@@ -1,0 +1,135 @@
+================================================================================
+  SelectOR  —  Menú de selección para Open Rails
+  Guía de instalación y uso
+  Autor: David MZP · Licencia GNU GPL v3 (ver LICENCIA.txt)
+================================================================================
+
+SelectOR es un menú/lanzador alternativo para Open Rails, con un diseño moderno,
+vista previa 3D y 2D de los trenes, mapa del recorrido y lanzamiento directo de
+la simulación. Es una herramienta COMPLEMENTARIA e independiente: no modifica
+Open Rails, solo reutiliza sus componentes ya instalados.
+
+
+--------------------------------------------------------------------------------
+1. REQUISITOS
+--------------------------------------------------------------------------------
+
+  • Open Rails ya instalado y funcionando (con tu contenido: rutas y trenes).
+      - Vale la versión oficial o la de pruebas (Testing).
+  • Windows 10 o 11 (64 bits).
+  • ".NET Desktop Runtime 8" (o superior).
+      Si al abrir SelectOR aparece un aviso de que falta .NET, descárgalo gratis
+      de Microsoft ("Descargar .NET Desktop Runtime 8"):
+        https://dotnet.microsoft.com/download/dotnet/8.0
+      Elige "Desktop Runtime", x64, e instálalo.
+
+  IMPORTANTE: haz que Open Rails funcione y tenga tu contenido configurado ANTES
+  de instalar SelectOR. SelectOR usa las mismas carpetas de contenido que ya
+  tienes dadas de alta en Open Rails.
+
+
+--------------------------------------------------------------------------------
+2. INSTALACIÓN (copiar y pegar)
+--------------------------------------------------------------------------------
+
+  1) Localiza la CARPETA de tu instalación de Open Rails. Es la carpeta donde
+     están "OpenRails.exe" y "RunActivity.exe".
+       Ejemplos habituales:
+         C:\Open Rails\Program
+         C:\Program Files\Open Rails
+         (o la carpeta donde lo hayas descomprimido)
+
+  2) Abre la subcarpeta de esta distribución llamada:
+         "Folder Open Rails"
+
+  3) Copia TODO su contenido y PÉGALO dentro de la carpeta de Open Rails del
+     paso 1 (junto a OpenRails.exe). Son estos archivos:
+         SelectOR.exe
+         SelectOR.dll
+         SelectOR.runtimeconfig.json
+         SelectOR.deps.json
+         shape.mgfx
+
+     No sobrescribe nada de Open Rails: son archivos nuevos que conviven con él.
+
+  4) ¡Listo! Para abrir SelectOR, ejecuta:  SelectOR.exe
+     (puedes crear un acceso directo en el Escritorio y renombrarlo "SelectOR").
+
+
+--------------------------------------------------------------------------------
+3. PRIMER ARRANQUE
+--------------------------------------------------------------------------------
+
+  • SelectOR lee automáticamente las CARPETAS DE CONTENIDO que ya tienes
+    configuradas en Open Rails. Si no ves rutas o trenes, abre primero Open Rails
+    y comprueba en sus Opciones que tus carpetas de contenido están añadidas.
+
+  • El IDIOMA (español / inglés) sigue la configuración de idioma de Open Rails.
+
+  • La ventana arranca maximizada. Puedes redimensionarla dentro de unos límites.
+
+
+--------------------------------------------------------------------------------
+4. CÓMO SE USA
+--------------------------------------------------------------------------------
+
+  1) Arriba, en "Contenido", elige el conjunto de carpetas (si tienes varios).
+  2) A la izquierda, selecciona una RUTA. Verás su imagen y descripción.
+  3) Elige el modo con las pestañas centrales:
+        • Actividad    — jugar una actividad de la ruta.
+        • Exploración  — elegir libremente TREN + RECORRIDO, hora, estación y
+                         clima. Incluye vista previa 3D (arrastra para girar) y
+                         la composición 2D del tren completo.
+        • Horarios     — modo timetable (si la ruta tiene horarios).
+        • Multijugador — alojar (servidor) o unirse (cliente) a una partida en
+                         red; incluye lista de servidores públicos.
+  4) Botones útiles:
+        • "Ver mapa del recorrido"  — esquema de vías con origen y destino.
+        • "Reanudar"                — continúa una partida guardada (.save).
+        • "Opciones OR"             — abre el menú de opciones nativo de Open Rails.
+  5) Pulsa CONDUCIR (o CONECTAR en multijugador) para lanzar la simulación.
+
+  Consejos:
+        • Doble clic en una ruta o tren para marcarlo/desmarcarlo como favorito.
+        • Usa los buscadores para filtrar rutas, trenes o actividades.
+
+
+--------------------------------------------------------------------------------
+5. PREGUNTAS FRECUENTES / PROBLEMAS
+--------------------------------------------------------------------------------
+
+  ¿No abre y menciona ".NET"?
+     Instala el ".NET Desktop Runtime 8" (ver Requisitos).
+
+  ¿No aparecen rutas o trenes ("Sin rutas" / "Sin trenes")?
+     Esa carpeta de contenido no tiene rutas/consists, o no está configurada en
+     Open Rails. Añádela desde Open Rails > Opciones > Contenido.
+
+  ¿Un tren se ve gris o incompleto en la vista previa?
+     Suele ser porque a ese modelo le faltan archivos (texturas o el .s) en tu
+     instalación: es un problema del contenido descargado, no del menú. En el
+     simulador se vería igual.
+
+  ¿La vista previa 3D no coincide al 100% con el juego?
+     Es una previsualización; se orienta según el consist (.con), igual que
+     Open Rails. Modelos mal exportados pueden verse de forma distinta.
+
+  ¿Puedo desinstalarlo?
+     Sí: borra de la carpeta de Open Rails los 5 archivos que copiaste
+     (SelectOR.* y shape.mgfx). No deja nada más.
+     (SelectOR guarda tus preferencias en:
+        %AppData%\Open Rails\SelectOR.json
+      y las miniaturas en:
+        %AppData%\Open Rails\SelectOR_previews\  — puedes borrarlas también.)
+
+
+--------------------------------------------------------------------------------
+6. LICENCIA Y CRÉDITOS
+--------------------------------------------------------------------------------
+
+  SelectOR © 2026 David MZP — GNU GPL v3 (ver LICENCIA.txt y GPLv3.txt).
+  Usa las bibliotecas de Open Rails (https://www.openrails.org/, GPL v3).
+  No está avalado por el equipo de Open Rails.
+
+  ¡Gracias por probar SelectOR y buen viaje!
+================================================================================

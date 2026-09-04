@@ -1,0 +1,52 @@
+SelectOR — Menú de selección para Open Rails
+Copyright (C) 2026  David Muñoz Primo (David MZP)
+
+================================================================================
+LICENCIA: GNU General Public License, versión 3 (GPL v3)
+================================================================================
+
+SelectOR es software libre. Este programa funciona reutilizando las bibliotecas
+(DLLs) ya compiladas de Open Rails, que se distribuyen bajo la GNU General Public
+License v3. Por ese motivo, y para poder distribuirse junto a Open Rails, SelectOR
+se publica bajo esa misma licencia:
+
+  Este programa es software libre: usted puede redistribuirlo y/o modificarlo
+  bajo los términos de la Licencia Pública General de GNU publicada por la Free
+  Software Foundation, ya sea la versión 3 de la Licencia o (a su elección)
+  cualquier versión posterior.
+
+  Este programa se distribuye con la esperanza de que sea útil, pero SIN NINGUNA
+  GARANTÍA; ni siquiera la garantía implícita de COMERCIABILIDAD o IDONEIDAD PARA
+  UN PROPÓSITO PARTICULAR. Consulte la Licencia Pública General de GNU para más
+  detalles.
+
+  Usted debería haber recibido una copia de la Licencia Pública General de GNU
+  junto con este programa. Si no, consulte <https://www.gnu.org/licenses/>.
+
+El texto COMPLETO de la licencia (en inglés, versión oficial) está en el archivo:
+
+  GPLv3.txt
+
+y también en línea en:  https://www.gnu.org/licenses/gpl-3.0.txt
+
+================================================================================
+AVISOS Y ATRIBUCIÓN
+================================================================================
+
+- SelectOR es una herramienta complementaria e INDEPENDIENTE de Open Rails.
+  NO forma parte del proyecto Open Rails ni está avalada por él. No modifica el
+  código fuente de Open Rails: únicamente reutiliza sus DLLs ya compiladas.
+
+- Open Rails es Copyright (C) del equipo de Open Rails y se distribuye bajo
+  GNU GPL v3.  Sitio web: https://www.openrails.org/
+
+- Las rutas, trenes (modelos .s, texturas .ace/.dds), actividades y demás
+  contenido que SelectOR muestra son propiedad de sus respectivos autores y NO
+  se incluyen en esta distribución. Cada contenido conserva su propia licencia.
+
+- «Open Rails» y «MSTS» son marcas de sus respectivos propietarios; se citan
+  únicamente con fines identificativos.
+
+================================================================================
+Autor: David Muñoz Primo (David MZP) · 2026
+================================================================================
