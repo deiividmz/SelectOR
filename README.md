@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="logo.png" alt="SelectOR" width="460">
+<img src="docs/logo.png" alt="SelectOR" width="460">
 
 ### Un menú moderno y fácil para elegir tren y ruta en **Open Rails**
 
-Vista previa **3D y 2D** de los trenes · Mapa del recorrido · Multijugador · Todo en una pantalla.
+Vista previa **3D y 2D** de los trenes · Mapa del recorrido · Multijugador · **Empresas** · Todo en una pantalla.
 
 ![Licencia](https://img.shields.io/badge/Licencia-GPL%20v3-4c9a2a)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6)
@@ -39,6 +39,28 @@ instalado. Si quitas SelectOR, Open Rails sigue igual.
 - ⏱️ **Horarios (timetable)** y **Reanudar** partidas guardadas.
 - 🌍 **Español e inglés** (según el idioma configurado en Open Rails).
 - ✅ **Compatible con varias versiones de Open Rails** (oficial, Testing, *New Year*…).
+- 🏢 **Empresas** *(en línea, opcional)*: crea o únete a una **empresa ferroviaria** con otros
+  maquinistas y lleva la contabilidad de vuestros viajes — banca, rangos, insignias y rankings.
+
+---
+
+## 🏢 Empresas *(modo en línea — novedad 1.1)*
+
+Una sección **opcional** para jugar en comunidad: forma o únete a una **empresa ferroviaria**
+compartida con otros maquinistas y lleva la **contabilidad de todos vuestros viajes reales**.
+
+- 🚂 **Servicios automáticos**: cada viaje que conduces para tu empresa se registra solo al volver,
+  con los **kilómetros medidos en directo** desde Open Rails y el **tiempo real** de conducción.
+- 💶 **Economía y banca**: ingreso por km, cánon al administrador de infraestructuras, energía,
+  mantenimiento y salario; tesorería, historial de movimientos y panel financiero.
+- 🎖️ **Rangos e insignias**: progresa de *Aprendiz* a *Leyenda* y desbloquea logros.
+- 🏆 **Rankings**: público de empresas (por km) y de maquinistas dentro de tu empresa.
+- 👥 **Roles**: Maquinista, Gestor y Gerente, cada uno con sus permisos.
+- 🛡️ **Antitrampas**: los viajes con velocidades imposibles se marcan y no cuentan.
+
+> 🔐 Requiere **registrarse** (correo + contraseña) desde la propia pestaña y **conexión a internet**.
+> Es opcional: si no usas Empresas, el resto de SelectOR funciona igual. Tu contraseña, si eliges
+> recordarla, se guarda **cifrada** en tu equipo (nunca en texto plano).
 
 ---
 
@@ -54,7 +76,7 @@ instalado. Si quitas SelectOR, Open Rails sigue igual.
 ## ⬇️ Instalación (¡en 30 segundos!)
 
 1. **Descarga** la última versión desde la sección **[Releases](../../releases)** y descomprímela.
-2. Abre la carpeta **`Copiar dentro de la carpeta de Open Rails`**.
+2. Abre la carpeta **`Folder Open Rails`**.
 3. **Copia todo** su contenido dentro de la carpeta de tu Open Rails
    (la que tiene `OpenRails.exe`).
 4. Ejecuta **`SelectOR.exe`**. ¡Listo! 🎉
@@ -68,7 +90,8 @@ instalado. Si quitas SelectOR, Open Rails sigue igual.
 
 1. Arriba, en **Contenido**, elige tu carpeta (si tienes varias).
 2. A la izquierda, selecciona una **ruta**.
-3. Elige el modo con las pestañas: **Actividad**, **Exploración**, **Horarios** o **Multijugador**.
+3. Elige el modo con las pestañas: **Ruta**, **Actividad**, **Exploración**, **Horarios**,
+   **Multijugador** o **Empresas**.
 4. Ajusta hora, estación y clima; mira la **vista 3D** (arrástrala) o la **composición 2D**.
 5. Pulsa **CONDUCIR** (o **CONECTAR** en multijugador). 🚀
 

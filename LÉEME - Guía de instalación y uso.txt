@@ -1,6 +1,6 @@
 ================================================================================
   SelectOR  —  Menú de selección para Open Rails
-  Guía de instalación y uso
+  Guía de instalación y uso · Versión 1.1
   Autor: David MZP · Licencia GNU GPL v3 (ver LICENCIA.txt)
 ================================================================================
 
@@ -8,6 +8,10 @@ SelectOR es un menú/lanzador alternativo para Open Rails, con un diseño modern
 vista previa 3D y 2D de los trenes, mapa del recorrido y lanzamiento directo de
 la simulación. Es una herramienta COMPLEMENTARIA e independiente: no modifica
 Open Rails, solo reutiliza sus componentes ya instalados.
+
+  NOVEDAD 1.1 — Sección "Empresas": crea o únete a una empresa ferroviaria con
+  otros maquinistas y lleva la contabilidad de todos vuestros viajes (banca,
+  cánon, rangos, rankings...). Es OPCIONAL; ver el apartado 6.
 
 
 --------------------------------------------------------------------------------
@@ -22,6 +26,7 @@ Open Rails, solo reutiliza sus componentes ya instalados.
       de Microsoft ("Descargar .NET Desktop Runtime 8"):
         https://dotnet.microsoft.com/download/dotnet/8.0
       Elige "Desktop Runtime", x64, e instálalo.
+  • Solo para la sección "Empresas" (opcional): conexión a internet.
 
   IMPORTANTE: haz que Open Rails funcione y tenga tu contenido configurado ANTES
   de instalar SelectOR. SelectOR usa las mismas carpetas de contenido que ya
@@ -55,6 +60,17 @@ Open Rails, solo reutiliza sus componentes ya instalados.
   4) ¡Listo! Para abrir SelectOR, ejecuta:  SelectOR.exe
      (puedes crear un acceso directo en el Escritorio y renombrarlo "SelectOR").
 
+  ¿Actualizas desde la versión 1.0? Solo tienes que sobrescribir esos 5 archivos
+  con los nuevos. Tus preferencias se conservan.
+
+  NOTA sobre las carpetas del paquete:
+    • "Folder Open Rails"  → lo ÚNICO que necesitas copiar para usar SelectOR.
+    • "Logotipo"           → imágenes del logotipo (informativo).
+    • "Backend (Supabase)" → SOLO referencia: el esquema de base de datos, la
+                             plantilla de correo y la guía del servidor de la
+                             sección "Empresas". El servidor ya está configurado;
+                             un usuario normal NO necesita tocar esta carpeta.
+
 
 --------------------------------------------------------------------------------
 3. PRIMER ARRANQUE
@@ -76,6 +92,7 @@ Open Rails, solo reutiliza sus componentes ya instalados.
   1) Arriba, en "Contenido", elige el conjunto de carpetas (si tienes varios).
   2) A la izquierda, selecciona una RUTA. Verás su imagen y descripción.
   3) Elige el modo con las pestañas centrales:
+        • Ruta         — ficha de la ruta (imagen, descripción y mapa).
         • Actividad    — jugar una actividad de la ruta.
         • Exploración  — elegir libremente TREN + RECORRIDO, hora, estación y
                          clima. Incluye vista previa 3D (arrastra para girar) y
@@ -83,6 +100,7 @@ Open Rails, solo reutiliza sus componentes ya instalados.
         • Horarios     — modo timetable (si la ruta tiene horarios).
         • Multijugador — alojar (servidor) o unirse (cliente) a una partida en
                          red; incluye lista de servidores públicos.
+        • Empresas     — modo en línea opcional (ver apartado 6).
   4) Botones útiles:
         • "Ver mapa del recorrido"  — esquema de vías con origen y destino.
         • "Reanudar"                — continúa una partida guardada (.save).
@@ -124,7 +142,50 @@ Open Rails, solo reutiliza sus componentes ya instalados.
 
 
 --------------------------------------------------------------------------------
-6. LICENCIA Y CRÉDITOS
+6. EMPRESAS (modo en línea opcional)  — NOVEDAD 1.1
+--------------------------------------------------------------------------------
+
+  La pestaña "Empresas" te permite crear o unirte a una EMPRESA FERROVIARIA
+  compartida con otros maquinistas y llevar la contabilidad de todos vuestros
+  viajes reales. Es completamente OPCIONAL: si no la usas, el resto de SelectOR
+  funciona igual que siempre.
+
+  ¿QUÉ OFRECE?
+    • Crea tu propia empresa (quedas de gerente) o solicita unirte a una
+      existente por su nombre.
+    • Cada servicio que conduces para la empresa se registra AUTOMÁTICAMENTE al
+      volver de la simulación: los kilómetros (medidos en directo desde Open
+      Rails) y el TIEMPO REAL de conducción, con su desglose económico
+      (ingreso por km, cánon al administrador de infraestructuras, energía,
+      mantenimiento y salario).
+    • Banca de la empresa: tesorería, historial de movimientos y panel
+      financiero. Visible para todos los socios.
+    • Rangos de maquinista (de Aprendiz a Leyenda) e insignias por logros.
+    • Rankings: público de empresas (por km) y de maquinistas dentro de tu
+      empresa.
+    • Roles: Maquinista, Gestor y Gerente, cada uno con sus permisos.
+    • Antitrampas: los viajes con velocidades imposibles se marcan y no
+      generan ingresos ni cuentan para los rankings.
+
+  CUENTA
+    • La primera vez tendrás que REGISTRARTE con un correo y una contraseña
+      desde la propia pestaña "Empresas". Es gratis.
+    • Puedes marcar "Recordar contraseña": se guarda CIFRADA en tu equipo
+      (protección DPAPI de Windows), nunca en texto plano ni se comparte.
+    • "Cerrar sesión" olvida esa contraseña recordada.
+
+  PRIVACIDAD Y DATOS
+    • Los datos de las empresas (viajes, banca, socios) se guardan en un
+      servicio en la nube para poder compartirse entre los maquinistas.
+    • SelectOR no publica ni comparte tu correo con terceros; se usa solo como
+      identificador de tu cuenta.
+
+  Nota: "Empresas" necesita conexión a internet. Si no te interesa, simplemente
+  no entres en esa pestaña.
+
+
+--------------------------------------------------------------------------------
+7. LICENCIA Y CRÉDITOS
 --------------------------------------------------------------------------------
 
   SelectOR © 2026 David MZP — GNU GPL v3 (ver LICENCIA.txt y GPLv3.txt).
