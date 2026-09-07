@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.png" alt="SelectOR" width="460">
+<img src="logo.png" alt="SelectOR" width="460">
 
 ### Un menú moderno y fácil para elegir tren y ruta en **Open Rails**
 
