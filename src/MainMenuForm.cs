@@ -1370,7 +1370,7 @@ namespace SelectOR
             LoadStep("folders");
             if (_folders.Count == 0)
             {
-                _lblStatus.Text = "No hay carpetas de contenido configuradas. Ábrelas con «Opciones OR».";
+                _lblStatus.Text = Tr("No hay carpetas de contenido configuradas. Ábrelas con «Opciones OR».");
                 _noContent = true;
                 if (_activePage == PageEditor) OnEditorShown();   // el editor deja de decir «Cargando…»
                 // No hay contenido que leer: no tiene sentido seguir esperando en la pantalla de inicio.
@@ -1527,7 +1527,7 @@ namespace SelectOR
             }
             _lstActivities.EndUpdate();
             if (_lstActivities.SelectedIndex < 0 && _lstActivities.Items.Count > 0) _lstActivities.SelectedIndex = 0;
-            if (_activitiesAll.Count == 0) _txtBriefing.Text = "Esta ruta no tiene actividades. Usa «Exploración» u «Horarios».";
+            if (_activitiesAll.Count == 0) _txtBriefing.Text = Tr("Esta ruta no tiene actividades. Usa «Exploración» u «Horarios».");
         }
 
         void RefreshConsistList()

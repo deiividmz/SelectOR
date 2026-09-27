@@ -1166,7 +1166,7 @@ namespace SelectOR
             t.Controls.Add(_badges);
 
             t.Controls.Add(EmpHeader("TRENES MÁS UTILIZADOS"));
-            _profTrains = new BarChart { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 6), Format = v => $"{v:0} viajes" };
+            _profTrains = new BarChart { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 6), Format = v => string.Format(Tr("{0} viajes"), v.ToString("0")) };
             t.Controls.Add(_profTrains);
 
             t.Controls.Add(EmpHeader("TRAYECTOS MÁS REPETIDOS"));

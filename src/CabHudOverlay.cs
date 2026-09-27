@@ -692,8 +692,8 @@ namespace SelectOR
         // ============================ pintado ============================
         CabDraw.Needle[] AirNeedles() => new[]
         {
-            new CabDraw.Needle("TDP", CabDraw.Red, _dMr, _v.Has("mr")),
-            new CabDraw.Needle("TFA", CabDraw.Amber, _dBp, _v.Has("bp")),
+            new CabDraw.Needle(I18n.T("TDP"), CabDraw.Red, _dMr, _v.Has("mr")),
+            new CabDraw.Needle(I18n.T("TFA"), CabDraw.Amber, _dBp, _v.Has("bp")),
         };
 
         // Imagen de cada pictograma según la posición actual de su mando.
