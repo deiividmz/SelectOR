@@ -1,0 +1,85 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>SelectOR</AssemblyName>
+    <RootNamespace>SelectOR</RootNamespace>
+    <Product>SelectOR</Product>
+    <AssemblyTitle>SelectOR</AssemblyTitle>
+    <Company>David MZP</Company>
+    <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
+    <Version>1.2.33</Version>
+    <AssemblyVersion>1.2.33.0</AssemblyVersion>
+    <FileVersion>1.2.33.0</FileVersion>
+
+    <!-- Carpeta de una instalación de Open Rails (la que contiene OpenRails.exe). Por defecto,
+         «OR Desplegado» junto a esta carpeta; se cambia al compilar con
+         dotnet build -p:ORDir="C:\Open Rails\Program" -->
+    <ORDir Condition="'$(ORDir)' == ''">..\OR Desplegado\</ORDir>
+    <ORPath>$([MSBuild]::EnsureTrailingSlash('$(ORDir)'))</ORPath>
+    <!-- Compilamos directamente dentro de esa carpeta de Open Rails para que todas las DLLs
+         dependientes (MonoGame, GNU.Gettext, etc.) se resuelvan en tiempo de ejecucion.
+         El .exe queda junto a Menu.exe. -->
+    <OutputPath>$(ORPath)</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- No tocamos las DLLs de OR: las referenciamos sin copiarlas. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <ApplicationIcon>SelectOR.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- Shader propio (réplica del Shape Viewer de TSRE5), compilado con mgfxc a DirectX_11.
+       Se copia junto al .exe para cargarlo en tiempo de ejecución. -->
+  <ItemGroup>
+    <None Include="shape.mgfx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Pictogramas del pupitre (pantógrafo, disyuntor, faros…): van dentro del .exe. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Pictogramas\*.png" LogicalName="pict.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- Referencias a las DLLs ya compiladas de Open Rails (no se copian, Private=false) -->
+  <ItemGroup>
+    <Reference Include="Orts.Menu">
+      <HintPath>$(ORPath)Orts.Menu.dll</HintPath>
+      <SpecificVersion>false</SpecificVersion>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Orts.Settings">
+      <HintPath>$(ORPath)Orts.Settings.dll</HintPath>
+      <SpecificVersion>false</SpecificVersion>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Orts.Common">
+      <HintPath>$(ORPath)Orts.Common.dll</HintPath>
+      <SpecificVersion>false</SpecificVersion>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Orts.Formats.Msts">
+      <HintPath>$(ORPath)Orts.Formats.Msts.dll</HintPath>
+      <SpecificVersion>false</SpecificVersion>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Orts.Formats.OR">
+      <HintPath>$(ORPath)Orts.Formats.OR.dll</HintPath>
+      <SpecificVersion>false</SpecificVersion>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MonoGame.Framework">
+      <HintPath>$(ORPath)MonoGame.Framework.dll</HintPath>
+      <SpecificVersion>false</SpecificVersion>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

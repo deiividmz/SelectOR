@@ -1,0 +1,16 @@
+# Compilación .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Nunca subir claves ni secretos (la clave de firma de actualizaciones vive solo en %AppData%)
+*.key
+*.pem
+*.pfx
+*.snk
+.env*
+
+# Sistema
+Thumbs.db
+desktop.ini
