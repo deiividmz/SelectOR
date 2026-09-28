@@ -925,11 +925,11 @@ namespace SelectOR
             // --- Tarifas ---
             var pTar = FormPage(true);
             pTar.Controls.Add(EmpHeader("TARIFAS GLOBALES DE LOS SERVICIOS (€) — SOLO SUPERADMIN"));
-            pTar.Controls.Add(EmpFieldLabel(Tr("Ingreso por km")));
+            pTar.Controls.Add(EmpFieldLabel(Tr("Ingreso por km (sin viajeros; mercancías de 500 t)")));
             _tarIncome = EmpInput("8"); _tarIncome.Width = 240; pTar.Controls.Add(_tarIncome);
             pTar.Controls.Add(EmpFieldLabel(Tr("Cánon AI (administrador de infraestructuras) por km")));
             _tarCanon = EmpInput("3"); _tarCanon.Width = 240; pTar.Controls.Add(_tarCanon);
-            pTar.Controls.Add(EmpFieldLabel(Tr("Energía / combustible por km")));
+            pTar.Controls.Add(EmpFieldLabel(Tr("Energía / combustible por km (tren de 500 t; escala con la masa)")));
             _tarEnergy = EmpInput("1.5"); _tarEnergy.Width = 240; pTar.Controls.Add(_tarEnergy);
             pTar.Controls.Add(EmpFieldLabel(Tr("Salario del maquinista por servicio")));
             _tarSalary = EmpInput("40"); _tarSalary.Width = 240; pTar.Controls.Add(_tarSalary);
@@ -2528,14 +2528,8 @@ namespace SelectOR
             }
             var (vehicleId, reason) = await ResolveCompanyUnitReason(_empOnDutyCompany.Id, engNames);
             if (vehicleId == null) { _empStartFailReason = reason; return null; }   // no es de la flota / no disponible
-            var (json, err) = await Supa.RpcAsync("start_service", new
-            {
-                p_company = _empOnDutyCompany.Id,
-                p_route = _curRoute?.Name ?? "",
-                p_consist = CurrentConsistLabel(),
-                p_path = CurrentPathLabel(),
-                p_vehicle = vehicleId
-            });
+            var (json, err) = await StartServiceRpc(_empOnDutyCompany.Id, _curRoute?.Name ?? "", CurrentConsistLabel(),
+                                                    CurrentPathLabel(), vehicleId, CurrentDrivenConsist());
             if (err != null || string.IsNullOrWhiteSpace(json))
             {
                 _empStartFailReason = err != null ? (Tr("No se pudo abrir el servicio: ") + err) : null;
@@ -2567,15 +2561,29 @@ namespace SelectOR
         // Nombres .eng de los coches motrices del tren de la pestaña activa (cabeza + coches del
         // consist), para reconocer la unidad aunque se conduzca con un consist invertido.
         List<(string name, string folder)> CurrentConsistEngineNames()
+            => FleetAccessNames(CurrentDrivenConsist());   // la motriz de cabeza (y su formación fija, si la tiene)
+
+        // Abre el servicio enviando los totales del tren que se conduce (masa, vehículos y plazas): con
+        // ellos el servidor calcula el ingreso y la energía de los mercancías según su masa. Si el
+        // servidor aún no tiene mercancias-masa.sql, se abre como antes, sin esos datos.
+        async Task<(string json, string err)> StartServiceRpc(string company, string route, string consist, string path,
+                                                               string vehicle, TrainItem train)
         {
-            TrainItem c = _activePage switch
+            var tot = train != null ? ConsistTotals(train) : default;
+            if (tot.cars > 0 && tot.mass > 0)
             {
-                2 => _lstConsists.SelectedItem as TrainItem,
-                4 => _lstConsists.SelectedItem as TrainItem,
-                3 => _ttConsist,
-                _ => null
-            };
-            return FleetAccessNames(c);   // la motriz de cabeza (y su formación fija, si la tiene)
+                var (j, e) = await Supa.RpcAsync("start_service", new
+                {
+                    p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle,
+                    p_mass = Math.Round(tot.mass, 1), p_cars = tot.cars, p_capacity = Math.Round(tot.capacity)
+                });
+                bool viejo = e != null && (e.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                                           || e.IndexOf("p_mass", StringComparison.OrdinalIgnoreCase) >= 0
+                                           || e.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (!viejo) return (j, e);
+            }
+            return await Supa.RpcAsync("start_service", new
+            { p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle });
         }
 
         // Busca una unidad de la empresa que corresponda a la máquina de cabeza del tren y esté

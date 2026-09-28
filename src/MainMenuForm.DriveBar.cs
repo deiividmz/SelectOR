@@ -192,14 +192,7 @@ namespace SelectOR
             if (vid == null) { _empOnDutyCompany = prev; _fleetCheckCompany = null; return (false, ShortFleetReason(reason, co.Name)); }
             string plate = _lastUnitPlate;
 
-            var (json, err) = await Supa.RpcAsync("start_service", new
-            {
-                p_company = co.Id,
-                p_route = _drivenRoute,
-                p_consist = _drivenLabel,
-                p_path = _drivenPath,
-                p_vehicle = vid
-            });
+            var (json, err) = await StartServiceRpc(co.Id, _drivenRoute, _drivenLabel, _drivenPath, vid, _drivenConsist);
             if (err != null || string.IsNullOrWhiteSpace(json)) { _empOnDutyCompany = prev; return (false, Tr("No se pudo abrir el servicio: ") + err); }
             string sid;
             try
