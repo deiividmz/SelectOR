@@ -70,6 +70,7 @@ namespace SelectOR
         List<(string station, double lat, double lon)> _paxStations = new();
         readonly HashSet<string> _paxDone = new();   // andenes ya embarcados este servicio
         int _paxBoarded, _paxOnboard, _paxCapacity;  // billetes totales, a bordo ahora, tope de la unidad
+        double _paxKm;                                // viajeros·km: cada viajero por los km que va a bordo (billete por km)
         bool _paxActive; bool _paxBusy; volatile bool _paxWanted;   // activo / poll en curso / se quiere seguir cargando andenes
         double _paxDemandBase = 60;                  // demanda base por andén (app_settings.fleet_pax_demand)
         Panel _soloPanel;   // panel "Mi perfil"
@@ -218,7 +219,8 @@ namespace SelectOR
         // Economía de flota (global, superadmin): escala de precio + % alquiler + % mantenimiento + capacidad de referencia
         RoundButton _fleetBuyAllBtn;              // compra masiva (solo superadmin)
         bool _buyingAll, _buyAllCancel;
-        RoundedInput _fsScale, _fsRentPct, _fsMaintPct, _fsCapBase, _fsFareBase, _fsPaxDemand; RoundButton _fsSaveBtn; Panel _fleetSettingsRow;
+        RoundedInput _fsScale, _fsRentPct, _fsMaintPct, _fsFareBase, _fsFareKm, _fsPaxDemand; RoundButton _fsSaveBtn; Panel _fleetSettingsRow;
+        double _fsCapBaseVal = 300;   // capacidad de referencia: ya no se usa (sin celda), se reenvía tal cual al guardar
         // --- Ranking ---
         StyledTable _rankCompanies, _rankDrivers;
         Panel _rankDriversPanel; Label _rankDriversHeader;   // sección de ranking de socios (se oculta si no hay empresa)
@@ -925,7 +927,7 @@ namespace SelectOR
             // --- Tarifas ---
             var pTar = FormPage(true);
             pTar.Controls.Add(EmpHeader("TARIFAS GLOBALES DE LOS SERVICIOS (€) — SOLO SUPERADMIN"));
-            pTar.Controls.Add(EmpFieldLabel(Tr("Ingreso por km (sin viajeros; mercancías de 500 t)")));
+            pTar.Controls.Add(EmpFieldLabel(Tr("Ingreso por km (mercancías de 500 t)")));
             _tarIncome = EmpInput("8"); _tarIncome.Width = 240; pTar.Controls.Add(_tarIncome);
             pTar.Controls.Add(EmpFieldLabel(Tr("Cánon AI (administrador de infraestructuras) por km")));
             _tarCanon = EmpInput("3"); _tarCanon.Width = 240; pTar.Controls.Add(_tarCanon);
@@ -971,10 +973,10 @@ namespace SelectOR
             _fsRentPct = EmpInput("0,00008"); _fsRentPct.Width = 240; fsInner.Controls.Add(_fsRentPct);
             fsInner.Controls.Add(EmpFieldLabel(Tr("Mantenimiento por taller (fracción del valor, p. ej. 0,0015)")));
             _fsMaintPct = EmpInput("0,0015"); _fsMaintPct.Width = 240; fsInner.Controls.Add(_fsMaintPct);
-            fsInner.Controls.Add(EmpFieldLabel(Tr("Capacidad de referencia (plazas para el ingreso base)")));
-            _fsCapBase = EmpInput("300"); _fsCapBase.Width = 240; fsInner.Controls.Add(_fsCapBase);
-            fsInner.Controls.Add(EmpFieldLabel(Tr("Billete base (€) — viajeros: billete = base + confort·0,05 + vel·0,02")));
+            fsInner.Controls.Add(EmpFieldLabel(Tr("Billete base (€) — viajeros: billete = base + confort·0,05 + vel·0,02 + €/km × km a bordo")));
             _fsFareBase = EmpInput("1,5"); _fsFareBase.Width = 240; fsInner.Controls.Add(_fsFareBase);
+            fsInner.Controls.Add(EmpFieldLabel(Tr("Billete por km (€ por viajero y km a bordo, p. ej. 0,08)")));
+            _fsFareKm = EmpInput("0,08"); _fsFareKm.Width = 240; fsInner.Controls.Add(_fsFareKm);
             _fsSaveBtn = EmpButton(Tr("Guardar economía de flota"), primary: true); _fsSaveBtn.Width = 240;
             _fsSaveBtn.Click += (s, e) => SaveFleetSettings();
             fsInner.Controls.Add(_fsSaveBtn);
@@ -1261,7 +1263,7 @@ namespace SelectOR
             if (i == 0 && _empSel != null) LoadServices(_empSel);
             if (i == 1) LoadLedger();
             if (i == 2 && _empSel != null) LoadMembers(_empSel);
-            if (i == 3) { FillTariffFields(); LoadDefaultBalance(); LoadFleetSettings(); }
+            if (i == 3) { FillTariffFields(); LoadDefaultBalance(); LoadFleetSettings(); LoadFarePerKm(); }
             if (i == 4) LoadRankings();
             if (i == 5) LoadProfile();
             if (i == 7) LoadUsers();
@@ -2886,7 +2888,7 @@ namespace SelectOR
             _svcClockUtc = null;   // el cronómetro espera a que el escenario esté abierto
             _scenarioReady = false;   // y los HUD también (ver OnScenarioReady)
             _stoppedSinceUtc = null;
-            _paxActive = false; _paxWanted = false; _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0;
+            _paxActive = false; _paxWanted = false; _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0;
             try { Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\Software\OpenRails\ORTS", "WebServer", 1); } catch { }
             try
             {
@@ -2980,7 +2982,7 @@ namespace SelectOR
         async void StartPaxTracking(TrainItem c)
         {
             _paxActive = false; _paxStations = new(); _paxDone.Clear(); _paxMeta.Clear(); _paxVisits.Clear();
-            _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxBusy = false; _paxWanted = true;
+            _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0; _paxBusy = false; _paxWanted = true;
             _pHavePrev = _pHaveDir = false; _paxNextName = null; _paxLastEvent = null; _paxHourUtc = DateTime.MinValue;            _paxSeed = Environment.TickCount;
             // Estación del año y clima elegidos para el viaje (Exploración / Horarios; en Actividad, neutros).
             try
@@ -3390,7 +3392,11 @@ namespace SelectOR
                 if (_tHave)
                 {
                     double dm = Haversine(_tLat, _tLon, lat, lon);
-                    if (dm >= 0.5 && dm < 3000) _trackedMeters += dm;   // ignora jitter y saltos/teleports
+                    if (dm >= 0.5 && dm < 3000)   // ignora jitter y saltos/teleports
+                    {
+                        _trackedMeters += dm;
+                        if (_paxOnboard > 0) _paxKm += _paxOnboard * dm / 1000.0;   // viajeros a bordo × km
+                    }
                     // Parado = casi sin desplazamiento entre sondeos (~1,5 s): < 0,8 m ≈ < 2 km/h.
                     if (dm < 0.8) { if (_stoppedSinceUtc == null) _stoppedSinceUtc = DateTime.UtcNow; }
                     else _stoppedSinceUtc = null;
@@ -6842,8 +6848,17 @@ namespace SelectOR
                 p_completed = true,
                 p_notes = "",
                 p_duration_s = _tripDurationS,
-                p_pax = _paxBoarded
+                p_pax = _paxBoarded,
+                p_pax_km = Math.Round(_paxKm, 1)
             });
+            // Servidor sin billete-por-km.sql: no conoce p_pax_km → se registra como antes, sin él.
+            if (err != null && (err.IndexOf("p_pax_km", StringComparison.OrdinalIgnoreCase) >= 0
+                                || err.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0))
+                (jr, err) = await Supa.RpcAsync("close_service", new
+                {
+                    p_service = svc, p_km = _estimatedKm, p_completed = true, p_notes = "",
+                    p_duration_s = _tripDurationS, p_pax = _paxBoarded
+                });
             // Si falla, dejamos el servicio pendiente para poder reintentar con "Registrar servicio".
             if (err != null) { Msg(_empHomeMsg, Tr("No se pudo registrar el servicio: ") + err, true); return (false, Tr("No se pudo registrar el servicio: ") + err); }
             _pendingServiceId = null; _svcOpenedUtc = null;
@@ -7367,11 +7382,21 @@ namespace SelectOR
                 _fsScale.Box.Text = Num(root, "price_scale").ToString("0.####", EsEs);
                 _fsRentPct.Box.Text = Num(root, "rental_pct").ToString("0.########", EsEs);
                 _fsMaintPct.Box.Text = Num(root, "maint_pct").ToString("0.########", EsEs);
-                if (_fsCapBase != null) _fsCapBase.Box.Text = Num(root, "capacity_base").ToString("0.##", EsEs);
+                if (Num(root, "capacity_base") > 0) _fsCapBaseVal = Num(root, "capacity_base");
                 if (_fsFareBase != null) _fsFareBase.Box.Text = Num(root, "fare_base").ToString("0.##", EsEs);
                 if (_fsPaxDemand != null) _fsPaxDemand.Box.Text = Num(root, "pax_demand").ToString("0.##", EsEs);
             }
             catch { }
+        }
+
+        // €/km por viajero del billete (billete-por-km.sql). Sin ese SQL, la celda se queda con 0,08.
+        async void LoadFarePerKm()
+        {
+            if (_fsFareKm == null || !Supa.IsSuperadmin) return;
+            var (json, err) = await Supa.RpcAsync("get_fare_per_km", new { });
+            if (err != null) return;
+            if (double.TryParse((json ?? "").Trim().Trim('"'), NumberStyles.Any, CultureInfo.InvariantCulture, out var v))
+                _fsFareKm.Box.Text = v.ToString("0.####", EsEs);
         }
 
         // Guarda la economía de flota (escala de precio + % alquiler + % mantenimiento; SOLO superadmin).
@@ -7384,11 +7409,16 @@ namespace SelectOR
                 p_scale = ParseNum(_fsScale.Box.Text),
                 p_rental_pct = ParseNum(_fsRentPct.Box.Text),
                 p_maint_pct = ParseNum(_fsMaintPct.Box.Text),
-                p_capacity_base = ParseNum(_fsCapBase.Box.Text),
+                p_capacity_base = _fsCapBaseVal,
                 p_fare_base = ParseNum(_fsFareBase.Box.Text),
                 p_pax_demand = ParseNum(_fsPaxDemand.Box.Text)
             });
             if (err != null) { Msg(_tariffMsg, Tr("Error: ") + err, true); return; }
+            if (_fsFareKm != null)
+            {
+                var (_, e2) = await Supa.RpcAsync("set_fare_per_km", new { p_value = ParseNum(_fsFareKm.Box.Text) });
+                if (e2 != null) { Msg(_tariffMsg, Tr("Error: ") + e2, true); return; }
+            }
             Msg(_tariffMsg, Tr("Economía de flota guardada."), false);
             _fleetScale = ParseNum(_fsScale.Box.Text); _fleetRentPct = ParseNum(_fsRentPct.Box.Text);
             _paxDemandBase = ParseNum(_fsPaxDemand.Box.Text);
@@ -7543,7 +7573,7 @@ namespace SelectOR
                     p_scale = ParseNum(_fsScale.Box.Text),
                     p_rental_pct = ParseNum(_fsRentPct.Box.Text),
                     p_maint_pct = ParseNum(_fsMaintPct.Box.Text),
-                    p_capacity_base = ParseNum(_fsCapBase.Box.Text),
+                    p_capacity_base = _fsCapBaseVal,
                     p_fare_base = ParseNum(_fsFareBase.Box.Text),
                     p_pax_demand = ParseNum(_fsPaxDemand.Box.Text)
                 });

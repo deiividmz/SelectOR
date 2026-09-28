@@ -210,7 +210,7 @@ namespace SelectOR
             _trackedMeters = 0;
             // Los viajeros ya iban contándose en conducción libre: se conservan los que van a bordo
             // y el servicio solo cobra los que suban a partir de ahora.
-            if (_paxActive || _paxWanted) _paxBoarded = 0;
+            if (_paxActive || _paxWanted) { _paxBoarded = 0; _paxKm = 0; }
             else StartPaxTracking(_drivenConsist);
             UpdateDutyUi();
 
@@ -237,7 +237,7 @@ namespace SelectOR
             if (!ok) return (false, summary ?? Tr("No se pudo registrar el servicio."));
 
             // Vuelta a conducción libre: los viajeros siguen (a bordo se conservan; «subidos» vuelve a 0).
-            _paxBoarded = 0;
+            _paxBoarded = 0; _paxKm = 0;
             _fleetCheckCompany = null;
             bool bigWasOpen = HudAlive && _serviceHud.BigMapOpen;
             bool hudWasHidden = HudAlive && !_serviceHud.Visible;
