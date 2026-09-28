@@ -105,6 +105,13 @@ namespace SelectOR
 
         public event Action<int, int> Dragged;   // (dx, dy) en píxeles
         public event Action ResetRequested;
+        public event Action Zoomed;              // la rueda ha cambiado el zoom: hay que volver a dibujar
+
+        // Zoom de la cámara con la rueda del ratón: >1 acerca, <1 aleja. Doble clic lo devuelve a 1.
+        public float Zoom { get; private set; } = 1f;
+        const float ZoomMin = 0.5f, ZoomMax = 3f;
+        /// <summary>Distancia de la cámara (en radios del modelo) para <see cref="ShapeRenderer.Render"/> con el zoom aplicado.</summary>
+        public float CamDistance(float baseDistance = 2.25f) => baseDistance / Zoom;
 
         bool _dragging; System.Drawing.Point _last;
 
@@ -122,7 +129,18 @@ namespace SelectOR
                     _last = e.Location;
                 }
             };
-            DoubleClick += (s, e) => { if (Rotatable) ResetRequested?.Invoke(); };
+            DoubleClick += (s, e) => { if (Rotatable) { Zoom = 1f; ResetRequested?.Invoke(); } };
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (!Rotatable || _image == null || e.Delta == 0) return;
+            float z = Math.Max(ZoomMin, Math.Min(ZoomMax, Zoom * (float)Math.Pow(1.15, e.Delta / 120.0)));
+            if (e is HandledMouseEventArgs h) h.Handled = true;   // que no desplace la página de detrás
+            if (Math.Abs(z - Zoom) < 0.001f) return;
+            Zoom = z;
+            Zoomed?.Invoke();
         }
 
         public Bitmap Image { get => _image; set { _image = value; Invalidate(); } }
@@ -156,7 +174,7 @@ namespace SelectOR
 
             if (Rotatable && _image != null)
                 using (var f = Theme.Font(8f))
-                    TextRenderer.DrawText(g, I18n.T("↺ arrastra para girar"), f, new Rectangle(rect.X + 8, rect.Y + 6, rect.Width - 16, 16), Color.FromArgb(150, Theme.Subtle),
+                    TextRenderer.DrawText(g, I18n.T("↺ arrastra para girar · rueda: zoom"), f, new Rectangle(rect.X + 8, rect.Y + 6, rect.Width - 16, 16), Color.FromArgb(150, Theme.Subtle),
                         TextFormatFlags.Left | TextFormatFlags.Top);
         }
 

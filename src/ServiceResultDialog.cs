@@ -32,6 +32,8 @@ namespace SelectOR
             public string StatusText = "";  // estado (completado / en curso / …)
             public bool InProgress;         // true = servicio "En conducción": aún no hay km/tiempo/economía
             public string Notes = "";       // notas del servicio, si las hay
+            // Viaje NO registrado (Valid = false): por qué no se ha guardado (viaje corto, velocidad imposible…).
+            public System.Collections.Generic.List<string> Reasons = new System.Collections.Generic.List<string>();
             // Rango
             public string RankName = "";
             public bool RankedUp;
@@ -48,7 +50,7 @@ namespace SelectOR
 
         public ServiceResultDialog(Data d)
         {
-            Text = I18n.T(d.InProgress ? "Servicio en conducción" : (d.Valid ? "Servicio registrado" : "Servicio no válido"));
+            Text = I18n.T(d.InProgress ? "Servicio en conducción" : (d.Valid ? "Servicio registrado" : "Servicio no registrado"));
             BackColor = Theme.Bg; ForeColor = Theme.Text;
             Font = Theme.Font(9.5f);
             StartPosition = FormStartPosition.CenterParent;
@@ -60,7 +62,7 @@ namespace SelectOR
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
             var header = new Label
             {
-                Text = "  " + I18n.T(d.InProgress ? "▶  Servicio EN CONDUCCIÓN" : (d.Valid ? "Servicio registrado" : "Servicio NO VÁLIDO")),
+                Text = "  " + I18n.T(d.InProgress ? "▶  Servicio EN CONDUCCIÓN" : (d.Valid ? "Servicio registrado" : "Servicio NO REGISTRADO")),
                 Dock = DockStyle.Top, Height = 46,
                 Font = Theme.Font(14f, FontStyle.Bold),
                 ForeColor = d.InProgress ? Color.FromArgb(120, 144, 226) : (d.Valid ? Green : Red),
@@ -180,19 +182,22 @@ namespace SelectOR
             }
             else if (!d.InProgress)
             {
+                // Por qué no se registra el viaje: una línea por motivo y, debajo, qué supone.
+                var motivos = d.Reasons.Count > 0 ? d.Reasons
+                    : new System.Collections.Generic.List<string> { I18n.T("Velocidad media imposible (más de 350 km/h).") };
+                string warnTxt = "";
+                foreach (var m in motivos) warnTxt += "⚠  " + m + Environment.NewLine;
+                warnTxt += Environment.NewLine + I18n.T("El viaje no se guarda: no genera ingresos ni cuenta para los rankings.");
+                var warnFont = Theme.Font(10f, FontStyle.Bold);
+                int warnH = TextRenderer.MeasureText(warnTxt, warnFont, new Size(W - 32, 0), TextFormatFlags.WordBreak).Height;
                 var warn = new Card { Width = W, Fill = Color.FromArgb(64, 44, 44), Radius = 12, Padding = new Padding(16, 12, 16, 12), Margin = new Padding(0, 0, 0, 8) };
-                warn.Controls.Add(new Label
-                {
-                    Dock = DockStyle.Fill, ForeColor = Red, Font = Theme.Font(10f, FontStyle.Bold),
-                    Text = "⚠  " + I18n.T("Velocidad media imposible (> 350 km/h). El viaje no genera ingresos ni cuenta para los rankings."),
-                    AutoSize = false
-                });
-                warn.Height = 78;
+                warn.Controls.Add(new Label { Dock = DockStyle.Fill, ForeColor = Red, Font = warnFont, Text = warnTxt, AutoSize = false });
+                warn.Height = warnH + 24 + 6;
                 body.Controls.Add(warn);
             }
 
             // Rango (solo en el resultado del viaje; en la vista de detalle desde Servicios se oculta)
-            if (!d.History)
+            if (!d.History && !string.IsNullOrEmpty(d.RankName))
             {
             var rank = new Card { Width = W, Fill = d.RankedUp ? Color.FromArgb(58, 52, 30) : Theme.Surface, Radius = 12, Padding = new Padding(16, 12, 16, 14), Margin = new Padding(0, 0, 0, 4) };
             var rg = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, BackColor = Color.Transparent, AutoSize = true };

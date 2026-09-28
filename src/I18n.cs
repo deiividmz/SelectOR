@@ -11,7 +11,6 @@ namespace SelectOR
         static readonly Dictionary<string, string> En = new Dictionary<string, string>
         {
             ["Contenido"] = "Content",
-            ["Reanudar"] = "Resume",
             ["Opciones OR"] = "OR Options",
             ["CONDUCIR"] = "DRIVE",
             ["CONECTAR"] = "CONNECT",
@@ -78,10 +77,8 @@ namespace SelectOR
             ["Acerca de SelectOR"] = "About SelectOR",
             ["Cerrar"] = "Close",
             ["Composición del tren"] = "Train consist",
-            ["Reanudar partida"] = "Resume game",
-            ["Partidas guardadas"] = "Saved games",
-            ["Repetir"] = "Replay",
             ["↺ arrastra para girar"] = "↺ drag to rotate",
+            ["↺ arrastra para girar · rueda: zoom"] = "↺ drag to rotate · wheel: zoom",
             // Mapa de la ruta
             ["Ver mapa del recorrido"] = "View route map",
             ["Ver mapa de la ruta"] = "View route map",
@@ -131,8 +128,6 @@ namespace SelectOR
             ["Esta ruta no tiene horarios."] = "This route has no timetables.",
             ["Modo no soportado."] = "Unsupported mode.",
             ["No se pudieron leer los ajustes de Open Rails:\n\n"] = "Could not read Open Rails settings:\n\n",
-            ["No hay partidas guardadas todavía. Se crean al guardar dentro del simulador (tecla F2)."]
-                = "No saved games yet. They are created by saving inside the simulator (F2 key).",
             // Empresas: crear / solicitar
             ["SOLICITUDES PENDIENTES"] = "PENDING REQUESTS",
             ["MAQUINISTA"] = "DRIVER",
@@ -605,6 +600,7 @@ namespace SelectOR
             ["Cuenta creada. Confirma el correo y luego inicia sesión."] = "Account created. Confirm your email and then sign in.",
             ["maquinista@correo.com"] = "driver@email.com",
             ["Guardar"] = "Save",
+            ["Enviar"] = "Send",
             ["Cancelar"] = "Cancel",
             ["Nombre de maquinista"] = "Driver name",
             ["Nombre de maquinista (solo para registrarse)"] = "Driver name (only to sign up)",
@@ -1145,6 +1141,55 @@ namespace SelectOR
             ["Este equipo no tiene la clave de firma de actualizaciones: sin ella las copias instaladas rechazarían el paquete."] = "This computer does not have the update signing key: without it, installed copies would reject the package.",
             ["No se pudo firmar el paquete con la clave de este equipo."] = "Could not sign the package with this computer's key.",
             ["No se pudo subir el paquete: "] = "Could not upload the package: ",
+            // ---- 1.2.35 ----
+            ["Solo el gerente de la empresa puede eliminarla."] = "Only the company manager can delete it.",
+            ["¿Eliminar la empresa «{0}» y TODOS sus datos? Se borran sus socios, su flota, todos sus servicios (también los que estén en marcha), su banca, sus solicitudes y su megafonía. Esta acción no se puede deshacer."]
+                = "Delete the company «{0}» and ALL its data? Its members, fleet, all its services (including the ones in progress), bank, join requests and station announcements will be deleted. This cannot be undone.",
+            ["Para confirmar, escribe el nombre de la empresa: {0}"] = "To confirm, type the company name: {0}",
+            ["El nombre no coincide: la empresa NO se ha eliminado."] = "The name does not match: the company has NOT been deleted.",
+            ["Recorrido de {0} km: los viajes de menos de 3 km no se registran."] = "Distance of {0} km: trips shorter than 3 km are not recorded.",
+            ["Duración de {0}: los viajes de menos de 5 minutos no se registran."] = "Duration of {0}: trips shorter than 5 minutes are not recorded.",
+            ["El servicio terminó como fallido."] = "The service ended as failed.",
+            ["Velocidad media imposible ({0} km/h; el máximo son 350 km/h)."] = "Impossible average speed ({0} km/h; the maximum is 350 km/h).",
+            ["Velocidad media imposible (más de 350 km/h)."] = "Impossible average speed (more than 350 km/h).",
+            ["El viaje no se guarda: no genera ingresos ni cuenta para los rankings."] = "The trip is not saved: it earns nothing and does not count for rankings.",
+            ["Servicio no registrado: "] = "Service not recorded: ",
+            ["Servicio no registrado"] = "Service not recorded",
+            ["Servicio NO REGISTRADO"] = "Service NOT RECORDED",
+            ["Cargar"] = "Load",
+            ["¿Qué contenido quieres cargar?"] = "Which content do you want to load?",
+            // ---- 1.2.35: solicitudes de compra y usuario de Multijugador ----
+            ["Solicitar compra"] = "Request purchase",
+            ["Se pedirá al gerente y a los gestores de «{0}» que compren o alquilen «{1}». Mensaje para ellos (opcional):"]
+                = "The manager and supervisors of «{0}» will be asked to buy or rent «{1}». Message for them (optional):",
+            ["El servidor aún no admite solicitudes de compra."] = "The server does not support purchase requests yet.",
+            ["Solicitud enviada: el gerente o un gestor de «{0}» decidirán si compran o alquilan «{1}»."]
+                = "Request sent: the manager or a supervisor of «{0}» will decide whether to buy or rent «{1}».",
+            ["No se pudo enviar la solicitud: "] = "Could not send the request: ",
+            ["Solicitudes"] = "Requests",
+            ["SOLICITUDES DE COMPRA DE LOS MAQUINISTAS"] = "PURCHASE REQUESTS FROM DRIVERS",
+            ["Máquinas que los socios piden que la empresa compre o alquile. «Comprar» y «Alquilar» abren la compra de esa máquina (con su tasación); «Rechazar» la descarta."]
+                = "Locomotives that members ask the company to buy or rent. «Buy» and «Rent» open the purchase of that locomotive (with its valuation); «Reject» discards it.",
+            ["MÁQUINA"] = "LOCOMOTIVE",
+            ["No hay solicitudes de compra pendientes."] = "There are no pending purchase requests.",
+            ["¿Rechazar la solicitud de {0} para «{1}»?"] = "Reject {0}'s request for «{1}»?",
+            ["«{0}» no está en tu contenido: instálala para poder comprarla o alquilarla."] = "«{0}» is not in your content: install it to be able to buy or rent it.",
+            ["Solicitud de {0} atendida."] = "{0}'s request fulfilled.",
+            ["No se pudo cerrar la solicitud: "] = "Could not close the request: ",
+            ["Usuario: de 4 a 10 caracteres, sin espacios ni ' \" -, y sin empezar por un número (lo exige Open Rails)."]
+                = "User: 4 to 10 characters, no spaces, ' \" or -, and not starting with a digit (required by Open Rails).",
+            ["El usuario de Multijugador debe tener de 4 a 10 caracteres, sin espacios ni ' \" -, y no puede empezar por un número."]
+                = "The Multiplayer user must be 4 to 10 characters long, with no spaces, ' \" or -, and cannot start with a digit.",
+            ["no: datos del maquinista"] = "no: driver's data",
+            ["la tienes"] = "installed",
+            ["EN TU EQUIPO"] = "ON YOUR PC",
+            ["no la tienes"] = "not installed",
+            ["No tienes «{0}» en tu contenido. ¿Alquilarla con los datos que envió {1} ({2} coches, {3} t)? El precio lo calcula el servidor."]
+                = "You do not have «{0}» in your content. Rent it with the data sent by {1} ({2} cars, {3} t)? The server calculates the price.",
+            ["No tienes «{0}» en tu contenido. ¿Comprarla con los datos que envió {1} ({2} coches, {3} t)? El precio lo calcula el servidor."]
+                = "You do not have «{0}» in your content. Buy it with the data sent by {1} ({2} cars, {3} t)? The server calculates the price.",
+            ["«{0}» no está en tu contenido y la solicitud no trae sus datos: pide al maquinista que la vuelva a enviar."]
+                = "«{0}» is not in your content and the request does not include its data: ask the driver to send it again.",
         };
 
         public static string T(string es)

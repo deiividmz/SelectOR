@@ -23,8 +23,9 @@ namespace SelectOR
             try
             {
                 var tren = _drivenConsist ?? CurrentDrivenConsist();
+                var units = TrainCabUnits(tren);   // unidades y escalas de los instrumentos de la cabina (.cvf)
                 _cabHud = new CabHudOverlay(_prefs, OrWebPort(), TrainMaxKmh(tren), CabDayOfYear(), TrainTraction(tren), TrainIsPassenger(tren),
-                                            TrainBrakeDecel(tren));
+                                            TrainBrakeDecel(tren), units);
                 _cabHud.TrainName = tren?.Name;
                 if (_tHave) _cabHud.SetPosition(_tLat, _tLon);
                 var _ = _cabHud.Handle;
@@ -76,6 +77,68 @@ namespace SelectOR
             }
             catch { }
             return vmax;
+        }
+
+        // Instrumentos de la cabina del tren: el .cvf de la máquina de cabeza («CabView ( … )» en su .eng,
+        // dentro de su carpeta CABVIEW) dice en qué unidades y con qué escala están su velocímetro
+        // («Units ( KM_PER_HOUR )» o «MILES_PER_HOUR», «ScaleRange ( 0 120 )») y sus manómetros
+        // (MAIN_RES / BRAKE_PIPE y BRAKE_CYL: BAR, PSI, KILO_PASCALS, INCHES_OF_MERCURY…). El pupitre
+        // se dibuja igual. null / 0 = no se ha podido leer (entonces, km/h, bar y escalas por defecto).
+        CabHudOverlay.CabUnits TrainCabUnits(TrainItem c)
+        {
+            try
+            {
+                foreach (var r in ConsistCarRefs(c?.FilePath))
+                {
+                    if (!r.isEngine) continue;   // la máquina de cabeza es la que se conduce
+                    string eng = ResolveCarFile(r.name, r.folder);
+                    string cab = EngFind(eng, @"\bCabView\s*\(\s*""?([^"")]+?)""?\s*\)", 0);
+                    if (string.IsNullOrWhiteSpace(cab)) return new CabHudOverlay.CabUnits();
+                    string dir = Path.GetDirectoryName(eng), rel = cab.Trim().Replace('/', '\\');
+                    foreach (var cvf in new[] { Path.Combine(dir, "CABVIEW", rel), Path.Combine(dir, rel) })
+                        if (File.Exists(cvf) && Native.IsLocalFile(cvf)) return CvfUnits(ReadHead(cvf, 4000000));
+                    break;
+                }
+            }
+            catch { }
+            return new CabHudOverlay.CabUnits();
+        }
+
+        // Del .cvf: cada control es un bloque «Type ( SPEEDOMETER DIAL )», «Type ( BRAKE_PIPE DIAL )»…
+        // con sus Units y ScaleRange. La escala se toma de las esferas (DIAL); un marcador digital o
+        // de agujas solo da las unidades.
+        static CabHudOverlay.CabUnits CvfUnits(string t)
+        {
+            var u = new CabHudOverlay.CabUnits();
+            if (string.IsNullOrEmpty(t)) return u;
+            foreach (Match m in Regex.Matches(t, @"\bType\s*\(\s*(SPEEDOMETER|MAIN_RES|BRAKE_PIPE|BRAKE_CYL)\s+(\w+)", RegexOptions.IgnoreCase))
+            {
+                // El bloque del control llega hasta el Type del control siguiente.
+                int end = t.IndexOf("Type", m.Index + m.Length, StringComparison.OrdinalIgnoreCase);
+                int len = (end > 0 ? end : Math.Min(t.Length, m.Index + 3000)) - m.Index;
+                string blk = t.Substring(m.Index, Math.Max(0, len));
+                string units = Regex.Match(blk, @"\bUnits\s*\(\s*(\w+)", RegexOptions.IgnoreCase).Groups[1].Value.ToUpperInvariant();
+                bool dial = m.Groups[2].Value.Equals("DIAL", StringComparison.OrdinalIgnoreCase);
+                double max = 0;
+                var sr = Regex.Match(blk, @"\bScaleRange\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)", RegexOptions.IgnoreCase);
+                if (dial && sr.Success) double.TryParse(sr.Groups[2].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out max);
+                switch (m.Groups[1].Value.ToUpperInvariant())
+                {
+                    case "SPEEDOMETER":
+                        if (u.SpeedMph == null && units.Length > 0) u.SpeedMph = units.Contains("MILES");
+                        if (u.SpeedScale <= 0 && max > 0) u.SpeedScale = units.Contains("METRES") ? max * 3.6 : max;   // en m/s (raro): km/h
+                        break;
+                    case "BRAKE_CYL":
+                        if (u.BcUnits == null && units.Length > 0) u.BcUnits = units;
+                        if (u.BcScale <= 0 && max > 0) u.BcScale = max;
+                        break;
+                    default:   // MAIN_RES y BRAKE_PIPE comparten el manómetro doble (TDP/TFA)
+                        if (u.AirUnits == null && units.Length > 0) u.AirUnits = units;
+                        if (max > u.AirScale) u.AirScale = max;
+                        break;
+                }
+            }
+            return u;
         }
 
         // Tracción del tren, del bloque Engine de sus .eng: «Type ( Electric )», «Diesel» o «Steam»

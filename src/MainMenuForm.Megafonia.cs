@@ -452,6 +452,10 @@ namespace SelectOR
                 });
             _paStOrder = orden;
 
+            // Misma empresa, ruta y línea: tras editar una fila la tabla se queda donde estaba.
+            string ctx = (_empSel?.Id ?? "") + "|" + _paRoute + "|" + _paLineId;
+            _paStList.RowKey = c => c.Length > 0 ? c[0].Split(new[] { "   ·  " }, StringSplitOptions.None)[0] : null;
+            _paStList.BeginReload(ctx);
             _paStList.ClearRows();
             foreach (var r in orden)
             {
@@ -471,8 +475,10 @@ namespace SelectOR
                                  new Color?[] { nameCol, audioCol, cfgCol, cfgCol });
             }
             if (orden.Count == 0) _paStList.SetEmpty(Tr("No se han encontrado estaciones en el .tdb de esta ruta."));
+            _paStList.EndReload();
 
             // --- líneas ---
+            _paLineList.BeginReload(ctx);
             _paLineList.ClearRows();
             foreach (var l in _paLines)
             {
@@ -483,6 +489,7 @@ namespace SelectOR
                                    new Color?[] { null, null, propios > 0 ? Theme.Accent : (Color?)Theme.Subtle });
             }
             if (_paLines.Count == 0) _paLineList.SetEmpty(Tr("Todavía no hay líneas: crea una para que el maquinista pueda elegirla."));
+            _paLineList.EndReload();
         }
 
         List<PaRow> _paStOrder = new List<PaRow>();   // orden con el que se pintó la tabla

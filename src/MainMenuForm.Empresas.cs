@@ -101,7 +101,6 @@ namespace SelectOR
         Panel _svcPanel, _memberPanel, _tariffPanel, _rankPanel, _reviewPanel, _usersPanel;
         int _empSubtab;
         // Revisión de servicios sospechosos (superadmin)
-        StyledTable _suspList; Label _suspMsg; readonly List<string> _suspIds = new();
         // Gestión de usuarios (solo superadmin)
         StyledTable _usersList; Label _usersMsg;
         readonly List<string> _userIds = new(); readonly List<bool> _userIsSelf = new();
@@ -384,7 +383,7 @@ namespace SelectOR
             ("OPERACIÓN", new[] { 0, 9, 10 }),        // Servicios · Flota · Compra
             ("FINANZAS", new[] { 1, 4 }),             // Banca · Ranking
             ("EMPRESA", new[] { 2, 3, 11, 5 }),       // Socios · Ajustes · Megafonía · Mi perfil
-            ("ADMINISTRACIÓN", new[] { 6, 7, 8 }),    // Revisión · Usuarios · Administración
+            ("ADMINISTRACIÓN", new[] { 7, 8 }),       // Usuarios · Administración (el 6, «Revisión», ya no existe)
         };
         const int RailW = 236;          // ancho del menú lateral de Empresas
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
@@ -625,9 +624,10 @@ namespace SelectOR
         {
             if (_empCreateHost == null) return;
             _empCreateHost.Controls.Clear();
-            _createAreaSuper = Supa.IsSuperadmin;
-            bool su = Supa.IsSuperadmin;
-            // Rejilla a lo ancho de la tarjeta de empresa: [Crear | Unirse] y, para el superadmin, [Eliminar].
+            // [Eliminar] lo ven el superadmin y el gerente de la empresa elegida (puede borrar la suya).
+            bool su = CanDeleteCompany();
+            _createAreaSuper = su;
+            // Rejilla a lo ancho de la tarjeta de empresa: [Crear | Unirse] y, si puede, [Eliminar].
             var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = su ? 2 : 1, BackColor = Theme.Surface, Margin = new Padding(0), Padding = new Padding(0) };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             t.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
@@ -675,7 +675,7 @@ namespace SelectOR
             _tariffPanel = BuildTariffSubpanel();
             _rankPanel = BuildRankSubpanel();
             _soloPanel = BuildProfileSubpanel();
-            _reviewPanel = BuildReviewSubpanel();
+            _reviewPanel = new Panel();   // hueco de la antigua sección «Revisión» (los viajes no válidos ya no se guardan)
             _usersPanel = BuildUsersSubpanel();
             _allCompPanel = BuildAllCompaniesSubpanel();
             _fleetPanel = BuildFleetSubpanel();
@@ -793,14 +793,13 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var tabs = MakeSubTabs(new[] { "Todos", "En conducción", "Completados", "Fallidos", "No válidos" }, i =>
+            // Los viajes fallidos o no válidos ya no se guardan (el servidor los borra al cerrarlos).
+            var tabs = MakeSubTabs(new[] { "Todos", "En conducción", "Completados" }, i =>
             {
                 _empSvcList.RowFilter = i switch
                 {
                     1 => cells => cells.Length > 9 && cells[9].Contains(Tr("En conducción")),
                     2 => cells => cells.Length > 9 && cells[9].Contains(Tr("completado")),
-                    3 => cells => cells.Length > 9 && cells[9].Contains(Tr("fallido")),
-                    4 => cells => cells.Length > 9 && cells[9].Contains(Tr("no válido")),
                     _ => (Func<string[], bool>)null
                 };
                 _empSvcList.Refilter();
@@ -1244,7 +1243,7 @@ namespace SelectOR
         void ShowSubtab(int i)
         {
             _empSubtab = i;
-            for (int k = 0; k < _empSubtabs.Length; k++) { _empSubtabs[k].Active = k == i; _empSubtabs[k].Invalidate(); }
+            for (int k = 0; k < _empSubtabs.Length; k++) { if (_empSubtabs[k] == null) continue; _empSubtabs[k].Active = k == i; _empSubtabs[k].Invalidate(); }   // el 6 («Revisión») ya no tiene botón
             if (_empSectionTitle != null && i >= 0 && i < SubNames.Length) _empSectionTitle.Text = Tr(SubNames[i]);
             _svcPanel.Visible = i == 0;
             _bankPanel.Visible = i == 1;
@@ -1265,10 +1264,10 @@ namespace SelectOR
             if (i == 3) { FillTariffFields(); LoadDefaultBalance(); LoadFleetSettings(); }
             if (i == 4) LoadRankings();
             if (i == 5) LoadProfile();
-            if (i == 6) LoadSuspicious();
             if (i == 7) LoadUsers();
             if (i == 8) LoadAllCompanies();
             if (i == 9 || i == 10) LoadFleet();   // Flota y Compra comparten los mismos datos (vehicles)
+            if (i == 10) LoadPurchaseRequests();
             if (i == 11) OnMegafoniaShown();
             UpdateCompanyKpis();                  // la tira de la empresa se muestra u oculta según la sección
         }
@@ -1313,7 +1312,7 @@ namespace SelectOR
             if (home)
             {
                 _empUserLbl.Text = UserHeaderText();
-                if (_createAreaSuper != Supa.IsSuperadmin) BuildCreateArea();   // adapta la zona de crear empresa al rol
+                if (_createAreaSuper != CanDeleteCompany()) BuildCreateArea();   // adapta la zona de crear empresa al rol
                 UpdateCompanyDash(); UpdateDutyUi(); UpdateRoleUi();
                 if (string.IsNullOrWhiteSpace(Supa.Username)) LoadMyUsername();
                 StartRealtime();   // escucha de cambios en vivo (una sola vez)
@@ -1569,6 +1568,7 @@ namespace SelectOR
         async void LoadServices(EmpCompany c)
         {
             if (c == null) return;
+            _empSvcList.BeginReload(c.Id);
             _empSvcList.SetEmpty(Tr("Cargando…"));
             var (json, err) = await Supa.RpcAsync("list_company_services", new { p_company = c.Id });
             _empSvcList.ClearRows(); _svcIds.Clear(); _svcRows.Clear();
@@ -1603,11 +1603,12 @@ namespace SelectOR
                                 open ? "—" : net.ToString("+#,##0.00;-#,##0.00", EsEs) + " €",
                                 StatusLabel(rawStatus, valid) },
                         new Color?[] { Theme.Accent, null, Theme.Subtle, null, null, null, Theme.Subtle, Theme.Subtle,
-                                       open ? Theme.Subtle : (net < 0 ? RedC : Theme.Accent), StatusColor(rawStatus, valid) });
+                                       open ? Theme.Subtle : (net < 0 ? RedC : Theme.Accent), StatusColor(rawStatus, valid) }, null, id);
                 }
             }
             catch { }
             if (n == 0) _empSvcList.SetEmpty(Tr("Sin servicios todavía."));
+            _empSvcList.EndReload();
             UpdateCompanyKpis();   // nº de servicios y km totales
         }
 
@@ -1702,6 +1703,7 @@ namespace SelectOR
         {
             if (_bankList == null) return;
             if (_empSel == null) { _bankList.SetEmpty(Tr("Selecciona una empresa.")); return; }
+            _bankList.BeginReload(_empSel.Id);
             _bankList.SetEmpty(Tr("Cargando…"));
             var (json, err) = await Supa.SelectAsync(
                 $"ledger?select=id,created_at,concept,amount,description&company_id=eq.{Uri.EscapeDataString(_empSel.Id)}&order=created_at.desc&limit=1000");
@@ -1726,7 +1728,7 @@ namespace SelectOR
                     string desc = Str(e, "description");
                     _bankList.AddRow(
                         new[] { date, concept, amount.ToString("+#,##0.00;-#,##0.00", EsEs) + " €", desc },
-                        new Color?[] { null, null, amount < 0 ? RedC : Theme.Accent, null });
+                        new Color?[] { null, null, amount < 0 ? RedC : Theme.Accent, null }, null, _ledgerIds[_ledgerIds.Count - 1]);
                     // Agregados para el panel financiero
                     if (amount >= 0) { income += amount; if (rawConcept == "income" && createdAt.Length >= 7) { string m = createdAt.Substring(0, 7); byMonth[m] = byMonth.TryGetValue(m, out var mv) ? mv + amount : amount; } }
                     else { expense += -amount; byConcept[concept] = byConcept.TryGetValue(concept, out var cv) ? cv - amount : -amount; }
@@ -1734,6 +1736,7 @@ namespace SelectOR
             }
             catch { }
             if (n == 0) _bankList.SetEmpty(Tr("Sin movimientos todavía."));
+            _bankList.EndReload();
 
             // KPIs + gráficas
             SetKpi(_finIncome, income.ToString("N0", EsEs) + " €");
@@ -1875,18 +1878,48 @@ namespace SelectOR
         }
 
         // Superadmin: elimina por completo la empresa seleccionada (con doble confirmación).
+        // Elimina la empresa elegida con TODO lo suyo: socios, flota, servicios (también los que estén en
+        // marcha), banca, solicitudes y megafonía. La puede eliminar su gerente (o el superadmin). Para
+        // confirmar hay que escribir su nombre. Los audios de megafonía (Storage) se borran antes.
         async void DeleteCompany()
         {
-            if (!Supa.IsSuperadmin) { Msg(_empHomeMsg, Tr("Solo el superadministrador puede eliminar empresas."), true); return; }
             var c = _empSel;
             if (c == null) { Msg(_empHomeMsg, Tr("Selecciona una empresa de la lista."), true); return; }
+            if (!CanDeleteCompany()) { Msg(_empHomeMsg, Tr("Solo el gerente de la empresa puede eliminarla."), true); return; }
             if (MessageBox.Show(this,
-                    string.Format(Tr("¿Eliminar la empresa «{0}» y TODOS sus datos (socios, flota, servicios y banca)? Esta acción no se puede deshacer."), c.Name),
-                    "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                    string.Format(Tr("¿Eliminar la empresa «{0}» y TODOS sus datos? Se borran sus socios, su flota, todos sus servicios (también los que estén en marcha), su banca, sus solicitudes y su megafonía. Esta acción no se puede deshacer."), c.Name),
+                    "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            using (var d = new TextPromptDialog(Tr("Eliminar empresa"), string.Format(Tr("Para confirmar, escribe el nombre de la empresa: {0}"), c.Name), "", "", Tr("Eliminar")))
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                if (!string.Equals((d.Value ?? "").Trim(), c.Name.Trim(), StringComparison.CurrentCultureIgnoreCase))
+                { Msg(_empHomeMsg, Tr("El nombre no coincide: la empresa NO se ha eliminado."), true); return; }
+            }
             Msg(_empHomeMsg, Tr("Eliminando empresa…"), false);
+            // 1) Audios de megafonía: están en el almacén y no se borran con la empresa.
+            var (pj, perr) = await Supa.RpcAsync("pa_company_audio_paths", new { p_company = c.Id });
+            if (perr == null && !string.IsNullOrWhiteSpace(pj))
+            {
+                try
+                {
+                    using var pd = JsonDocument.Parse(pj);
+                    foreach (var e in pd.RootElement.EnumerateArray())
+                    {
+                        string path = e.ValueKind == JsonValueKind.String ? e.GetString()
+                                    : e.ValueKind == JsonValueKind.Object ? Str(e, "pa_company_audio_paths") : null;
+                        if (!string.IsNullOrEmpty(path)) { try { await Megafonia.DeleteAsync(path); } catch { } }
+                    }
+                }
+                catch { }
+            }
+            // 2) La empresa (el resto se borra en cascada en el servidor).
             var (_, err) = await Supa.RpcAsync("delete_company", new { p_company = c.Id });
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
+            // Lo que el programa tuviera de esa empresa deja de valer.
+            if (_empOnDutyCompany?.Id == c.Id) { _empOnDutyCompany = null; _pendingServiceId = null; _svcOpenedUtc = null; }
+            if (_favCompanyId == c.Id) { _favCompanyId = null; if (_prefs != null && _prefs.FavoriteCompany == c.Id) { _prefs.FavoriteCompany = null; try { _prefs.Save(); } catch { } } }
             _empSel = null;
+            UpdateDutyUi();
             Msg(_empHomeMsg, string.Format(Tr("Empresa «{0}» eliminada."), c.Name), false);
             LoadCompanies();
         }
@@ -3591,94 +3624,6 @@ namespace SelectOR
             return card;
         }
 
-        // ============================ Revisión de servicios sospechosos (superadmin) ============================
-        Panel BuildReviewSubpanel()
-        {
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Theme.Bg };
-            t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // intro
-            t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // tabla
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // botones
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // msg
-
-            t.Controls.Add(EmpIntro(Tr("Servicios marcados como NO válidos (velocidad media imposible, > 350 km/h). Revísalos: revalida y paga los legítimos, o descarta los tramposos.")));
-
-            _suspList = EmpTable();
-            _suspList.SetColumns(
-                new StyledTable.Col("FECHA", 96),
-                new StyledTable.Col("EMPRESA", 120),
-                new StyledTable.Col("MAQUINISTA", 120),
-                new StyledTable.Col("RUTA", 0, true),
-                new StyledTable.Col("KM", 70, false, HorizontalAlignment.Right),
-                new StyledTable.Col("TIEMPO", 78, false, HorizontalAlignment.Right),
-                new StyledTable.Col("VEL. km/h", 92, false, HorizontalAlignment.Right));
-            t.Controls.Add(_suspList);
-
-            var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
-            var reval = EmpButton(Tr("Revalidar y pagar"), primary: true); reval.Width = 190; reval.Click += (s, e) => RevalidateService();
-            var disc = EmpButton(Tr("Descartar")); disc.Width = 150; disc.BaseColor = Theme.Surface2; disc.HoverColor = Color.FromArgb(150, 60, 60); disc.TextColor = RedC; disc.Click += (s, e) => DismissService();
-            btns.Controls.Add(reval); btns.Controls.Add(disc);
-            t.Controls.Add(btns);
-
-            _suspMsg = EmpMsg(); t.Controls.Add(_suspMsg);
-            return t;
-        }
-
-        async void LoadSuspicious()
-        {
-            if (_suspList == null || !Supa.IsSuperadmin) return;
-            _suspList.SetEmpty(Tr("Cargando…"));
-            var (json, err) = await Supa.RpcAsync("list_suspicious_services", new { });
-            _suspList.ClearRows(); _suspIds.Clear();
-            if (err != null) { _suspList.SetEmpty(Tr("Error: ") + err); return; }
-            int n = 0;
-            try
-            {
-                using var d = JsonDocument.Parse(json);
-                foreach (var e in d.RootElement.EnumerateArray())
-                {
-                    n++;
-                    _suspIds.Add(Str(e, "id"));
-                    string date = FmtDate(Str(e, "started_at"));
-                    string comp = Str(e, "company"); if (comp.Length == 0) comp = "—";
-                    string who = Str(e, "username"); if (who.Length == 0) who = "—";
-                    string route = Str(e, "route"); if (route.Length == 0) route = "—";
-                    double km = Num(e, "km"); double dur = Num(e, "duration_s");
-                    double vel = dur > 0 ? km / (dur / 3600.0) : 0;
-                    _suspList.AddRow(
-                        new[] { date, comp, who, route, km.ToString("N0", EsEs), FmtDurShort(dur), vel.ToString("N0", EsEs) },
-                        new Color?[] { null, null, null, null, null, null, RedC });
-                }
-            }
-            catch { }
-            if (n == 0) _suspList.SetEmpty(Tr("No hay servicios sospechosos."));
-        }
-
-        async void RevalidateService()
-        {
-            if (!Supa.IsSuperadmin || _suspList == null) return;
-            int i = _suspList.SelectedRow;
-            if (i < 0 || i >= _suspIds.Count) { Msg(_suspMsg, Tr("Selecciona un servicio de la lista."), true); return; }
-            if (MessageBox.Show(this, Tr("¿Revalidar este servicio y pagar a la empresa?"), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            Msg(_suspMsg, Tr("Revalidando…"), false);
-            var (_, err) = await Supa.RpcAsync("revalidate_service", new { p_service = _suspIds[i] });
-            if (err != null) { Msg(_suspMsg, Tr("Error: ") + err, true); return; }
-            Msg(_suspMsg, Tr("Servicio revalidado y pagado."), false);
-            LoadSuspicious(); LoadCompanies();
-        }
-
-        async void DismissService()
-        {
-            if (!Supa.IsSuperadmin || _suspList == null) return;
-            int i = _suspList.SelectedRow;
-            if (i < 0 || i >= _suspIds.Count) { Msg(_suspMsg, Tr("Selecciona un servicio de la lista."), true); return; }
-            Msg(_suspMsg, Tr("Descartando…"), false);
-            var (_, err) = await Supa.RpcAsync("dismiss_service", new { p_service = _suspIds[i] });
-            if (err != null) { Msg(_suspMsg, Tr("Error: ") + err, true); return; }
-            Msg(_suspMsg, Tr("Servicio descartado."), false);
-            LoadSuspicious();
-        }
-
         // ============================ Usuarios (solo superadmin) ============================
         Panel BuildUsersSubpanel()
         {
@@ -3914,6 +3859,7 @@ namespace SelectOR
             _fleetOwnPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
             _fleetOwnPreview.Dragged += OnFleetOwnDrag;
             _fleetOwnPreview.ResetRequested += OnFleetOwnReset;
+            _fleetOwnPreview.Zoomed += () => { if (_fleetOwnGeom != null) RenderFleetOwnLive(); };
             _fleetOwnPreview.Resize += (s, e) => { if (_fleetOwnGeom != null) RenderFleetOwnLive(); };
             fviewport.Controls.Add(_fleetOwnPreview);
             fright.Controls.Add(fviewport, 0, 0);
@@ -4030,6 +3976,7 @@ namespace SelectOR
             _fleetPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
             _fleetPreview.Dragged += OnFleetPreviewDrag;
             _fleetPreview.ResetRequested += OnFleetPreviewReset;
+            _fleetPreview.Zoomed += () => { if (_fleetGeom != null) RenderFleetLive(); };
             _fleetRerender = new System.Windows.Forms.Timer { Interval = 140 };
             _fleetRerender.Tick += (s, e) => { _fleetRerender.Stop(); RenderFleetLive(); };
             _fleetPreview.Resize += (s, e) => { if (_fleetGeom != null) { _fleetRerender.Stop(); _fleetRerender.Start(); } };
@@ -4100,7 +4047,8 @@ namespace SelectOR
 
             _buyMsg = EmpMsg(); t.Controls.Add(_buyMsg);
 
-            scroll.Controls.Add(t);
+            // Pestañas «Comprar» (el escaparate) y «Solicitudes» (lo que piden los maquinistas).
+            scroll.Controls.Add(WrapBuyWithRequests(t));
             return scroll;
         }
 
@@ -4213,6 +4161,7 @@ namespace SelectOR
             LoadFleetScale();          // escala de precio para tasar en el cliente
             PopulateFleetConsistList(); // consists comprables del contenido actual
             PopulateBuyMachines();      // máquinas (.eng) comprables del contenido actual
+            _fleetList.BeginReload(_empSel?.Id);   // misma empresa: tras editar una unidad, la lista no vuelve arriba
             if (_empSel == null) { _fleetList.ClearRows(); _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetPlates.Clear(); _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); OnFleetVehicleSelected(); _fleetList.SetEmpty(Tr("Selecciona una empresa.")); return; }
             _fleetList.SetEmpty(Tr("Cargando…"));
             const string fleetCols = "id,name,folder,kind,engine_type,km_total,km_since_maint,maint_interval_km,ownership,status,rental_per_service,capacity,comfort";
@@ -4275,7 +4224,8 @@ namespace SelectOR
                     string plate = Str(e, "plate");
                     _fleetPlates.Add(plate);
                     _fleetList.AddRow(new[] { plate.Length > 0 ? plate : "—", name, model, estado },
-                        new Color?[] { plate.Length > 0 ? (Color?)Theme.AccentHi : Theme.Subtle, nameColor, hasLocal ? (Color?)null : Theme.Subtle, estadoColor });
+                        new Color?[] { plate.Length > 0 ? (Color?)Theme.AccentHi : Theme.Subtle, nameColor, hasLocal ? (Color?)null : Theme.Subtle, estadoColor },
+                        null, _fleetIds.Count > 0 ? _fleetIds[_fleetIds.Count - 1] : null);
                     // Datos para la ficha lateral (columna derecha).
                     _fleetRowEng.Add(engPath.TryGetValue(name, out var ep) ? ep : "");
                     // TIPO = lo que declara el archivo del vehículo (Motriz / Viajeros / Mercancías…);
@@ -4297,6 +4247,7 @@ namespace SelectOR
             foreach (var kv in _fleetOwnedCount) ownedStamp = ownedStamp * 31 + kv.Key.GetHashCode() + kv.Value;
             if (ownedStamp != _fleetOwnedStamp) { _fleetOwnedStamp = ownedStamp; FilterBuyList(); }
             else _fleetEngList?.Invalidate();
+            _fleetList.EndReload();    // misma fila arriba y la misma unidad elegida que antes de editar
             OnFleetVehicleSelected();  // refresca la ficha/vista del vehículo seleccionado
             UpdateRoleUi();
             UpdateFleetValuation();   // recalcula el desglose del consist elegido (la propiedad puede haber cambiado)
@@ -4536,13 +4487,14 @@ namespace SelectOR
         // Refresca el ID visible y el botón «Comprar este tren» de Exploración y Horarios.
         void UpdateTrainShortcuts()
         {
-            bool canBuy = CanBuyTrains();
+            // Gerente/gestor: «Comprar este tren». Maquinista: «Solicitar compra» (se lo pide a ellos).
+            bool canBuy = CanBuyTrains(), canAsk = CanRequestPurchase();
             var ce = _lstConsists?.SelectedItem as TrainItem;
             UpdateFleetStatusChip(_lblStatusExplore, ce);
-            if (_buyWrapExplore != null) _buyWrapExplore.Visible = canBuy && ce != null;
+            SetBuyWrap(_buyWrapExplore, canBuy, (canBuy || canAsk) && ce != null);
             TrainItem ct = null; try { ct = CurrentTTConsist(); } catch { }
             UpdateFleetStatusChip(_lblStatusTT, ct);
-            if (_buyWrapTT != null) _buyWrapTT.Visible = canBuy && ct != null;
+            SetBuyWrap(_buyWrapTT, canBuy, (canBuy || canAsk) && ct != null);
         }
 
         // Cabecera «TREN SELECCIONADO»: a la derecha, el estado del tren en la flota de tu empresa
@@ -4604,6 +4556,12 @@ namespace SelectOR
                 _fleetStatusCache[key] = (DateTime.UtcNow, code);
             }
             if (lbl.Tag as string != key) return;   // la selección cambió mientras se consultaba
+            // El maquinista solo pide trenes que su empresa no tenga disponibles.
+            if (code == "ok" && !CanBuyTrains())
+            {
+                var w = lbl == _lblStatusExplore ? _buyWrapExplore : lbl == _lblStatusTT ? _buyWrapTT : null;
+                if (w != null) w.Visible = false;
+            }
             switch (code)
             {
                 case "ok": lbl.Text = "●  " + string.Format(Tr("Operativo · {0}"), co.Name); lbl.ForeColor = Theme.Accent; break;
@@ -4624,9 +4582,21 @@ namespace SelectOR
                 BaseColor = Color.FromArgb(40, 70, 44), HoverColor = Theme.Accent, TextColor = Theme.AccentHi,
                 FontSize = 9.5f, FontStyle = FontStyle.Bold
             };
-            b.Click += (s, e) => BuyThisTrain(getConsist());
+            b.Click += (s, e) => { if (CanBuyTrains()) BuyThisTrain(getConsist()); else RequestPurchase(getConsist()); };
             wrap.Controls.Add(b);
             return wrap;
+        }
+
+        // El mismo botón para los dos: texto según quién lo ve.
+        void SetBuyWrap(Panel wrap, bool canBuy, bool visible)
+        {
+            if (wrap == null) return;
+            wrap.Visible = visible;
+            if (wrap.Controls.Count > 0 && wrap.Controls[0] is RoundButton b)
+            {
+                string txt = Tr(canBuy ? "Comprar este tren" : "Solicitar compra");
+                if (b.Text != txt) { b.Text = txt; b.Invalidate(); }
+            }
         }
 
         // Abre Empresas → Compra con la MÁQUINA de ese tren ya seleccionada: la compra va por .eng,
@@ -4683,6 +4653,8 @@ namespace SelectOR
             if (_fleetConsistList == null) return;
             string filter = (_fleetConsistSearch?.Box.Text ?? "").Trim();
             var prevSel = _fleetConsistList.SelectedItem as TrainItem;
+            int top = filter == _consistListFilter ? _fleetConsistList.TopIndex : 0;
+            _consistListFilter = filter;
             _fleetConsistList.BeginUpdate();
             _fleetConsistList.Items.Clear();
             foreach (var c in _fleetConsists)
@@ -4696,6 +4668,7 @@ namespace SelectOR
             if (prevSel != null)
                 for (int i = 0; i < _fleetConsistList.Items.Count; i++)
                     if (((TrainItem)_fleetConsistList.Items[i]).FilePath == prevSel.FilePath) { _fleetConsistList.SelectedIndex = i; break; }
+            if (prevSel != null && _fleetConsistList.Items.Count > 0) _fleetConsistList.TopIndex = Math.Min(top, _fleetConsistList.Items.Count - 1);
             if (_fleetConsistList.SelectedIndex < 0 && _fleetConsistList.Items.Count > 0) _fleetConsistList.SelectedIndex = 0;   // dispara el preview
             else if (_fleetConsistList.Items.Count == 0) { RenderFleetAddPreview(); UpdateFleetValuation(); }
         }
@@ -4796,12 +4769,17 @@ namespace SelectOR
         }
 
         // Filtra la lista visible (máquinas o trenes) con el mismo buscador.
+        string _buyListFilter = "", _consistListFilter = "";
+
         void FilterBuyList()
         {
             if (!_buyByMachine) { FilterFleetConsistList(); return; }
             if (_fleetEngList == null) return;
             string filter = (_fleetConsistSearch?.Box.Text ?? "").Trim();
             var prev = _fleetEngList.SelectedItem as BuyMachine;
+            // Al recargar tras comprar, la lista se queda donde estaba; si cambia el filtro, empieza arriba.
+            int top = filter == _buyListFilter ? _fleetEngList.TopIndex : 0;
+            _buyListFilter = filter;
 
             var shown = new List<BuyMachine>();
             foreach (var m in _buyMachines)
@@ -4817,9 +4795,12 @@ namespace SelectOR
             _fleetEngList.Items.Clear();
             foreach (var m in shown) _fleetEngList.Items.Add(m);
             _fleetEngList.EndUpdate();
+            // La lista se rehace con objetos nuevos: la máquina elegida se reconoce por nombre y carpeta.
             if (prev != null)
                 for (int i = 0; i < _fleetEngList.Items.Count; i++)
-                    if (_fleetEngList.Items[i] == prev) { _fleetEngList.SelectedIndex = i; break; }
+                    if (_fleetEngList.Items[i] is BuyMachine bm && string.Equals(bm.Name, prev.Name, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(bm.Folder ?? "", prev.Folder ?? "", StringComparison.OrdinalIgnoreCase)) { _fleetEngList.SelectedIndex = i; break; }
+            if (_fleetEngList.Items.Count > 0) _fleetEngList.TopIndex = Math.Min(top, _fleetEngList.Items.Count - 1);
         }
 
         // Fila: nombre de la máquina arriba y, debajo, si es un automotor, los coches que incluye y
@@ -5266,19 +5247,19 @@ namespace SelectOR
             return (cars, mass, brake, cap);
         }
 
-        async Task AcquireMachine(bool rent)
+        async Task<bool> AcquireMachine(bool rent)   // true = comprada/alquilada
         {
-            if (_empSel == null) { Msg(_buyMsg, Tr("Selecciona una empresa."), true); return; }
-            if (!CanManage() && !Supa.IsSuperadmin) { Msg(_buyMsg, Tr("Solo el dueño o un gestor pueden gestionar la flota."), true); return; }
+            if (_empSel == null) { Msg(_buyMsg, Tr("Selecciona una empresa."), true); return false; }
+            if (!CanManage() && !Supa.IsSuperadmin) { Msg(_buyMsg, Tr("Solo el dueño o un gestor pueden gestionar la flota."), true); return false; }
             var m = _fleetEngList?.SelectedItem as BuyMachine;
-            if (m == null) { Msg(_buyMsg, Tr("Elige una máquina de la lista."), true); return; }
+            if (m == null) { Msg(_buyMsg, Tr("Elige una máquina de la lista."), true); return false; }
             int owned = OwnedUnits(m.Folder, m.Name);
             if (owned > 0)
             {
                 string q = string.Format(rent
                         ? Tr("Ya tienes {0} unidad(es) de esta máquina. Cada unidad deja conducir a un maquinista a la vez. ¿Alquilar otra?")
                         : Tr("Ya tienes {0} unidad(es) de esta máquina. Cada unidad deja conducir a un maquinista a la vez. ¿Comprar otra?"), owned);
-                if (MessageBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (MessageBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
             }
 
             // Se compra la MÁQUINA, pero el precio simula el de un tren completo: el gestor elige
@@ -5290,7 +5271,7 @@ namespace SelectOR
             if (ops.l.Count > 0)
             {
                 using var dlg = new ConsistPriceDialog(m.Name, ops.l, ops.d);
-                if (dlg.ShowDialog(this) != DialogResult.OK) { Msg(_buyMsg, "", false); return; }
+                if (dlg.ShowDialog(this) != DialogResult.OK) { Msg(_buyMsg, "", false); return false; }
                 var elegida = ops.l[dlg.Elegida];
                 var tot = ConsistTotals(elegida.Tag as TrainItem);
                 cars = tot.cars; mass = tot.mass; brake = tot.brake; capacity = tot.capacity;
@@ -5299,10 +5280,11 @@ namespace SelectOR
             Msg(_buyMsg, rent ? Tr("Alquilando…") : Tr("Comprando…"), false);
             string err = await RpcAcquire(rent, _empSel.Id, m.Name, m.Folder, sp.type, sp.automotor,
                                           sp.kw, sp.kmh, cars, mass, brake, capacity, sp.comfort);
-            if (err != null) { Msg(_buyMsg, Tr("Error: ") + err, true); return; }
+            if (err != null) { Msg(_buyMsg, Tr("Error: ") + err, true); return false; }
             Msg(_buyMsg, (rent ? Tr("Vehículo alquilado.") : Tr("Vehículo comprado.")) + "  " + Tr("Puedes asignarle matrícula en Flota."), false);
             LoadCompanies();
             LoadFleet();
+            return true;
         }
 
         // Máquinas de tracción de un consist que se pueden comprar POR SEPARADO: la cabeza de cada
@@ -6125,7 +6107,7 @@ namespace SelectOR
             if (_fleetGeom == null || _fleetPreview == null || _fleetPreview.Width < 40 || _fleetPreview.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_fleetPreview.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_fleetPreview.Height - 36) * 2));
-            var bmp = ShapeRenderer.Render(_fleetGeom, w, h, _fleetYaw, _fleetPitch, 1, _fleetFlip);
+            var bmp = ShapeRenderer.Render(_fleetGeom, w, h, _fleetYaw, _fleetPitch, 1, _fleetFlip, _fleetPreview.CamDistance());
             if (bmp != null) _fleetPreview.Image = bmp;
         }
 
@@ -6197,7 +6179,7 @@ namespace SelectOR
             if (_fleetOwnGeom == null || _fleetOwnPreview == null || _fleetOwnPreview.Width < 40 || _fleetOwnPreview.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_fleetOwnPreview.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_fleetOwnPreview.Height - 36) * 2));
-            var bmp = ShapeRenderer.Render(_fleetOwnGeom, w, h, _fleetOwnYaw, _fleetOwnPitch, 1, _fleetOwnFlip, FleetOwnCamDistance);
+            var bmp = ShapeRenderer.Render(_fleetOwnGeom, w, h, _fleetOwnYaw, _fleetOwnPitch, 1, _fleetOwnFlip, _fleetOwnPreview.CamDistance(FleetOwnCamDistance));
             if (bmp != null) _fleetOwnPreview.Image = bmp;
         }
 
@@ -6811,7 +6793,7 @@ namespace SelectOR
             var svc = _pendingServiceId;
 
             // Viajes de menos de 3 km o de menos de 5 minutos: no se registran (se descarta el
-            // servicio y se libera la unidad).
+            // servicio y se libera la unidad). Al maquinista se le explica por qué.
             int durRule = ServiceSecondsForRule();
             bool cortoKm = _estimatedKm < MinServiceKm, cortoTiempo = durRule < MinServiceSeconds;
             if (cortoKm || cortoTiempo)
@@ -6830,14 +6812,16 @@ namespace SelectOR
                 {
                     _pendingServiceId = null; _svcOpenedUtc = null;
                     UpdateDutyUi();
-                    string shortMsg = cortoKm
-                        ? string.Format(Tr("Viaje de {0} km: los viajes de menos de 3 km no se registran."), _estimatedKm.ToString("0.0", EsEs))
-                        : string.Format(Tr("Viaje de {0}: los viajes de menos de 5 minutos no se registran."), FmtMinSec(durRule));
-                    Msg(_empHomeMsg, shortMsg, false);
+                    var motivos = new List<string>();
+                    if (cortoKm) motivos.Add(string.Format(Tr("Recorrido de {0} km: los viajes de menos de 3 km no se registran."), _estimatedKm.ToString("0.0", EsEs)));
+                    if (cortoTiempo) motivos.Add(string.Format(Tr("Duración de {0}: los viajes de menos de 5 minutos no se registran."), FmtMinSec(durRule)));
+                    var nr = new ServiceResultDialog.Data
+                    {
+                        Company = companyName, Route = route, Valid = false, Km = _estimatedKm,
+                        DurationS = durRule == int.MaxValue ? _tripDurationS : durRule, Reasons = motivos
+                    };
                     _estimatedKm = 0;
-                    LoadCompanies();
-                    RefreshActiveSubtab();
-                    return (true, shortMsg);
+                    return ShowNotRegistered(nr, showDialog);
                 }
                 // (sin el SQL nuevo, un viaje de más de 3 km pero corto de tiempo se registra como antes)
             }
@@ -6875,6 +6859,17 @@ namespace SelectOR
                 r.Net = Num(root, "net");
                 r.Balance = Num(root, "balance");
                 r.Pax = (int)Num(root, "pax");
+                if (!r.Valid)
+                {
+                    // El servidor no lo ha registrado (y, con el SQL de la 1.2.35, lo ha borrado): por qué.
+                    string reason = Str(root, "reason");
+                    double avg = Num(root, "avg_kmh");
+                    if (avg <= 0 && r.DurationS > 0) avg = r.Km / (r.DurationS / 3600.0);
+                    r.Reasons.Add(reason == "failed"
+                        ? Tr("El servicio terminó como fallido.")
+                        : string.Format(Tr("Velocidad media imposible ({0} km/h; el máximo son 350 km/h)."), avg.ToString("N0", EsEs)));
+                    r.Pax = 0;
+                }
                 double validAfter = Num(root, "driver_valid_km");
                 double validBefore = validAfter - (r.Valid ? r.Km : 0);
                 int tBefore = RankTierIndex(validBefore);
@@ -6894,9 +6889,8 @@ namespace SelectOR
             catch { }
 
             _estimatedKm = 0;
-            Msg(_empHomeMsg, r.Valid
-                ? Tr("Servicio registrado.")
-                : Tr("Servicio registrado como NO VÁLIDO (velocidad media imposible): no genera ingresos ni cuenta para rankings."), !r.Valid);
+            if (!r.Valid) return ShowNotRegistered(r, showDialog);
+            Msg(_empHomeMsg, Tr("Servicio registrado."), false);
             // Registro publicado → refresca saldo y la subpestaña visible (sin botón "Actualizar").
             LoadCompanies();
             RefreshActiveSubtab();
@@ -6906,10 +6900,24 @@ namespace SelectOR
                 using var dlg = new ServiceResultDialog(r);
                 dlg.ShowDialog(this);
             }
-            string sum = r.Valid
-                ? string.Format(Tr("Servicio registrado · {0} km · neto {1}"), r.Km.ToString("0.0", EsEs), r.Net.ToString("+#,##0.00 €;-#,##0.00 €", EsEs))
-                : Tr("Servicio registrado como NO VÁLIDO");
+            string sum = string.Format(Tr("Servicio registrado · {0} km · neto {1}"), r.Km.ToString("0.0", EsEs), r.Net.ToString("+#,##0.00 €;-#,##0.00 €", EsEs));
             return (true, sum);
+        }
+
+        // Viaje que NO se registra (corto, velocidad imposible o fallido): el servicio ya no existe;
+        // se avisa al maquinista de por qué (ventana al volver de conducir; con OR abierto, en la barra).
+        (bool ok, string summary) ShowNotRegistered(ServiceResultDialog.Data r, bool showDialog)
+        {
+            string motivos = string.Join(" ", r.Reasons);
+            Msg(_empHomeMsg, Tr("Servicio no registrado: ") + motivos, true);
+            LoadCompanies();
+            RefreshActiveSubtab();
+            if (showDialog)
+            {
+                using var dlg = new ServiceResultDialog(r);
+                dlg.ShowDialog(this);
+            }
+            return (true, Tr("Servicio no registrado: ") + motivos);
         }
 
         // Recarga los datos de la subpestaña visible (auto-refresh al publicar un registro).
@@ -6922,10 +6930,9 @@ namespace SelectOR
                 case 2: if (_empSel != null) LoadMembers(_empSel); break;
                 case 4: LoadRankings(); break;
                 case 5: LoadProfile(); break;
-                case 6: LoadSuspicious(); break;
                 case 7: LoadUsers(); break;
                 case 8: LoadAllCompanies(); break;
-                case 9: case 10: LoadFleet(); break;
+                case 9: case 10: LoadFleet(); if (_empSubtab == 10) LoadPurchaseRequests(); break;
             }
         }
 
@@ -6990,15 +6997,18 @@ namespace SelectOR
             _myRole = _members.Find(m => m.UserId == Supa.UserId)?.Role;
             if (_memberList != null)
             {
+                _memberList.BeginReload(c.Id);
                 _memberList.ClearRows();
                 foreach (var m in _members)
                     _memberList.AddRow(new[] { m.Username.Length > 0 ? m.Username : "—", TrRole(m.Role) },
-                        new Color?[] { null, m.Role == "owner" ? Theme.Accent : (Color?)null });
+                        new Color?[] { null, m.Role == "owner" ? Theme.Accent : (Color?)null }, null, m.UserId);
                 if (_members.Count == 0) _memberList.SetEmpty(err ?? Tr("Sin socios."));
+                _memberList.EndReload();
             }
             UpdateRoleUi();
             UpdateCompanyDash();
             LoadJoinRequests(c);
+            LoadPurchaseRequests();   // contador «Compra (n)» para gerente y gestores
         }
 
         // Carga las solicitudes de ingreso pendientes (solo dueño/gestor las obtiene del servidor).
@@ -7006,6 +7016,7 @@ namespace SelectOR
         {
             if (_joinList == null || c == null) return;
             if (!CanManage() && !Supa.IsSuperadmin) { _joinList.ClearRows(); _joinIds.Clear(); _joinList.SetEmpty(Tr("—")); return; }
+            _joinList.BeginReload(c.Id);
             var (json, err) = await Supa.RpcAsync("list_join_requests", new { p_company = c.Id });
             _joinList.ClearRows(); _joinIds.Clear();
             if (err != null) { _joinList.SetEmpty(Tr("Error: ") + err); return; }
@@ -7019,11 +7030,12 @@ namespace SelectOR
                     _joinIds.Add(Str(e, "id"));
                     string who = Str(e, "username"); if (who.Length == 0) who = "—";
                     string note = Str(e, "note");
-                    _joinList.AddRow(new[] { who, note, FmtDate(Str(e, "created_at")) }, null);
+                    _joinList.AddRow(new[] { who, note, FmtDate(Str(e, "created_at")) }, null, null, _joinIds[_joinIds.Count - 1]);
                 }
             }
             catch { }
             if (n == 0) _joinList.SetEmpty(Tr("No hay solicitudes de ingreso."));
+            _joinList.EndReload();
         }
 
         async void ApproveJoin()
@@ -7124,6 +7136,8 @@ namespace SelectOR
 
         bool CanManage() => _myRole == "owner" || _myRole == "manager";
         bool IsOwner() => _myRole == "owner";
+        // Borrar empresa: el superadmin cualquiera; el gerente, la suya.
+        bool CanDeleteCompany() => Supa.IsSuperadmin || (_empSel != null && IsOwner());
 
         void UpdateRoleUi()
         {
@@ -7131,6 +7145,7 @@ namespace SelectOR
             // raso no ve botones de gestión que no puede usar.
             bool manage = CanManage() || Supa.IsSuperadmin;
             bool ownerOrSu = IsOwner() || Supa.IsSuperadmin;
+            if (_createAreaSuper != null && _createAreaSuper != CanDeleteCompany()) BuildCreateArea();   // [Eliminar] según el rol
             if (_memberAddBtn != null) _memberAddBtn.Visible = manage;
             if (_memberDelBtn != null) _memberDelBtn.Visible = manage;
             if (_memberRoleBtn != null) _memberRoleBtn.Visible = ownerOrSu;              // cambiar roles: solo gerente/superadmin
@@ -7184,12 +7199,12 @@ namespace SelectOR
             // Con empresa → por permiso (el superadmin ve/gestiona TODO). Sin empresa → solo Ranking
             // y Mi perfil (y, para el superadmin, Usuarios y Todas las empresas).
             //   índices: 0 Servicios · 1 Banca · 2 Socios · 3 Ajustes · 4 Ranking · 5 Mi perfil
-            //            · 6 Revisión · 7 Usuarios · 8 Todas las empresas · 9 Flota · 10 Compra · 11 Megafonía
+            //            · 6 (Revisión, ya no existe) · 7 Usuarios · 8 Todas las empresas · 9 Flota · 10 Compra · 11 Megafonía
             // Megafonía: la habilita el superadmin empresa por empresa (companies.pa_enabled). Quien
             // gestiona solo la ve si está habilitada; el superadmin la ve siempre (para habilitarla).
             bool pa = su || (PaEnabledHere() && CanManage());
             bool[] show = hasCompany
-                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa }   // Compra: solo gestión
+                ? new[] { true, true, CanManage() || su, su, true, true, false, su, su, true, CanManage() || su, pa }   // Compra: solo gestión
                 : new[] { false, false, false, false, true, true, false, su, su, false, false, false };
             for (int k = 0; k < _empSubtabs.Length && k < show.Length; k++)
                 if (_empSubtabs[k] != null) _empSubtabs[k].Visible = show[k];

@@ -34,7 +34,62 @@ namespace SelectOR
     {
         readonly AppPrefs _prefs;
         readonly CabPoller _poller;
-        readonly double _speedMax;       // fondo de escala del velocímetro
+        double _speedMax;                // fondo de escala del velocímetro (en km/h, como todo lo interno)
+        // Unidades del velocímetro del tren (.cvf): todo se calcula en km/h y se DIBUJA en la unidad
+        // del tren. _uf convierte km/h a esa unidad (1 en km/h; 1/1,609344 en millas por hora).
+        readonly bool _mph, _unitsKnown;
+        readonly double _uf = 1;
+        const double KmhPorMph = 1.609344;
+        // Manómetros en la unidad de la cabina: las presiones llegan en bar y se DIBUJAN en esa unidad
+        // (f = bar → unidad) con la escala de su esfera.
+        readonly string _airUnit = "bar", _bcUnit = "bar";
+        readonly double _airF = 1, _bcF = 1, _airMax = 12, _bcMax = 10;
+
+        /// <summary>Unidades y escalas de los instrumentos de la cabina del tren (leídas de su .cvf).</summary>
+        public sealed class CabUnits
+        {
+            public bool? SpeedMph;        // null = no se sabe (km/h)
+            public double SpeedScale;     // fondo de escala del velocímetro, en su unidad (0 = no se sabe)
+            public string AirUnits, BcUnits;   // Units del .cvf de MAIN_RES/BRAKE_PIPE y de BRAKE_CYL
+            public double AirScale, BcScale;   // sus fondos de escala, en esa unidad
+        }
+
+        // Unidad de presión del .cvf → rótulo y factor desde bar.
+        static (string label, double f) PressUnit(string cvf)
+        {
+            string u = (cvf ?? "").ToUpperInvariant();
+            if (u.Contains("PSI")) return ("psi", 14.5037738);
+            if (u.Contains("KILOPASCAL") || u.Contains("KILO_PASCAL") || u == "KPA") return ("kPa", 100);
+            if (u.Contains("MEGAPASCAL") || u.Contains("MEGA_PASCAL") || u == "MPA") return ("MPa", 0.1);
+            if (u.Contains("KGS_PER_SQUARE_CM") || u.Contains("KGF")) return ("kgf/cm²", 1.01971621);
+            if (u.Contains("INCHES_OF_MERCURY") || u.Contains("INHG")) return ("inHg", 29.5299831);
+            return ("bar", 1);
+        }
+
+        // Unidad, factor y escala de un manómetro a partir de lo que declara el .cvf. Hay cabinas con
+        // unidades que no cuadran con su esfera (un cilindro «en kPa» de 0-11, que es de bar): si la
+        // escala no es creíble para esa unidad, la unidad se deduce por el tamaño de la escala.
+        static (string label, double f, double max) PressDial(string cvfUnits, double scale, double defBar)
+        {
+            var (lab, f) = PressUnit(cvfUnits);
+            if (scale <= 0 || scale > 5000) return (lab, f, NiceMax(lab == "inHg" ? 30 : defBar * f));
+            bool creible = lab == "inHg" ? scale >= 10 && scale <= 40 : scale / f >= 3 && scale / f <= 30;
+            if (!creible)
+                (lab, f) = scale <= 20 ? ("bar", 1.0) : scale <= 40 ? ("inHg", 29.5299831)
+                         : scale <= 300 ? ("psi", 14.5037738) : ("kPa", 100.0);
+            return (lab, f, scale);
+        }
+
+        // Número redondo por encima (para una escala por defecto en psi, kPa…).
+        static double NiceMax(double v)
+        {
+            if (v <= 0) return 10;
+            foreach (var step in new double[] { 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000 })
+                if (Math.Ceiling(v / step) <= 12) return Math.Ceiling(v / step) * step;
+            return Math.Ceiling(v / 1000) * 1000;
+        }
+        readonly double _trainMaxKmh;    // velocidad máxima del tren según sus .eng (0 = sin dato)
+        bool _scaleFromCab;              // la escala ya se ha tomado del velocímetro de la cabina
         CabValues _v = new CabValues();
         bool _hover, _night;
         float _scale = 1f;
@@ -113,15 +168,29 @@ namespace SelectOR
         }
 
         public CabHudOverlay(AppPrefs prefs, int port, double trainMaxKmh, int dayOfYear = 173, string traction = null, bool? passenger = null,
-                             double brakeDecel = 0.65)
+                             double brakeDecel = 0.65, CabUnits units = null)
         {
+            units ??= new CabUnits();
+            bool? speedoMph = units.SpeedMph;
+            double cabScale = units.SpeedScale;
+            // Manómetros: unidad y escala de las esferas de la cabina; si no las declara, 12 bar
+            // (depósito/tubería) y 10 bar (cilindro) pasados a esa unidad y redondeados.
+            (_airUnit, _airF, _airMax) = PressDial(units.AirUnits, units.AirScale, 12);
+            (_bcUnit, _bcF, _bcMax) = PressDial(units.BcUnits, units.BcScale, 10);
             _brakeDecel = Math.Max(0.35, Math.Min(1.3, brakeDecel));
             _traction = traction;
             _passenger = passenger;
             _prefs = prefs;
             _dayOfYear = dayOfYear;
             OrControl.Reload();   // teclado de OR tal como lo tenga configurado ahora
-            _speedMax = ScaleForTrain(trainMaxKmh);
+            _trainMaxKmh = trainMaxKmh > 0 ? trainMaxKmh : 0;
+            _unitsKnown = speedoMph != null;
+            _mph = speedoMph == true;
+            _uf = _mph ? 1 / KmhPorMph : 1;
+            // Escala: la de la esfera de la cabina (.cvf, ya en su unidad) o, si no la declara, un número
+            // redondo en esa unidad un poco por encima de la velocidad máxima del tren.
+            if (cabScale >= 25 && cabScale <= 600) { _speedMax = cabScale / _uf; _scaleFromCab = true; }
+            else _speedMax = ScaleForTrain(_trainMaxKmh * _uf) / _uf;
             _scale = Math.Max(ScaleMin, Math.Min(ScaleMax, prefs != null && prefs.CabHudScale > 0 ? prefs.CabHudScale : 1f));
 
             FormBorderStyle = FormBorderStyle.None;
@@ -140,8 +209,30 @@ namespace SelectOR
             _anim.Tick += (s, e) => Animate();
         }
 
+        // Las señales de límite y de anuncio nunca pasan de la velocidad máxima del tren (.eng): si la
+        // vía admite 160 y el tren 120, el límite que manda para el maquinista es 120.
+        double TrainCap(double kmh) => _trainMaxKmh > 0 ? Math.Min(kmh, Math.Round(_trainMaxKmh)) : kmh;
+
+        // Escala del velocímetro: la de la esfera de la cabina del tren (ScaleRange del .cvf, que da Open
+        // Rails) y, mientras no llegue, la calculada con la velocidad máxima de sus .eng.
+        void ApplyCabScale(double dial)
+        {
+            if (_scaleFromCab || dial <= 0) return;
+            // Llega en la unidad de la cabina. Si no se ha podido leer el .cvf, una esfera claramente por
+            // debajo de la velocidad del tren es de millas.
+            bool enMillas = _unitsKnown ? _mph : _trainMaxKmh > 0 && dial < _trainMaxKmh * 0.9;
+            double kmh = enMillas ? dial * KmhPorMph : dial;
+            if (kmh < 40 || kmh > 1000) return;
+            _scaleFromCab = true;
+            _speedMax = _unitsKnown ? kmh : Math.Round(kmh);
+            _cacheKey = null;   // la esfera (escala y números) se vuelve a dibujar
+        }
+
         void OnData(CabValues v)
         {
+            // Velocidad o límite leídos del mando de la cabina: vienen en SUS unidades.
+            if (_mph && v.SpeedFromCab) { v.SpeedKmh *= KmhPorMph; v.SpeedFromCab = false; }
+            if (_mph && v.LimitFromCab) { v.LimitKmh *= KmhPorMph; v.LimitFromCab = false; }
             _v = v;
             if (v.Connected)
             {
@@ -150,6 +241,7 @@ namespace SelectOR
                 if (v.Has("doorl") || v.Has("doorr") || v.Has("doorhud")) _seenDoors = true;
             }
             if (v.Connected) _night = IsNight(v.Time);
+            ApplyCabScale(v.SpeedoMax);
             double sp = v.Has("speed") ? Math.Max(0, Math.Min(_speedMax, Math.Abs(v.SpeedKmh))) : 0;
             if (!_animInit)
             {
@@ -166,7 +258,7 @@ namespace SelectOR
             // Límite: la primera vez aparece en su sitio; después, al cambiar, el triángulo se
             // desliza por el aro desde donde estaba hasta el nuevo valor.
             bool hayLimite = v.Has("limit") && v.LimitKmh > 0;
-            double lim = hayLimite ? Math.Min(_speedMax, v.LimitKmh) : 0;
+            double lim = hayLimite ? Math.Min(_speedMax, TrainCap(v.LimitKmh)) : 0;
             _limVal = lim;
             if (hayLimite && !_limShown) _limShown = true;
             else if (!hayLimite && v.Connected) _limShown = false;
@@ -183,7 +275,7 @@ namespace SelectOR
             if (!hayLimite || v.LimitsAhead == null || v.RowStepM <= 0) { _tgtLimit = -1; return; }
             double step = v.RowStepM;
             (double d, double l)? primero = null;
-            foreach (var (d, l) in v.LimitsAhead) if (l < lim - 0.5) { primero = (d, l); break; }
+            foreach (var (d, l0) in v.LimitsAhead) { double l = TrainCap(l0); if (l < lim - 0.5) { primero = (d, l); break; } }
             if (primero == null) { _tgtLimit = -1; return; }
             var (fd, fl) = primero.Value;
             if (_tgtLimit < 0 || Math.Abs(fl - _tgtLimit) > 0.5 || fd > _tgtRow + step * 0.5)
@@ -692,8 +784,8 @@ namespace SelectOR
         // ============================ pintado ============================
         CabDraw.Needle[] AirNeedles() => new[]
         {
-            new CabDraw.Needle(I18n.T("TDP"), CabDraw.Red, _dMr, _v.Has("mr")),
-            new CabDraw.Needle(I18n.T("TFA"), CabDraw.Amber, _dBp, _v.Has("bp")),
+            new CabDraw.Needle(I18n.T("TDP"), CabDraw.Red, _dMr * _airF, _v.Has("mr")),
+            new CabDraw.Needle(I18n.T("TFA"), CabDraw.Amber, _dBp * _airF, _v.Has("bp")),
         };
 
         // Imagen de cada pictograma según la posición actual de su mando.
@@ -706,7 +798,7 @@ namespace SelectOR
         void Draw(Graphics g)
         {
             var ps = Pictograms();
-            string key = $"{Width}x{Height}|{_scale}|{_night}|{_v.Has("speed")}{_v.Has("mr")}{_v.Has("bp")}{_v.Has("bc")}|{string.Join(",", ps)}";
+            string key = $"{Width}x{Height}|{_scale}|{_speedMax}|{_night}|{_v.Has("speed")}{_v.Has("mr")}{_v.Has("bp")}{_v.Has("bc")}|{string.Join(",", ps)}";
             if (_cache == null || _cache.Width != Width || _cache.Height != Height || key != _cacheKey)
             {
                 _cache?.Dispose();
@@ -732,11 +824,13 @@ namespace SelectOR
             CabDraw.Layer = layer;
             try
             {
-                CabDraw.Manometer(g, AirX, Cy, AirR, "", "bar", 0, 12, AirNeedles(), true, LabelPx);
-                CabDraw.Manometer(g, BcX, Cy, BcR, I18n.T("CIL. FRENO"), "bar", 0, 10,
-                    new[] { new CabDraw.Needle("CF", CabDraw.White, _dBc, _v.Has("bc")) }, false, LabelPx);
-                CabDraw.Speedometer(g, RSpeed, _dSpeed, _v.LimitKmh, _v.Has("limit"), _speedMax, _v.Has("speed"),
-                    _curveTarget, _dCruise);
+                // Manómetros en la unidad y con la escala de la cabina del tren (bar, psi, kPa…).
+                CabDraw.Manometer(g, AirX, Cy, AirR, "", _airUnit, 0, _airMax, AirNeedles(), true, LabelPx);
+                CabDraw.Manometer(g, BcX, Cy, BcR, I18n.T("CIL. FRENO"), _bcUnit, 0, _bcMax,
+                    new[] { new CabDraw.Needle("CF", CabDraw.White, _dBc * _bcF, _v.Has("bc")) }, false, LabelPx);
+                // Se dibuja en la unidad del velocímetro del tren (km/h o mph).
+                CabDraw.Speedometer(g, RSpeed, _dSpeed * _uf, TrainCap(_v.LimitKmh) * _uf, _v.Has("limit"), _speedMax * _uf, _v.Has("speed"),
+                    _curveTarget * _uf, _dCruise * _uf, _mph ? "mph" : "km/h");
 
                 if (layer == 1)
                 {

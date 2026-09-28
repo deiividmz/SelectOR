@@ -85,18 +85,23 @@ namespace SelectOR
         {
             PaDriveStop();
             if (_prefs == null || string.IsNullOrWhiteSpace(route) || !Supa.IsLoggedIn) return;
-            var company = _empOnDutyCompany ?? _empSel;     // en servicio, la del servicio; si no, la elegida
-            if (company == null || !company.PaEnabled) return;
-
-            _paDriveCompany = company.Id; _paDriveRoute = route;
-            var (json, err) = await Supa.RpcAsync("pa_bundle", new { p_company = company.Id, p_route = route });
-            if (err != null || string.IsNullOrWhiteSpace(json)) return;
-            ParsePaDriveBundle(json);
-            // Solo se considera «con megafonía» si hay algún aviso de estación grabado.
-            _paDriveReady = false;
-            foreach (var kv in _paDriveAudio)
-                if (kv.Key.Contains("|nombre|")) { _paDriveReady = true; break; }
-            if (!_paDriveReady) return;
+            // Empresa cuya megafonía suena: no hace falta elegirla en el desplegable de Empresas. Se
+            // prueban, en este orden, la del servicio, la elegida, la favorita y las demás de las que
+            // el usuario es socio (maquinista, gestor o gerente), y se queda la primera que tenga la
+            // megafonía habilitada y avisos grabados para esta ruta.
+            string companyName = null;
+            foreach (var (id, name) in await PaCandidateCompanies())
+            {
+                var (json, err) = await Supa.RpcAsync("pa_bundle", new { p_company = id, p_route = route });
+                if (err != null || string.IsNullOrWhiteSpace(json)) continue;
+                ParsePaDriveBundle(json);
+                // Solo se considera «con megafonía» si hay algún aviso de estación grabado.
+                _paDriveReady = false;
+                foreach (var kv in _paDriveAudio)
+                    if (kv.Key.Contains("|nombre|")) { _paDriveReady = true; break; }
+                if (_paDriveReady) { _paDriveCompany = id; _paDriveRoute = route; companyName = name; break; }
+            }
+            if (!_paDriveReady) { _paDriveSt.Clear(); _paDriveAudio.Clear(); _paDriveLines.Clear(); return; }
 
             // Cada conducción empieza SIN megafonía elegida: el HUD muestra «Selecciona megafonía» y
             // no suena nada hasta que el maquinista elige una línea (o la voz base) en la lista.
@@ -108,12 +113,36 @@ namespace SelectOR
 
             int voces = 0;
             foreach (var kv in _paDriveAudio) if (kv.Key.Contains("|nombre|")) voces++;
-            PaLog($"INICIO empresa={company.Name} ruta=[{route}] voces={voces} lineas={_paDriveLines.Count} "
+            PaLog($"INICIO empresa={companyName} ruta=[{route}] voces={voces} lineas={_paDriveLines.Count} "
                   + $"linea=[{PaHudLineName()}] alias={_paAlias.Count} tdb=[{dir}]", true);
 
             Audio.SetVolume(_prefs.PaVolume);
             _serviceHud?.NotifyPaChanged();   // la fila del HUD aparece y la ventana crece
             await PaPrecacheAsync();
+        }
+
+        // Empresas con megafonía habilitada de las que el usuario es socio, por orden de preferencia:
+        // la del servicio, la elegida en Empresas, la favorita y el resto por nombre. Se piden al
+        // servidor (no hace falta haber abierto la pestaña Empresas).
+        async Task<List<(string id, string name)>> PaCandidateCompanies()
+        {
+            var res = new List<(string id, string name)>();
+            var mine = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var (mj, me) = await Supa.SelectAsync($"company_members?select=company_id&user_id=eq.{Uri.EscapeDataString(Supa.UserId ?? "")}");
+            if (me == null)
+                try { using var d = JsonDocument.Parse(mj); foreach (var e in d.RootElement.EnumerateArray()) mine.Add(Str(e, "company_id")); } catch { }
+            var all = new List<(string id, string name)>();
+            var (cj, ce) = await Supa.SelectAsync("companies?select=id,name&pa_enabled=is.true&order=name.asc");
+            if (ce == null)
+                try { using var d = JsonDocument.Parse(cj); foreach (var e in d.RootElement.EnumerateArray()) all.Add((Str(e, "id"), Str(e, "name"))); } catch { }
+            all.RemoveAll(c => !mine.Contains(c.id));   // solo las suyas (el superadmin las ve todas)
+            foreach (var pref in new[] { _empOnDutyCompany?.Id, _empSel?.Id, _favCompanyId ?? _prefs?.FavoriteCompany })
+            {
+                int i = all.FindIndex(c => c.id == pref);
+                if (i >= 0) { res.Add(all[i]); all.RemoveAt(i); }
+            }
+            res.AddRange(all);
+            return res;
         }
 
         // ¿Hay algún aviso base (sin línea) en esta ruta?

@@ -131,7 +131,6 @@ namespace SelectOR
                 case "play": DrawPlay(g, b, cx, cy); break;
                 case "train": DrawTrain(g, b, cx, cy); break;
                 case "connect": DrawConnect(g, b, cx, cy); break;
-                case "resume": DrawResume(g, b, cx, cy); break;
                 case "gear": DrawGear(g, b, cx, cy); break;
                 case "info": DrawInfo(g, b, cx, cy); break;
                 case "bank": DrawBank(g, b, cx, cy); break;
@@ -287,20 +286,6 @@ namespace SelectOR
             }
         }
 
-        static void DrawResume(Graphics g, Rectangle b, int cx, int cy)
-        {
-            int r = (int)(b.Width * 0.36f);
-            using (var pen = new Pen(Color.White, Math.Max(2f, b.Width * 0.085f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                g.DrawArc(pen, cx - r, cy - r, r * 2, r * 2, 60, 260);
-            using (var ab = new SolidBrush(Color.White))
-            using (var p = new GraphicsPath())
-            {
-                double a = 60 * Math.PI / 180;
-                int ax = cx + (int)(Math.Cos(a) * r), ay = cy + (int)(Math.Sin(a) * r);
-                p.AddPolygon(new[] { new Point(ax + 4, ay - 5), new Point(ax + 7, ay + 4), new Point(ax - 3, ay + 3) });
-                g.FillPath(ab, p);
-            }
-        }
 
         static void DrawGear(Graphics g, Rectangle b, int cx, int cy)
         {

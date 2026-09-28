@@ -257,6 +257,7 @@ namespace SelectOR
             _edPreview3D = new TrainPreviewPanel { Dock = DockStyle.Fill };
             _edPreview3D.Dragged += (dx, dy) => { if (_edGeom != null) { _edYaw += dx * 0.6f; _edPitch = Math.Max(-55f, Math.Min(70f, _edPitch - dy * 0.6f)); Render3DLive(); } };
             _edPreview3D.ResetRequested += () => { _edYaw = 22; _edPitch = 12; Render3DLive(); };
+            _edPreview3D.Zoomed += () => { if (_edGeom != null) Render3DLive(); };
             _edPreview3D.Resize += (s, e) => { if (_edGeom != null) Render3DLive(); };
             card3D.Controls.Add(_edPreview3D);
             view3D.Controls.Add(card3D, 0, 1);
@@ -543,6 +544,7 @@ namespace SelectOR
             if (_edDoc != null && _edDoc.Cars.Count == 0) _edCars.SetEmpty(Tr("Tren vacío: añade coches desde la lista de la derecha."));
             _edCarsHdr.Text = Tr("COCHES DEL TREN") + (_edDoc != null ? "  ·  " + _edDoc.Cars.Count : "");
             UpdateEditorDirty();
+            UpdateEditorStats();   // tarjetas al momento; la tira 2D llega después
             Queue2DRender();
             if (select >= 0) _edCars.SelectRow(select);
         }
@@ -561,6 +563,7 @@ namespace SelectOR
                 _edDoc = null; _edOriginal = null;
                 Show3DCar(-1);
                 ShowCarCapacity(-1);
+                UpdateEditorStats();
                 Queue2DRender();
             }
         }
@@ -807,6 +810,7 @@ namespace SelectOR
                 ? string.Format(Tr("Plazas quitadas de {0}."), file)
                 : string.Format(Tr("Plazas guardadas en {0}."), file), false);
             ShowCarCapacity(_edCars?.SelectedRow ?? -1);
+            UpdateEditorStats();   // PLAZAS y TIPO cambian al momento
         }
 
         // 3D del coche elegido (se puede girar arrastrando; doble clic vuelve a la vista inicial).
@@ -857,7 +861,7 @@ namespace SelectOR
             if (_edGeom == null || _edPreview3D == null || _edPreview3D.Width < 40 || _edPreview3D.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_edPreview3D.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_edPreview3D.Height - 36) * 2));
-            var bmp = ShapeRenderer.Render(_edGeom, w, h, _edYaw, _edPitch, 1, _edGeomFlip);
+            var bmp = ShapeRenderer.Render(_edGeom, w, h, _edYaw, _edPitch, 1, _edGeomFlip, _edPreview3D.CamDistance());
             if (bmp != null) _edPreview3D.Image = bmp;
         }
 
@@ -895,30 +899,9 @@ namespace SelectOR
             {
                 var slots = new List<(Bitmap bmp, bool missing, string name)>();
                 double meters = 0;
-                var st = new ConsistStats();
+                var st = ComputeConsistStats(models);
                 foreach (var (path, flip, name, isEngine) in models)
                 {
-                    // Datos del coche (masa, longitud, freno, plazas y, si es motriz, potencia y velocidad).
-                    // Todo sale de la caché de contenido: cada archivo se lee una vez por sesión.
-                    st.Cars++;
-                    if (isEngine) st.Engines++;
-                    string declared = DeclaredVehicleType(path);
-                    if (declared == "carriage" || declared == "passenger") st.Pax = true;
-                    else if (declared == "freight") st.Freight = true;
-                    var veh = VehicleStats(path);
-                    if (veh != null)
-                    {
-                        st.MassT += veh.MassT;
-                        st.BrakeKn += veh.BrakeKn;
-                        st.Capacity += veh.Capacity;
-                        if (veh.Length > 0) st.LengthM += veh.Length;
-                        if (isEngine)
-                        {
-                            st.PowerKw += veh.PowerKw;
-                            double kmh = veh.SpeedKmh;
-                            if (kmh > 0) st.MaxKmh = st.MaxKmh <= 0 ? kmh : Math.Min(st.MaxKmh, kmh);
-                        }
-                    }
                     ShapeGeom geom = null;
                     if (path != null)
                     {
@@ -938,7 +921,6 @@ namespace SelectOR
                     slots.Add((bmp, false, name));
                 }
                 if (!IsHandleCreated) return;
-                st.Kind = st.Pax ? Tr("Viajeros") : st.Freight ? Tr("Mercancías") : "";
                 try { BeginInvoke((Action)(() => Compose2D(token, slots, meters, st))); } catch { }
             });
         }
@@ -1003,7 +985,55 @@ namespace SelectOR
             Highlight2D();
         }
 
-        // Datos sumados de toda la composición (se calculan junto al dibujo 2D).
+        // Tarjetas COCHES, LONGITUD, MASA…: se recalculan EN CUANTO cambia algo (coches, orden, plazas),
+        // sin esperar al dibujo 2D, que tiene que construir la geometría de cada coche y tarda.
+        int _edStatsToken;
+        void UpdateEditorStats()
+        {
+            if (_stCars == null) return;
+            var doc = _edDoc;
+            if (doc == null || doc.Cars.Count == 0) { _edStatsToken++; ShowConsistStats(null); return; }
+            var models = new List<(string path, bool flip, string name, bool isEngine)>();
+            foreach (var c in doc.Cars) models.Add((ResolveCarFile(c.Name, c.Folder), c.Flip, c.Name, c.IsEngine));
+            int token = ++_edStatsToken;
+            Task.Run(() =>
+            {
+                var st = ComputeConsistStats(models);
+                if (!IsHandleCreated) return;
+                try { BeginInvoke((Action)(() => { if (token == _edStatsToken) ShowConsistStats(st); })); } catch { }
+            });
+        }
+
+        // Datos del tren sumando sus coches (masa, longitud, freno, plazas y, de las motrices, potencia y
+        // velocidad). Todo sale de la caché de contenido, que se vacía al cambiar las plazas de un coche.
+        ConsistStats ComputeConsistStats(List<(string path, bool flip, string name, bool isEngine)> models)
+        {
+            var st = new ConsistStats();
+            foreach (var (path, _, _, isEngine) in models)
+            {
+                st.Cars++;
+                if (isEngine) st.Engines++;
+                string declared = DeclaredVehicleType(path);
+                if (declared == "carriage" || declared == "passenger") st.Pax = true;
+                else if (declared == "freight") st.Freight = true;
+                var veh = VehicleStats(path);
+                if (veh == null) continue;
+                st.MassT += veh.MassT;
+                st.BrakeKn += veh.BrakeKn;
+                st.Capacity += veh.Capacity;
+                if (veh.Length > 0) st.LengthM += veh.Length;
+                if (isEngine)
+                {
+                    st.PowerKw += veh.PowerKw;
+                    double kmh = veh.SpeedKmh;
+                    if (kmh > 0) st.MaxKmh = st.MaxKmh <= 0 ? kmh : Math.Min(st.MaxKmh, kmh);
+                }
+            }
+            st.Kind = st.Pax ? Tr("Viajeros") : st.Freight ? Tr("Mercancías") : "";
+            return st;
+        }
+
+        // Datos sumados de toda la composición.
         sealed class ConsistStats
         {
             public int Cars, Engines;

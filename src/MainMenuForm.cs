@@ -84,9 +84,12 @@ namespace SelectOR
         // Multijugador
         RadioButton _rbClient, _rbServer;
         TextBox _txtMPUser, _txtMPHost, _txtMPPort;
+        Label _lblMPUserRule;
         ListBox _lstServers;
         Label _lblServers;
         List<GameServer> _serversAll = new List<GameServer>();
+
+        System.Windows.Forms.Timer _revealGuard;   // red de seguridad: muestra el menú si la carga se atasca
 
         public MainMenuForm(bool kiosk)
         {
@@ -106,9 +109,9 @@ namespace SelectOR
             // ventana nativa (y Load queda como respaldo; StartData solo entra una vez).
             HandleCreated += (s, e) => { try { BeginInvoke((Action)StartData); } catch { StartData(); } };
             // Red de seguridad: si algo se atascase leyendo el contenido, el menú aparece igualmente.
-            var guard = new System.Windows.Forms.Timer { Interval = 30000 };
-            guard.Tick += (s, e) => { guard.Stop(); guard.Dispose(); RevealWindow(); };
-            guard.Start();
+            _revealGuard = new System.Windows.Forms.Timer { Interval = 30000 };
+            _revealGuard.Tick += (s, e) => { _revealGuard.Stop(); RevealWindow(); };
+            _revealGuard.Start();
             Load += (s, e) => StartData();
             KeyPreview = true;
             KeyDown += OnKeyDown;
@@ -448,14 +451,12 @@ namespace SelectOR
             StyleCombo(_cboFolder);
             _cboFolder.SelectedIndexChanged += (s, e) => OnFolderChanged();
 
-            var btnResume = MakeChip(Tr("Reanudar"), 138, "resume");
-            btnResume.Click += (s, e) => OpenResume();
             var btnOptions = MakeChip(Tr("Opciones OR"), 176, "gear");
             btnOptions.Click += (s, e) => LaunchSibling("Menu.exe", "");
             var btnAbout = MakeChip(Tr("Acerca de SelectOR"), 210, "info");
             btnAbout.Click += (s, e) => ShowAbout();
 
-            top.Controls.AddRange(new Control[] { logo, _lblVersion, lblPack, _cboFolder, btnResume, btnOptions, btnAbout });
+            top.Controls.AddRange(new Control[] { logo, _lblVersion, lblPack, _cboFolder, btnOptions, btnAbout });
             _lblVersion.TextChanged += (s, e) => top.PerformLayout();   // la versión se rellena más tarde
             top.Layout += (s, e) =>
             {
@@ -471,19 +472,18 @@ namespace SelectOR
                 logo.Width = Theme.Px(190);
                 logo.Location = new Point(edge, (band - logo.Height) / 2);
 
-                btnAbout.Height = btnOptions.Height = btnResume.Height = chipH;
+                btnAbout.Height = btnOptions.Height = chipH;
                 int right = top.ClientSize.Width - edge;
                 btnAbout.Location = new Point(right - btnAbout.Width, chipY);
                 btnOptions.Location = new Point(btnAbout.Left - btnOptions.Width - gap, chipY);
-                btnResume.Location = new Point(btnOptions.Left - btnResume.Width - gap, chipY);
 
                 // Ventana estrecha: el selector de contenido se encoge (hasta 150 px) para no pisar la versión
                 // de Open Rails; si aun así no cabe, la versión se oculta (sigue en «Acerca de SelectOR»).
                 _lblVersion.Location = new Point(logo.Right + Theme.Px(14), (band - _lblVersion.PreferredHeight) / 2);
                 int verRight = _lblVersion.Left + _lblVersion.PreferredWidth + edge;
-                int room = btnResume.Left - Theme.Px(14) - (verRight + lblPack.Width + gap);
+                int room = btnOptions.Left - Theme.Px(14) - (verRight + lblPack.Width + gap);
                 _cboFolder.Width = Math.Max(Theme.Px(150), Math.Min(Theme.Px(210), room));
-                _cboFolder.Location = new Point(btnResume.Left - _cboFolder.Width - Theme.Px(14), (band - _cboFolder.Height) / 2);
+                _cboFolder.Location = new Point(btnOptions.Left - _cboFolder.Width - Theme.Px(14), (band - _cboFolder.Height) / 2);
                 lblPack.Location = new Point(_cboFolder.Left - lblPack.Width - gap, (band - lblPack.PreferredHeight) / 2);
                 _lblVersion.Visible = lblPack.Left >= verRight;
             };
@@ -802,6 +802,7 @@ namespace SelectOR
             _trainPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
             _trainPreview.Dragged += OnPreviewDrag;
             _trainPreview.ResetRequested += OnPreviewReset;
+            _trainPreview.Zoomed += () => { if (_previewGeom != null) RenderLive(); };
             _previewRerender = new Timer { Interval = 140 };
             _previewRerender.Tick += (s, e) => { _previewRerender.Stop(); RenderLive(); };
             _trainPreview.Resize += (s, e) => { if (_previewGeom != null) { _previewRerender.Stop(); _previewRerender.Start(); } };
@@ -871,6 +872,7 @@ namespace SelectOR
             _ttPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
             _ttPreview.Dragged += OnTTPreviewDrag;
             _ttPreview.ResetRequested += OnTTPreviewReset;
+            _ttPreview.Zoomed += () => { if (_ttPreviewGeom != null) RenderTTLive(); };
             _ttRerender = new Timer { Interval = 140 };
             _ttRerender.Tick += (s, e) => { _ttRerender.Stop(); RenderTTLive(); };
             _ttPreview.Resize += (s, e) => { if (_ttPreviewGeom != null) { _ttRerender.Stop(); _ttRerender.Start(); } };
@@ -967,12 +969,18 @@ namespace SelectOR
             _rbClient.CheckedChanged += (s, e) => { _txtMPHost.Enabled = _rbClient.Checked; UpdateStatus(); };
 
             _txtMPUser = MPField(inner, Tr("Usuario"), 86, 340);
+            // Usuario de Multijugador con las MISMAS reglas que Open Rails (si no, no conecta):
+            // de 4 a 10 caracteres, sin espacios, ni ', " o -, y que no empiece por un número.
+            _txtMPUser.MaxLength = 10;
+            _lblMPUserRule = new Label { Location = new Point(8, 150), Size = new Size(326, 42), ForeColor = Theme.Subtle, BackColor = Theme.Surface, AutoSize = false, Font = Theme.Font(8.25f),
+                                         Text = Tr("Usuario: de 4 a 10 caracteres, sin espacios ni ' \" -, y sin empezar por un número (lo exige Open Rails).") };
+            _txtMPUser.TextChanged += (s, e) => OnMPUserChanged();
             _txtMPHost = MPField(inner, Tr("Host (servidor)"), 124, 340);
             _txtMPPort = MPField(inner, Tr("Puerto"), 162, 340);
             _txtMPHost.Enabled = false;
 
             // CONECTAR vive ahora en la barra inferior, junto al resto de acciones de cada sección.
-            inner.Controls.AddRange(new Control[] { lblM, info, _rbServer, _rbClient });
+            inner.Controls.AddRange(new Control[] { lblM, info, _rbServer, _rbClient, _lblMPUserRule });
             card.Controls.Add(inner);
             Action centerInner = () => inner.Location = new Point(Math.Max(8, (card.ClientSize.Width - inner.Width) / 2), 16);
             card.Resize += (s, e) => centerInner();
@@ -1038,6 +1046,41 @@ namespace SelectOR
                         : Tr("SERVIDORES PÚBLICOS — no disponible (sin conexión o lista vacía)");
                 }));
             });
+        }
+
+        // ---- Usuario de Multijugador: reglas de Open Rails (Menu: «User name must be 4-10 characters long,
+        // cannot contain space, ' , " or - and must not start with a digit») ----
+        static string MPUserClean(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new System.Text.StringBuilder();
+            foreach (char ch in s)
+                if (!char.IsWhiteSpace(ch) && ch != '\'' && ch != '"' && ch != '-') sb.Append(ch);
+            return sb.Length > 10 ? sb.ToString(0, 10) : sb.ToString();
+        }
+
+        static bool MPUserValid(string s) => !string.IsNullOrEmpty(s) && s.Length >= 4 && s.Length <= 10 && !char.IsDigit(s[0]) && MPUserClean(s) == s;
+
+        // Nombre de Windows limpio si vale; si no, uno genérico que sí cumple.
+        static string MPUserDefault()
+        {
+            string u = MPUserClean(Environment.UserName);
+            return MPUserValid(u) ? u : "Maquinista";
+        }
+
+        bool _mpUserFixing;
+        void OnMPUserChanged()
+        {
+            if (_mpUserFixing || _txtMPUser == null) return;
+            string t = _txtMPUser.Text, c = MPUserClean(t);
+            if (c != t)
+            {
+                // Se quitan al escribir los caracteres que Open Rails no admite (conservando el cursor).
+                int caret = Math.Max(0, _txtMPUser.SelectionStart - (t.Length - c.Length));
+                _mpUserFixing = true; _txtMPUser.Text = c; _mpUserFixing = false;
+                _txtMPUser.SelectionStart = Math.Min(caret, c.Length);
+            }
+            if (_lblMPUserRule != null) _lblMPUserRule.ForeColor = MPUserValid(c) ? Theme.Subtle : Color.FromArgb(229, 115, 115);
         }
 
         TextBox MPField(Control parent, string label, int y, int xLabel)
@@ -1335,7 +1378,7 @@ namespace SelectOR
             InitData();
         }
 
-        void InitData()
+        async void InitData()
         {
             // Auto-login de Empresas en segundo plano (si hay contraseña recordada): así, al abrir
             // la pestaña Empresas, ya hay sesión y no se ve parpadear el formulario de acceso.
@@ -1361,7 +1404,7 @@ namespace SelectOR
             // Multiplayer defaults desde settings
             try
             {
-                _txtMPUser.Text = string.IsNullOrEmpty(_settings.Multiplayer_User) ? Environment.UserName : _settings.Multiplayer_User;
+                _txtMPUser.Text = MPUserValid(MPUserClean(_settings.Multiplayer_User)) ? MPUserClean(_settings.Multiplayer_User) : MPUserDefault();
                 _txtMPHost.Text = string.IsNullOrEmpty(_settings.Multiplayer_Host) ? "127.0.0.1" : _settings.Multiplayer_Host;
                 _txtMPPort.Text = _settings.Multiplayer_Port > 0 ? _settings.Multiplayer_Port.ToString() : "30000";
             }
@@ -1382,6 +1425,16 @@ namespace SelectOR
             {
                 int found = _folders.FindIndex(f => f.Path == _prefs.LastFolder);
                 if (found >= 0) idx = found;
+            }
+            // Con varias carpetas de contenido, se pregunta cuál cargar ANTES de leer nada (en la propia
+            // pantalla de inicio, con la última usada ya elegida). Mientras se elige, no corre la red de
+            // seguridad que muestra el menú a los 30 s.
+            if (_folders.Count > 1)
+            {
+                _revealGuard?.Stop();
+                idx = await SplashScreen.AskFolder(_folders.Select(f => f.Name).ToArray(), idx);
+                if (idx < 0 || idx >= _folders.Count) idx = 0;
+                if (!_uiRevealed) _revealGuard?.Start();
             }
             _cboFolder.SelectedIndex = idx;
         }
@@ -1729,7 +1782,7 @@ namespace SelectOR
             if (_ttPreviewGeom == null || _ttPreview.Width < 40 || _ttPreview.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_ttPreview.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_ttPreview.Height - 36) * 2));
-            var bmp = ShapeRenderer.Render(_ttPreviewGeom, w, h, _ttYaw, _ttPitch, 1, _ttPreviewFlip);
+            var bmp = ShapeRenderer.Render(_ttPreviewGeom, w, h, _ttYaw, _ttPitch, 1, _ttPreviewFlip, _ttPreview.CamDistance());
             if (bmp != null) _ttPreview.Image = bmp;
         }
 
@@ -1851,7 +1904,7 @@ namespace SelectOR
             if (_previewGeom == null || _trainPreview.Width < 40 || _trainPreview.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_trainPreview.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_trainPreview.Height - 36) * 2));
-            var bmp = ShapeRenderer.Render(_previewGeom, w, h, _yaw, _pitch, 1, _previewFlip);
+            var bmp = ShapeRenderer.Render(_previewGeom, w, h, _yaw, _pitch, 1, _previewFlip, _trainPreview.CamDistance());
             if (bmp != null) _trainPreview.Image = bmp;
         }
 
@@ -2029,10 +2082,18 @@ namespace SelectOR
             var p = CurrentPath();
             if (c == null || p == null) { Warn(Tr("Configura recorrido y tren en «Exploración» antes de conectar.")); return; }
 
+            // El usuario tiene que cumplir las reglas de Open Rails o la conexión falla.
+            if (!MPUserValid(_txtMPUser.Text.Trim()))
+            {
+                Warn(Tr("El usuario de Multijugador debe tener de 4 a 10 caracteres, sin espacios ni ' \" -, y no puede empezar por un número."));
+                try { _txtMPUser.Focus(); } catch { }
+                return;
+            }
+
             // Guardar ajustes MP en el registro (RunActivity los lee de ahí)
             try
             {
-                _settings.Multiplayer_User = string.IsNullOrWhiteSpace(_txtMPUser.Text) ? Environment.UserName : _txtMPUser.Text.Trim();
+                _settings.Multiplayer_User = _txtMPUser.Text.Trim();
                 if (!string.IsNullOrWhiteSpace(_txtMPHost.Text)) _settings.Multiplayer_Host = _txtMPHost.Text.Trim();
                 if (int.TryParse(_txtMPPort.Text.Trim(), out int port)) _settings.Multiplayer_Port = port;
                 _settings.Save();
@@ -2134,15 +2195,6 @@ namespace SelectOR
                 }
             }
             catch (Exception ex) { Warn(Tr("No se pudo iniciar el simulador:\n") + ex.Message); }
-        }
-
-        void OpenResume()
-        {
-            using (var dlg = new ResumeDialog())
-            {
-                if (dlg.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(dlg.SelectedSaveFile))
-                    Launch($"{dlg.ModeFlag} \"{dlg.SelectedSaveFile}\"");
-            }
         }
 
         // ============================ Favoritos e imágenes ============================

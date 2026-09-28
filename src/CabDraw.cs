@@ -100,8 +100,9 @@ namespace SelectOR
         // Abajo, la señal de velocidad: el límite de ahora en el rombo («anuncio») o, mientras la
         // curva de frenado manda (target = límite al que se está frenando), ese próximo límite en el
         // círculo («límite»).
+        // Todos los valores llegan ya en la unidad del velocímetro del tren (unit: «km/h» o «mph»).
         public static void Speedometer(Graphics g, RectangleF r, double speed, double limit, bool hasLimit, double max, bool avail,
-                                       double target = double.NaN, double cruise = double.NaN)
+                                       double target = double.NaN, double cruise = double.NaN, string unit = "km/h")
         {
             float size = Math.Min(r.Width, r.Height);
             float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2 + size * 0.03f, R = size * 0.46f;
@@ -155,15 +156,15 @@ namespace SelectOR
             }
             using (var b = new SolidBrush(Color.FromArgb(70, 80, 96))) g.FillEllipse(b, cx - size * 0.035f, cy - size * 0.035f, size * 0.07f, size * 0.07f);
 
-            // Lectura digital con «km/h» pequeño a su derecha.
+            // Lectura digital con la unidad («km/h» o «mph») pequeña a su derecha.
             string num = avail ? N(speed, 0) : "—";
             using (var fv = F(Math.Max(9, size * 0.105f), true))
             using (var fu = F(Math.Max(6, size * 0.046f)))
             {
-                float nw = g.MeasureString(num, fv).Width, uw = g.MeasureString("km/h", fu).Width;
+                float nw = g.MeasureString(num, fv).Width, uw = g.MeasureString(unit, fu).Width;
                 float y = cy + R * 0.48f, x0 = cx - (nw + uw * 0.9f) / 2;
                 Ink(g, num, fv, avail ? Text : Dark, x0 + nw / 2, y);
-                Ink(g, "km/h", fu, Dim, x0 + nw + uw * 0.40f, y + size * 0.018f, true);
+                Ink(g, unit, fu, Dim, x0 + nw + uw * 0.40f, y + size * 0.018f, true);
             }
 
             // Señal abajo: rombo con el límite de ahora; con curva de frenado, círculo con el próximo.
@@ -330,9 +331,12 @@ namespace SelectOR
             using (var p = new Pen(Lit ? Color.FromArgb(110, 86, 58) : Color.FromArgb(70, 82, 100), Math.Max(1.4f, rd * 0.014f)))
                 g.DrawArc(p, cx - ra, cy - ra, 2 * ra, 2 * ra, a0, sweep);
 
-            // Marcas: enteras (largas, blancas) y medias (cortas, grises); si la escala pasa de 15,
-            // de dos en dos.
-            double mayor = max - min > 15 ? 2 : 1, menor = mayor / 2;
+            // Marcas: rotuladas (largas, blancas) y medias (cortas, grises). El paso sale del rango para
+            // que haya como mucho 12 números: 0-12 bar de 1 en 1, 0-150 psi de 20 en 20, 0-1000 kPa de 100…
+            double mayor = 1;
+            foreach (var st in new double[] { 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000 })
+                if ((max - min) / st <= 12.001) { mayor = st; break; }
+            double menor = mayor / 2;
             using (var pm = new Pen(DialGray, Math.Max(1f, rd * 0.0065f)))
             using (var pM = new Pen(DialWhite, Math.Max(1.6f, rd * 0.017f)))
                 for (double v = min; v <= max + 1e-6; v += menor)
@@ -340,7 +344,10 @@ namespace SelectOR
                     bool M = Math.Abs((v - min) / mayor - Math.Round((v - min) / mayor)) < 1e-6;
                     Mark(g, M ? pM : pm, M, Polar(cx, cy, M ? rd * 0.78f : rd * 0.87f, A(v)), Polar(cx, cy, rd * 0.93f, A(v)));
                 }
-            using (var fn = F(Math.Max(9, rd * 0.19f), true))
+            // Números de 3 o 4 cifras (psi, kPa) algo más pequeños para que quepan en la esfera.
+            int cifras = Math.Max(1, max.ToString("0", Es).Length);
+            float fnK = cifras >= 4 ? 0.66f : cifras == 3 ? 0.80f : 1f;
+            using (var fn = F(Math.Max(7, rd * 0.19f * fnK), true))
                 for (double v = min; v <= max + 1e-6; v += mayor)
                 {
                     var q = Polar(cx, cy, rd * 0.63f, A(v));

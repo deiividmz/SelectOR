@@ -33,6 +33,8 @@ namespace SelectOR
     {
         public bool Connected;
         public double SpeedKmh, LimitKmh, Gradient, OdoKm;
+        public double SpeedoMax;   // fondo de escala del velocímetro de la cabina (.cvf, ScaleRange); 0 = sin dato
+        public bool SpeedFromCab, LimitFromCab;   // leídos del mando de la cabina: en SUS unidades (km/h o mph)
         public double Throttle, TrainBrake, EngineBrake, DynBrake;       // %
         public double MrBar, BpBar, EqBar, BcBar;                         // bar
         public bool Compressor;
@@ -147,7 +149,7 @@ namespace SelectOR
             FromPage5(v, _p5);
             FromPage7(v, _p7);
             if (jc != null) FromCabControls(v, jc);
-            if (_tmLimit >= 0) { v.LimitKmh = _tmLimit; v.Av.Add("limit"); }   // manda el Track Monitor
+            if (_tmLimit >= 0) { v.LimitKmh = _tmLimit; v.Av.Add("limit"); v.LimitFromCab = false; }   // manda el Track Monitor
             else if (_tmLimit == -2) { v.LimitKmh = 0; v.Av.Remove("limit"); }
             v.LimitsAhead = _tmAhead; v.RowStepM = _tmStep;
 
@@ -655,10 +657,11 @@ namespace SelectOR
                             v.Av.Add("dir");
                             break;
                         case "speed":
-                            if (!v.Has("speed") || v.SpeedKmh == 0) { v.SpeedKmh = Math.Abs(real); v.Av.Add("speed"); }
+                            if (tu == "SPEEDOMETER" && max > 0) v.SpeedoMax = max;   // rango de la esfera de la cabina
+                            if (!v.Has("speed") || v.SpeedKmh == 0) { v.SpeedKmh = Math.Abs(real); v.Av.Add("speed"); v.SpeedFromCab = true; }
                             visto.Add(key); continue;
                         case "limit":
-                            if (real > 0) { v.LimitKmh = real; v.Av.Add("limit"); }
+                            if (real > 0) { v.LimitKmh = real; v.Av.Add("limit"); v.LimitFromCab = true; }
                             visto.Add(key); continue;
                         case "linev":
                             // Algunas cabinas lo dan por NIVELES (0..4); otras en voltios.

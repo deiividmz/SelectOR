@@ -30,6 +30,7 @@ namespace SelectOR
             public Image Image;
             public int OrigIndex;        // orden de inserción (para que la selección mapee a los datos)
             public ListViewItem Item;    // su fila dibujada (si está visible): cambiarla es O(1)
+            public string Key;           // identificador opcional (id del vehículo, del servicio…)
         }
 
         readonly List<Col> _cols = new();
@@ -179,6 +180,50 @@ namespace SelectOR
             SelectedItems.Clear();
         }
 
+        // ---- Conservar la vista al recargar ----
+        // Al editar una fila, la tabla se vacía y se vuelve a llenar, y el ListView vuelve arriba.
+        // BeginReload(contexto) antes de vaciarla y EndReload() después de llenarla la dejan con la
+        // misma fila arriba y la misma elegida, SOLO si el contexto (empresa, ruta…) es el mismo:
+        // al cambiar de empresa la lista empieza arriba como siempre.
+        public Func<string[], string> RowKey;   // identifica una fila; por defecto, su primera celda
+        string _viewContext;
+        (string topKey, int topIdx, string selKey, int selIdx)? _reloadView;
+
+        string KeyOf(Row r) => r?.Cells == null ? null : r.Key ?? (RowKey != null ? RowKey(r.Cells) : (r.Cells.Length > 0 ? r.Cells[0] : null));
+
+        public void BeginReload(string context)
+        {
+            _reloadView = null;
+            if (context != null && context == _viewContext && _emptyText == null && Items.Count > 0)
+            {
+                var top = TopItem?.Tag as Row;
+                var sel = SelectedItems.Count > 0 ? SelectedItems[0].Tag as Row : null;
+                _reloadView = (KeyOf(top), TopItem?.Index ?? 0, KeyOf(sel), sel != null ? SelectedItems[0].Index : -1);
+            }
+            _viewContext = context;
+        }
+
+        public void EndReload()
+        {
+            if (_reloadView == null) return;
+            var v = _reloadView.Value; _reloadView = null;
+            if (_emptyText != null || Items.Count == 0) return;
+            ListViewItem Find(string key, int idx)
+            {
+                if (key != null)
+                    foreach (ListViewItem it in Items)
+                        if (it.Tag is Row r && KeyOf(r) == key) return it;
+                return idx >= 0 ? Items[Math.Min(idx, Items.Count - 1)] : null;
+            }
+            var sel = v.selIdx >= 0 ? Find(v.selKey, v.selIdx) : null;
+            if (sel != null) { sel.Selected = true; sel.Focused = true; }
+            var top = Find(v.topKey, v.topIdx);
+            if (top == null) return;
+            // En vista de detalles, TopItem a veces no se aplica hasta que la lista termina de maquetar.
+            try { TopItem = top; } catch { }
+            try { BeginInvoke((Action)(() => { try { if (top.ListView == this) TopItem = top; } catch { } })); } catch { }
+        }
+
         public void ClearRows()
         {
             _rows.Clear(); _emptyText = null; _hoverItem = -1;
@@ -188,10 +233,13 @@ namespace SelectOR
 
         public void AddRow(string[] cells, Color?[] colors = null) => AddRow(cells, colors, null);
 
-        public void AddRow(string[] cells, Color?[] colors, Image image)
+        public void AddRow(string[] cells, Color?[] colors, Image image) => AddRow(cells, colors, image, null);
+
+        /// <summary>Con <paramref name="key"/> (un id), la fila se reconoce al recargar la tabla (BeginReload/EndReload).</summary>
+        public void AddRow(string[] cells, Color?[] colors, Image image, string key)
         {
             _emptyText = null;
-            var row = new Row { Cells = cells, Colors = colors, Image = image, OrigIndex = _rows.Count };
+            var row = new Row { Cells = cells, Colors = colors, Image = image, OrigIndex = _rows.Count, Key = key };
             _rows.Add(row);
             // Al llenar miles de filas, reajustar los anchos en cada una costaba más que las filas:
             // se acumulan y se hace UNA vez cuando la interfaz vuelve a estar libre.

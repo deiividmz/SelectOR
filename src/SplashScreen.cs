@@ -90,6 +90,77 @@ namespace SelectOR
 
         bool _closing;
 
+        // ---- Elegir el contenido antes de cargar ----
+        // Con varias carpetas de contenido configuradas en Open Rails, la pantalla de inicio pregunta
+        // cuál cargar ANTES de leer nada: así se carga directamente la elegida (y no primero otra).
+        bool _asking;
+        ThemeCombo _askCombo;
+        RoundButton _askBtn;
+
+        /// <summary>Muestra en la pantalla de inicio un desplegable con las carpetas de contenido y
+        /// devuelve el índice elegido. Si la pantalla no está disponible, devuelve <paramref name="preselect"/>.</summary>
+        public static async System.Threading.Tasks.Task<int> AskFolder(string[] names, int preselect)
+        {
+            if (names == null || names.Length == 0) return preselect;
+            // La ventana puede estar aún creándose en su hilo: se espera un momento a que exista.
+            SplashScreen s = null;
+            for (int i = 0; i < 50; i++)
+            {
+                lock (_lock) s = _instance;
+                if (s != null && s.IsHandleCreated) break;
+                await System.Threading.Tasks.Task.Delay(100);
+            }
+            if (s == null || !s.IsHandleCreated) return preselect;
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<int>();
+            try { s.BeginInvoke((Action)(() => s.ShowFolderChooser(names, preselect, tcs))); }
+            catch { return preselect; }
+            return await tcs.Task;
+        }
+
+        void ShowFolderChooser(string[] names, int preselect, System.Threading.Tasks.TaskCompletionSource<int> tcs)
+        {
+            _asking = true;
+            int pad = Theme.Px(46), btnW = Theme.Px(120), gap = Theme.Px(10), y = Height - Theme.Px(78);
+            _askCombo = new ThemeCombo { DropDownStyle = ComboBoxStyle.DropDownList, Width = Width - pad * 2 - btnW - gap, DropDownHeight = Theme.Px(240) };
+            // Mismo aspecto que el desplegable «Contenido» del menú (oscuro, elegido en verde).
+            _askCombo.BackColor = Theme.Surface2; _askCombo.ForeColor = Theme.Text;
+            _askCombo.ItemHeight = Theme.Px(22); _askCombo.Font = Theme.Font(10f);
+            _askCombo.DrawItem += (o, e) =>
+            {
+                bool sel = (e.State & DrawItemState.Selected) != 0;
+                using (var b = new SolidBrush(sel ? Theme.Accent : Theme.Surface2)) e.Graphics.FillRectangle(b, e.Bounds);
+                if (e.Index < 0) return;
+                var r = new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 8, e.Bounds.Height);
+                TextRenderer.DrawText(e.Graphics, _askCombo.GetItemText(_askCombo.Items[e.Index]), _askCombo.Font, r, sel ? Color.White : Theme.Text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            };
+            try { Native.UseDarkScrollBars(_askCombo); } catch { }
+            foreach (var n in names) _askCombo.Items.Add(n);
+            _askCombo.SelectedIndex = Math.Max(0, Math.Min(names.Length - 1, preselect));
+            _askCombo.Location = new Point(pad, y);
+            _askBtn = new RoundButton
+            {
+                Text = I18n.T("Cargar"), Radius = 8, Width = btnW, Height = Math.Max(_askCombo.Height, Theme.Px(30)),
+                BaseColor = Theme.Accent, HoverColor = Theme.AccentHi, TextColor = Color.White, FontSize = 10f, FontStyle = FontStyle.Bold,
+                Location = new Point(Width - pad - btnW, y - Math.Max(0, (Math.Max(_askCombo.Height, Theme.Px(30)) - _askCombo.Height) / 2))
+            };
+            void Done()
+            {
+                if (!_asking) return;
+                int i = _askCombo.SelectedIndex;
+                _asking = false;
+                Controls.Remove(_askCombo); Controls.Remove(_askBtn);
+                _askCombo.Dispose(); _askBtn.Dispose();
+                Invalidate();
+                tcs.TrySetResult(i < 0 ? preselect : i);
+            }
+            _askBtn.Click += (s, e) => Done();
+            _askCombo.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Done(); } };
+            Controls.Add(_askCombo); Controls.Add(_askBtn);
+            Invalidate();
+            try { Activate(); _askCombo.Focus(); } catch { }
+        }
+
         SplashScreen()
         {
             Text = "SelectOR";
@@ -160,6 +231,17 @@ namespace SelectOR
                 int x = (r.Width - (wSel + wOr)) / 2, y = box.Bottom + Theme.Px(16);
                 TextRenderer.DrawText(g, "Select", f, new Point(x, y), Theme.Text, TextFormatFlags.NoPadding);
                 TextRenderer.DrawText(g, "OR", f, new Point(x + wSel, y), Theme.Accent, TextFormatFlags.NoPadding);
+            }
+
+            if (_asking)
+            {
+                // Mientras se elige el contenido no hay barra: solo la pregunta (el desplegable va debajo).
+                using var fq = Theme.Font(10f, FontStyle.Bold);
+                int pq = Theme.Px(46);
+                TextRenderer.DrawText(g, I18n.T("¿Qué contenido quieres cargar?"), fq,
+                    new Rectangle(pq, r.Height - Theme.Px(112), r.Width - pq * 2, Theme.Px(24)), Theme.Text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                return;
             }
 
             // barra de progreso
