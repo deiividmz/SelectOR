@@ -15,6 +15,64 @@ using System.Windows.Forms;
 
 namespace SelectOR
 {
+    // Rastro del tren en el mapa durante TODA la conducción, desde el origen. Lo guarda la ventana
+    // principal (no el HUD): así no se pierde al cerrar y reabrir el HUD, al ponerse de servicio ni al
+    // registrar el servicio a mitad de viaje. Un punto cada 8 m; si pasa de MaxPoints, en lugar de
+    // borrar lo más antiguo se deja uno de cada dos en el tramo viejo (los últimos KeepRecent, enteros):
+    // el rastro sigue entero desde la salida, solo con menos detalle en lo lejano.
+    public sealed class DriveTrail
+    {
+        public const int MaxPoints = 12000, KeepRecent = 2000;
+        public readonly List<(double lat, double lon)> Points = new();
+
+        public void Clear() => Points.Clear();
+
+        /// <summary>Añade la posición si el tren se ha movido más de 8 m desde la última. true = añadida.</summary>
+        public bool Add(double lat, double lon)
+        {
+            if (Points.Count > 0)
+            {
+                var (la, lo) = Points[^1];
+                double dLat = (lat - la) * Math.PI / 180, dLon = (lon - lo) * Math.PI / 180;
+                double h = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                           Math.Cos(la * Math.PI / 180) * Math.Cos(lat * Math.PI / 180) * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+                if (6371000.0 * 2 * Math.Atan2(Math.Sqrt(h), Math.Sqrt(1 - h)) <= 8) return false;
+            }
+            Points.Add((lat, lon));
+            if (Points.Count > MaxPoints) Thin();
+            return true;
+        }
+
+        // Aclara el tramo antiguo por DISTANCIA: se queda con unos MaxPoints/2 puntos repartidos a la misma
+        // separación a lo largo de todo ese tramo (no «uno de cada dos» en cada pasada, que dejaba el
+        // principio de un viaje largo casi sin puntos). La salida y los últimos KeepRecent quedan siempre.
+        void Thin()
+        {
+            int old = Points.Count - KeepRecent;
+            double largo = 0;
+            for (int i = 1; i <= old; i++) largo += Meters(Points[i - 1], Points[i]);
+            double paso = largo / (MaxPoints / 2);
+            var res = new List<(double lat, double lon)>(MaxPoints) { Points[0] };
+            double acum = 0;
+            for (int i = 1; i < old; i++)
+            {
+                acum += Meters(Points[i - 1], Points[i]);
+                if (acum >= paso) { res.Add(Points[i]); acum = 0; }
+            }
+            res.AddRange(Points.GetRange(old, KeepRecent));
+            Points.Clear();
+            Points.AddRange(res);
+        }
+
+        static double Meters((double lat, double lon) a, (double lat, double lon) b)
+        {
+            double dLat = (b.lat - a.lat) * Math.PI / 180, dLon = (b.lon - a.lon) * Math.PI / 180;
+            double h = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                       Math.Cos(a.lat * Math.PI / 180) * Math.Cos(b.lat * Math.PI / 180) * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+            return 6371000.0 * 2 * Math.Atan2(Math.Sqrt(h), Math.Sqrt(1 - h));
+        }
+    }
+
     public class ServiceHudOverlay : Form
     {
         readonly string _company, _train, _route;
@@ -41,7 +99,8 @@ namespace SelectOR
         double[] _trkLat = Array.Empty<double>(), _trkLon = Array.Empty<double>();          // nube de puntos (respaldo API)
         double[] _stLat = Array.Empty<double>(), _stLon = Array.Empty<double>();
         string[] _stName = Array.Empty<string>();
-        readonly List<(double lat, double lon)> _crumb = new();   // traza recorrida (posiciones sucesivas)
+        readonly DriveTrail _trail;                               // rastro recorrido (de la ventana principal)
+        readonly List<(double lat, double lon)> _crumb;           // = _trail.Points
         double _curLat, _curLon; bool _hasPos;
         double _heading; bool _hasHeading;
         double _headingTarget;                                   // el rumbo mostrado gira suave hacia este
@@ -102,8 +161,10 @@ namespace SelectOR
                                  Func<(bool avail, bool on, string line)> pa = null,
                                  Func<List<(string id, string name)>> paLines = null,
                                  Action<string> paPick = null,
-                                 Action paToggle = null)
+                                 Action paToggle = null,
+                                 DriveTrail trail = null)
         {
+            _trail = trail ?? new DriveTrail(); _crumb = _trail.Points;
             _service = service; _km = km; _paxNote = paxNote;
             _pa = pa; _paLines = paLines; _paPick = paPick; _paToggle = paToggle;
             _company = string.IsNullOrWhiteSpace(company) ? (service ? "Empresa" : "SelectOR") : company;
@@ -252,10 +313,8 @@ namespace SelectOR
                     if (has && !(lat == 0 && lon == 0))
                     {
                         _curLat = lat; _curLon = lon; _hasPos = true;
-                        if (_crumb.Count == 0 || Haversine(_crumb[^1].lat, _crumb[^1].lon, lat, lon) > 8)
+                        if (_trail.Add(lat, lon))
                         {
-                            _crumb.Add((lat, lon));
-                            if (_crumb.Count > 4000) _crumb.RemoveRange(0, 500);
                             // rumbo entre las dos últimas posiciones con distancia suficiente
                             if (_crumb.Count >= 2)
                             {

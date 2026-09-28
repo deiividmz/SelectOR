@@ -66,6 +66,7 @@ namespace SelectOR
         // Seguimiento de km reales por la API web de OR (posición del tren en vivo)
         Timer _kmTimer; System.Net.Http.HttpClient _kmHttp;
         double _trackedMeters, _tLat, _tLon; bool _tHave;
+        readonly DriveTrail _driveTrail = new();   // rastro del tren en el mapa desde el origen (toda la conducción)
         // Modelo de viajeros (PseudoPAX): embarque en andenes reales de la ruta
         List<(string station, double lat, double lon)> _paxStations = new();
         readonly HashSet<string> _paxDone = new();   // andenes ya embarcados este servicio
@@ -1522,27 +1523,40 @@ namespace SelectOR
             RefreshEmpresasView();
         }
 
-        async void LoadCompanies()
+        // soft = refresco en segundo plano (cambios en vivo, servicio registrado): si la lista de empresas
+        // no ha cambiado, no se rehace el desplegable ni se «vuelve a elegir» la empresa (eso recargaba y
+        // repintaba toda la pantalla); solo se ponen al día sus datos.
+        async void LoadCompanies(bool soft = false)
         {
             if (!Supa.IsLoggedIn) return;
-            await LoadCompaniesCore();
+            await LoadCompaniesCore(soft);
         }
 
-        async Task LoadCompaniesCore()
+        async Task LoadCompaniesCore(bool soft = false)
         {
             _empLoaded = true;
-            Msg(_empHomeMsg, Tr("Cargando empresas…"), false);
+            bool first = _empCompanies.Count == 0;
+            if (!soft || first) Msg(_empHomeMsg, Tr("Cargando empresas…"), false);
             var (json, err) = await Supa.SelectAsync("companies?select=id,name,logo,balance,income_per_km,canon_per_km,energy_per_km,salary_per_service,pa_enabled&order=name.asc");
             if (err != null)   // por si aún no están las columnas logo/pa_enabled (esquema sin re-ejecutar): reintenta sin ellas
                 (json, err) = await Supa.SelectAsync("companies?select=id,name,balance,income_per_km,canon_per_km,energy_per_km,salary_per_service&order=name.asc");
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
             var prevId = _empSel?.Id;
+            var nuevas = ParseCompanies(json);
+            bool mismaLista = nuevas.Count == _empCompanies.Count && _empCoCombo.Items.Count == nuevas.Count;
+            for (int k = 0; mismaLista && k < nuevas.Count; k++)
+                mismaLista = nuevas[k].Id == _empCompanies[k].Id && nuevas[k].Name == _empCompanies[k].Name;
             _empCompanies.Clear();
-            _empCompanies.AddRange(ParseCompanies(json));
-            _suppressCoSel = true;
-            _empCoCombo.Items.Clear();
-            foreach (var c in _empCompanies) _empCoCombo.Items.Add(c.Name);
-            _suppressCoSel = false;
+            _empCompanies.AddRange(nuevas);
+            if (!mismaLista)
+            {
+                _suppressCoSel = true;
+                _empCoCombo.BeginUpdate();
+                _empCoCombo.Items.Clear();
+                foreach (var c in _empCompanies) _empCoCombo.Items.Add(c.Name);
+                _empCoCombo.EndUpdate();
+                _suppressCoSel = false;
+            }
             if (_empCompanies.Count == 0)
             {
                 _empSel = null; _myRole = null; _empSvcList.ClearRows();
@@ -1554,13 +1568,24 @@ namespace SelectOR
                 LoadCompanyVehNames();     // etiqueta de "tren de empresa" (aquí: ninguno)
                 return;
             }
-            Msg(_empHomeMsg, "", false);
+            if (!soft || first) Msg(_empHomeMsg, "", false);
             UpdateEmptyStateUi();
             if (!_favLoaded) await LoadFavoriteCompanyAsync();   // la favorita está en el perfil
             int sel = prevId != null ? _empCompanies.FindIndex(c => c.Id == prevId) : -1;
             if (sel < 0 && !string.IsNullOrEmpty(_favCompanyId))   // sin selección previa: la favorita
                 sel = _empCompanies.FindIndex(c => c.Id == _favCompanyId);
             if (sel < 0) sel = 0;
+            if (soft && mismaLista && sel == _empCoCombo.SelectedIndex)
+            {
+                // Misma empresa y misma lista: solo sus datos (saldo, servicios/KPI, socios y rol).
+                _empSel = _empCompanies[sel];
+                UpdateCompanyDash();
+                LoadServices(_empSel);
+                LoadMembers(_empSel);
+                UpdateDutyHostVisible();
+                LoadCompanyVehNames();
+                return;
+            }
             if (_empCoCombo.SelectedIndex == sel) OnCompanySelected();   // mismo índice: forzar recarga
             else _empCoCombo.SelectedIndex = sel;                        // dispara OnCompanySelected
             UpdateDutyHostVisible();
@@ -1571,7 +1596,7 @@ namespace SelectOR
         {
             if (c == null) return;
             _empSvcList.BeginReload(c.Id);
-            _empSvcList.SetEmpty(Tr("Cargando…"));
+            _empSvcList.ShowLoading(Tr("Cargando…"));
             var (json, err) = await Supa.RpcAsync("list_company_services", new { p_company = c.Id });
             _empSvcList.ClearRows(); _svcIds.Clear(); _svcRows.Clear();
             if (err != null) { _empSvcList.SetEmpty(Tr("Error: ") + err); return; }
@@ -1706,7 +1731,7 @@ namespace SelectOR
             if (_bankList == null) return;
             if (_empSel == null) { _bankList.SetEmpty(Tr("Selecciona una empresa.")); return; }
             _bankList.BeginReload(_empSel.Id);
-            _bankList.SetEmpty(Tr("Cargando…"));
+            _bankList.ShowLoading(Tr("Cargando…"));
             var (json, err) = await Supa.SelectAsync(
                 $"ledger?select=id,created_at,concept,amount,description&company_id=eq.{Uri.EscapeDataString(_empSel.Id)}&order=created_at.desc&limit=1000");
             _bankList.ClearRows(); _ledgerIds.Clear();
@@ -1997,7 +2022,7 @@ namespace SelectOR
                 if (_empRoleLbl != null) _empRoleLbl.Text = "";
                 _kpiTreasuryTxt = "—";
                 _kpiTreasuryCol = Theme.Subtle;
-                if (_empLogoPic != null) _empLogoPic.Image = null;
+                if (_empLogoPic != null && _empLogoPic.Image != null) _empLogoPic.Image = null;
                 if (_logoLink != null) _logoLink.Visible = false;
                 if (_empRenameLink != null) _empRenameLink.Visible = false;
                 if (_empFavLink != null) _empFavLink.Visible = false;
@@ -2008,7 +2033,10 @@ namespace SelectOR
             _kpiTreasuryTxt = _empSel.Balance.ToString("N2", EsEs) + " €";
             _kpiTreasuryCol = _empSel.Balance < 0 ? Color.FromArgb(229, 115, 115) : Theme.Accent;
             if (_empLogoPic != null)
-                _empLogoPic.Image = LogoFor(_empSel.Id, _empSel.Logo) ?? PlaceholderLogo(_empSel.Name);
+            {
+                var logo = LogoFor(_empSel.Id, _empSel.Logo) ?? PlaceholderLogo(_empSel.Name);
+                if (!ReferenceEquals(_empLogoPic.Image, logo)) _empLogoPic.Image = logo;
+            }
             if (_logoLink != null) _logoLink.Visible = CanManage() || Supa.IsSuperadmin;
             if (_fleetBuyAllBtn != null) _fleetBuyAllBtn.Visible = Supa.IsSuperadmin;   // compra masiva
             if (_empRenameLink != null) _empRenameLink.Visible = CanManage() || Supa.IsSuperadmin;
@@ -2194,7 +2222,8 @@ namespace SelectOR
                     () => _trackedMeters / 1000.0,                    // km recorridos en vivo
                     PaxHudNote,                                       // próxima parada / último embarque
                     () => (PaAvailable, PaOn, PaHudLineName()),       // megafonía: disponible · encendida · línea
-                    PaHudLines, PaHudPickLine, PaHudToggle);
+                    PaHudLines, PaHudPickLine, PaHudToggle,
+                    _driveTrail);                                     // rastro de toda la conducción
                 _serviceHud.CabVisible = () => CabHudAlive && _cabHud.Visible;   // botón del pupitre
                 _serviceHud.ToggleCab = ToggleCabHudFromBar;
                 var _ = _serviceHud.Handle;   // la ventana existe ya (el trazado del mapa se le pasa aunque esté oculta)
@@ -2885,6 +2914,7 @@ namespace SelectOR
         void StartKmTracking(bool withPax = true)
         {
             _trackedMeters = 0; _tHave = false; _tLat = _tLon = 0;
+            _driveTrail.Clear();   // conducción nueva: rastro nuevo
             _svcClockUtc = null;   // el cronómetro espera a que el escenario esté abierto
             _scenarioReady = false;   // y los HUD también (ver OnScenarioReady)
             _stoppedSinceUtc = null;
@@ -3395,6 +3425,8 @@ namespace SelectOR
                     if (dm >= 0.5 && dm < 3000)   // ignora jitter y saltos/teleports
                     {
                         _trackedMeters += dm;
+                        // Con el HUD cerrado el rastro sigue grabándose (con él abierto lo graba el HUD, más fino).
+                        if (!HudAlive) _driveTrail.Add(lat, lon);
                         if (_paxOnboard > 0) _paxKm += _paxOnboard * dm / 1000.0;   // viajeros a bordo × km
                     }
                     // Parado = casi sin desplazamiento entre sondeos (~1,5 s): < 0,8 m ≈ < 2 km/h.
@@ -3572,8 +3604,10 @@ namespace SelectOR
             // Insignias (cada una con su color)
             if (_badges != null)
             {
-                _badges.Controls.Clear();
-                void Badge(string icon, string text, bool earned, Color color) => _badges.Controls.Add(BadgeChip(icon, text, earned, color));
+                // Se reúnen primero y solo se rehacen si ha cambiado alguna: rehacerlas en cada recarga
+                // (refresco en vivo) hacía parpadear todo el panel.
+                var lista = new List<(string icon, string text, bool earned, Color color)>();
+                void Badge(string icon, string text, bool earned, Color color) => lista.Add((icon, text, earned, color));
                 // Servicios
                 Badge("🚂", Tr("Primer viaje"), trips >= 1, ColBlue);
                 Badge("🏅", Tr("10 servicios"), trips >= 10, ColGold);
@@ -3607,8 +3641,22 @@ namespace SelectOR
                 Badge("✅", Tr("Conducción limpia"), trips >= 5 && invalid == 0, Theme.Accent);
                 Badge("🛡", Tr("Impecable (50 servicios)"), trips >= 50 && invalid == 0, Theme.Accent);
                 Badge("⚡", Tr("Alta velocidad (media 100 km/h)"), trips >= 10 && avgKmh >= 100, ColOrange);
+                var firma = new System.Text.StringBuilder();
+                foreach (var x in lista) firma.Append(x.text).Append(x.earned ? '1' : '0').Append('|');
+                if (firma.ToString() != _badgesSig || _badges.Controls.Count != lista.Count)
+                {
+                    _badgesSig = firma.ToString();
+                    _badges.SuspendLayout();
+                    var viejas = new List<Control>();
+                    foreach (Control c in _badges.Controls) viejas.Add(c);
+                    _badges.Controls.Clear();
+                    foreach (var c in viejas) c.Dispose();
+                    foreach (var x in lista) _badges.Controls.Add(BadgeChip(x.icon, x.text, x.earned, x.color));
+                    _badges.ResumeLayout(true);
+                }
             }
         }
+        string _badgesSig;   // insignias que se ven ahora (para no rehacerlas si no cambian)
 
         // Insignia: pastilla con icono a color (blanco sobre disco del color) + texto.
         // Conseguida = disco a color + fondo teñido + texto claro; bloqueada = disco gris + texto atenuado.
@@ -3680,7 +3728,7 @@ namespace SelectOR
         async void LoadUsers()
         {
             if (_usersList == null || !Supa.IsSuperadmin) return;
-            _usersList.SetEmpty(Tr("Cargando…"));
+            _usersList.ShowLoading(Tr("Cargando…"));
             var (json, err) = await Supa.RpcAsync("list_all_users", new { });
             _usersList.ClearRows(); _userIds.Clear(); _userIsSelf.Clear();
             if (err != null) { _usersList.SetEmpty(Tr("Error: ") + err); return; }
@@ -3762,7 +3810,7 @@ namespace SelectOR
         async void LoadAllCompanies()
         {
             if (_allCompList == null || !Supa.IsSuperadmin) return;
-            _allCompList.SetEmpty(Tr("Cargando…"));
+            _allCompList.ShowLoading(Tr("Cargando…"));
             var (json, err) = await Supa.RpcAsync("list_all_companies", new { });
             _allCompList.ClearRows(); _allCompIds.Clear();
             if (err != null) { _allCompList.SetEmpty(Tr("Error: ") + err); return; }
@@ -4177,7 +4225,7 @@ namespace SelectOR
             PopulateBuyMachines();      // máquinas (.eng) comprables del contenido actual
             _fleetList.BeginReload(_empSel?.Id);   // misma empresa: tras editar una unidad, la lista no vuelve arriba
             if (_empSel == null) { _fleetList.ClearRows(); _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetPlates.Clear(); _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); OnFleetVehicleSelected(); _fleetList.SetEmpty(Tr("Selecciona una empresa.")); return; }
-            _fleetList.SetEmpty(Tr("Cargando…"));
+            _fleetList.ShowLoading(Tr("Cargando…"));
             const string fleetCols = "id,name,folder,kind,engine_type,km_total,km_since_maint,maint_interval_km,ownership,status,rental_per_service,capacity,comfort";
             string fleetFilter = $"&company_id=eq.{Uri.EscapeDataString(_empSel.Id)}&order=name.asc,created_at.asc";
             var (json, err) = await SelectVehicles(fleetCols + ",plate", fleetFilter);
@@ -6915,8 +6963,8 @@ namespace SelectOR
             if (!r.Valid) return ShowNotRegistered(r, showDialog);
             Msg(_empHomeMsg, Tr("Servicio registrado."), false);
             // Registro publicado → refresca saldo y la subpestaña visible (sin botón "Actualizar").
-            LoadCompanies();
-            RefreshActiveSubtab();
+            LoadCompanies(soft: true);
+            RefreshActiveSubtab(skipCompanyLists: true);
 
             if (showDialog)
             {
@@ -6933,8 +6981,8 @@ namespace SelectOR
         {
             string motivos = string.Join(" ", r.Reasons);
             Msg(_empHomeMsg, Tr("Servicio no registrado: ") + motivos, true);
-            LoadCompanies();
-            RefreshActiveSubtab();
+            LoadCompanies(soft: true);
+            RefreshActiveSubtab(skipCompanyLists: true);
             if (showDialog)
             {
                 using var dlg = new ServiceResultDialog(r);
@@ -6944,13 +6992,14 @@ namespace SelectOR
         }
 
         // Recarga los datos de la subpestaña visible (auto-refresh al publicar un registro).
-        void RefreshActiveSubtab()
+        // skipCompanyLists: servicios y socios ya los recarga LoadCompanies(soft: true).
+        void RefreshActiveSubtab(bool skipCompanyLists = false)
         {
             switch (_empSubtab)
             {
-                case 0: if (_empSel != null) LoadServices(_empSel); break;
+                case 0: if (_empSel != null && !skipCompanyLists) LoadServices(_empSel); break;
                 case 1: LoadLedger(); break;
-                case 2: if (_empSel != null) LoadMembers(_empSel); break;
+                case 2: if (_empSel != null && !skipCompanyLists) LoadMembers(_empSel); break;
                 case 4: LoadRankings(); break;
                 case 5: LoadProfile(); break;
                 case 7: LoadUsers(); break;
@@ -6997,8 +7046,8 @@ namespace SelectOR
         void DoRealtimeRefresh()
         {
             if (!Supa.IsLoggedIn || _activePage != PageEmpresas) return;   // solo refresca si estás mirando Empresas
-            LoadCompanies();                 // saldo/tesorería y lista de empresas
-            RefreshActiveSubtab();           // la subpestaña visible
+            LoadCompanies(soft: true);                  // saldo/tesorería, servicios, socios y rol
+            RefreshActiveSubtab(skipCompanyLists: true); // el resto de la subpestaña visible
         }
 
         // ============================ Socios y roles ============================
@@ -7605,7 +7654,7 @@ namespace SelectOR
         {
             if (!Supa.IsLoggedIn) return;
             UpdateRankLayout();
-            if (_rankCompanies != null) _rankCompanies.SetEmpty(Tr("Cargando…"));
+            if (_rankCompanies != null) { _rankCompanies.BeginReload("ranking"); _rankCompanies.ShowLoading(Tr("Cargando…")); }
             var (json, err) = await Supa.RpcAsync("public_company_ranking", new { });
             if (_rankCompanies != null)
             {
@@ -7638,6 +7687,7 @@ namespace SelectOR
                     catch { }
                     if (pos == 0) _rankCompanies.SetEmpty(Tr("Sin datos todavía."));
                 }
+                _rankCompanies.EndReload();
             }
             if (_empSel != null) await LoadDriverRanking(_empSel);
             else if (_rankDrivers != null) _rankDrivers.SetEmpty(Tr("Selecciona una empresa para ver su ranking."));
@@ -7646,7 +7696,8 @@ namespace SelectOR
         async Task LoadDriverRanking(EmpCompany c)
         {
             if (_rankDrivers == null) return;
-            _rankDrivers.SetEmpty(Tr("Cargando…"));
+            _rankDrivers.BeginReload(c.Id);   // misma empresa: sin «Cargando…» ni salto al refrescar
+            _rankDrivers.ShowLoading(Tr("Cargando…"));
             var (json, err) = await Supa.RpcAsync("company_driver_ranking", new { p_company = c.Id });
             _rankDrivers.ClearRows();
             if (err != null) { _rankDrivers.SetEmpty(Tr("Error: ") + err); return; }
@@ -7665,6 +7716,7 @@ namespace SelectOR
             }
             catch { }
             if (pos == 0) _rankDrivers.SetEmpty(Tr("Sin servicios completados todavía."));
+            _rankDrivers.EndReload();
         }
 
         async void AddMember()

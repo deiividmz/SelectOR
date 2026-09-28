@@ -451,12 +451,14 @@ namespace SelectOR
             StyleCombo(_cboFolder);
             _cboFolder.SelectedIndexChanged += (s, e) => OnFolderChanged();
 
+            var btnResume = MakeChip(Tr("Reanudar"), 138, "resume");
+            btnResume.Click += (s, e) => OpenResume();
             var btnOptions = MakeChip(Tr("Opciones OR"), 176, "gear");
             btnOptions.Click += (s, e) => LaunchSibling("Menu.exe", "");
             var btnAbout = MakeChip(Tr("Acerca de SelectOR"), 210, "info");
             btnAbout.Click += (s, e) => ShowAbout();
 
-            top.Controls.AddRange(new Control[] { logo, _lblVersion, lblPack, _cboFolder, btnOptions, btnAbout });
+            top.Controls.AddRange(new Control[] { logo, _lblVersion, lblPack, _cboFolder, btnResume, btnOptions, btnAbout });
             _lblVersion.TextChanged += (s, e) => top.PerformLayout();   // la versión se rellena más tarde
             top.Layout += (s, e) =>
             {
@@ -472,18 +474,19 @@ namespace SelectOR
                 logo.Width = Theme.Px(190);
                 logo.Location = new Point(edge, (band - logo.Height) / 2);
 
-                btnAbout.Height = btnOptions.Height = chipH;
+                btnAbout.Height = btnOptions.Height = btnResume.Height = chipH;
                 int right = top.ClientSize.Width - edge;
                 btnAbout.Location = new Point(right - btnAbout.Width, chipY);
                 btnOptions.Location = new Point(btnAbout.Left - btnOptions.Width - gap, chipY);
+                btnResume.Location = new Point(btnOptions.Left - btnResume.Width - gap, chipY);
 
                 // Ventana estrecha: el selector de contenido se encoge (hasta 150 px) para no pisar la versión
                 // de Open Rails; si aun así no cabe, la versión se oculta (sigue en «Acerca de SelectOR»).
                 _lblVersion.Location = new Point(logo.Right + Theme.Px(14), (band - _lblVersion.PreferredHeight) / 2);
                 int verRight = _lblVersion.Left + _lblVersion.PreferredWidth + edge;
-                int room = btnOptions.Left - Theme.Px(14) - (verRight + lblPack.Width + gap);
+                int room = btnResume.Left - Theme.Px(14) - (verRight + lblPack.Width + gap);
                 _cboFolder.Width = Math.Max(Theme.Px(150), Math.Min(Theme.Px(210), room));
-                _cboFolder.Location = new Point(btnOptions.Left - _cboFolder.Width - Theme.Px(14), (band - _cboFolder.Height) / 2);
+                _cboFolder.Location = new Point(btnResume.Left - _cboFolder.Width - Theme.Px(14), (band - _cboFolder.Height) / 2);
                 lblPack.Location = new Point(_cboFolder.Left - lblPack.Width - gap, (band - lblPack.PreferredHeight) / 2);
                 _lblVersion.Visible = lblPack.Left >= verRight;
             };
@@ -1970,9 +1973,8 @@ namespace SelectOR
             try
             {
                 if (patMeters <= 0) return 0;   // sin ruta con la que acotar, no arriesgamos
-                string dir = null;
-                try { dir = UserSettings.UserDataFolder; } catch { }
-                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return 0;
+                string dir = ResumeDialog.OrDataFolder;   // donde guarda el simulador (no la carpeta de SelectOR)
+                if (!Directory.Exists(dir)) return 0;
 
                 string best = null; DateTime bestT = DateTime.MinValue;
                 foreach (var f in Directory.GetFiles(dir, "*.save"))
@@ -2195,6 +2197,16 @@ namespace SelectOR
                 }
             }
             catch (Exception ex) { Warn(Tr("No se pudo iniciar el simulador:\n") + ex.Message); }
+        }
+
+        // Partidas guardadas de OR (F2 en el simulador): reanudar o repetir.
+        void OpenResume()
+        {
+            using (var dlg = new ResumeDialog())
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK && !string.IsNullOrEmpty(dlg.SelectedSaveFile))
+                    Launch($"{dlg.ModeFlag} \"{dlg.SelectedSaveFile}\"");
+            }
         }
 
         // ============================ Favoritos e imágenes ============================

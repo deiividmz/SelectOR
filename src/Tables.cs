@@ -194,6 +194,7 @@ namespace SelectOR
         public void BeginReload(string context)
         {
             _reloadView = null;
+            _reloadArmed = true;
             if (context != null && context == _viewContext && _emptyText == null && Items.Count > 0)
             {
                 var top = TopItem?.Tag as Row;
@@ -205,9 +206,10 @@ namespace SelectOR
 
         public void EndReload()
         {
-            if (_reloadView == null) return;
+            _reloadArmed = false;
+            if (_reloadView == null) { EndBatchSoon(); return; }
             var v = _reloadView.Value; _reloadView = null;
-            if (_emptyText != null || Items.Count == 0) return;
+            if (_emptyText != null || Items.Count == 0) { EndBatchSoon(); return; }
             ListViewItem Find(string key, int idx)
             {
                 if (key != null)
@@ -218,14 +220,62 @@ namespace SelectOR
             var sel = v.selIdx >= 0 ? Find(v.selKey, v.selIdx) : null;
             if (sel != null) { sel.Selected = true; sel.Focused = true; }
             var top = Find(v.topKey, v.topIdx);
-            if (top == null) return;
-            // En vista de detalles, TopItem a veces no se aplica hasta que la lista termina de maquetar.
+            if (top == null) { EndBatchSoon(); return; }
+            // En vista de detalles, TopItem a veces no se aplica hasta que la lista termina de maquetar:
+            // se fija ahora y otra vez justo antes de volver a pintar (con el redibujado aún parado).
             try { TopItem = top; } catch { }
-            try { BeginInvoke((Action)(() => { try { if (top.ListView == this) TopItem = top; } catch { } })); } catch { }
+            if (_batching) { _restoreTop = top; EndBatchSoon(); }
+            else try { BeginInvoke((Action)(() => { try { if (top.ListView == this) TopItem = top; } catch { } })); } catch { }
+        }
+
+        // ---- Sin parpadeos al recargar ----
+        // Recargar vacía la lista y la vuelve a llenar fila a fila; con el redibujado activo se ve la
+        // lista en blanco un instante, o «Cargando…», en cada refresco en vivo. Ahora:
+        //  · ShowLoading() NO cambia nada si la tabla ya tiene filas del mismo contexto: se ven los datos
+        //    de antes hasta que llegan los nuevos (y la primera vez, o con otro contexto, sí sale el aviso).
+        //  · Vaciar y llenar se hace con el redibujado parado (BeginUpdate) y se pinta UNA vez al final,
+        //    ya con la misma fila arriba y la misma elegida.
+        bool _reloadArmed;          // BeginReload llamado y la recarga aún no ha terminado
+        bool _batching;             // redibujado parado mientras se vacía y se llena
+        ListViewItem _restoreTop;   // fila que debe quedar arriba al terminar
+
+        /// <summary>Aviso de carga («Cargando…») solo si no hay nada que enseñar mientras tanto.</summary>
+        public void ShowLoading(string text)
+        {
+            bool hasRows = _emptyText == null && _rows.Count > 0;
+            bool keep = _reloadArmed ? _reloadView != null : hasRows;
+            if (!keep) SetEmpty(text);
+        }
+
+        void StartBatch()
+        {
+            if (_batching || !IsHandleCreated) return;
+            _batching = true;
+            BeginUpdate();
+            // Por si nadie la cierra (la recarga no llama a EndReload): se vuelve a pintar en cuanto
+            // la interfaz queda libre, que es cuando ya se han añadido las filas.
+            EndBatchSoon();
+        }
+
+        void EndBatchSoon()
+        {
+            if (!_batching) return;
+            try { BeginInvoke((Action)EndBatch); } catch { EndBatch(); }
+        }
+
+        void EndBatch()
+        {
+            if (!_batching) return;
+            var top = _restoreTop; _restoreTop = null;
+            try { if (top != null && top.ListView == this) TopItem = top; } catch { }
+            _batching = false;
+            EndUpdate();
+            try { if (top != null && top.ListView == this && TopItem != top) TopItem = top; } catch { }
         }
 
         public void ClearRows()
         {
+            StartBatch();
             _rows.Clear(); _emptyText = null; _hoverItem = -1;
             Items.Clear();
             ResetMeasures();
@@ -239,6 +289,7 @@ namespace SelectOR
         public void AddRow(string[] cells, Color?[] colors, Image image, string key)
         {
             _emptyText = null;
+            StartBatch();
             var row = new Row { Cells = cells, Colors = colors, Image = image, OrigIndex = _rows.Count, Key = key };
             _rows.Add(row);
             // Al llenar miles de filas, reajustar los anchos en cada una costaba más que las filas:
@@ -282,6 +333,8 @@ namespace SelectOR
 
         public void SetEmpty(string text)
         {
+            if (_emptyText == text && Items.Count == 1) return;   // ya lo está diciendo: nada que repintar
+            StartBatch();
             _rows.Clear(); _hoverItem = -1;
             _emptyText = text;
             Items.Clear();

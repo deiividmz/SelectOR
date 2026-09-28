@@ -601,6 +601,17 @@ namespace SelectOR
             ["maquinista@correo.com"] = "driver@email.com",
             ["Guardar"] = "Save",
             ["Enviar"] = "Send",
+            ["Reanudar"] = "Resume",
+            ["Reanudar partida"] = "Resume game",
+            ["Partidas guardadas"] = "Saved games",
+            ["Repetir"] = "Replay",
+            ["Sin captura"] = "No screenshot",
+            ["(multijugador)"] = "(multiplayer)",
+            ["No hay partidas guardadas todavía. Se crean al guardar dentro del simulador (tecla F2)."]
+                = "There are no saved games yet. They are created when you save inside the simulator (F2 key).",
+            ["«Reanudar» sigue la partida donde se guardó; «Repetir» la vuelve a reproducir desde el principio."]
+                = "«Resume» continues the game where it was saved; «Replay» plays it again from the start.",
+            ["Ruta: {0}\nRecorrido: {1}\nGuardada: {2}"] = "Route: {0}\nPath: {1}\nSaved: {2}",
             ["Cancelar"] = "Cancel",
             ["Nombre de maquinista"] = "Driver name",
             ["Nombre de maquinista (solo para registrarse)"] = "Driver name (only to sign up)",

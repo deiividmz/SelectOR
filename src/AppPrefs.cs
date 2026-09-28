@@ -55,8 +55,11 @@ namespace SelectOR
         static string Dir => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Open Rails");
 
+        // SELECTOR_PREFS_FILE: otro archivo de preferencias (lo usan los programas de prueba para no tocar
+        // NUNCA las del usuario). Sin la variable, el de siempre.
         [JsonIgnore]
-        private static string FilePath => Path.Combine(Dir, "SelectOR.json");
+        private static string FilePath =>
+            Environment.GetEnvironmentVariable("SELECTOR_PREFS_FILE") is string f && f.Length > 0 ? f : Path.Combine(Dir, "SelectOR.json");
         // Nombre antiguo (versiones previas): se migra automáticamente si aún existe.
         [JsonIgnore]
         private static string LegacyFilePath => Path.Combine(Dir, "MenuParalelo.json");
@@ -65,7 +68,8 @@ namespace SelectOR
         {
             try
             {
-                var path = File.Exists(FilePath) ? FilePath : (File.Exists(LegacyFilePath) ? LegacyFilePath : null);
+                bool otro = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SELECTOR_PREFS_FILE"));
+                var path = File.Exists(FilePath) ? FilePath : (!otro && File.Exists(LegacyFilePath) ? LegacyFilePath : null);
                 if (path != null)
                 {
                     var json = File.ReadAllText(path);
