@@ -615,7 +615,7 @@ namespace SelectOR
                 LoadMembers(_empSel);    // para saber mi rol y habilitar acciones
                 FillTariffFields();
                 if (_empSubtab == 1) LoadLedger();
-                if (_empSubtab == 4) LoadRankings();
+                if (_empSubtab == 4) LoadRankTab();
                 if (_empSubtab == 11) OnMegafoniaShown();   // otra empresa → otros audios
             }
             else { _myRole = null; UpdateRoleUi(); }
@@ -1053,13 +1053,15 @@ namespace SelectOR
             _updPublishBtn.Click += (s, e) => PublishUpdate();
             pUpd.Controls.Add(_updPublishBtn);
 
+            var pLiga = BuildLeagueSettingsPage();
             var pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-            pages.Controls.Add(pUpd); pages.Controls.Add(pCls); pages.Controls.Add(pPax); pages.Controls.Add(pFs); pages.Controls.Add(pBal); pages.Controls.Add(pTar);
-            var tabs = MakeSubTabs(new[] { "Tarifas", "Saldos", "Economía de flota", "Viajeros", "Clasificación", "Actualizaciones" },
+            pages.Controls.Add(pUpd); pages.Controls.Add(pLiga); pages.Controls.Add(pCls); pages.Controls.Add(pPax); pages.Controls.Add(pFs); pages.Controls.Add(pBal); pages.Controls.Add(pTar);
+            var tabs = MakeSubTabs(new[] { "Tarifas", "Saldos", "Economía de flota", "Viajeros", "Clasificación", "Liga", "Actualizaciones" },
                 i =>
                 {
-                    pTar.Visible = i == 0; pBal.Visible = i == 1; pFs.Visible = i == 2; pPax.Visible = i == 3; pCls.Visible = i == 4; pUpd.Visible = i == 5;
-                    if (i == 5) RefreshUpdateInfo();
+                    pTar.Visible = i == 0; pBal.Visible = i == 1; pFs.Visible = i == 2; pPax.Visible = i == 3; pCls.Visible = i == 4; pLiga.Visible = i == 5; pUpd.Visible = i == 6;
+                    if (i == 5) LoadLeagueSettings();
+                    if (i == 6) RefreshUpdateInfo();
                 });
             FillPaxModelInputs(PaxCfg);
             _tariffMsg = EmpMsg(); _tariffMsg.Dock = DockStyle.Bottom;
@@ -1104,7 +1106,7 @@ namespace SelectOR
             host.Controls.Add(_rankCompanies);
             host.Controls.Add(topHeader);
             host.Controls.Add(_rankDriversPanel);
-            return host;
+            return WrapRankingTabs(host);   // Liga del mes · Campeones · Ranking general (este)
         }
 
         Panel BuildProfileSubpanel()
@@ -1265,7 +1267,7 @@ namespace SelectOR
             if (i == 1) LoadLedger();
             if (i == 2 && _empSel != null) LoadMembers(_empSel);
             if (i == 3) { FillTariffFields(); LoadDefaultBalance(); LoadFleetSettings(); LoadFarePerKm(); }
-            if (i == 4) LoadRankings();
+            if (i == 4) LoadRankTab();
             if (i == 5) LoadProfile();
             if (i == 7) LoadUsers();
             if (i == 8) LoadAllCompanies();
@@ -1590,6 +1592,7 @@ namespace SelectOR
             else _empCoCombo.SelectedIndex = sel;                        // dispara OnCompanySelected
             UpdateDutyHostVisible();
             LoadCompanyVehNames();          // .eng de mis empresas → etiqueta en Exploración/Horarios
+            if (!_leagueChecked) { _leagueChecked = true; _ = CheckLeagueAwards(); }   // ¿premios de la liga?
         }
 
         async void LoadServices(EmpCompany c)
@@ -1756,7 +1759,8 @@ namespace SelectOR
                     _bankList.AddRow(
                         new[] { date, concept, amount.ToString("+#,##0.00;-#,##0.00", EsEs) + " €", desc },
                         new Color?[] { null, null, amount < 0 ? RedC : Theme.Accent, null }, null, _ledgerIds[_ledgerIds.Count - 1]);
-                    // Agregados para el panel financiero
+                    // Agregados para el panel financiero (un ajuste de saldo no es ingreso ni gasto)
+                    if (rawConcept == "adjustment") continue;
                     if (amount >= 0) { income += amount; if (rawConcept == "income" && createdAt.Length >= 7) { string m = createdAt.Substring(0, 7); byMonth[m] = byMonth.TryGetValue(m, out var mv) ? mv + amount : amount; } }
                     else { expense += -amount; byConcept[concept] = byConcept.TryGetValue(concept, out var cv) ? cv - amount : -amount; }
                 }
@@ -1811,6 +1815,8 @@ namespace SelectOR
             "purchase" => Tr("Compra"),
             "loan" => Tr("Préstamo"),
             "other" => Tr("Otro"),
+            "prize" => Tr("Premio de la liga"),
+            "adjustment" => Tr("Ajuste de saldo"),
             _ => c
         };
 
@@ -7000,7 +7006,7 @@ namespace SelectOR
                 case 0: if (_empSel != null && !skipCompanyLists) LoadServices(_empSel); break;
                 case 1: LoadLedger(); break;
                 case 2: if (_empSel != null && !skipCompanyLists) LoadMembers(_empSel); break;
-                case 4: LoadRankings(); break;
+                case 4: LoadRankTab(); break;
                 case 5: LoadProfile(); break;
                 case 7: LoadUsers(); break;
                 case 8: LoadAllCompanies(); break;

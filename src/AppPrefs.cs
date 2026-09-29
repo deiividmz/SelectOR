@@ -43,6 +43,7 @@ namespace SelectOR
         public float CabHudScale { get; set; } = 1f;
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
         public string FavoriteCompany { get; set; }
+        public string LeagueSeenMonth { get; set; }   // último mes de la liga cuyos premios ya se avisaron (aaaa-MM)
         // Megafonía: si suenan los avisos, a qué volumen (0-100) y la última línea elegida por ruta.
         public bool PaOn { get; set; } = true;
         public int PaVolume { get; set; } = 90;
