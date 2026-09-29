@@ -663,6 +663,8 @@ namespace SelectOR
             var titleBar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Theme.Bg };
             _empSectionTitle = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Text, Font = Theme.Font(16f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
             titleBar.Controls.Add(_empSectionTitle);
+            _liveShareBox = BuildLiveShareBox();   // «Compartir mi posición en el mapa» (solo en Mi perfil)
+            titleBar.Controls.Add(_liveShareBox);
 
             // KPIs (Tesorería · Socios · Servicios · Km) como 4 tarjetas compactas dibujadas a mano.
             _empStatsCard = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.Bg };
@@ -1256,6 +1258,7 @@ namespace SelectOR
             _tariffPanel.Visible = i == 3;
             _rankPanel.Visible = i == 4;
             _soloPanel.Visible = i == 5;
+            if (_liveShareBox != null) _liveShareBox.Visible = i == 5;
             _reviewPanel.Visible = i == 6;
             _usersPanel.Visible = i == 7;
             _allCompPanel.Visible = i == 8;
@@ -1321,6 +1324,7 @@ namespace SelectOR
                 UpdateCompanyDash(); UpdateDutyUi(); UpdateRoleUi();
                 if (string.IsNullOrWhiteSpace(Supa.Username)) LoadMyUsername();
                 StartRealtime();   // escucha de cambios en vivo (una sola vez)
+                StartNotifications();   // avisos emergentes (solicitudes, compras, roles…)
             }
         }
 
@@ -1501,6 +1505,7 @@ namespace SelectOR
         void DoSignOut()
         {
             StopRealtime();
+            StopNotifications();
             Supa.SignOut();
             // Cerrar sesión explícito: olvidar la contraseña y no auto-reentrar.
             _prefs.RememberPassword = false; _prefs.EmpresasPasswordEnc = null; _prefs.Save();
@@ -2232,6 +2237,8 @@ namespace SelectOR
                     _driveTrail);                                     // rastro de toda la conducción
                 _serviceHud.CabVisible = () => CabHudAlive && _cabHud.Visible;   // botón del pupitre
                 _serviceHud.ToggleCab = ToggleCabHudFromBar;
+                _serviceHud.Mates = LiveMarkers;   // mapa en vivo: los demás usuarios de la ruta
+                _serviceHud.Me = LiveMe;
                 var _ = _serviceHud.Handle;   // la ventana existe ya (el trazado del mapa se le pasa aunque esté oculta)
                 if (_scenarioReady || force) _serviceHud.Show(); else _hudWaiting = true;
                 PushHudMap();   // descarga el trazado de la ruta y lo pasa al HUD
@@ -2848,6 +2855,7 @@ namespace SelectOR
             CloseDriveBar();     // y la barra superior
             RestoreAfterDrive();
             FinalizeService();
+            NotifySoon(2500);    // los avisos que llegaron mientras conducías
         }
 
         // Estado de la ventana antes de lanzar el simulador (maximizada o normal).
@@ -2936,6 +2944,7 @@ namespace SelectOR
                 _kmTimer.Start();
                 if (withPax) StartPaxTracking(_drivenConsist ?? CurrentDrivenConsist());   // viajeros (servicio o conducción libre)
                 PaDriveStart(_curRoute?.Name);   // megafonía: se descarga lo de esta ruta y queda lista
+                StartLiveMap();                  // mapa en vivo: mi posición y la de los demás en la ruta
             }
             catch { }
         }
@@ -3486,6 +3495,7 @@ namespace SelectOR
             _paxActive = false; _paxWanted = false;
             EndPaxAnimation();
             PaDriveStop();   // megafonía: corta lo que suene y olvida la ruta
+            StopLiveMap();   // mapa en vivo: desaparezco del mapa de los demás
             try { _kmTimer?.Stop(); _kmTimer?.Dispose(); _kmTimer = null; } catch { }
             try { _kmHttp?.Dispose(); _kmHttp = null; } catch { }
             return Math.Round(_trackedMeters / 1000.0, 1);
@@ -7025,7 +7035,7 @@ namespace SelectOR
             // Un topic por tabla (en SupaRealtime): si alguna no está publicada aún, solo falla su topic.
             _rt = new SupaRealtime(
                 Supa.Url, Supa.AnonKey, () => Supa.AccessToken,
-                new[] { "services", "ledger", "companies", "company_members", "join_requests" },
+                new[] { "services", "ledger", "companies", "company_members", "join_requests", "notifications" },
                 OnRealtimeChange);
             _rt.Start();
         }
@@ -7044,6 +7054,7 @@ namespace SelectOR
             try
             {
                 if (!IsHandleCreated) return;
+                if (table == "notifications") { BeginInvoke((Action)(() => NotifySoon(300))); return; }   // aviso nuevo para ti
                 BeginInvoke((Action)(() => { if (_rtDebounce != null) { _rtDebounce.Stop(); _rtDebounce.Start(); } }));
             }
             catch { }

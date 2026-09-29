@@ -818,6 +818,7 @@ namespace SelectOR
             btnCompHost.Controls.Add(btnComp);           // Fill
             btnCompHost.Controls.Add(_buyWrapExplore);   // Right
             var (hdrP, stChip) = MakeTrainHeader(lblP); _lblStatusExplore = stChip;   // título + estado en la flota
+            _teleExplore = MakeTeleUi(hdrP, () => RenderLive());                       // teleindicador (si el tren tiene destinos)
             previewCard.Controls.Add(_trainPreview);
             previewCard.Controls.Add(btnCompHost);
             previewCard.Controls.Add(hdrP);
@@ -896,6 +897,7 @@ namespace SelectOR
             btnsTTHost.Controls.Add(gapBtnsTT);
             btnsTTHost.Controls.Add(btnMapTT);    // añadido 2º → queda arriba
             var (hdrTT, stChipTT) = MakeTrainHeader(lblP); _lblStatusTT = stChipTT;   // título + estado en la flota
+            _teleTT = MakeTeleUi(hdrTT, () => RenderTTLive());                          // teleindicador (si el tren tiene destinos)
             previewCard.Controls.Add(_ttPreview);
             previewCard.Controls.Add(btnsTTHost);
             previewCard.Controls.Add(hdrTT);
@@ -1710,6 +1712,7 @@ namespace SelectOR
             string ttConsist = tr != null ? (!string.IsNullOrWhiteSpace(tr.LeadingConsist) ? tr.LeadingConsist : tr.Consist) : null;
             var c = ResolveConsist(ttConsist);
             _ttConsist = c;
+            TeleRefresh(_teleTT, c);   // destinos del tren (antes del render: la vista 3D ya sale con el cartel elegido)
             _ttPreviewGeom = null; _ttYaw = 0; _ttPitch = 0;
             _ttPreview.Image = null; _ttPreview.Rotatable = false; _ttPreview.Invalidate();
             _ttPreview.Caption = c?.Locomotive != null ? c.Locomotive.Name : (c != null ? c.Name : "");
@@ -1785,6 +1788,7 @@ namespace SelectOR
             if (_ttPreviewGeom == null || _ttPreview.Width < 40 || _ttPreview.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_ttPreview.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_ttPreview.Height - 36) * 2));
+            TeleRedirect(_teleTT);   // el cartel elegido en Horarios (Exploración puede tener otro para el mismo tren)
             var bmp = ShapeRenderer.Render(_ttPreviewGeom, w, h, _ttYaw, _ttPitch, 1, _ttPreviewFlip, _ttPreview.CamDistance());
             if (bmp != null) _ttPreview.Image = bmp;
         }
@@ -1852,6 +1856,7 @@ namespace SelectOR
             _trainPreview.Caption = c?.Locomotive != null ? c.Locomotive.Name : "";
             _trainPreview.Image = null; _trainPreview.Rotatable = false; _trainPreview.Invalidate();
             _previewGeom = null; _yaw = 0; _pitch = 0; _previewConsistPath = c?.FilePath;
+            TeleRefresh(_teleExplore, c);   // destinos del tren (antes del render: la vista 3D ya sale con el cartel elegido)
             UpdateStatus();
             if (c == null) return;
             string eng = c.Locomotive?.FilePath;
@@ -1907,6 +1912,7 @@ namespace SelectOR
             if (_previewGeom == null || _trainPreview.Width < 40 || _trainPreview.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_trainPreview.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_trainPreview.Height - 36) * 2));
+            TeleRedirect(_teleExplore);
             var bmp = ShapeRenderer.Render(_previewGeom, w, h, _yaw, _pitch, 1, _previewFlip, _trainPreview.CamDistance());
             if (bmp != null) _trainPreview.Image = bmp;
         }
@@ -2155,6 +2161,9 @@ namespace SelectOR
             var exe = SysPath.Combine(AppContext.BaseDirectory, "RunActivity.exe");
             if (!File.Exists(exe)) { Warn(Tr("No se encuentra RunActivity.exe junto al selector.")); return; }
             _prefs.Save();
+            // Teleindicador: el destino elegido para este tren se pone en su carpeta antes de que OR lo cargue.
+            if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase))
+                TeleApplyForLaunch(_activePage == 1 ? ActivityConsist(_lstActivities.SelectedItem as Activity) : CurrentDrivenConsist());
 
             // Empresas: si estoy "de servicio", abro el servicio antes de lanzar.
             string serviceId = null;
@@ -2242,13 +2251,13 @@ namespace SelectOR
                 case 1: _lblStatus.Text = $"{r}   ·   {Tr("Actividad")}: {((_lstActivities.SelectedItem as Activity)?.Name ?? "—")}"; break;
                 case 2:
                     _lblStatus.Text = $"{r}   ·   {Tr("Tren")}: {((_lstConsists.SelectedItem as TrainItem)?.Name ?? "—")}"
-                        + EmpSuffix(_lstConsists.SelectedItem as TrainItem);
+                        + TeleSuffix(_teleExplore) + EmpSuffix(_lstConsists.SelectedItem as TrainItem);
                     break;
                 case 3:
                     var ttr = _cboTTTrain?.SelectedItem as Orts.Formats.OR.TimetableFileLite.TrainInformation;
                     string ttc = ttr != null ? (!string.IsNullOrWhiteSpace(ttr.LeadingConsist) ? ttr.LeadingConsist : ttr.Consist) : null;
                     _lblStatus.Text = $"{r}   ·   {Tr("Horario")}: {(_cboTT.SelectedItem?.ToString() ?? "—")}  ·  {Tr("Tren")}: {(_cboTTTrain.SelectedItem?.ToString() ?? "—")}"
-                        + EmpSuffix(ResolveConsist(ttc));
+                        + TeleSuffix(_teleTT) + EmpSuffix(ResolveConsist(ttc));
                     break;
                 case 4: _lblStatus.Text = $"{r}   ·   {Tr("Multijugador")}: {(_rbServer.Checked ? Tr("Servidor") : Tr("Cliente"))}"; break;
             }

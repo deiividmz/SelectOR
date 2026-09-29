@@ -44,6 +44,10 @@ namespace SelectOR
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
         public string FavoriteCompany { get; set; }
         public string LeagueSeenMonth { get; set; }   // último mes de la liga cuyos premios ya se avisaron (aaaa-MM)
+        // Mapa en vivo: enviar mi posición mientras conduzco y ver a los demás usuarios de la misma ruta.
+        public bool ShareLivePosition { get; set; } = true;
+        // Teleindicador elegido por tren: clave = ruta del .con, valor = subcarpeta de Destinos ("" = original).
+        public Dictionary<string, string> TeleDest { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         // Megafonía: si suenan los avisos, a qué volumen (0-100) y la última línea elegida por ruta.
         public bool PaOn { get; set; } = true;
         public int PaVolume { get; set; } = 90;

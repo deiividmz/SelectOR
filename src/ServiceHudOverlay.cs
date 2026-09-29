@@ -116,6 +116,11 @@ namespace SelectOR
         // Pupitre (indicadores del tren): botón junto a los del minimapa y el mapa grande.
         public Func<bool> CabVisible;
         public Action ToggleCab;
+        // Mapa en vivo: los demás usuarios de la comunidad en esta ruta, y quién soy yo (nombre y
+        // empresa de servicio, o null en conducción libre) para la leyenda del mapa grande.
+        public Func<List<LiveMarker>> Mates;
+        public Func<(string name, string company)> Me;
+        List<LiveMarker> CurMates() { try { return Mates?.Invoke(); } catch { return null; } }
         ServiceMapWindow _bigMap;   // ventana de mapa grande con transparencia
 
         static readonly Color Rec = Color.FromArgb(224, 86, 86);
@@ -216,6 +221,7 @@ namespace SelectOR
                 if (Math.Abs(d) > 0.2) { _heading = (_heading + d * 0.18 + 360) % 360; moved = true; }
                 else if (d != 0) { _heading = _headingTarget; moved = true; }
             }
+            if (!moved) { var mm = CurMates(); moved = mm != null && mm.Count > 0; }   // los demás también se mueven
             if (moved && _mapOpen && !_collapsed && Visible)
                 Invalidate(new Rectangle(0, 0, Width, MapBlockH));
         }
@@ -759,8 +765,11 @@ namespace SelectOR
         {
             var area = new Rectangle(6, MapHeaderH, Width - 12, _mapH - 4);
             double anchoM = MapWorldWidthM(area);
+            var mates = CurMates();
             HudMapRender.Draw(g, area, _segLat, _segLon, _trkLat, _trkLon, _stLat, _stLon, _stName, _crumb,
-                _hasPos, _curLat, _curLon, _hasHeading, _heading, anchoM, 7.5f, 1f, I18n.T("Cargando mapa…"));
+                _hasPos, _curLat, _curLon, _hasHeading, _heading, anchoM, 7.5f, 1f, I18n.T("Cargando mapa…"), mates: mates);
+            // Cuántos usuarios hay en la ruta (arriba a la derecha; mientras se enseña el zoom, no).
+            if (mates != null && mates.Count > 0 && DateTime.UtcNow >= _zoomShownUntil) LiveMapDraw.Chip(g, area, mates.Count);
 
             // Botones de zoom abajo a la izquierda (solo con el ratón encima, para no tapar el mapa).
             if (!_hover) { _hitZoomIn = _hitZoomOut = Rectangle.Empty; }
@@ -801,8 +810,10 @@ namespace SelectOR
             SegLat = _segLat, SegLon = _segLon, TrkLat = _trkLat, TrkLon = _trkLon,
             StLat = _stLat, StLon = _stLon, StName = _stName, Crumb = _crumb,
             HasPos = _hasPos, CurLat = _curLat, CurLon = _curLon, HasHeading = _hasHeading, Heading = _heading,
-            Route = _route
+            Route = _route, Mates = CurMates(), Me = MeInfo()
         };
+
+        (string name, string company) MeInfo() { try { return Me?.Invoke() ?? default; } catch { return default; } }
 
         void DrawMapGlyph(Graphics g, Rectangle b, Pen pen)
         {
@@ -917,6 +928,8 @@ namespace SelectOR
         public bool HasPos, HasHeading;
         public double CurLat, CurLon, Heading;
         public string Route;
+        public List<LiveMarker> Mates;                  // los demás usuarios de la ruta (o null)
+        public (string name, string company) Me;        // para la leyenda del mapa grande
     }
 
     // Renderizador COMPARTIDO del mapa (lo usan el mini-mapa del HUD y la ventana grande → idénticos).
@@ -932,7 +945,8 @@ namespace SelectOR
             System.Collections.Generic.IReadOnlyList<(double lat, double lon)> crumb,
             bool hasPos, double curLat, double curLon, bool hasHeading, double heading,
             double worldWidthM, float labelPt, float arrowScale, string loadingText,
-            double viewCenterLat = double.NaN, double viewCenterLon = double.NaN, double viewPxPerM = 0)
+            double viewCenterLat = double.NaN, double viewCenterLon = double.NaN, double viewPxPerM = 0,
+            IReadOnlyList<LiveMarker> mates = null, bool mateDetail = false)
         {
             segLat ??= Array.Empty<double[]>(); segLon ??= Array.Empty<double[]>();
             trkLat ??= Array.Empty<double>(); trkLon ??= Array.Empty<double>();
@@ -940,7 +954,7 @@ namespace SelectOR
             bool haveSeg = segLat.Length > 0;
             bool haveTrk = trkLat.Length >= 2;
             bool haveCrumb = crumb != null && crumb.Count >= 2;
-            if (!haveSeg && !haveTrk && !haveCrumb && !hasPos)
+            if (!haveSeg && !haveTrk && !haveCrumb && !hasPos && (mates == null || mates.Count == 0))
             {
                 using var f0 = Theme.Font(Math.Max(9f, labelPt));
                 TextRenderer.DrawText(g, loadingText, f0, area, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
@@ -1038,6 +1052,10 @@ namespace SelectOR
                     }
                 }
 
+            // Los demás usuarios de la ruta, debajo de la flecha propia.
+            if (mates != null && mates.Count > 0)
+                LiveMapDraw.Draw(g, area, Proj, mates, arrowScale, mateDetail, stLat, stLon, stName);
+
             if (hasPos)
             {
                 var p = Proj(curLat, curLon);
@@ -1090,6 +1108,9 @@ namespace SelectOR
         bool _panning; Point _lastPan;                                 // desplazamiento del MAPA
         bool _free; double _pxPerM = HudMapRender.BaseScale; double _cLat, _cLon; bool _haveCenter;   // zoom/pan
         Rectangle _hitClose;
+        // Leyenda de los demás usuarios de la ruta: su caja y cada fila (clic → centrar en ese usuario).
+        Rectangle _legendBox; List<(Rectangle hit, LiveMarker m)> _legendHits = new();
+        bool _legendDown;
         const int HdrH = 30;
         double _lastLat, _lastLon, _lastHdg; int _frames;
 
@@ -1117,7 +1138,8 @@ namespace SelectOR
                 bool mov = sn != null && sn.HasPos && (sn.CurLat != _lastLat || sn.CurLon != _lastLon || sn.Heading != _lastHdg);
                 if (sn != null) { _lastLat = sn.CurLat; _lastLon = sn.CurLon; _lastHdg = sn.Heading; }
                 bool toca = ++_frames % 12 == 0;
-                if (mov || toca) { UpdateFollow(); Invalidate(); }
+                bool otros = sn?.Mates != null && sn.Mates.Count > 0;   // los demás se deslizan también
+                if (mov || toca || otros) { UpdateFollow(); Invalidate(); }
             };
             _tick.Start();
         }
@@ -1155,6 +1177,7 @@ namespace SelectOR
         {
             if (e.Button != MouseButtons.Left) { base.OnMouseDown(e); return; }
             if (e.Y < HdrH) { _winDrag = true; _moved = false; _downScreen = Cursor.Position; _formAtDown = Location; }   // cabecera → mueve la ventana
+            else if (_legendBox.Contains(e.Location)) _legendDown = true;                                                // leyenda → clic en un nombre
             else { _panning = true; _lastPan = e.Location; }                                                             // mapa → desplaza el contenido
             base.OnMouseDown(e);
         }
@@ -1172,14 +1195,28 @@ namespace SelectOR
                 PanBy(e.X - _lastPan.X, e.Y - _lastPan.Y);
                 _lastPan = e.Location;
             }
+            else
+            {
+                bool sobre = false;
+                foreach (var (hit, _) in _legendHits) if (hit.Contains(e.Location)) { sobre = true; break; }
+                Cursor = sobre ? Cursors.Hand : Cursors.Default;
+            }
             base.OnMouseMove(e);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
-            bool wasWinDrag = _winDrag, moved = _moved;
-            _winDrag = false; _panning = false; _moved = false;
+            bool wasWinDrag = _winDrag, moved = _moved, legend = _legendDown;
+            _winDrag = false; _panning = false; _moved = false; _legendDown = false;
             if (wasWinDrag && !moved && _hitClose.Contains(e.Location)) { Close(); return; }
+            if (legend)
+                foreach (var (hit, m) in _legendHits)
+                    if (hit.Contains(e.Location))
+                    {
+                        // Centra el mapa en ese usuario (vista libre: doble clic vuelve a seguir a tu tren).
+                        _free = true; _cLat = m.Lat; _cLon = m.Lon; _haveCenter = true; Invalidate();
+                        break;
+                    }
             base.OnMouseUp(e);
         }
 
@@ -1191,7 +1228,7 @@ namespace SelectOR
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
-            if (e.Y >= HdrH) { _free = false; _pxPerM = HudMapRender.BaseScale; UpdateFollow(); Invalidate(); }   // volver a centrar en el tren
+            if (e.Y >= HdrH && !_legendBox.Contains(e.Location)) { _free = false; _pxPerM = HudMapRender.BaseScale; UpdateFollow(); Invalidate(); }   // volver a centrar en el tren
             base.OnMouseDoubleClick(e);
         }
 
@@ -1250,7 +1287,8 @@ namespace SelectOR
             double vPx = _haveCenter ? _pxPerM : 0;
             HudMapRender.Draw(g, area, snap.SegLat, snap.SegLon, snap.TrkLat, snap.TrkLon, snap.StLat, snap.StLon, snap.StName,
                 snap.Crumb, snap.HasPos, snap.CurLat, snap.CurLon, snap.HasHeading, snap.Heading,
-                worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx);
+                worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true);
+            _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e) { try { _tick?.Stop(); _tick?.Dispose(); } catch { } base.OnFormClosing(e); }

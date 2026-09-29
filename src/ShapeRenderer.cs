@@ -824,10 +824,34 @@ namespace SelectOR
 
         static readonly Dictionary<string, int> _texAlpha = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
+        // Teleindicador elegido (Teleindicadores.cs): la vista 3D enseña el cartel del destino en lugar
+        // del fichero que hay ahora en la carpeta del tren. Clave = ruta completa del fichero del tren.
+        static readonly Dictionary<string, string> _texRedirect = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Sustituye las redirecciones de esas carpetas de tren por las nuevas.
+        public static void SetTextureRedirects(IEnumerable<string> trainDirs, Dictionary<string, string> map)
+        {
+            foreach (var d in trainDirs)
+            {
+                string pre = Path.GetFullPath(d).TrimEnd('\\') + "\\";
+                foreach (var k in new List<string>(_texRedirect.Keys))
+                    if (k.StartsWith(pre, StringComparison.OrdinalIgnoreCase)) _texRedirect.Remove(k);
+            }
+            if (map != null) foreach (var kv in map) { try { _texRedirect[Path.GetFullPath(kv.Key)] = kv.Value; } catch { } }
+        }
+
+        static string Redirect(string path)
+        {
+            if (_texRedirect.Count == 0) return path;
+            try { return _texRedirect.TryGetValue(Path.GetFullPath(path), out var r) && File.Exists(r) ? r : path; }
+            catch { return path; }
+        }
+
         static Texture2D LoadTexture(string path, out int alphaBits)
         {
             alphaBits = 0;
             if (string.IsNullOrEmpty(path)) return null;
+            path = Redirect(path);
             if (_texCache.TryGetValue(path, out var t)) { _texAlpha.TryGetValue(path, out alphaBits); return t; }
             Texture2D tex = null;
             int bits = 0;
