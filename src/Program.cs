@@ -46,6 +46,15 @@ namespace SelectOR
                 // contenido está leído (lo hace MainMenuForm al terminar la carga).
                 try { Theme.ComputeUiScale(Screen.PrimaryScreen.WorkingArea); } catch { }
                 SplashScreen.Begin();
+
+                // Actualización automática: si hay versión nueva, se instala aquí mismo, con la pantalla de
+                // carga, y se arranca la nueva sin abrir el menú de esta.
+                if (StartupUpdate.Run())
+                {
+                    SplashScreen.Finish();
+                    Updater.LaunchPending();
+                    Environment.Exit(0);
+                }
                 System.Threading.Tasks.Task.Run(AppDataTidy.Run);   // %AppData%: fuera lo que sobra (en segundo plano)
 
                 Application.Run(new MainMenuForm(kiosk));

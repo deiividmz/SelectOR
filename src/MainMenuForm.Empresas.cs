@@ -457,8 +457,8 @@ namespace SelectOR
         {
             ("OPERACIÓN", new[] { 0, 9, 10 }),        // Servicios · Flota · Compra
             ("FINANZAS", new[] { 1, 4 }),             // Banca · Ranking
-            ("EMPRESA", new[] { 12, 2, 6, 3, 11, 5 }),   // Chat · Socios · Revisión · Ajustes · Megafonía · Mi perfil
-            ("ADMINISTRACIÓN", new[] { 7, 8 }),       // Usuarios · Administración
+            ("EMPRESA", new[] { 12, 2, 3, 11, 5 }),   // Chat · Socios · Ajustes · Megafonía · Mi perfil
+            ("ADMINISTRACIÓN", new[] { 6, 7, 8 }),    // Revisión (carné) · Usuarios · Administración
         };
         const int RailW = 236;          // ancho del menú lateral de Empresas
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
@@ -1376,6 +1376,7 @@ namespace SelectOR
         {
             RefreshEmpresasView();
             AjustarNav();   // al hacerse visible ya se conoce el alto real del menú lateral
+            if (Supa.IsSuperadmin) LoadReview(onlyCount: true);   // «Revisión (n)»: infracciones pendientes de todas las empresas
             if (Supa.IsLoggedIn && !_empLoaded) LoadCompanies();
             else if (!Supa.IsLoggedIn) TryAutoLogin();
         }
@@ -2127,7 +2128,7 @@ namespace SelectOR
         // Ranking (4), Mi perfil (5) y Megafonía (11) no hablan de la marcha de la empresa: sus
         // datos no tienen nada que ver con tesorería, socios, servicios ni km, así que en ellas la
         // tira de KPIs solo roba alto a la tabla.
-        static bool SubtabShowsCompanyKpis(int subtab) => subtab != 4 && subtab != 5 && subtab != 11 && subtab != ChatSubtab;   // el chat aprovecha todo el alto
+        static bool SubtabShowsCompanyKpis(int subtab) => subtab != 4 && subtab != 5 && subtab != 6 && subtab != 11 && subtab != ChatSubtab;   // Revisión es de todas las empresas; el chat aprovecha todo el alto
 
         void UpdateCompanyKpis()
         {
@@ -7270,9 +7271,14 @@ namespace SelectOR
             string route = _curRoute?.Name ?? "";
             var svc = _pendingServiceId;
 
+            // Viajes de menos de 3 km o de menos de 5 minutos: no se registran (más abajo).
+            int durRule = ServiceSecondsForRule();
+            bool cortoKm = _estimatedKm < MinServiceKm, cortoTiempo = durRule < MinServiceSeconds;
+
             // Carné por puntos: primero lo detectado durante la conducción. Un salto de posición o el
             // tiempo acelerado anulan el servicio (el servidor ya lo ha borrado); la infracción queda.
-            var infr = await ReportInfractionsAsync(svc);
+            // En los viajes cortos no cuenta ninguna infracción (el viaje tampoco se registra).
+            var infr = await ReportInfractionsAsync(svc, _estimatedKm, durRule == int.MaxValue ? _tripDurationS : durRule, cortoKm || cortoTiempo);
             if (infr.Err != null) { Msg(_empHomeMsg, Tr("No se pudo registrar el servicio: ") + infr.Err, true); return (false, Tr("No se pudo registrar el servicio: ") + infr.Err); }
             if (infr.Voided)
             {
@@ -7289,8 +7295,6 @@ namespace SelectOR
 
             // Viajes de menos de 3 km o de menos de 5 minutos: no se registran (se descarta el
             // servicio y se libera la unidad). Al maquinista se le explica por qué.
-            int durRule = ServiceSecondsForRule();
-            bool cortoKm = _estimatedKm < MinServiceKm, cortoTiempo = durRule < MinServiceSeconds;
             if (cortoKm || cortoTiempo)
             {
                 Msg(_empHomeMsg, Tr("Descartando viaje corto…"), false);
@@ -7733,8 +7737,8 @@ namespace SelectOR
             // gestiona solo la ve si está habilitada; el superadmin la ve siempre (para habilitarla).
             bool pa = su || (PaEnabledHere() && CanManage());
             bool[] show = hasCompany
-                ? new[] { true, true, CanManage() || su, su, true, true, CanManage() || su, su, su, true, CanManage() || su, pa, true }   // Compra y Revisión: solo gestión
-                : new[] { false, false, false, false, true, true, false, su, su, false, false, false, false };
+                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true }   // Compra: solo gestión · Revisión: superadmin
+                : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false };
             for (int k = 0; k < _empSubtabs.Length && k < show.Length; k++)
                 if (_empSubtabs[k] != null) _empSubtabs[k].Visible = show[k];
             UpdateNavGroupHeaders();   // oculta el encabezado de un grupo si ninguna de sus secciones se ve

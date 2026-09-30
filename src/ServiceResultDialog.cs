@@ -331,7 +331,7 @@ namespace SelectOR
             }
             var notes = new System.Collections.Generic.List<string>();
             if (d.Infractions.Exists(x => x.Status == "pending"))
-                notes.Add(I18n.T("Las infracciones graves las revisará el gerente o un gestor de la empresa; hasta entonces no restan puntos."));
+                notes.Add(I18n.T("Los excesos de velocidad los revisa el administrador: si los anula, se te devuelven los puntos."));
             if (susp)
                 notes.Add(string.Format(I18n.T("Carné suspendido hasta el {0}: no puedes ponerte de servicio. Después vuelves con 8 puntos."), Carne.FmtLocal(d.SuspendedUntil.Value)));
             else if (pts >= 0 && pts < Carne.PenaltyBelow)

@@ -7,8 +7,9 @@
 //    A2 (velocidad media imposible) la decide el servidor con su propio reloj al cerrar el servicio.
 //  · Al registrar el servicio se envía lo detectado (report_infractions). El SERVIDOR aplica las reglas:
 //    puntos, tope de 6 por servicio, suspensión… A1 y A3 anulan el servicio.
-//  · Las leves (B6) se aplican al momento; las graves quedan pendientes y las revisa el gerente o un
-//    gestor en «Revisión» (confirmar / anular). Mi perfil muestra el carné y su historial.
+//  · Todas restan los puntos al momento. B6 y B7 quedan pendientes de revisión: el superadministrador
+//    las confirma o las anula (se devuelven los puntos) en «Revisión», con las de todas las empresas.
+//    En los viajes cortos (menos de 3 km o de 5 minutos) no cuenta ninguna. Mi perfil muestra el carné.
 
 using System;
 using System.Collections.Generic;
@@ -170,6 +171,7 @@ namespace SelectOR
         double _osStart = double.NaN, _osLast, _osGraveStart = double.NaN, _osGraveLast, _osGraveMax;
         double _osWorstV, _osWorstL, _osWorstRatio;
         bool _osBusy;
+        bool _osToldB6, _osToldB7;   // episodio en curso: ya se ha avisado de B6 / B7
 
         const double JumpMinM = 1000, JumpMinKmh = 400;     // A1
         const double AccelFactor = 1.5, AccelMinS = 60;      // A3
@@ -202,6 +204,7 @@ namespace SelectOR
                 {
                     ["dist_m"] = Math.Round(dm), ["secs"] = Math.Round(dt, 1), ["at_s"] = (int)ServiceSecondsExact()
                 }));
+                InfrNotify("jump", string.Format(Tr("El tren ha aparecido a {0} m en un instante."), dm.ToString("N0", EsEs)));
             }
         }
 
@@ -220,6 +223,8 @@ namespace SelectOR
                 {
                     ["seconds"] = (int)Math.Round(_infrAccelS), ["factor"] = Math.Round(_infrAccelMax, 1)
                 }));
+                InfrNotify("time_accel", string.Format(Tr("La hora del simulador ha ido hasta ×{0} más rápida durante {1} s."),
+                    _infrAccelMax.ToString("0.#", EsEs), Math.Round(_infrAccelS).ToString("N0", EsEs)));
             }
         }
 
@@ -249,6 +254,7 @@ namespace SelectOR
                 {
                     InfrOverspeedClose();
                     _osStart = t; _osWorstRatio = 0; _osGraveMax = 0; _osGraveStart = double.NaN;
+                    _osToldB6 = _osToldB7 = false;
                 }
                 _osLast = t;
                 if (v / lim > _osWorstRatio) { _osWorstRatio = v / lim; _osWorstV = v; _osWorstL = lim; }
@@ -258,8 +264,30 @@ namespace SelectOR
                     _osGraveLast = t;
                     _osGraveMax = Math.Max(_osGraveMax, t - _osGraveStart);
                 }
+                // Aviso en directo en cuanto el exceso cumple los 30 s (el grave, aunque ya se avisara el leve).
+                string det = string.Format(Tr("{0} km/h con límite {1} durante más de 30 s."), Math.Round(_osWorstV).ToString("N0", EsEs), Math.Round(_osWorstL).ToString("N0", EsEs));
+                if (!_osToldB7 && _osGraveMax >= OverspeedS) { _osToldB7 = _osToldB6 = true; InfrNotify("overspeed_grave", det); }
+                else if (!_osToldB6 && _osLast - _osStart >= OverspeedS) { _osToldB6 = true; InfrNotify("overspeed", det); }
             }
             else if (!double.IsNaN(_osStart) && t - _osLast > OverspeedGapS) InfrOverspeedClose();
+        }
+
+        // Aviso en directo sobre Open Rails (abajo a la derecha, sin quitar el teclado al simulador): qué se ha
+        // detectado y lo que supondrá al registrar el servicio. Un clic lo cierra (no abre SelectOR).
+        void InfrNotify(string code, string what)
+        {
+            try
+            {
+                int pts = code switch { "jump" => 6, "time_accel" => 3, "overspeed" => 1, "overspeed_grave" => 3, _ => 0 };
+                string pp = pts + " " + Tr(pts == 1 ? "punto" : "puntos");
+                string then = code == "jump" || code == "time_accel"
+                    ? string.Format(Tr("El servicio no se registrará y restará {0} del carné (salvo en un viaje de menos de 3 km o 5 minutos)."), pp)
+                    : string.Format(Tr("Si el servicio se registra, restará {0} del carné, pendiente de revisión."), pp);
+                var toast = new NotificationToast("⚠", Tr("Infracción") + " · " + Carne.Label(code), what + "\n" + then,
+                                                  "SelectOR · " + Tr("Carné por puntos"), code == "overspeed" ? Carne.Gold : Carne.Red);
+                EnqueueToast(toast);
+            }
+            catch { }
         }
 
         // Fin de un episodio: 30 s por encima → B6; 30 s por encima del 30 % → B7.
@@ -323,14 +351,21 @@ namespace SelectOR
 
         // Envía al servidor lo detectado en este servicio. Sin nada que enviar, o con un servidor sin el
         // carné (sin carne-por-puntos.sql), no hace nada. Si falla la conexión, se conserva para reintentar.
-        async Task<InfrReport> ReportInfractionsAsync(string svc)
+        async Task<InfrReport> ReportInfractionsAsync(string svc, double km, int durationS, bool shortTrip)
         {
             InfrOverspeedClose();   // un exceso de velocidad que seguía en curso al registrar
             var rep = new InfrReport();
+            // Viaje corto (no se registra): no cuenta ninguna infracción.
+            if (shortTrip) _infrItems.Clear();
             if (_infrItems.Count == 0) return rep;
             var items = new List<object>();
             foreach (var (code, detail) in _infrItems) items.Add(new { code, detail });
-            var (json, err) = await Supa.RpcAsync("report_infractions", new { p_service = svc, p_items = items });
+            var (json, err) = await Supa.RpcAsync("report_infractions",
+                new { p_service = svc, p_items = items, p_km = Math.Round(km, 1), p_duration_s = durationS });
+            // Servidor sin carne-revision-superadmin.sql: sin los km ni la duración.
+            if (err != null && (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                                || err.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0))
+                (json, err) = await Supa.RpcAsync("report_infractions", new { p_service = svc, p_items = items });
             if (err != null)
             {
                 if (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
@@ -484,7 +519,7 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tabla
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // acciones
 
-            var intro = EmpIntro("Infracciones del carné por puntos en los servicios de la empresa. Las graves (A1, A2, A3 y B7) quedan pendientes: confírmalas para restar los puntos al maquinista o anúlalas si no hubo mala conducta. Nadie puede revisar las suyas.");
+            var intro = EmpIntro("Infracciones del carné por puntos de todas las empresas. Todas restan los puntos al momento. Los excesos de velocidad (B6 y B7) quedan pendientes de revisión: confírmalos o anúlalos para devolver los puntos al maquinista.");
             intro.MaximumSize = new Size(900, 0);
             t.Controls.Add(intro);
 
@@ -506,6 +541,7 @@ namespace SelectOR
 
             _revList.SetColumns(
                 new StyledTable.Col("FECHA", 92),
+                new StyledTable.Col("EMPRESA", 150),
                 new StyledTable.Col("MAQUINISTA", 128),
                 new StyledTable.Col("INFRACCIÓN", 230),
                 new StyledTable.Col("DETALLE", 0, true),
@@ -528,13 +564,17 @@ namespace SelectOR
             return outer;
         }
 
-        // Carga las infracciones de la empresa (onlyCount: solo el contador «Revisión (n)» del menú).
+        // Carga las infracciones de TODAS las empresas (solo el superadministrador). onlyCount: solo el
+        // contador «Revisión (n)» del menú.
+        bool _revLoading;
         async void LoadReview(bool onlyCount = false)
         {
-            var c = _empSel;
-            if (c == null || !(CanManage() || Supa.IsSuperadmin)) { SetReviewCount(0); return; }
-            var (json, err) = await Supa.RpcAsync("list_company_infractions", new { p_company = c.Id });
-            if (c != _empSel) return;
+            if (!Supa.IsSuperadmin) { SetReviewCount(0); return; }
+            if (_revLoading && onlyCount) return;   // un contador ya en camino basta
+            _revLoading = true;
+            string json, err;
+            try { (json, err) = await Supa.RpcAsync("list_all_infractions", new { p_limit = 500 }); }
+            finally { _revLoading = false; }
             int pending = 0;
             var rows = new List<(string[] cells, Color?[] colors, string id, string status, string driver)>();
             if (err == null)
@@ -553,10 +593,11 @@ namespace SelectOR
                         string who = Str(e, "username"); if (who.Length == 0) who = "—";
                         string st = Carne.StatusName(status);
                         string rev = Str(e, "reviewer");
-                        if (status != "pending" && rev.Length > 0 && code != "overspeed") det += (det.Length > 0 ? " · " : "") + string.Format(Tr("revisada por {0}"), rev);
+                        if (status != "pending" && rev.Length > 0) det += (det.Length > 0 ? " · " : "") + string.Format(Tr("revisada por {0}"), rev);
                         string train = Str(e, "consist"); if (train.Length == 0) train = "—";
-                        rows.Add((new[] { FmtDate(Str(e, "created_at")), who, Carne.Label(code), det, train, Carne.PointsText(p), st },
-                                  new Color?[] { null, null, null, Theme.Subtle, Theme.Subtle, status == "annulled" ? Theme.Subtle : Carne.Red, Carne.StatusColor(status) },
+                        string co = Str(e, "company_name"); if (co.Length == 0) co = "—";
+                        rows.Add((new[] { FmtDate(Str(e, "created_at")), co, who, Carne.Label(code), det, train, Carne.PointsText(p), st },
+                                  new Color?[] { null, Theme.Subtle, null, null, Theme.Subtle, Theme.Subtle, status == "annulled" ? Theme.Subtle : Carne.Red, Carne.StatusColor(status) },
                                   Str(e, "id"), status, Str(e, "driver_id")));
                     }
                 }
@@ -564,12 +605,12 @@ namespace SelectOR
             }
             SetReviewCount(pending);
             if (onlyCount || _revList == null) return;
-            _revList.BeginReload(c.Id);
+            _revList.BeginReload("todas");
             _revList.ClearRows(); _revRows.Clear();
             foreach (var r in rows) { _revRows.Add((r.id, r.status, r.driver)); _revList.AddRow(r.cells, r.colors, null, r.id); }
             if (rows.Count == 0)
                 _revList.SetEmpty(err != null
-                    ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no tiene el carné por puntos (falta carne-por-puntos.sql).") : Tr("Error: ") + err)
+                    ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no tiene la revisión del superadministrador (falta carne-revision-superadmin.sql).") : Tr("Error: ") + err)
                     : Tr("No hay infracciones."));
             else if (pending == 0) _revList.SetEmpty(Tr("No hay infracciones pendientes de revisión."));
             _revList.EndReload();
@@ -584,19 +625,19 @@ namespace SelectOR
 
         async void ReviewInfraction(bool confirm)
         {
-            if (_revList == null || _empSel == null) return;
+            if (_revList == null) return;
             int i = _revList.SelectedRow;
             if (i < 0 || i >= _revRows.Count) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
             var (id, status, driver) = _revRows[i];
             if (status != "pending") { Msg(_revMsg, Tr("Esta infracción ya está revisada."), true); return; }
-            if (driver == Supa.UserId && !Supa.IsSuperadmin) { Msg(_revMsg, Tr("No puedes revisar tus propias infracciones."), true); return; }
-            string q = confirm ? Tr("¿Confirmar la infracción? Se restarán los puntos al maquinista.")
-                               : Tr("¿Anular la infracción? No restará puntos.");
+            if (!Supa.IsSuperadmin) return;
+            string q = confirm ? Tr("¿Confirmar la infracción? Los puntos siguen restados al maquinista.")
+                               : Tr("¿Anular la infracción? Se devolverán los puntos al maquinista.");
             if (MessageBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             Msg(_revMsg, confirm ? Tr("Confirmando…") : Tr("Anulando…"), false);
             var (_, err) = await Supa.RpcAsync("review_infraction", new { p_id = id, p_confirm = confirm });
             if (err != null) { Msg(_revMsg, Tr("Error: ") + err, true); return; }
-            Msg(_revMsg, confirm ? Tr("Infracción confirmada: se han restado los puntos.") : Tr("Infracción anulada."), false);
+            Msg(_revMsg, confirm ? Tr("Infracción confirmada.") : Tr("Infracción anulada: se han devuelto los puntos."), false);
             LoadReview();
             if (_empSel != null) LoadMembers(_empSel);   // columna PUNTOS de Socios
         }

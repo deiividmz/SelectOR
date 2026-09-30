@@ -1471,6 +1471,28 @@ namespace SelectOR
             ["{0} te ha retirado el permiso para escribir en el chat de {1}. Puedes seguir leyéndolo."] = "{0} has removed your permission to write in the {1} chat. You can still read it.",
             ["{0} vuelve a poder escribir en el chat."] = "{0} can write in the chat again.",
             ["{0} ya no puede escribir en el chat."] = "{0} can no longer write in the chat.",
+            // Carné: revisión del superadministrador
+            ["Infracciones del carné por puntos de todas las empresas. Todas restan los puntos al momento. Los excesos de velocidad (B6 y B7) quedan pendientes de revisión: confírmalos o anúlalos para devolver los puntos al maquinista."] = "Points-licence offences of all companies. They all deduct the points at once. Speeding offences (B6 and B7) stay pending review: confirm them, or annul them to give the points back to the driver.",
+            ["¿Confirmar la infracción? Los puntos siguen restados al maquinista."] = "Confirm the offence? The points stay deducted from the driver.",
+            ["¿Anular la infracción? Se devolverán los puntos al maquinista."] = "Annul the offence? The points will be given back to the driver.",
+            ["Infracción confirmada."] = "Offence confirmed.",
+            ["Infracción anulada: se han devuelto los puntos."] = "Offence annulled: the points have been given back.",
+            ["Los excesos de velocidad los revisa el administrador: si los anula, se te devuelven los puntos."] = "Speeding offences are reviewed by the administrator: if they are annulled, you get the points back.",
+            ["El servidor aún no tiene la revisión del superadministrador (falta carne-revision-superadmin.sql)."] = "The server does not have the superadmin review yet (carne-revision-superadmin.sql is missing).",
+            // Aviso de infracciones y actualización al arrancar
+            ["El tren ha aparecido a {0} m en un instante."] = "The train appeared {0} m away in an instant.",
+            ["La hora del simulador ha ido hasta ×{0} más rápida durante {1} s."] = "The simulator clock ran up to ×{0} faster for {1} s.",
+            ["{0} km/h con límite {1} durante más de 30 s."] = "{0} km/h with a {1} limit for more than 30 s.",
+            ["El servicio no se registrará y restará {0} del carné (salvo en un viaje de menos de 3 km o 5 minutos)."] = "The service will not be recorded and will cost {0} on your licence (except on a trip under 3 km or 5 minutes).",
+            ["Si el servicio se registra, restará {0} del carné, pendiente de revisión."] = "If the service is recorded, it will cost {0} on your licence, pending review.",
+            ["Carné por puntos"] = "Points licence",
+            ["Buscando actualizaciones…"] = "Checking for updates…",
+            ["Actualizando SelectOR a la versión {0}…"] = "Updating SelectOR to version {0}…",
+            ["Descargando la versión {0}… {1} %"] = "Downloading version {0}… {1} %",
+            ["Comprobando la firma de la actualización…"] = "Checking the update signature…",
+            ["Instalando la actualización…"] = "Installing the update…",
+            ["Reiniciando SelectOR…"] = "Restarting SelectOR…",
+            ["No se ha podido actualizar; se abre la versión actual."] = "The update could not be installed; opening the current version.",
         };
 
         public static string T(string es)

@@ -72,6 +72,21 @@ namespace SelectOR
             catch { }
         }
 
+        /// <summary>Vuelve a poner la barra a cero con otro texto (la actualización al arrancar usa la
+        /// barra para su progreso y, si no se actualiza, la carga normal empieza de nuevo).</summary>
+        public static void Reset(string step)
+        {
+            SplashScreen s;
+            lock (_lock) s = _instance;
+            if (s == null) return;
+            try
+            {
+                if (!s.IsHandleCreated) return;
+                s.BeginInvoke((Action)(() => { s._target = 0; s._creepTo = 0; s._shown = 0; s._step = step ?? ""; s.Invalidate(); }));
+            }
+            catch { }
+        }
+
         /// <summary>Cierra la pantalla: la barra termina de llegar al 100 % y se espera a que se vaya,
         /// para que el menú aparezca justo después y no encima de ella.</summary>
         public static void Finish()
