@@ -28,6 +28,8 @@ namespace SelectOR
         [DllImport("kernel32.dll")] static extern int GetCurrentThreadId();
         const int SW_SHOW = 5;
 
+        public static IntPtr Foreground() { try { return GetForegroundWindow(); } catch { return IntPtr.Zero; } }
+
         public static void ForceForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;

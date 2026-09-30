@@ -134,6 +134,8 @@ namespace SelectOR
                 case "resume": DrawResume(g, b, cx, cy); break;
                 case "gear": DrawGear(g, b, cx, cy); break;
                 case "info": DrawInfo(g, b, cx, cy); break;
+                case "shield": DrawShield(g, b, cx, cy); break;
+                case "chat": ChatHudOverlay.DrawBubble(g, new Rectangle(cx - (int)(b.Width * 0.38f), cy - (int)(b.Height * 0.36f), (int)(b.Width * 0.76f), (int)(b.Height * 0.72f)), Color.FromArgb(94, 190, 155)); break;
                 case "bank": DrawBank(g, b, cx, cy); break;
                 case "speaker": DrawSpeaker(g, b, cx, cy); break;
             }
@@ -352,6 +354,23 @@ namespace SelectOR
             using (var cb = new SolidBrush(Color.FromArgb(76, 175, 80))) g.FillEllipse(cb, cx - r, cy - r, r * 2, r * 2);
             using (var f = Theme.Font(b.Height * 0.5f, FontStyle.Bold))
                 TextRenderer.DrawText(g, "i", f, new Rectangle(cx - r, cy - r, r * 2, r * 2), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        // Escudo con una marca (carné por puntos · Revisión).
+        static void DrawShield(Graphics g, Rectangle b, int cx, int cy)
+        {
+            float w = b.Width * 0.72f, h = b.Height * 0.84f, x0 = cx - w / 2, y0 = cy - h / 2;
+            using (var path = new GraphicsPath())
+            {
+                path.AddLine(cx, y0, x0 + w, y0 + h * 0.18f);
+                path.AddBezier(x0 + w, y0 + h * 0.18f, x0 + w, y0 + h * 0.62f, cx + w * 0.22f, y0 + h * 0.86f, cx, y0 + h);
+                path.AddBezier(cx, y0 + h, cx - w * 0.22f, y0 + h * 0.86f, x0, y0 + h * 0.62f, x0, y0 + h * 0.18f);
+                path.CloseFigure();
+                using var br = new SolidBrush(Color.FromArgb(245, 197, 66));
+                g.FillPath(br, path);
+            }
+            using var pen = new Pen(Color.White, Math.Max(1.6f, b.Width * 0.1f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+            g.DrawLines(pen, new[] { new PointF(cx - w * 0.22f, cy + h * 0.02f), new PointF(cx - w * 0.04f, cy + h * 0.18f), new PointF(cx + w * 0.24f, cy - h * 0.14f) });
         }
 
         static void DrawSun(Graphics g, Rectangle b, int cx, int cy)

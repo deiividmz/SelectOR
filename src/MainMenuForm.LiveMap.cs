@@ -31,7 +31,7 @@ namespace SelectOR
             StopLiveTimer();
             _liveMates.Reset();
             if (!LiveWanted || _kmTimer == null) return;
-            _liveRoute = _curRoute?.Name ?? "";
+            _liveRoute = RouteIds.IdOf(_curRoute?.Path, _curRoute?.Name);   // RouteID del .trk (no el nombre, que se puede repetir)
             _liveTrain = _drivenConsist?.Name;
             if (string.IsNullOrWhiteSpace(_liveTrain)) _liveTrain = CurrentConsistLabel();
             if (string.IsNullOrWhiteSpace(_liveRoute)) return;

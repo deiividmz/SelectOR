@@ -68,9 +68,8 @@ namespace SelectOR
         int _tick;
         // Páginas lentas: se refrescan cada segundo y se reutiliza lo último leído.
         List<(string label, string value)> _p2 = new(), _p5 = new(), _p7 = new();
-        // Diagnóstico: cada 3 s se guarda en %AppData%\Open Rails\SelectOR\pupitre-diagnostico.json
-        // lo que envía OR tal cual y lo que el pupitre ha entendido, para revisar trenes que se vean
-        // mal (se sobrescribe: vale la última lectura).
+        // Diagnóstico (solo con SELECTOR_CABLOG=1): cada 3 s se guarda en %AppData%\Open Rails\SelectOR        // pupitre-diagnostico.json lo que envía OR tal cual y lo que el pupitre ha entendido, para revisar
+        // trenes que se vean mal (se sobrescribe: vale la última lectura). Sin la variable no se escribe nada.
         string _raw5, _rawTm; long _diagAt = -100000;
         public string DiagTrain = "";
         readonly Dictionary<string, double> _ema = new(StringComparer.Ordinal);
@@ -157,7 +156,7 @@ namespace SelectOR
             if (v.Has("dir") && !v.Has("rev"))
             { v.Reverser = v.Direction == 'F' ? 1 : v.Direction == 'R' ? -1 : 0; v.Av.Add("rev"); }
 
-            if (j1 != null && jc != null && _raw5 != null && Environment.TickCount64 - _diagAt > 3000)
+            if (DiagOn && j1 != null && jc != null && _raw5 != null && Environment.TickCount64 - _diagAt > 3000)
             {
                 _diagAt = Environment.TickCount64;
                 SaveDiag(j1, _raw5, jc, v);
@@ -166,6 +165,8 @@ namespace SelectOR
             Smooth(v);
             return v;
         }
+
+        static readonly bool DiagOn = AppDataTidy.Flag("SELECTOR_CABLOG");
 
         void SaveDiag(string hud1, string hud5, string cab, CabValues v)
         {

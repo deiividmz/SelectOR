@@ -95,12 +95,22 @@ namespace SelectOR
         // tsection.dat, como antes: los puntos de inicio de cada sección.
         public static PointF[] NodePolyline(TrVectorSection[] vs, TrackSectionsFile ts)
         {
-            var pts = new List<PointF>(vs.Length * 2);
+            var d = NodePolylineD(vs, ts);
+            var res = new PointF[d.Count];
+            for (int i = 0; i < d.Count; i++) res[i] = new PointF((float)d[i].x, (float)d[i].z);
+            return res;
+        }
+
+        // Igual, en doble precisión (en float las coordenadas de mundo se redondean a ~1 m; los andenes
+        // necesitan precisión de palmo para distinguir su vía de la de al lado).
+        public static List<(double x, double z)> NodePolylineD(TrVectorSection[] vs, TrackSectionsFile ts)
+        {
+            var pts = new List<(double x, double z)>(vs.Length * 2);
             for (int i = 0; i < vs.Length; i++)
             {
                 var s = vs[i];
                 double x = s.TileX * 2048.0 + s.X, z = s.TileZ * 2048.0 + s.Z;
-                pts.Add(new PointF((float)x, (float)z));
+                pts.Add((x, z));
                 if (ts == null || !ts.TrackSections.TryGetValue(s.SectionIndex, out var sec) || sec?.SectionCurve == null) continue;
                 double r = sec.SectionCurve.Radius, ang = sec.SectionCurve.Angle * Math.PI / 180.0;
                 if (r <= 0 || Math.Abs(ang) < 1e-6) continue;
@@ -112,15 +122,15 @@ namespace SelectOR
                 {
                     double a = ang * k / n;
                     double fwd = r * Math.Sin(Math.Abs(a)), lat = Math.Sign(a) * r * (1 - Math.Cos(a));
-                    pts.Add(new PointF((float)(x + fx * fwd + fz * lat), (float)(z + fz * fwd - fx * lat)));
+                    pts.Add((x + fx * fwd + fz * lat, z + fz * fwd - fx * lat));
                 }
                 if (i == vs.Length - 1)   // última sección: también su punto final
                 {
                     double fwd = r * Math.Sin(Math.Abs(ang)), lat = Math.Sign(ang) * r * (1 - Math.Cos(ang));
-                    pts.Add(new PointF((float)(x + fx * fwd + fz * lat), (float)(z + fz * fwd - fx * lat)));
+                    pts.Add((x + fx * fwd + fz * lat, z + fz * fwd - fx * lat));
                 }
             }
-            return pts.ToArray();
+            return pts;
         }
 
         // Une el tramo con la posición real de sus empalmes/finales (el .tdb no la repite en las

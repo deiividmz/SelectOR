@@ -1,4 +1,4 @@
-﻿// Pestaña "Empresas": empresas ferroviarias multi-maquinista sobre Supabase.
+// Pestaña "Empresas": empresas ferroviarias multi-maquinista sobre Supabase.
 // Tres vistas conmutables: configuración del servidor, acceso (login/registro) y panel.
 // La economía vive en el servidor (funciones SQL); aquí solo se muestra y se llama por REST.
 
@@ -61,7 +61,67 @@ namespace SelectOR
                                            // (primera posición del tren que da OR), no durante la carga
 
         // Segundos de servicio (0 si el escenario aún no había terminado de cargar).
-        int ServiceSeconds() => _svcClockUtc == null ? 0 : (int)Math.Max(0, (DateTime.UtcNow - _svcClockUtc.Value).TotalSeconds);
+        // Cronómetro del servicio: tiempo REAL, pero solo mientras Open Rails está en marcha. Con el juego en
+        // pausa (tecla Pausa o menú de Esc) la hora del simulador (/API/TIME) no avanza, y ese tiempo no cuenta.
+        // El acelerador de tiempo de OR tampoco cuenta: se suma el tiempo real, no el del juego.
+        // Tren del servicio en curso, tal como se envió al abrirlo: plazas (viajeros) o toneladas (mercancías,
+        // con las que el servidor calcula el ingreso). NaN = no se sabe.
+        double _svcTrainMass = double.NaN, _svcTrainCap = double.NaN;
+        double _svcRunS;                   // segundos de marcha acumulados hasta el último sondeo
+        DateTime? _svcLastTickUtc;         // último sondeo (el tramo desde ahí se suma si no hay pausa)
+        double _svcLastGameS = double.NaN; // hora del juego en el último sondeo
+        bool _svcPaused;                   // Open Rails está en pausa
+
+        void StartSvcClock(DateTime? t)
+        {
+            _svcClockUtc = t;
+            _svcRunS = 0; _svcLastTickUtc = t; _svcLastGameS = double.NaN; _svcPaused = false;
+            InfrReset();   // carné por puntos: servicio nuevo, nada detectado
+        }
+
+        double ServiceSecondsExact()
+        {
+            if (_svcClockUtc == null) return 0;
+            double s = _svcRunS;
+            if (!_svcPaused && _svcLastTickUtc != null) s += Math.Max(0, (DateTime.UtcNow - _svcLastTickUtc.Value).TotalSeconds);
+            return s;
+        }
+
+        int ServiceSeconds() => (int)Math.Max(0, ServiceSecondsExact());
+
+        // Para el HUD, que cuenta desde una hora de inicio: la que da el tiempo de marcha hasta ahora.
+        DateTime? SvcVirtualStart() => _svcClockUtc == null ? (DateTime?)null : DateTime.UtcNow - TimeSpan.FromSeconds(ServiceSecondsExact());
+
+        // En cada sondeo: ¿ha avanzado la hora del juego? Si sí, se suma el tramo; si no, el juego está en pausa.
+        async Task SvcClockTick()
+        {
+            if (_svcClockUtc == null) return;
+            double game = await FetchGameSeconds();
+            var now = DateTime.UtcNow;
+            if (_svcLastTickUtc != null)
+            {
+                // Sin dato (API que no responde): se cuenta, como antes, para no perder tiempo por un fallo.
+                bool running = double.IsNaN(game) || double.IsNaN(_svcLastGameS) || Math.Abs(game - _svcLastGameS) > 0.05;
+                if (running) _svcRunS += Math.Max(0, (now - _svcLastTickUtc.Value).TotalSeconds);
+                _svcPaused = !running;
+                // Carné (A3): ¿la hora del juego corre más que la real?
+                if (!double.IsNaN(game) && !double.IsNaN(_svcLastGameS))
+                    InfrAccelTick((now - _svcLastTickUtc.Value).TotalSeconds, game - _svcLastGameS);
+            }
+            _svcLastTickUtc = now;
+            if (!double.IsNaN(game)) _svcLastGameS = game;
+        }
+
+        async Task<double> FetchGameSeconds()
+        {
+            try
+            {
+                string txt = await _kmHttp.GetStringAsync("/API/TIME");
+                if (double.TryParse(txt.Trim().Trim('"'), NumberStyles.Float, CultureInfo.InvariantCulture, out double secs)) return secs;
+            }
+            catch { }
+            return double.NaN;
+        }
         int _tripDurationS;                // duración REAL del viaje en segundos (anti-trampas)
         // Seguimiento de km reales por la API web de OR (posición del tren en vivo)
         Timer _kmTimer; System.Net.Http.HttpClient _kmHttp;
@@ -73,7 +133,7 @@ namespace SelectOR
         int _paxBoarded, _paxOnboard, _paxCapacity;  // billetes totales, a bordo ahora, tope de la unidad
         double _paxKm;                                // viajeros·km: cada viajero por los km que va a bordo (billete por km)
         bool _paxActive; bool _paxBusy; volatile bool _paxWanted;   // activo / poll en curso / se quiere seguir cargando andenes
-        double _paxDemandBase = 60;                  // demanda base por andén (app_settings.fleet_pax_demand)
+        double _paxDemandBase = 60;                  // antigua demanda base fija (app_settings.fleet_pax_demand): ya no se usa, la afluencia sale de las plazas del tren
         Panel _soloPanel;   // panel "Mi perfil"
         // Panel "Mi perfil" (estadísticas privadas del maquinista)
         BarChart _profTrains; DonutChart _profRoutes;
@@ -210,7 +270,19 @@ namespace SelectOR
         {
             public string Id, Date, Driver, Route, Status;
             public double Km, DurationS, Pax, Income, Cost, Net;
+            public double MassT = double.NaN, Capacity = double.NaN;   // toneladas y plazas del tren (NaN = no se sabe)
+            public string Train = "";                                   // tren conducido (composición)
+            public int Cars, Engines;                                   // vehículos de su .con y cuántos son motrices (0 = no se sabe)
             public bool Valid;
+        }
+
+        // «300 plazas» si el tren lleva viajeros; «1.250 t» si es de mercancías (el ingreso se calcula con esa
+        // masa); «—» si el servicio es de una versión antigua que no lo guardaba.
+        static string TrainLoadText(double capacity, double massT)
+        {
+            if (capacity > 0) return string.Format(Tr("{0} plazas"), capacity.ToString("N0", EsEs));
+            if (massT > 0) return massT.ToString("N0", EsEs) + " t";
+            return "—";
         }
         // --- Ajustes (tarifas + saldo superadmin) ---
         RoundedInput _tarIncome, _tarCanon, _tarEnergy, _tarSalary, _tarBalance, _defBalance;
@@ -378,15 +450,15 @@ namespace SelectOR
         }
 
         // Secciones de Empresas (el índice es el que usan ShowSubtab / UpdateSubtabVisibility).
-        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía" };
-        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "explore", "connect", "globe", "train", "train", "speaker" };
+        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía", "Chat" };
+        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "shield", "connect", "globe", "train", "train", "speaker", "chat" };
         // Agrupación del menú lateral.
         static readonly (string title, int[] items)[] NavGroupDefs =
         {
             ("OPERACIÓN", new[] { 0, 9, 10 }),        // Servicios · Flota · Compra
             ("FINANZAS", new[] { 1, 4 }),             // Banca · Ranking
-            ("EMPRESA", new[] { 2, 3, 11, 5 }),       // Socios · Ajustes · Megafonía · Mi perfil
-            ("ADMINISTRACIÓN", new[] { 7, 8 }),       // Usuarios · Administración (el 6, «Revisión», ya no existe)
+            ("EMPRESA", new[] { 12, 2, 6, 3, 11, 5 }),   // Chat · Socios · Revisión · Ajustes · Megafonía · Mi perfil
+            ("ADMINISTRACIÓN", new[] { 7, 8 }),       // Usuarios · Administración
         };
         const int RailW = 236;          // ancho del menú lateral de Empresas
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
@@ -541,7 +613,7 @@ namespace SelectOR
         }
 
         // Alturas del menú lateral (se encogen si hace falta para que quepa todo sin barras).
-        const int NavItemH = 34, NavItemHMin = 26, NavHeaderH = 30, NavHeaderH0 = 22, NavHeaderHMin = 17;
+        const int NavItemH = 34, NavItemHMin = 23, NavHeaderH = 30, NavHeaderH0 = 22, NavHeaderHMin = 14;
         TableLayoutPanel _empNav;
         List<(Control c, int tipo)> _navRows;   // tipo: 0 sección · 1 primer encabezado · 2 encabezado
 
@@ -617,6 +689,7 @@ namespace SelectOR
                 if (_empSubtab == 1) LoadLedger();
                 if (_empSubtab == 4) LoadRankTab();
                 if (_empSubtab == 11) OnMegafoniaShown();   // otra empresa → otros audios
+                if (_empSubtab == ChatSubtab) OnChatShown();  // otra empresa → otro chat
             }
             else { _myRole = null; UpdateRoleUi(); }
         }
@@ -680,13 +753,14 @@ namespace SelectOR
             _tariffPanel = BuildTariffSubpanel();
             _rankPanel = BuildRankSubpanel();
             _soloPanel = BuildProfileSubpanel();
-            _reviewPanel = new Panel();   // hueco de la antigua sección «Revisión» (los viajes no válidos ya no se guardan)
+            _reviewPanel = BuildReviewSubpanel();   // infracciones del carné por puntos (gerente y gestores)
+            _chatPanel = BuildChatSubpanel();       // chat de la empresa
             _usersPanel = BuildUsersSubpanel();
             _allCompPanel = BuildAllCompaniesSubpanel();
             _fleetPanel = BuildFleetSubpanel();
             _buyPanel = BuildBuySubpanel();
             _paPanel = BuildPaSubpanel();
-            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
+            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel, _chatPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
 
             _empHomeMsg = EmpMsg(); _empHomeMsg.Dock = DockStyle.Bottom;
 
@@ -803,8 +877,8 @@ namespace SelectOR
             {
                 _empSvcList.RowFilter = i switch
                 {
-                    1 => cells => cells.Length > 9 && cells[9].Contains(Tr("En conducción")),
-                    2 => cells => cells.Length > 9 && cells[9].Contains(Tr("completado")),
+                    1 => cells => cells.Length > 0 && cells[^1].Contains(Tr("En conducción")),   // el estado es la última columna
+                    2 => cells => cells.Length > 0 && cells[^1].Contains(Tr("completado")),
                     _ => (Func<string[], bool>)null
                 };
                 _empSvcList.Refilter();
@@ -819,9 +893,12 @@ namespace SelectOR
                 new StyledTable.Col("FECHA", 92),
                 new StyledTable.Col("MAQUINISTA", 128),
                 new StyledTable.Col("RUTA", 0, true),
+                new StyledTable.Col("TREN", 150),
+                new StyledTable.Col("COCHES", 78, false, HorizontalAlignment.Right),   // vehículos del .con y motrices, «8 (2M)»
                 new StyledTable.Col("KM", 54, false, HorizontalAlignment.Right),
                 new StyledTable.Col("TIEMPO", 76, false, HorizontalAlignment.Right),
                 new StyledTable.Col("VIAJEROS", 78, false, HorizontalAlignment.Right),
+                new StyledTable.Col("PLAZAS · CARGA", 104, false, HorizontalAlignment.Right),
                 new StyledTable.Col("INGRESO", 94, false, HorizontalAlignment.Right),
                 new StyledTable.Col("NETO", 100, false, HorizontalAlignment.Right),
                 new StyledTable.Col("ESTADO", 124));
@@ -859,7 +936,8 @@ namespace SelectOR
             pMem.Controls.Add(EmpSearch(_memberList, 300));
             _memberList.SetColumns(
                 new StyledTable.Col("MAQUINISTA", 0, true),
-                new StyledTable.Col("ROL", 160));
+                new StyledTable.Col("ROL", 160),
+                new StyledTable.Col("PUNTOS", 110, false, HorizontalAlignment.Right));
             pMem.Controls.Add(_memberList);
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 4, 0, 0) };
             _memberRole = NewCombo(); _memberRole.Dock = DockStyle.None; _memberRole.Width = 170; _memberRole.DropDownStyle = ComboBoxStyle.DropDownList; _memberRole.Margin = new Padding(0, 16, 8, 2);
@@ -996,9 +1074,11 @@ namespace SelectOR
             var R = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(48, 0, 0, 0) };
             pPax.Controls.Add(L, 0, 0); pPax.Controls.Add(R, 1, 0);
             L.Controls.Add(EmpHeader("MODELO DE VIAJEROS (GLOBAL, SUPERADMIN)"));
-            L.Controls.Add(EmpNote(Tr("Viajeros que esperan = demanda base × tamaño de estación × tipo de servicio × hora × estación del año × clima × variación aleatoria.")));
-            L.Controls.Add(EmpFieldLabel(Tr("Demanda base de viajeros por estación")));
-            _fsPaxDemand = EmpInput("60"); _fsPaxDemand.Anchor = AnchorStyles.Left; _fsPaxDemand.Width = 200; L.Controls.Add(_fsPaxDemand);
+            L.Controls.Add(EmpNote(Tr("Viajeros que esperan = plazas del tren × % base × tamaño de estación × tipo de servicio × hora × estación del año × clima × variación aleatoria. Nunca suben más viajeros que plazas libres.")));
+            L.Controls.Add(EmpFieldLabel(Tr("Viajeros que esperan en una estación de tamaño ×1 (% de las plazas del tren)")));
+            _pmCapPct = EmpInput("12"); _pmCapPct.Anchor = AnchorStyles.Left; _pmCapPct.Width = 200; L.Controls.Add(_pmCapPct);
+            // La antigua demanda base fija ya no se enseña; el campo se conserva para guardar la economía de flota tal cual.
+            _fsPaxDemand = EmpInput("60");
             var profCols = new[] { "Cercanías", "Media", "Larga", "Alta Vel." };
             var profGrid = ParamGrid(profCols, new[]
             {
@@ -1007,11 +1087,11 @@ namespace SelectOR
             });
             L.Controls.Add(EmpHeader("POR TIPO DE SERVICIO"));
             L.Controls.Add(profGrid);
-            L.Controls.Add(EmpHeader("POR TAMAÑO DE ESTACIÓN (Nº DE ANDENES)"));
-            L.Controls.Add(ParamGrid(new[] { "1", "2–3", "4–7", "8+" }, new[] { ("Peso de la estación (× base)", _pmStation = new RoundedInput[4]) }));
+            L.Controls.Add(EmpHeader("POR TAMAÑO DE ESTACIÓN (METROS DE ANDÉN)"));
+            L.Controls.Add(ParamGrid(new[] { "< 250 m", "250–600 m", "600–1.400 m", "≥ 1.400 m" }, new[] { ("Peso de la estación (× base)", _pmStation = new RoundedInput[4]) }));
 
             R.Controls.Add(EmpHeader("OTROS FACTORES"));
-            R.Controls.Add(EmpNote(Tr("Bajada extra: multiplica la fracción que baja en estaciones de 4 o más andenes. Variación: ± aleatorio por estación y visita. Reembarque: distancia a la que hay que alejarse para volver a atender la misma estación.")));
+            R.Controls.Add(EmpNote(Tr("Bajada extra: multiplica la fracción que baja en estaciones de 600 m de andén o más. Variación: ± aleatorio por estación y visita. Reembarque: distancia a la que hay que alejarse para volver a atender la misma estación.")));
             R.Controls.Add(ParamGrid(new[] { "Bajada extra (×)", "Variación (±%)", "Reembarque (m)" },
                 new[] { ("Paradas", _pmMisc = new RoundedInput[3]) }, 90, 132));
             R.Controls.Add(EmpHeader("CLIMA Y ESTACIÓN DEL AÑO"));
@@ -1115,9 +1195,10 @@ namespace SelectOR
         {
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, AutoScroll = true };
             Native.UseDarkScrollBars(host);   // barra de scroll oscura acorde al tema
-            var t = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, RowCount = 8, BackColor = Theme.Bg, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            var t = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, RowCount = 11, BackColor = Theme.Bg, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // tarjeta de rango
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // tarjeta del carné por puntos
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // KPIs
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // header insignias
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // insignias
@@ -1125,6 +1206,8 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.Absolute, 168));  // gráfica trenes
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // header trayectos
             t.RowStyles.Add(new RowStyle(SizeType.Absolute, 190));  // gráfica trayectos (anillo)
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // header historial del carné
+            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 230));  // historial del carné
 
             // Anchura del contenido = ancho del host (menos margen para la barra de scroll)
             void FitWidth() { t.Width = Math.Max(10, host.ClientSize.Width - 4); }
@@ -1157,6 +1240,7 @@ namespace SelectOR
             rankInner.Controls.Add(rankTop, 0, 0); rankInner.Controls.Add(_rankTrack, 0, 1); rankInner.Controls.Add(_rankNext, 0, 2);
             rankCard.Controls.Add(rankInner);
             t.Controls.Add(rankCard);
+            t.Controls.Add(BuildLicenseCard());
 
             // KPIs
             var kpis = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
@@ -1179,6 +1263,10 @@ namespace SelectOR
             // Los trayectos se ven mejor en anillo: lo interesante es el REPARTO de tus viajes.
             _profRoutes = new DonutChart { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 6), Format = v => $"{v:0}", CenterCaption = Tr("VIAJES") };
             t.Controls.Add(_profRoutes);
+
+            t.Controls.Add(EmpHeader("HISTORIAL DEL CARNÉ"));
+            var hist = BuildLicenseHistory(); hist.Margin = new Padding(2, 2, 2, 8);
+            t.Controls.Add(hist);
 
             host.Controls.Add(t);
             return host;
@@ -1250,7 +1338,7 @@ namespace SelectOR
         void ShowSubtab(int i)
         {
             _empSubtab = i;
-            for (int k = 0; k < _empSubtabs.Length; k++) { if (_empSubtabs[k] == null) continue; _empSubtabs[k].Active = k == i; _empSubtabs[k].Invalidate(); }   // el 6 («Revisión») ya no tiene botón
+            for (int k = 0; k < _empSubtabs.Length; k++) { if (_empSubtabs[k] == null) continue; _empSubtabs[k].Active = k == i; _empSubtabs[k].Invalidate(); }
             if (_empSectionTitle != null && i >= 0 && i < SubNames.Length) _empSectionTitle.Text = Tr(SubNames[i]);
             _svcPanel.Visible = i == 0;
             _bankPanel.Visible = i == 1;
@@ -1265,6 +1353,7 @@ namespace SelectOR
             _fleetPanel.Visible = i == 9;
             _buyPanel.Visible = i == 10;
             if (_paPanel != null) _paPanel.Visible = i == 11;
+            if (_chatPanel != null) _chatPanel.Visible = i == ChatSubtab;
             // Cada subpestaña recarga sus datos al abrirse (ya no hay botón "Actualizar").
             if (i == 0 && _empSel != null) LoadServices(_empSel);
             if (i == 1) LoadLedger();
@@ -1272,11 +1361,13 @@ namespace SelectOR
             if (i == 3) { FillTariffFields(); LoadDefaultBalance(); LoadFleetSettings(); LoadFarePerKm(); }
             if (i == 4) LoadRankTab();
             if (i == 5) LoadProfile();
+            if (i == 6) LoadReview();
             if (i == 7) LoadUsers();
             if (i == 8) LoadAllCompanies();
             if (i == 9 || i == 10) LoadFleet();   // Flota y Compra comparten los mismos datos (vehicles)
             if (i == 10) LoadPurchaseRequests();
             if (i == 11) OnMegafoniaShown();
+            if (i == ChatSubtab) OnChatShown();
             UpdateCompanyKpis();                  // la tira de la empresa se muestra u oculta según la sección
         }
 
@@ -1605,7 +1696,30 @@ namespace SelectOR
             if (c == null) return;
             _empSvcList.BeginReload(c.Id);
             _empSvcList.ShowLoading(Tr("Cargando…"));
-            var (json, err) = await Supa.RpcAsync("list_company_services", new { p_company = c.Id });
+            // A la vez: la lista (con maquinista, economía…) y las plazas y toneladas de cada tren, que se
+            // leen aparte de la tabla de servicios (la función de la lista no las devuelve).
+            var tLista = Supa.RpcAsync("list_company_services", new { p_company = c.Id });
+            string trenQ(string cols) => $"services?select={cols}&company_id=eq.{Uri.EscapeDataString(c.Id)}&order=started_at.desc&limit=200";
+            var tTren = Supa.SelectAsync(trenQ("id,consist,consist_mass,consist_capacity,consist_cars,consist_engines"));
+            var (json, err) = await tLista;
+            var tren = new Dictionary<string, (double mass, double cap, string name, int cars, int engines)>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var (tj, te) = await tTren;
+                // Servidor sin motrices-servicio.sql: sin la columna de motrices.
+                if (te != null && te.IndexOf("consist_engines", StringComparison.OrdinalIgnoreCase) >= 0)
+                    (tj, te) = await Supa.SelectAsync(trenQ("id,consist,consist_mass,consist_capacity,consist_cars"));
+                if (te == null && !string.IsNullOrWhiteSpace(tj))
+                {
+                    using var td = JsonDocument.Parse(tj);
+                    foreach (var e in td.RootElement.EnumerateArray())
+                    {
+                        double NumOrNaN(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : double.NaN;
+                        tren[Str(e, "id")] = (NumOrNaN("consist_mass"), NumOrNaN("consist_capacity"), Str(e, "consist"), (int)Num(e, "consist_cars"), (int)Num(e, "consist_engines"));
+                    }
+                }
+            }
+            catch { }
             _empSvcList.ClearRows(); _svcIds.Clear(); _svcRows.Clear();
             if (err != null) { _empSvcList.SetEmpty(Tr("Error: ") + err); return; }
             int n = 0;
@@ -1624,20 +1738,24 @@ namespace SelectOR
                     bool valid = !e.TryGetProperty("validated", out var vv) || vv.ValueKind != JsonValueKind.False;
                     string rawStatus = Str(e, "status");
                     _svcIds.Add(id);
+                    var (tm, tc, tn, tcars, teng) = tren.TryGetValue(id, out var tt) ? tt : (double.NaN, double.NaN, "", 0, 0);
+                    if (string.IsNullOrWhiteSpace(tn)) tn = "—";
                     _svcRows.Add(new SvcRow { Id = id, Date = date, Driver = driver, Route = route, Status = rawStatus,
-                                              Km = km, DurationS = dur, Pax = pax, Income = inc, Cost = cost, Net = net, Valid = valid });
+                                              Km = km, DurationS = dur, Pax = pax, Income = inc, Cost = cost, Net = net, Valid = valid,
+                                              MassT = tm, Capacity = tc, Train = tn, Cars = tcars, Engines = teng });
                     // Servicio "En conducción" (open): aún no hay datos del viaje → km, tiempo, viajeros,
                     // ingreso y neto se muestran en blanco (—) hasta que se registre al terminar.
                     bool open = rawStatus == "open";
                     _empSvcList.AddRow(
-                        new[] { "ⓘ", date, driver, route,
+                        new[] { "ⓘ", date, driver, route, tn, CarsText(tcars, teng),
                                 open ? "—" : km.ToString("N0", EsEs),
                                 open ? "—" : FmtDurShort(dur),
                                 open || pax <= 0 ? "—" : pax.ToString("N0", EsEs),
+                                TrainLoadText(tc, tm),
                                 open ? "—" : inc.ToString("N0", EsEs) + " €",
                                 open ? "—" : net.ToString("+#,##0.00;-#,##0.00", EsEs) + " €",
                                 StatusLabel(rawStatus, valid) },
-                        new Color?[] { Theme.Accent, null, Theme.Subtle, null, null, null, Theme.Subtle, Theme.Subtle,
+                        new Color?[] { Theme.Accent, null, Theme.Subtle, null, Theme.Subtle, Theme.Subtle, null, null, Theme.Subtle, Theme.Subtle, Theme.Subtle,
                                        open ? Theme.Subtle : (net < 0 ? RedC : Theme.Accent), StatusColor(rawStatus, valid) }, null, id);
                 }
             }
@@ -1658,7 +1776,7 @@ namespace SelectOR
                 History = true, Company = _empSel?.Name ?? "", Route = s.Route, Driver = s.Driver, DateText = s.Date,
                 Valid = s.Valid, Km = s.Km, DurationS = (int)s.DurationS, Pax = (int)s.Pax,
                 Income = s.Income, Net = s.Net, StatusText = StatusLabel(s.Status, s.Valid),
-                InProgress = s.Status == "open"
+                InProgress = s.Status == "open", MassT = s.MassT, Capacity = s.Capacity, Cars = s.Cars, Engines = s.Engines
             };
             // Datos extra del servicio (tren, recorrido, notas) — máxima info que registró OR/servidor.
             try
@@ -2009,7 +2127,7 @@ namespace SelectOR
         // Ranking (4), Mi perfil (5) y Megafonía (11) no hablan de la marcha de la empresa: sus
         // datos no tienen nada que ver con tesorería, socios, servicios ni km, así que en ellas la
         // tira de KPIs solo roba alto a la tabla.
-        static bool SubtabShowsCompanyKpis(int subtab) => subtab != 4 && subtab != 5 && subtab != 11;
+        static bool SubtabShowsCompanyKpis(int subtab) => subtab != 4 && subtab != 5 && subtab != 11 && subtab != ChatSubtab;   // el chat aprovecha todo el alto
 
         void UpdateCompanyKpis()
         {
@@ -2227,7 +2345,7 @@ namespace SelectOR
                     logo = LogoFor(_empOnDutyCompany.Id, _empOnDutyCompany.Logo) ?? PlaceholderLogo(_empOnDutyCompany.Name);
                 }
                 _serviceHud = new ServiceHudOverlay(company, logo,
-                    CurrentConsistLabel(), _curRoute?.Name ?? "", () => _svcClockUtc, _prefs, service,
+                    CurrentConsistLabel(), _curRoute?.Name ?? "", SvcVirtualStart, _prefs, service,
                     () => (_paxOnboard, _paxBoarded, _paxCapacity),   // viajeros en vivo (solo servicio)
                     SmoothPos,                                        // posición en vivo, suavizada (para el mapa)
                     () => _trackedMeters / 1000.0,                    // km recorridos en vivo
@@ -2236,6 +2354,7 @@ namespace SelectOR
                     PaHudLines, PaHudPickLine, PaHudToggle,
                     _driveTrail);                                     // rastro de toda la conducción
                 _serviceHud.CabVisible = () => CabHudAlive && _cabHud.Visible;   // botón del pupitre
+                _serviceHud.Paused = () => _svcPaused;                            // cronómetro parado: Open Rails en pausa
                 _serviceHud.ToggleCab = ToggleCabHudFromBar;
                 _serviceHud.Mates = LiveMarkers;   // mapa en vivo: los demás usuarios de la ruta
                 _serviceHud.Me = LiveMe;
@@ -2614,9 +2733,22 @@ namespace SelectOR
                                                                string vehicle, TrainItem train)
         {
             var tot = train != null ? ConsistTotals(train) : default;
+            _svcTrainMass = tot.mass > 0 ? Math.Round(tot.mass, 1) : double.NaN;
+            _svcTrainCap = tot.cars > 0 ? Math.Round(tot.capacity) : double.NaN;
             if (tot.cars > 0 && tot.mass > 0)
             {
+                // Con las motrices del .con (motrices-servicio.sql); si el servidor aún no las conoce, sin ellas.
+                int engines = ConsistEngineCount(train.FilePath);
                 var (j, e) = await Supa.RpcAsync("start_service", new
+                {
+                    p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle,
+                    p_mass = Math.Round(tot.mass, 1), p_cars = tot.cars, p_capacity = Math.Round(tot.capacity), p_engines = engines
+                });
+                bool sinMotrices = e != null && (e.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                                                 || e.IndexOf("p_engines", StringComparison.OrdinalIgnoreCase) >= 0
+                                                 || e.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (!sinMotrices) return (j, e);
+                (j, e) = await Supa.RpcAsync("start_service", new
                 {
                     p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle,
                     p_mass = Math.Round(tot.mass, 1), p_cars = tot.cars, p_capacity = Math.Round(tot.capacity)
@@ -2852,6 +2984,7 @@ namespace SelectOR
         {
             CloseServiceHud();   // cerrar el HUD al volver de conducir
             CloseCabHud();       // y el pupitre
+            CloseChatHud();      // y el chat
             CloseDriveBar();     // y la barra superior
             RestoreAfterDrive();
             FinalizeService();
@@ -2929,7 +3062,7 @@ namespace SelectOR
         {
             _trackedMeters = 0; _tHave = false; _tLat = _tLon = 0;
             _driveTrail.Clear();   // conducción nueva: rastro nuevo
-            _svcClockUtc = null;   // el cronómetro espera a que el escenario esté abierto
+            StartSvcClock(null);   // el cronómetro espera a que el escenario esté abierto
             _scenarioReady = false;   // y los HUD también (ver OnScenarioReady)
             _stoppedSinceUtc = null;
             _paxActive = false; _paxWanted = false; _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0;
@@ -2943,7 +3076,7 @@ namespace SelectOR
                 _kmTimer.Tick += async (s, e) => await PollKm();
                 _kmTimer.Start();
                 if (withPax) StartPaxTracking(_drivenConsist ?? CurrentDrivenConsist());   // viajeros (servicio o conducción libre)
-                PaDriveStart(_curRoute?.Name);   // megafonía: se descarga lo de esta ruta y queda lista
+                PaDriveStart(RouteIds.IdOf(_curRoute?.Path, _curRoute?.Name), _curRoute?.Name);   // megafonía: se descarga lo de esta ruta y queda lista
                 StartLiveMap();                  // mapa en vivo: mi posición y la de los demás en la ruta
             }
             catch { }
@@ -2969,6 +3102,16 @@ namespace SelectOR
         int _paxSeason = -1, _paxWeather = 0;            // 0 prim · 1 ver · 2 otoño · 3 inv (−1 = desconocida) / 0 despejado · 1 nieve · 2 lluvia
         int _paxSeed;                                    // semilla del servicio (variación reproducible dentro del viaje)
         readonly Dictionary<string, (string name, double lat, double lon, double weight)> _paxMeta = new();   // estación normalizada → datos
+        // Andenes reales (del .tdb, con sus dos extremos): el embarque solo se hace con el tren DENTRO de uno.
+        readonly List<(string key, Anden a)> _paxPlat = new();
+        readonly HashSet<string> _paxPlatKeys = new(StringComparer.OrdinalIgnoreCase);   // estaciones con andenes medibles
+        // Para saber si ALGÚN coche está dentro del andén: Open Rails da la posición de la locomotora que
+        // conduces; el resto del tren va por detrás, por la misma vía que ella acaba de recorrer. Se guarda
+        // ese rastro (los últimos metros, tantos como mide el tren) y la longitud del tren (sus coches).
+        readonly List<(double lat, double lon)> _paxTrail = new();
+        double _paxTrainLenM, _paxLeadAheadM;   // longitud del tren y parte que va por delante de la locomotora
+        int _paxDoorNeed;                        // puertas del embarque en curso (1 izq., 2 der., 3 las dos, 0 cualquiera)
+        string _paxWrongSideSaid;                // estación en la que ya se avisó de «puertas del otro lado»
         readonly Dictionary<string, int> _paxVisits = new();
         double _pPrevLat, _pPrevLon, _pDirX, _pDirY; bool _pHavePrev, _pHaveDir;
         string _paxNextName, _paxNextNorm; int _paxNextWaiting; double _paxNextDist;
@@ -2979,7 +3122,8 @@ namespace SelectOR
         // Se guardan en app_settings.pax_model (jsonb). Si la columna aún no existe, se usan estos valores.
         sealed class PaxModelConfig
         {
-            public double[] StationWeights = { 0.6, 1.0, 1.8, 3.0 };      // 1 andén · 2–3 · 4–7 · 8 o más
+            public double[] StationWeights = { 0.6, 1.0, 1.8, 3.0 };      // metros de andén: < 250 · 250–600 · 600–1.400 · 1.400+ (sin andenes medibles: 1 · 2–3 · 4–7 · 8+ andenes)
+            public double CapacityPct = 12;                               // % de las plazas del tren que espera en una estación ×1
             public double[] ProfileDemand = { 1.0, 0.8, 0.6, 0.7 };       // Cercanías · Media · Larga · AV
             public double[] ProfileAlight = { 0.45, 0.35, 0.25, 0.20 };   // fracción que baja en cada parada
                 public double BigStationAlight = 1.3;                         // en estaciones grandes bajan × esto
@@ -3004,6 +3148,7 @@ namespace SelectOR
                 if (c.StationWeights?.Length != 4) c.StationWeights = d.StationWeights;
                 if (c.ProfileDemand?.Length != 4) c.ProfileDemand = d.ProfileDemand;
                 if (c.ProfileAlight?.Length != 4) c.ProfileAlight = d.ProfileAlight;
+                if (!(c.CapacityPct > 0)) c.CapacityPct = d.CapacityPct;   // modelos guardados antes de existir
                 return c;
             }
             catch { return d; }
@@ -3027,6 +3172,8 @@ namespace SelectOR
         async void StartPaxTracking(TrainItem c)
         {
             _paxActive = false; _paxStations = new(); _paxDone.Clear(); _paxMeta.Clear(); _paxVisits.Clear();
+            _paxPlat.Clear(); _paxPlatKeys.Clear(); _paxTrail.Clear(); _paxTrainLenM = 0; _paxLeadAheadM = 0; _paxDoorNeed = 0; _paxWrongSideSaid = null; _paxPaused = false; _paxPausedNorm = null;
+            string paxRouteDir = _curRoute?.Path;
             _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0; _paxBusy = false; _paxWanted = true;
             _pHavePrev = _pHaveDir = false; _paxNextName = null; _paxLastEvent = null; _paxHourUtc = DateTime.MinValue;            _paxSeed = Environment.TickCount;
             // Estación del año y clima elegidos para el viaje (Exploración / Horarios; en Actividad, neutros).
@@ -3046,6 +3193,7 @@ namespace SelectOR
                 var analysis = AnalyzeComposition(c, kmh);
                 if (analysis.Capacity < 1) return;   // sin plazas (tren de mercancías) → sin embarque
                 _paxCapacity = (int)Math.Round(analysis.Capacity);
+                (_paxTrainLenM, _paxLeadAheadM) = TrainLengths(c.FilePath);
                 _paxProfile = analysis.ServiceType == Tr("Alta Velocidad") ? PaxProfile.AV
                             : analysis.ServiceType == Tr("Larga Distancia") ? PaxProfile.Larga
                             : analysis.ServiceType == Tr("Media Distancia") ? PaxProfile.Media
@@ -3065,6 +3213,10 @@ namespace SelectOR
                 });
                 if (!_paxWanted) return;
                 BuildPaxStations(list);
+                // Andenes con sus extremos y su longitud (del .tdb): tamaño de la estación y embarque dentro del andén.
+                var plats = await Task.Run(() => Andenes.Load(paxRouteDir));
+                if (!_paxWanted) return;
+                ApplyPlatforms(plats);
                 _paxActive = _paxStations.Count > 0;
             }
             catch { }
@@ -3091,6 +3243,59 @@ namespace SelectOR
                 double weight = platforms <= 1 ? sw[0] : platforms <= 3 ? sw[1] : platforms <= 7 ? sw[2] : sw[3];
                 _paxMeta[kv.Key] = (kv.Value.pretty, kv.Value.sLat / kv.Value.points, kv.Value.sLon / kv.Value.points, weight);
             }
+        }
+
+        // Andenes del .tdb: cada uno se asigna a su estación (por nombre o, si Open Rails la llama distinto,
+        // a la más cercana) y el TAMAÑO de la estación pasa a ser el de sus metros de andén (los andenes mal
+        // hechos, de menos de 20 m, no cuentan). Las estaciones sin andenes medibles siguen como antes.
+        void ApplyPlatforms(List<Anden> plats)
+        {
+            if (plats == null || plats.Count == 0) return;
+            var metros = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var a in plats)
+            {
+                string key = NormStation(a.Station);
+                if (!_paxMeta.ContainsKey(key))
+                {
+                    string k2 = NormStation(a.Name);
+                    if (k2.Length > 0 && _paxMeta.ContainsKey(k2)) key = k2;
+                    else
+                    {
+                        double bd = 400; string near = null;
+                        foreach (var kv in _paxMeta)
+                        {
+                            double d = Haversine(a.MidLat, a.MidLon, kv.Value.lat, kv.Value.lon);
+                            if (d < bd) { bd = d; near = kv.Key; }
+                        }
+                        if (near != null) key = near;
+                    }
+                }
+                if (string.IsNullOrEmpty(key)) continue;
+                if (!_paxMeta.ContainsKey(key))
+                {
+                    // Estación que la API de Open Rails no nombra: se añade con los datos del .tdb.
+                    _paxMeta[key] = (CleanStation(a.Station), a.MidLat, a.MidLon, PaxCfg.StationWeights[0]);
+                    _paxStations.Add((key, a.Lat1, a.Lon1));
+                    _paxStations.Add((key, a.Lat2, a.Lon2));
+                }
+                if (!a.Valid) continue;
+                _paxPlat.Add((key, a));
+                _paxPlatKeys.Add(key);
+                metros[key] = (metros.TryGetValue(key, out var mm) ? mm : 0) + a.LengthM;
+            }
+            foreach (var kv in metros)
+            {
+                var m = _paxMeta[kv.Key];
+                _paxMeta[kv.Key] = (m.name, m.lat, m.lon, WeightByPlatformMeters(kv.Value));
+            }
+        }
+
+        // Tamaño de la estación por metros totales de andén (tramos equivalentes a los de antes por nº de
+        // andenes, con andenes de ~170 m): < 250 m · 250–600 · 600–1.400 · 1.400 o más.
+        static double WeightByPlatformMeters(double m)
+        {
+            var sw = PaxCfg.StationWeights;
+            return m < 250 ? sw[0] : m < 600 ? sw[1] : m < 1400 ? sw[2] : sw[3];
         }
 
         // Descarga los andenes de viajeros de la ruta (puntos "Named" acabados en "platform"),
@@ -3165,16 +3370,59 @@ namespace SelectOR
             return 1.0 + frac * spread;
         }
 
-        // Viajeros que esperan en una estación a una hora dada.
+        // Viajeros que esperan en una estación a una hora dada. La base es un % de las plazas del tren: un
+        // tren grande encuentra más gente que un automotor pequeño, y una estación grande más que un apeadero.
         int PaxDemandAt(string norm, int hour)
         {
             double weight = _paxMeta.TryGetValue(norm, out var m) ? m.weight : 1.0;
             int visit = _paxVisits.TryGetValue(norm, out var v) ? v : 0;
             var curve = PaxHourCurve[(int)_paxProfile];
-            double d = _paxDemandBase * weight * PaxProfileFactor(_paxProfile) * curve[((hour % 24) + 24) % 24]
+            double basePax = Math.Max(0, _paxCapacity) * PaxCfg.CapacityPct / 100.0;
+            double d = basePax * weight * PaxProfileFactor(_paxProfile) * curve[((hour % 24) + 24) % 24]
                      * PaxSeasonFactor(_paxProfile, _paxSeason) * PaxWeatherFactor(_paxProfile, _paxWeather)
                      * PaxJitter(norm, visit, PaxCfg.Jitter);
             return Math.Max(0, (int)Math.Round(d));
+        }
+
+        // Longitud del tren (suma de sus coches) y cuánto va por delante del centro de la locomotora
+        // (lo que Open Rails sitúa en /API/MAP): los coches antes de la primera motriz y media motriz.
+        (double length, double ahead) TrainLengths(string conPath)
+        {
+            double len = 0, ahead = 0; bool lead = false;
+            try
+            {
+                foreach (var r in ConsistCarRefs(conPath))
+                {
+                    double l = Veh(ResolveCarFile(r.name, r.folder))?.Length ?? 0;
+                    if (l <= 0 || l > 100) l = 20;   // coche sin medidas: uno normal
+                    if (!lead && r.isEngine) { ahead += l / 2; lead = true; }
+                    else if (!lead) ahead += l;
+                    len += l;
+                }
+            }
+            catch { }
+            return (len, lead ? ahead : 0);
+        }
+
+        // Rastro de la locomotora: un punto cada ~3 m, los últimos (longitud del tren y algo más: en lat/lon
+        // las distancias salen deformadas hasta un ~20 %). Un salto de posición (el tren se coloca al
+        // cargar, cambio de tren) lo borra: el rastro de antes ya no vale.
+        void AddPaxTrail(double lat, double lon)
+        {
+            if (_paxTrail.Count > 0)
+            {
+                var (pl, pn) = _paxTrail[_paxTrail.Count - 1];
+                double d = Haversine(pl, pn, lat, lon);
+                if (d > 500) _paxTrail.Clear();
+                else if (d < 3) return;
+            }
+            _paxTrail.Add((lat, lon));
+            double keep = _paxTrainLenM * 1.4 + 40, acc = 0;
+            for (int i = _paxTrail.Count - 1; i > 0; i--)
+            {
+                acc += Haversine(_paxTrail[i].lat, _paxTrail[i].lon, _paxTrail[i - 1].lat, _paxTrail[i - 1].lon);
+                if (acc > keep) { _paxTrail.RemoveRange(0, i - 1); break; }
+            }
         }
 
         // Rumbo del tren (para saber qué estaciones quedan POR DELANTE).
@@ -3225,6 +3473,7 @@ namespace SelectOR
         {
             if (!_paxActive) return "";
             if (_paxAnimating) return $"{_paxAnimStation}:  +{_paxAnimBoarded} / −{_paxAnimAlighted}";
+            if (_paxPaused) return $"{_paxAnimStation}:  +{_paxAnimBoarded} / −{_paxAnimAlighted}  ·  " + Tr("puertas cerradas");
             if (_paxLastEvent != null && (DateTime.UtcNow - _paxLastEventUtc).TotalSeconds < 20) return _paxLastEvent;
             return "";
         }
@@ -3234,11 +3483,14 @@ namespace SelectOR
         readonly Random _paxRnd = new Random();
         bool _paxAnimating, _paxAnimDoorCheck;
         string _paxAnimStation;
+        // En PAUSA: se cerraron las puertas antes de acabar. Al volver a abrirlas (del lado del andén, con el
+        // tren aún en ese andén) sigue donde iba; si el tren se va del andén, se da por terminado.
+        bool _paxPaused; string _paxAnimNorm, _paxPausedNorm;
         int _paxAnimAlightLeft, _paxAnimBoardLeft, _paxAnimAlighted, _paxAnimBoarded, _paxAnimTicks, _paxAnimStep;
 
-        void StartPaxAnimation(string station, int alight, int board)
+        void StartPaxAnimation(string station, string norm, int alight, int board)
         {
-            _paxAnimStation = station;
+            _paxAnimStation = station; _paxAnimNorm = norm; _paxPaused = false;
             _paxAnimAlightLeft = alight; _paxAnimBoardLeft = board;
             _paxAnimAlighted = 0; _paxAnimBoarded = 0; _paxAnimTicks = 0;
             // Ritmo: ~3 viajeros/s en paradas pequeñas; en las grandes sube el ritmo para no pasar de ~25 s.
@@ -3264,13 +3516,19 @@ namespace SelectOR
                 bool stop = false;
                 try
                 {
-                    var (hasDoors, open) = await FetchDoorsState();
-                    // Con mandos de puertas: se corta al cerrarlas. Sin ellos: al arrancar el tren.
-                    stop = hasDoors ? !open : (_stoppedSinceUtc == null);
+                    // Se corta al cerrar las puertas del lado del andén (o, si no se sabe el lado, todas).
+                    // Sin forma de saber las puertas: al arrancar el tren.
+                    var (sidesKnown, sides) = await FetchDoorSides();
+                    if (sidesKnown) stop = _paxDoorNeed != 0 ? (sides & _paxDoorNeed) == 0 : sides == 0;
+                    else
+                    {
+                        var (hasDoors, open) = await FetchDoorsState();
+                        stop = hasDoors ? !open : (_stoppedSinceUtc == null);
+                    }
                 }
                 catch { }
                 _paxAnimDoorCheck = false;
-                if (stop) { EndPaxAnimation(); return; }
+                if (stop) { PausePaxAnimation(); return; }
             }
             // Flujo irregular: a veces nadie, a veces un grupo.
             int n = _paxRnd.Next(0, 2 * _paxAnimStep + 1);
@@ -3292,11 +3550,26 @@ namespace SelectOR
             else EndPaxAnimation();
         }
 
-        void EndPaxAnimation()
+        void PausePaxAnimation()
         {
             _paxAnimTimer?.Stop();
             if (!_paxAnimating) return;
             _paxAnimating = false;
+            _paxPaused = true; _paxPausedNorm = _paxAnimNorm;
+        }
+
+        void ResumePaxAnimation()
+        {
+            if (!_paxPaused) return;
+            _paxPaused = false; _paxAnimating = true; _paxAnimDoorCheck = false; _paxAnimTicks = 0;
+            _paxAnimTimer?.Start();
+        }
+
+        void EndPaxAnimation()
+        {
+            _paxAnimTimer?.Stop();
+            if (!_paxAnimating && !_paxPaused) return;
+            _paxAnimating = false; _paxPaused = false;
             _paxLastEvent = $"{_paxAnimStation}:  +{_paxAnimBoarded} / −{_paxAnimAlighted}";
             _paxLastEventUtc = DateTime.UtcNow;
         }
@@ -3315,14 +3588,49 @@ namespace SelectOR
             UpdateNextStation(lat, lon);
             PaUpdateSpeed(lat, lon);                                      // megafonía: velocidad para la antelación
             await PaScan(lat, lon);                                       // megafonía: barrido de andenes
+            AddPaxTrail(lat, lon);
             if (_paxBusy || _paxAnimating) return;
-            double best = double.MaxValue; string bestNorm = null;
-            foreach (var st in _paxStations)
+            // ¿Algún coche dentro de un andén? (tramo entre sus dos marcas; si hay varios, el de la vía más cercana)
+            string bestNorm = null; Anden bestPlat = null;
+            double bestLat = double.MaxValue;
+            var trail = new List<(double lat, double lon)>(_paxTrail) { (lat, lon) };
+            double back = Math.Max(0, _paxTrainLenM - _paxLeadAheadM);
+            foreach (var (key, a) in _paxPlat)
+                if (Andenes.TrainInside(a, trail, back, _paxLeadAheadM, out double lt, out _) && lt < bestLat) { bestLat = lt; bestNorm = key; bestPlat = a; }
+            if (bestNorm == null)
             {
-                double dm = Haversine(lat, lon, st.lat, st.lon);
-                if (dm < best) { best = dm; bestNorm = st.station; }
+                // Estaciones sin andenes medibles (o ruta sin .tdb): como antes, a menos de 250 m de un punto de andén.
+                double best = double.MaxValue; string near = null;
+                foreach (var st in _paxStations)
+                {
+                    double dm = Haversine(lat, lon, st.lat, st.lon);
+                    if (dm < best) { best = dm; near = st.station; }
+                }
+                if (near != null && best <= 250 && !_paxPlatKeys.Contains(near)) bestNorm = near;
             }
-            if (bestNorm == null || best > 250 || _paxDone.Contains(bestNorm)) return;
+            if (_paxPaused)
+            {
+                // Intercambio a medias: si el tren ya no está en ese andén, se acaba; si sigue, al volver a
+                // abrir las puertas (del lado del andén) continúa.
+                if (bestNorm != _paxPausedNorm) { EndPaxAnimation(); return; }
+                _paxBusy = true;
+                try
+                {
+                    var (sk, sd) = await FetchDoorSides();
+                    bool again;
+                    if (sk) again = _paxDoorNeed != 0 ? (sd & _paxDoorNeed) != 0 : sd != 0;
+                    else
+                    {
+                        var (hasDoors, open) = await FetchDoorsState();
+                        again = hasDoors ? open : TrainStoppedByPosition(3);
+                    }
+                    if (again && _paxPaused) ResumePaxAnimation();
+                }
+                catch { }
+                finally { _paxBusy = false; }
+                return;
+            }
+            if (bestNorm == null || _paxDone.Contains(bestNorm)) return;
             _paxBusy = true;
             try
             {
@@ -3332,11 +3640,33 @@ namespace SelectOR
                     double speed = await FetchSpeedKmh();
                     if (speed > 2.0) return;             // aún en movimiento
                 }
-                // Puertas: si la cabina tiene mandos de puertas, deben estar ABIERTAS. Si no los tiene (no se
-                // puede saber), cuenta como parada comercial tras ~6 s detenido junto al andén.
-                var (hasDoors, open) = await FetchDoorsState();
-                if (hasDoors && !open) return;                          // puertas cerradas → no embarca
-                if (!hasDoors && !TrainStoppedByPosition(6)) return;    // sin mandos de puertas: esperar la parada
+                // Puertas: tienen que estar ABIERTAS y del LADO DEL ANDÉN (si la ruta dice a qué lado queda).
+                // Si no hay forma de saber las puertas, cuenta como parada comercial tras ~6 s detenido.
+                int need = Andenes.DoorsFor(bestPlat, trail);            // 0: el lado no se sabe → vale cualquiera
+                var (sidesKnown, sides) = await FetchDoorSides();
+                if (sidesKnown)
+                {
+                    if (sides == 0) return;                              // puertas cerradas → no embarca
+                    if (need != 0 && (sides & need) == 0)
+                    {
+                        // Abiertas del otro lado: nadie sube ni baja. Se avisa una vez por estación.
+                        if (_paxWrongSideSaid != bestNorm)
+                        {
+                            _paxWrongSideSaid = bestNorm;
+                            string st = _paxMeta.TryGetValue(bestNorm, out var mw) ? mw.name : bestNorm;
+                            _paxLastEvent = $"{st}:  " + Tr(need == 1 ? "el andén está a la izquierda" : "el andén está a la derecha");
+                            _paxLastEventUtc = DateTime.UtcNow;
+                        }
+                        return;
+                    }
+                }
+                else
+                {
+                    var (hasDoors, open) = await FetchDoorsState();
+                    if (hasDoors && !open) return;                          // puertas cerradas → no embarca
+                    if (!hasDoors && !TrainStoppedByPosition(6)) return;    // sin mandos de puertas: esperar la parada
+                }
+                _paxDoorNeed = sidesKnown ? need : 0;
                 int hour = await FetchGameHour(); _paxLastHour = hour;
                 double weight = _paxMeta.TryGetValue(bestNorm, out var m) ? m.weight : 1.0;
                 int visit = _paxVisits.TryGetValue(bestNorm, out var vv) ? vv : 0;
@@ -3350,7 +3680,7 @@ namespace SelectOR
                 _paxDone.Add(bestNorm);
                 _paxVisits[bestNorm] = visit + 1;
                 // El intercambio se hace poco a poco (el HUD va mostrando cómo cambian las cifras).
-                StartPaxAnimation(m.name ?? bestNorm, alight, board);
+                StartPaxAnimation(m.name ?? bestNorm, bestNorm, alight, board);
             }
             catch { }
             finally { _paxBusy = false; }
@@ -3364,7 +3694,7 @@ namespace SelectOR
                 using var d = JsonDocument.Parse(txt);
                 var vals = d.RootElement.GetProperty("commonTable").GetProperty("values");
                 for (int k = 0; k + 2 < vals.GetArrayLength(); k += 3)
-                    if (string.Equals(vals[k].GetString(), "Speed", StringComparison.OrdinalIgnoreCase))
+                    if (Array.Exists(HudSpeedLabels, x => string.Equals(HudClean(vals[k].GetString()), x, StringComparison.OrdinalIgnoreCase)))
                     {
                         string sp = vals[k + 2].GetString() ?? "";   // p.ej. "2,6 km/h"
                         var m = System.Text.RegularExpressions.Regex.Match(sp, @"([\d.,]+)");
@@ -3400,6 +3730,61 @@ namespace SelectOR
             return (has, false);
         }
 
+        // Puertas abiertas por LADO, desde el puesto del maquinista (1 = izquierda, 2 = derecha).
+        //  · Cabina con ORTS_LEFTDOOR y ORTS_RIGHTDOOR: Open Rails ya los da respecto al maquinista, aunque
+        //    la locomotora vaya dada la vuelta o se conduzca desde la cabina de atrás.
+        //  · Si no: la fila «Doors open: Left/Right» de la barra de datos de Open Rails (F5), que existe para
+        //    cualquier tren y también va respecto al maquinista. Si la barra se entiende (idioma conocido) y
+        //    no tiene esa fila, las puertas están cerradas.
+        // known = false: no hay forma de saberlo (idioma de OR desconocido y cabina sin esos mandos).
+        static readonly string[] HudDoorLabels = { "Doors open", "Abrir puertas", "Ouverture portes", "Türen offen", "Porte aperte", "Двери открыты", "Drzwi otwarte", "Otevřené dveře", "Ajtók nyitva" };
+        static readonly string[] HudSpeedLabels = { "Speed", "Velocidad", "Vitesse", "Geschw", "Velocità", "Скорость", "Prędkość", "Rychlost", "Sebesség" };
+        static readonly string[] HudLeftWords = { "Left", "Izquierda", "Gauche", "Links", "Sinistra", "Левые", "Lewy", "Vlevo", "Bal" };
+        static readonly string[] HudRightWords = { "Right", "Derecha", "Droite", "Rechts", "Destra", "Правые", "Prawy", "Vpravo", "Jobb" };
+
+        static string HudClean(string s) => (s ?? "").Trim().TrimEnd('?', '!', ' ', ':');
+
+        async Task<(bool known, int open)> FetchDoorSides()
+        {
+            bool hasL = false, hasR = false; int open = 0;
+            try
+            {
+                string txt = await _kmHttp.GetStringAsync("/API/CABCONTROLS");
+                using var d = JsonDocument.Parse(txt);
+                foreach (var c in d.RootElement.EnumerateArray())
+                {
+                    string tn = c.TryGetProperty("TypeName", out var t) ? t.GetString() : "";
+                    bool on = c.TryGetProperty("RangeFraction", out var rf) && rf.GetDouble() >= 0.5;
+                    if (tn == "ORTS_LEFTDOOR") { hasL = true; if (on) open |= 1; }
+                    else if (tn == "ORTS_RIGHTDOOR") { hasR = true; if (on) open |= 2; }
+                }
+            }
+            catch { }
+            if (hasL && hasR) return (true, open);
+            bool understood = false;
+            try
+            {
+                string txt = await _kmHttp.GetStringAsync("/API/HUD/0");
+                using var d = JsonDocument.Parse(txt);
+                var vals = d.RootElement.GetProperty("commonTable").GetProperty("values");
+                for (int k = 0; k + 2 < vals.GetArrayLength(); k += 3)
+                {
+                    string label = HudClean(vals[k].ValueKind == JsonValueKind.String ? vals[k].GetString() : "");
+                    if (Array.Exists(HudSpeedLabels, x => string.Equals(label, x, StringComparison.OrdinalIgnoreCase))) understood = true;
+                    if (!Array.Exists(HudDoorLabels, x => string.Equals(label, x, StringComparison.OrdinalIgnoreCase))) continue;
+                    understood = true;
+                    string v = vals[k + 2].ValueKind == JsonValueKind.String ? vals[k + 2].GetString() ?? "" : "";
+                    foreach (var w in System.Text.RegularExpressions.Regex.Split(v, @"[^\p{L}]+"))
+                    {
+                        if (Array.Exists(HudLeftWords, x => string.Equals(w, x, StringComparison.OrdinalIgnoreCase))) open |= 1;
+                        if (Array.Exists(HudRightWords, x => string.Equals(w, x, StringComparison.OrdinalIgnoreCase))) open |= 2;
+                    }
+                }
+            }
+            catch { }
+            return (understood, open);
+        }
+
         // ¿Tren parado? Por la POSICIÓN (independiente del idioma de OR): sin moverse más de ~0,8 m entre
         // sondeos durante al menos 3 s. Respaldo: velocidad del HUD de OR (solo si está en inglés, «Speed»).
         DateTime? _stoppedSinceUtc;
@@ -3432,11 +3817,13 @@ namespace SelectOR
                 if (lat == 0 && lon == 0) return;
                 // Primera posición válida = el escenario ya está abierto (OR no la da durante la carga):
                 // aquí arranca el cronómetro del servicio.
-                if (_svcClockUtc == null) _svcClockUtc = DateTime.UtcNow;
+                if (_svcClockUtc == null) StartSvcClock(DateTime.UtcNow);
+                else await SvcClockTick();   // ¿Open Rails en pausa? (entonces el tiempo no cuenta)
                 if (!_scenarioReady) { _scenarioReady = true; OnScenarioReady(); }   // y aquí aparecen los HUD
                 if (_tHave)
                 {
                     double dm = Haversine(_tLat, _tLon, lat, lon);
+                    InfrCheckJump(dm);   // carné (A1): salto de posición
                     if (dm >= 0.5 && dm < 3000)   // ignora jitter y saltos/teleports
                     {
                         _trackedMeters += dm;
@@ -3452,6 +3839,7 @@ namespace SelectOR
                 _tLat = lat; _tLon = lon; _tHave = true;
                 if (CabHudAlive) _cabHud.SetPosition(lat, lon);   // pupitre: para saber si es de noche
                 if (_paxActive && _paxStations.Count > 0) await PollPax(lat, lon);   // embarque de viajeros
+                if (InfrActive) _ = InfrSpeedPoll();   // carné (B6/B7): velocidad frente al límite
             }
             catch { }   // servidor aún no listo, pausa, etc.
         }
@@ -3548,6 +3936,7 @@ namespace SelectOR
                 if (!string.IsNullOrWhiteSpace(route)) routeCount[route] = routeCount.TryGetValue(route, out var b) ? b + 1 : 1;
             }
 
+            var tLic = LoadLicense();   // carné por puntos (a la vez que los servicios)
             // Servicios de empresa donde soy el maquinista
             var (sj, se) = await Supa.SelectAsync(
                 $"services?select=route,consist,km,duration_s,pax,status,validated&driver_id=eq.{Uri.EscapeDataString(Supa.UserId ?? "")}&limit=1000");
@@ -3573,6 +3962,7 @@ namespace SelectOR
             SetKpi(_profSpeedVal, avg.ToString("N0", EsEs) + " km/h");
             SetKpi(_profPaxVal, totalPax.ToString("N0", EsEs));
 
+            try { await tLic; } catch { }
             UpdateRankAndBadges(totalKm, trips, hours, invalid, routeCount.Count, totalPax, trainCount.Count, avg);
 
             // Gráficas (top 6)
@@ -3602,7 +3992,11 @@ namespace SelectOR
         void UpdateRankAndBadges(double km, int trips, double hours, int invalid, int distinctRoutes,
                                  double pax = 0, int distinctTrains = 0, double avgKmh = 0)
         {
-            // Rango: mayor tramo alcanzado + progreso al siguiente.
+            // Rango: mayor tramo alcanzado + progreso al siguiente. Con el carné por debajo de 6 puntos,
+            // congelado en los km que tenía al bajar (las insignias siguen contando todos los km).
+            double kmBadges = km;
+            bool frozen = !double.IsNaN(_licFrozenKm) && _licFrozenKm < km - 0.01;
+            km = RankKm(km);
             int tier = RankTierIndex(km);
             if (_rankName != null) _rankName.Text = Tr(RankTiers[tier].name);
             if (_rankStep != null) _rankStep.Text = string.Format(Tr("escalón {0} de {1}"), tier + 1, RankTiers.Length);
@@ -3615,7 +4009,9 @@ namespace SelectOR
                     (Math.Max(0, Math.Min(1, _rankPct)) * 100).ToString("N0", EsEs));
             }
             else { _rankPct = 1; if (_rankNext != null) _rankNext.Text = Tr("¡Rango máximo alcanzado!"); }
+            if (frozen && _rankNext != null) _rankNext.Text = "❄ " + Tr("Rango congelado: el carné está por debajo de 6 puntos.") + "  " + _rankNext.Text;
             _rankTrack?.Invalidate();
+            km = kmBadges;
 
             // Insignias (cada una con su color)
             if (_badges != null)
@@ -4374,7 +4770,11 @@ namespace SelectOR
         // para que la etiqueta reconozca también los consists invertidos u otras variantes del mismo tren.
         void RebuildCompanyEngs()
         {
+            // Sin trenes de ninguna empresa antes ni ahora (lo normal al arrancar, antes de iniciar sesión):
+            // no cambia nada, así que no se rehace la lista de trenes (con miles de trenes, se nota).
+            bool nada = _companyVehNames.Count == 0 && _companyEngs.Count == 0;
             _companyEngs.Clear();
+            if (nada) { try { PopulateCompanyFilters(); } catch { } return; }
             foreach (var kv in _companyVehNames) _companyEngs[kv.Key] = new List<string>(kv.Value);
             try
             {
@@ -6870,6 +7270,23 @@ namespace SelectOR
             string route = _curRoute?.Name ?? "";
             var svc = _pendingServiceId;
 
+            // Carné por puntos: primero lo detectado durante la conducción. Un salto de posición o el
+            // tiempo acelerado anulan el servicio (el servidor ya lo ha borrado); la infracción queda.
+            var infr = await ReportInfractionsAsync(svc);
+            if (infr.Err != null) { Msg(_empHomeMsg, Tr("No se pudo registrar el servicio: ") + infr.Err, true); return (false, Tr("No se pudo registrar el servicio: ") + infr.Err); }
+            if (infr.Voided)
+            {
+                _pendingServiceId = null; _svcOpenedUtc = null;
+                UpdateDutyUi();
+                var nv = new ServiceResultDialog.Data
+                {
+                    Company = companyName, Route = route, Valid = false, Km = _estimatedKm, DurationS = _tripDurationS,
+                    Reasons = InfrVoidReasons(infr.Items), Infractions = infr.Items, LicensePoints = infr.Points, SuspendedUntil = infr.Until
+                };
+                _estimatedKm = 0;
+                return ShowNotRegistered(nv, showDialog);
+            }
+
             // Viajes de menos de 3 km o de menos de 5 minutos: no se registran (se descarta el
             // servicio y se libera la unidad). Al maquinista se le explica por qué.
             int durRule = ServiceSecondsForRule();
@@ -6896,7 +7313,8 @@ namespace SelectOR
                     var nr = new ServiceResultDialog.Data
                     {
                         Company = companyName, Route = route, Valid = false, Km = _estimatedKm,
-                        DurationS = durRule == int.MaxValue ? _tripDurationS : durRule, Reasons = motivos
+                        DurationS = durRule == int.MaxValue ? _tripDurationS : durRule, Reasons = motivos,
+                        Infractions = infr.Items, LicensePoints = infr.Points, SuspendedUntil = infr.Until
                     };
                     _estimatedKm = 0;
                     return ShowNotRegistered(nr, showDialog);
@@ -6946,6 +7364,11 @@ namespace SelectOR
                 r.Net = Num(root, "net");
                 r.Balance = Num(root, "balance");
                 r.Pax = (int)Num(root, "pax");
+                // Plazas o toneladas del tren: las que guardó el servidor (con las que ha calculado) o, si no
+                // las devuelve, las que se enviaron al abrir el servicio.
+                double m = Num(root, "consist_mass");
+                r.MassT = m > 0 ? m : _svcTrainMass;
+                r.Capacity = _svcTrainCap;
                 if (!r.Valid)
                 {
                     // El servidor no lo ha registrado (y, con el SQL de la 1.2.35, lo ha borrado): por qué.
@@ -6957,8 +7380,17 @@ namespace SelectOR
                         : string.Format(Tr("Velocidad media imposible ({0} km/h; el máximo son 350 km/h)."), avg.ToString("N0", EsEs)));
                     r.Pax = 0;
                 }
+                // Carné por puntos: infracciones de este servicio y puntos que quedan.
+                if (root.TryGetProperty("infractions", out var inf)) r.Infractions = Carne.ParseItems(inf);
+                else r.Infractions = infr.Items;
+                if (root.TryGetProperty("license", out var lic)) (r.LicensePoints, r.SuspendedUntil) = Carne.ParseLicense(lic);
+                else { r.LicensePoints = infr.Points; r.SuspendedUntil = infr.Until; }
                 double validAfter = Num(root, "driver_valid_km");
                 double validBefore = validAfter - (r.Valid ? r.Km : 0);
+                // Con el carné por debajo de 6 el rango está congelado: el servidor da los km con que se calcula.
+                bool frozen = root.TryGetProperty("rank_km", out var rk) && rk.ValueKind == JsonValueKind.Number && rk.GetDouble() < validAfter - 0.01;
+                if (frozen) { validAfter = rk.GetDouble(); validBefore = validAfter; }
+                r.RankFrozen = frozen;
                 int tBefore = RankTierIndex(validBefore);
                 int tAfter = RankTierIndex(validAfter);
                 r.ValidKm = validAfter;
@@ -7018,6 +7450,7 @@ namespace SelectOR
                 case 2: if (_empSel != null && !skipCompanyLists) LoadMembers(_empSel); break;
                 case 4: LoadRankTab(); break;
                 case 5: LoadProfile(); break;
+                case 6: LoadReview(); break;
                 case 7: LoadUsers(); break;
                 case 8: LoadAllCompanies(); break;
                 case 9: case 10: LoadFleet(); if (_empSubtab == 10) LoadPurchaseRequests(); break;
@@ -7035,7 +7468,7 @@ namespace SelectOR
             // Un topic por tabla (en SupaRealtime): si alguna no está publicada aún, solo falla su topic.
             _rt = new SupaRealtime(
                 Supa.Url, Supa.AnonKey, () => Supa.AccessToken,
-                new[] { "services", "ledger", "companies", "company_members", "join_requests", "notifications" },
+                new[] { "services", "ledger", "companies", "company_members", "join_requests", "notifications", "company_chat_messages", "company_chat_mutes" },
                 OnRealtimeChange);
             _rt.Start();
         }
@@ -7055,6 +7488,7 @@ namespace SelectOR
             {
                 if (!IsHandleCreated) return;
                 if (table == "notifications") { BeginInvoke((Action)(() => NotifySoon(300))); return; }   // aviso nuevo para ti
+                if (table.StartsWith("company_chat", StringComparison.Ordinal)) { BeginInvoke((Action)(() => ChatRealtime(table))); return; }   // chat
                 BeginInvoke((Action)(() => { if (_rtDebounce != null) { _rtDebounce.Stop(); _rtDebounce.Start(); } }));
             }
             catch { }
@@ -7071,7 +7505,9 @@ namespace SelectOR
         async void LoadMembers(EmpCompany c)
         {
             if (c == null) return;
+            var tPts = LoadMemberPoints(c.Id);   // carné por puntos de cada socio (a la vez)
             var (json, err) = await Supa.RpcAsync("list_members", new { p_company = c.Id });
+            try { await tPts; } catch { }
             _members.Clear();
             if (err == null)
             {
@@ -7089,8 +7525,11 @@ namespace SelectOR
                 _memberList.BeginReload(c.Id);
                 _memberList.ClearRows();
                 foreach (var m in _members)
-                    _memberList.AddRow(new[] { m.Username.Length > 0 ? m.Username : "—", TrRole(m.Role) },
-                        new Color?[] { null, m.Role == "owner" ? Theme.Accent : (Color?)null }, null, m.UserId);
+                {
+                    var (pt, pc) = MemberPointsCell(m.UserId);
+                    _memberList.AddRow(new[] { m.Username.Length > 0 ? m.Username : "—", TrRole(m.Role), pt },
+                        new Color?[] { null, m.Role == "owner" ? Theme.Accent : (Color?)null, pc }, null, m.UserId);
+                }
                 if (_members.Count == 0) _memberList.SetEmpty(err ?? Tr("Sin socios."));
                 _memberList.EndReload();
             }
@@ -7098,6 +7537,7 @@ namespace SelectOR
             UpdateCompanyDash();
             LoadJoinRequests(c);
             LoadPurchaseRequests();   // contador «Compra (n)» para gerente y gestores
+            if (_empSubtab != 6) LoadReview(onlyCount: true);   // contador «Revisión (n)»
         }
 
         // Carga las solicitudes de ingreso pendientes (solo dueño/gestor las obtiene del servidor).
@@ -7288,13 +7728,13 @@ namespace SelectOR
             // Con empresa → por permiso (el superadmin ve/gestiona TODO). Sin empresa → solo Ranking
             // y Mi perfil (y, para el superadmin, Usuarios y Todas las empresas).
             //   índices: 0 Servicios · 1 Banca · 2 Socios · 3 Ajustes · 4 Ranking · 5 Mi perfil
-            //            · 6 (Revisión, ya no existe) · 7 Usuarios · 8 Todas las empresas · 9 Flota · 10 Compra · 11 Megafonía
+            //            · 6 Revisión (carné por puntos) · 7 Usuarios · 8 Todas las empresas · 9 Flota · 10 Compra · 11 Megafonía · 12 Chat
             // Megafonía: la habilita el superadmin empresa por empresa (companies.pa_enabled). Quien
             // gestiona solo la ve si está habilitada; el superadmin la ve siempre (para habilitarla).
             bool pa = su || (PaEnabledHere() && CanManage());
             bool[] show = hasCompany
-                ? new[] { true, true, CanManage() || su, su, true, true, false, su, su, true, CanManage() || su, pa }   // Compra: solo gestión
-                : new[] { false, false, false, false, true, true, false, su, su, false, false, false };
+                ? new[] { true, true, CanManage() || su, su, true, true, CanManage() || su, su, su, true, CanManage() || su, pa, true }   // Compra y Revisión: solo gestión
+                : new[] { false, false, false, false, true, true, false, su, su, false, false, false, false };
             for (int k = 0; k < _empSubtabs.Length && k < show.Length; k++)
                 if (_empSubtabs[k] != null) _empSubtabs[k].Visible = show[k];
             UpdateNavGroupHeaders();   // oculta el encabezado de un grupo si ninguna de sus secciones se ve
@@ -7513,6 +7953,11 @@ namespace SelectOR
                 Msg(_tariffMsg, string.Format(Tr("La versión {0} no es más nueva que la publicada ({1}). Sube la versión en SelectOR.csproj y compila."), cur, latest.Version), true);
                 return;
             }
+            // Lo que se publica debería ser lo firmado por SignPath: si no, se avisa (los antivirus desconfían).
+            var sinFirma = Updater.UnsignedPackageFiles();
+            if (sinFirma.Count > 0 && MessageBox.Show(this,
+                    string.Format(Tr("Estos archivos NO están firmados: {0}.\n\nSin firma, los antivirus pueden avisar al descargar o instalar SelectOR. Instala primero los firmados (flujo «Compilar y firmar» de GitHub y tools\\instalar-firmado.ps1).\n\n¿Publicar igualmente sin firmar?"), string.Join(", ", sinFirma)),
+                    "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             if (MessageBox.Show(this, string.Format(Tr("¿Publicar SelectOR {0}? Todos los usuarios recibirán el aviso de actualización."), cur),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _updPublishBtn.Enabled = false;
@@ -7533,6 +7978,7 @@ namespace SelectOR
 
         // ---------------- Ajustes → Viajeros / Clasificación ----------------
         RoundedInput[] _pmDemand, _pmAlight, _pmStation, _pmMisc, _pmWeather, _pmClass;
+        RoundedInput _pmCapPct;
         CheckBox _pmUseSeason, _pmUseWeather;
 
         static Label EmpNote(string t) => new Label { Text = t, AutoSize = true, MaximumSize = new Size(660, 0), ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Margin = new Padding(2, 2, 2, 6) };
@@ -7584,6 +8030,7 @@ namespace SelectOR
         void FillPaxModelInputs(PaxModelConfig c)
         {
             if (_pmDemand == null) return;
+            if (_pmCapPct != null) _pmCapPct.Box.Text = F(c.CapacityPct);
             for (int i = 0; i < 4; i++)
             {
                 _pmDemand[i].Box.Text = F(c.ProfileDemand[i]);
@@ -7611,8 +8058,10 @@ namespace SelectOR
             c.SnowFactor = V(_pmWeather[0]); c.RainCercanias = V(_pmWeather[1]); c.RainMedia = V(_pmWeather[2]);
             c.AvKmh = V(_pmClass[0]); c.LargaKmh = V(_pmClass[1]); c.MediaKmh = V(_pmClass[2]); c.MediaMaxDensity = V(_pmClass[3]);
             c.UseSeason = _pmUseSeason.Checked; c.UseWeather = _pmUseWeather.Checked;
+            if (_pmCapPct != null) c.CapacityPct = V(_pmCapPct);
 
             string bad = null;
+            if (!(c.CapacityPct > 0 && c.CapacityPct <= 100)) bad = Tr("El % de plazas debe estar entre 0 y 100.");
             foreach (var a in c.ProfileAlight) if (a < 0 || a > 0.9) bad = Tr("La fracción que baja debe estar entre 0 y 0,9.");
             foreach (var a in c.ProfileDemand) if (a < 0) bad = Tr("Los valores no pueden ser negativos.");
             foreach (var a in c.StationWeights) if (a < 0) bad = Tr("Los valores no pueden ser negativos.");
@@ -7911,6 +8360,12 @@ namespace SelectOR
 
         // Nº de coches de un .con (sin leer el archivo si ya está en la caché).
         static int ConsistCarCount(string conPath) => ConsistCarRefs(conPath).Count;
+        static int ConsistEngineCount(string conPath) { int n = 0; foreach (var r in ConsistCarRefs(conPath)) if (r.isEngine) n++; return n; }
+
+        // Coches del tren y cuántos son motrices, en corto para la tabla: «8 (2M)» (M = motriz; en el detalle
+        // del servicio va entero, «8  (2 motrices)», como en el Editor de composiciones). Sin datos: «—».
+        static string CarsText(int cars, int engines) =>
+            cars <= 0 ? "—" : cars.ToString("N0", EsEs) + (engines > 0 ? " (" + engines + "M)" : "");
 
         // Datos de un vehículo para el resto de secciones (editor incluido).
         static VehStats VehicleStats(string path) => Veh(path);

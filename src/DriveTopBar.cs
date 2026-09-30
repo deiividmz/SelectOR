@@ -14,7 +14,7 @@ namespace SelectOR
 {
     public sealed class DriveBarState
     {
-        public bool HudVisible, BigMapOpen, InService, CabVisible;
+        public bool HudVisible, BigMapOpen, InService, CabVisible, ChatVisible;
         public bool ServiceEnabled;        // se puede pulsar el botón de servicio
         public string ServiceText;         // «Ponerme de servicio» / «Registrar servicio» / motivo
         public string Status;              // «En servicio · RENFE · 00:12» / «Conducción libre · tren»
@@ -23,27 +23,27 @@ namespace SelectOR
     public class DriveTopBar : Form
     {
         readonly Func<DriveBarState> _state;
-        readonly Action _toggleHud, _toggleMap, _toggleCab;
+        readonly Action _toggleHud, _toggleMap, _toggleCab, _toggleChat;
         readonly Func<Task<(bool ok, string msg)>> _service;
         readonly Action _onShowing;   // p. ej. comprobar si el tren es de la flota al desplegarse
         readonly System.Windows.Forms.Timer _poll;
 
         DriveBarState _st = new DriveBarState();
-        Rectangle _hitHud, _hitMap, _hitCab, _hitSvc;
+        Rectangle _hitHud, _hitMap, _hitCab, _hitChat, _hitSvc;
         int _hoverBtn = -1;
         bool _busy, _confirm;
         DateTime _confirmUntil, _msgUntil, _lastInside;
         string _msg; bool _msgErr;
 
-        const int BarW = 830, BarH = 58, MsgH = 24, HotW = 420, HotH = 6;
+        const int BarW = 930, BarH = 58, MsgH = 24, HotW = 420, HotH = 6;
         static readonly Color Teal = Color.FromArgb(94, 190, 155);
         static readonly Color Rec = Color.FromArgb(224, 86, 86);
 
         public DriveTopBar(Func<DriveBarState> state, Action toggleHud, Action toggleMap,
-                           Func<Task<(bool ok, string msg)>> service, Action onShowing = null, Action toggleCab = null)
+                           Func<Task<(bool ok, string msg)>> service, Action onShowing = null, Action toggleCab = null, Action toggleChat = null)
         {
             _state = state; _toggleHud = toggleHud; _toggleMap = toggleMap; _service = service; _onShowing = onShowing;
-            _toggleCab = toggleCab;
+            _toggleCab = toggleCab; _toggleChat = toggleChat;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false; TopMost = true;
             StartPosition = FormStartPosition.Manual;
@@ -128,6 +128,7 @@ namespace SelectOR
             if (_hitMap.Contains(p)) return 1;
             if (_hitSvc.Contains(p)) return 2;
             if (_hitCab.Contains(p)) return 3;
+            if (_hitChat.Contains(p)) return 4;
             return -1;
         }
 
@@ -139,6 +140,7 @@ namespace SelectOR
             if (i == 0) { _toggleHud?.Invoke(); Refresh_(); }
             else if (i == 1) { _toggleMap?.Invoke(); Refresh_(); }
             else if (i == 3) { _toggleCab?.Invoke(); Refresh_(); }
+            else if (i == 4) { _toggleChat?.Invoke(); Refresh_(); }
             else if (i == 2 && _st.ServiceEnabled && _service != null)
             {
                 // Registrar pide una segunda pulsación (no hay diálogos: quedarían tras el simulador).
@@ -190,11 +192,13 @@ namespace SelectOR
             _hitHud = new Rectangle(222, y, 84, h);
             _hitMap = new Rectangle(_hitHud.Right + 6, y, 104, h);
             _hitCab = new Rectangle(_hitMap.Right + 6, y, 110, h);
-            _hitSvc = new Rectangle(_hitCab.Right + 6, y, Width - _hitCab.Right - 6 - 10, h);
+            _hitChat = new Rectangle(_hitCab.Right + 6, y, 94, h);
+            _hitSvc = new Rectangle(_hitChat.Right + 6, y, Width - _hitChat.Right - 6 - 10, h);
 
             DrawBtn(g, _hitHud, "HUD", _st.HudVisible, true, _hoverBtn == 0, Glyph.Hud);
             DrawBtn(g, _hitMap, I18n.T("Mapa"), _st.BigMapOpen, true, _hoverBtn == 1, Glyph.Map);
             DrawBtn(g, _hitCab, I18n.T("Pupitre"), _st.CabVisible, true, _hoverBtn == 3, Glyph.Cab);
+            DrawBtn(g, _hitChat, I18n.T("Chat"), _st.ChatVisible, true, _hoverBtn == 4, Glyph.Chat);
 
             string svcText = _busy ? I18n.T("Un momento…")
                 : _confirm ? I18n.T("Pulsa otra vez para registrar")
@@ -211,7 +215,7 @@ namespace SelectOR
             }
         }
 
-        enum Glyph { Hud, Map, Cab }
+        enum Glyph { Hud, Map, Cab, Chat }
 
         void DrawBtn(Graphics g, Rectangle r, string text, bool active, bool enabled, bool hover, Glyph glyph)
         {
@@ -227,6 +231,12 @@ namespace SelectOR
                     g.DrawRectangle(pen, ico.Left, ico.Top + 2, ico.Width, ico.Height - 4);
                     g.DrawLine(pen, ico.Left + 3, ico.Top + 6, ico.Right - 3, ico.Top + 6);
                     g.DrawLine(pen, ico.Left + 3, ico.Top + 9, ico.Right - 6, ico.Top + 9);
+                }
+                else if (glyph == Glyph.Chat)
+                {
+                    // Bocadillo de conversación.
+                    g.DrawRectangle(pen, ico.Left, ico.Top + 1, ico.Width, ico.Height - 5);
+                    g.DrawLines(pen, new[] { new Point(ico.Left + 3, ico.Bottom - 4), new Point(ico.Left + 2, ico.Bottom), new Point(ico.Left + 7, ico.Bottom - 4) });
                 }
                 else if (glyph == Glyph.Cab)
                 {

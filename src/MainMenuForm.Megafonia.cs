@@ -47,7 +47,8 @@ namespace SelectOR
         // Audios: clave «estación|tipo|línea» (línea vacía = aviso base de la ruta).
         readonly Dictionary<string, (string path, string stamp)> _paAudio =
             new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
-        string _paRoute;        // ruta elegida (el mismo nombre que se guarda en los servicios)
+        string _paRoute;        // ruta elegida: su RouteID (lo que la identifica en el servidor)
+        string _paRouteName;    // su nombre (el que se ve; y para trasladar lo grabado con él)
         string _paRouteDir;     // carpeta de esa ruta (para leer sus estaciones del .tdb)
         string _paLineId;       // línea elegida en el desplegable (null = base, para todas)
         // Preaviso/antelación PROPIOS de una línea en una estación («línea|estación» → metros, s).
@@ -270,30 +271,35 @@ namespace SelectOR
 
         void FillPaRoutes()
         {
-            var want = _paRoute ?? _curRoute?.Name;
+            var want = _paRouteDir ?? _curRoute?.Path;
             _paRouteBox.BeginUpdate();
             _paRouteBox.Items.Clear();
             foreach (var r in _routesAll) _paRouteBox.Items.Add(r);
             _paRouteBox.EndUpdate();
-            if (_paRouteBox.Items.Count == 0) { _paRoute = null; _paRouteDir = null; return; }
+            if (_paRouteBox.Items.Count == 0) { _paRoute = null; _paRouteName = null; _paRouteDir = null; return; }
             int sel = 0;
             if (!string.IsNullOrEmpty(want))
                 for (int i = 0; i < _routesAll.Count; i++)
-                    if (string.Equals(_routesAll[i].Name, want, StringComparison.OrdinalIgnoreCase)) { sel = i; break; }
+                    if (string.Equals(_routesAll[i].Path, want, StringComparison.OrdinalIgnoreCase)) { sel = i; break; }
             _paRouteBox.SelectedIndex = sel;
-            _paRoute = _routesAll[sel].Name;
-            _paRouteDir = _routesAll[sel].Path;
+            SetPaRoute(_routesAll[sel]);
         }
 
         void OnPaRouteChanged()
         {
             int i = _paRouteBox.SelectedIndex;
             if (i < 0 || i >= _routesAll.Count) return;
-            if (string.Equals(_routesAll[i].Name, _paRoute, StringComparison.Ordinal)) return;
-            _paRoute = _routesAll[i].Name;
-            _paRouteDir = _routesAll[i].Path;
+            if (string.Equals(_routesAll[i].Path, _paRouteDir, StringComparison.OrdinalIgnoreCase)) return;
+            SetPaRoute(_routesAll[i]);
             _paLineId = null;          // las líneas son de cada ruta
             LoadPaRoute();
+        }
+
+        void SetPaRoute(ORTS.Menu.Route r)
+        {
+            _paRouteName = r.Name;
+            _paRouteDir = r.Path;
+            _paRoute = RouteIds.IdOf(r.Path, r.Name);
         }
 
         void OnPaLineChanged()
@@ -316,7 +322,7 @@ namespace SelectOR
                 string dir = _paRouteDir;
                 var tdb = await Task.Run(() => TdbStationNames(dir));
 
-                var (json, err) = await Supa.RpcAsync("pa_bundle", new { p_company = _empSel.Id, p_route = _paRoute });
+                var (json, err) = await PaBundle(_empSel.Id, _paRoute, _paRouteName);
                 if (err != null) { Msg(_paMsg, Tr("Error: ") + err, true); return; }
 
                 _paRows.Clear(); _paLines.Clear(); _paAudio.Clear(); _paLineCfg.Clear();
@@ -585,7 +591,7 @@ namespace SelectOR
                     Msg(_paMsg, Tr("El audio no puede pasar de 2 MB. Conviértelo a MP3 (mono, 64 kbps es de sobra)."), true);
                     return;
                 }
-                string route = station == "*" ? "*" : _paRoute;
+                string route = station == "*" ? "*" : PaKey(_paRoute, _paRouteName);
                 string carpeta = string.IsNullOrEmpty(lineId) ? kind : kind + "/" + lineId;
                 string objPath = Megafonia.ObjectPath(_empSel.Id, route, carpeta, station, ext);
                 var bytes = File.ReadAllBytes(file);
@@ -627,7 +633,7 @@ namespace SelectOR
         async Task DeletePaClip(string objPath, string station, string kind, string lineId)
         {
             Msg(_paMsg, Tr("Quitando audio…"), false);
-            string route = station == "*" ? "*" : _paRoute;
+            string route = station == "*" ? "*" : PaKey(_paRoute, _paRouteName);
             var (_, rerr) = await Supa.RpcAsync("pa_delete_audio", new
             { p_company = _empSel.Id, p_route = route, p_station = station, p_kind = kind, p_line = lineId });
             if (rerr != null) { Msg(_paMsg, Tr("Error: ") + rerr, true); return; }
@@ -677,7 +683,7 @@ namespace SelectOR
 
             var (_, err) = await Supa.RpcAsync("pa_set_station", new
             {
-                p_company = _empSel.Id, p_route = _paRoute, p_station = row.Norm,
+                p_company = _empSel.Id, p_route = PaKey(_paRoute, _paRouteName), p_station = row.Norm,
                 p_lat = (double?)null, p_lon = (double?)null, p_radius = radius, p_lead = lead
             });
             if (err != null) { Msg(_paMsg, Tr("Error: ") + err, true); return; }
@@ -747,7 +753,7 @@ namespace SelectOR
             }
             if (name.Length == 0) { Msg(_paMsg, Tr("La línea necesita un nombre."), true); return; }
             var (json, err) = await Supa.RpcAsync("pa_upsert_line", new
-            { p_company = _empSel.Id, p_route = _paRoute, p_name = name, p_direction = (string)null, p_id = (string)null });
+            { p_company = _empSel.Id, p_route = PaKey(_paRoute, _paRouteName), p_name = name, p_direction = (string)null, p_id = (string)null });
             if (err != null) { Msg(_paMsg, Tr("Error: ") + err, true); return; }
             string id = (json ?? "").Trim().Trim('"');
             var line = new PaLine { Id = id, Name = name };
@@ -770,7 +776,7 @@ namespace SelectOR
             }
             if (name.Length == 0) return;
             var (_, err) = await Supa.RpcAsync("pa_upsert_line", new
-            { p_company = _empSel.Id, p_route = _paRoute, p_name = name, p_direction = (string)null, p_id = line.Id });
+            { p_company = _empSel.Id, p_route = PaKey(_paRoute, _paRouteName), p_name = name, p_direction = (string)null, p_id = line.Id });
             if (err != null) { Msg(_paMsg, Tr("Error: ") + err, true); return; }
             line.Name = name;
             FillPaLineBox(); FillPaTables();

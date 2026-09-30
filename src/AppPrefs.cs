@@ -41,6 +41,13 @@ namespace SelectOR
         public int CabPanelX { get; set; } = -1;     // -1 = abajo a la derecha
         public int CabPanelY { get; set; } = -1;
         public float CabHudScale { get; set; } = 1f;
+        // HUD del chat de empresa: si lo dejaste abierto, dónde, su tamaño y si estaba plegado.
+        public bool ChatHudOn { get; set; }
+        public int ChatHudX { get; set; } = -1;      // -1 = abajo a la derecha
+        public int ChatHudY { get; set; } = -1;
+        public int ChatHudW { get; set; } = 360;
+        public int ChatHudH { get; set; } = 300;
+        public bool ChatHudCollapsed { get; set; }
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
         public string FavoriteCompany { get; set; }
         public string LeagueSeenMonth { get; set; }   // último mes de la liga cuyos premios ya se avisaron (aaaa-MM)
@@ -51,6 +58,7 @@ namespace SelectOR
         // Megafonía: si suenan los avisos, a qué volumen (0-100) y la última línea elegida por ruta.
         public bool PaOn { get; set; } = true;
         public int PaVolume { get; set; } = 90;
+        [JsonIgnore]   // ya no se usa (cada conducción empieza sin línea elegida): no se guarda
         public Dictionary<string, string> PaLastLine { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> Favorites { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> FavoriteTrains { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

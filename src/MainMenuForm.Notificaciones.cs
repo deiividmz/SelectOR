@@ -85,7 +85,6 @@ namespace SelectOR
                     EnqueueToast(BuildToast(r));
                     shown++;
                 }
-                try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
                 // Te han añadido, quitado o cambiado de rol: la lista de empresas y los permisos cambian.
                 if (membership && _empLoaded) LoadCompanies();
             }
@@ -194,6 +193,31 @@ namespace SelectOR
                 case "service_deleted":
                     icon = "🗑"; c = bad; title = Tr("Servicio eliminado");
                     body = string.Format(Tr("Un administrador ha eliminado tu servicio {0} en {1}."), routeTxt, co); sub = 0; break;
+                // Chat de empresa
+                case "chat_muted":
+                    icon = "💬"; c = bad; title = Tr("Sin permiso para escribir en el chat");
+                    body = string.Format(Tr("{0} te ha retirado el permiso para escribir en el chat de {1}. Puedes seguir leyéndolo."), who, co); sub = 12; break;
+                case "chat_unmuted":
+                    icon = "💬"; c = ok; title = Tr("Ya puedes escribir en el chat");
+                    body = string.Format(Tr("{0} te ha devuelto el permiso para escribir en el chat de {1}."), who, co); sub = 12; break;
+                // Carné por puntos
+                case "infraction_new":
+                    icon = "🛡"; c = buy; title = Tr("Infracción pendiente de revisión");
+                    body = string.Format(Tr("{0}: {1} en {2}. Confírmala o anúlala en Revisión."),
+                               DataOr(r, "who", Tr("Un maquinista")), Carne.Label(DataStr(r, "code")), DataOr(r, "route", co)); sub = 6; break;
+                case "infraction_confirmed":
+                    icon = "⚠"; c = bad; title = Tr("Infracción confirmada");
+                    body = string.Format(Tr("{0} en {1}: {2} en tu carné."), Carne.Label(DataStr(r, "code")), DataOr(r, "route", co),
+                               Carne.PointsText(int.TryParse(DataStr(r, "points"), out var ip) ? ip : 0)); sub = 5; break;
+                case "infraction_annulled":
+                    icon = "✅"; c = ok; title = Tr("Infracción anulada");
+                    body = string.Format(Tr("{0} en {1} no te resta puntos."), Carne.Label(DataStr(r, "code")), DataOr(r, "route", co)); sub = 5; break;
+                case "license_suspended":
+                    icon = "⛔"; c = bad; title = Tr("Carné suspendido");
+                    body = DateTime.TryParse(DataStr(r, "until"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var until)
+                        ? string.Format(Tr("Te has quedado sin puntos: no puedes ponerte de servicio hasta el {0}. Después vuelves con 8 puntos."), Carne.FmtLocal(until))
+                        : Tr("Te has quedado sin puntos: el carné queda suspendido 7 días. Después vuelves con 8 puntos.");
+                    sub = 5; break;
                 default:
                     title = Tr("Aviso"); body = co; break;
             }

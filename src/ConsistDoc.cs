@@ -122,10 +122,12 @@ namespace SelectOR
             return null;
         }
 
-        static string Q(string s)   // entrecomilla si hace falta (espacios o vacío)
+        static string Q(string s)   // entrecomilla si hace falta (vacío, espacios o paréntesis)
         {
             s = (s ?? "").Trim();
-            return s.Length == 0 || s.IndexOf(' ') >= 0 ? "\"" + s.Replace("\"", "") + "\"" : s;
+            bool comillas = s.Length == 0;
+            foreach (char ch in s) if (char.IsWhiteSpace(ch) || ch == '(' || ch == ')') { comillas = true; break; }
+            return comillas ? "\"" + s.Replace("\"", "") + "\"" : s;
         }
 
         public string BuildText()

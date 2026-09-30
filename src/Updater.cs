@@ -24,6 +24,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SelectOR
@@ -32,6 +33,62 @@ namespace SelectOR
     {
         public string Version, Url, Sha256, Notes, Signature;
         public DateTime PublishedAt;
+    }
+
+    // Paso en curso de la actualización (para la ventana): descarga con bytes, o fase sin porcentaje.
+    public enum UpdatePhase { Downloading, Verifying, Installing, Done }
+    public readonly struct UpdateStep
+    {
+        public readonly UpdatePhase Phase; public readonly long Got, Total;
+        public UpdateStep(UpdatePhase phase, long got = 0, long total = -1) { Phase = phase; Got = got; Total = total; }
+    }
+
+    // Comprobación de firma Authenticode con WinVerifyTrust (la misma que hace Windows), sin avisos en
+    // pantalla y sin consultar revocaciones por red.
+    static class Authenticode
+    {
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        struct FileInfo { public uint cbStruct; public string pcwszFilePath; public IntPtr hFile; public IntPtr pgKnownSubject; }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct TrustData
+        {
+            public uint cbStruct; public IntPtr pPolicyCallbackData, pSIPClientData;
+            public uint dwUIChoice, fdwRevocationChecks, dwUnionChoice; public IntPtr pFile;
+            public uint dwStateAction; public IntPtr hWVTStateData, pwszURLReference;
+            public uint dwProvFlags, dwUIContext; public IntPtr pSignatureSettings;
+        }
+
+        [System.Runtime.InteropServices.DllImport("wintrust.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        static extern int WinVerifyTrust(IntPtr hwnd, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPStruct)] Guid action, ref TrustData data);
+
+        static readonly Guid GenericVerifyV2 = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+
+        public static bool IsValid(string path)
+        {
+            var fi = new FileInfo { cbStruct = (uint)System.Runtime.InteropServices.Marshal.SizeOf<FileInfo>(), pcwszFilePath = path };
+            IntPtr pFile = System.Runtime.InteropServices.Marshal.AllocHGlobal(System.Runtime.InteropServices.Marshal.SizeOf<FileInfo>());
+            try
+            {
+                System.Runtime.InteropServices.Marshal.StructureToPtr(fi, pFile, false);
+                var td = new TrustData
+                {
+                    cbStruct = (uint)System.Runtime.InteropServices.Marshal.SizeOf<TrustData>(),
+                    dwUIChoice = 2,            // WTD_UI_NONE
+                    fdwRevocationChecks = 0,   // WTD_REVOKE_NONE
+                    dwUnionChoice = 1,         // WTD_CHOICE_FILE
+                    pFile = pFile,
+                    dwProvFlags = 0x1000       // WTD_CACHE_ONLY_URL_RETRIEVAL (sin red)
+                };
+                return WinVerifyTrust(new IntPtr(-1), GenericVerifyV2, ref td) == 0;
+            }
+            catch { return false; }
+            finally
+            {
+                try { System.Runtime.InteropServices.Marshal.DestroyStructure<FileInfo>(pFile); } catch { }
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(pFile);
+            }
+        }
     }
 
     public static class Updater
@@ -192,9 +249,35 @@ namespace SelectOR
             }
         }
 
-        // Descarga, verifica, instala y reinicia. Devuelve null si va bien (la app se cerrará),
-        // o el mensaje de error (sin haber tocado nada, o tras deshacer los cambios).
-        public static async Task<string> DownloadAndInstallAsync(ReleaseInfo r, IProgress<double> progress)
+        // La nueva versión está instalada y hay que arrancarla cuando esta termine de cerrarse (Program).
+        public static bool RestartPending { get; private set; }
+
+        // Arranca la versión nueva (lo llama Program cuando la ventana principal ya se ha cerrado y las
+        // preferencias están guardadas: así nunca conviven las dos versiones).
+        public static void LaunchPending()
+        {
+            if (!RestartPending) return;
+            RestartPending = false;
+            try
+            {
+                Process.Start(new ProcessStartInfo(Path.Combine(AppDir, "SelectOR.exe"))
+                {
+                    UseShellExecute = true, WorkingDirectory = AppDir, Arguments = "--updated"
+                });
+            }
+            catch { }
+        }
+
+        const int StallSeconds = 30;   // sin recibir datos durante esto: la descarga se da por parada
+
+        // Descarga, verifica e instala. Devuelve null si va bien (la app se cerrará y Program arrancará la
+        // nueva), o el mensaje de error (sin haber tocado nada, o tras deshacer los cambios).
+        // TODO el trabajo va en segundo plano: la ventana nunca se queda «sin responder», ni aunque el
+        // antivirus tarde en revisar los archivos nuevos. La descarga se puede cancelar; la instalación no.
+        public static Task<string> DownloadAndInstallAsync(ReleaseInfo r, IProgress<UpdateStep> progress, CancellationToken ct = default)
+            => Task.Run(() => DownloadAndInstallCoreAsync(r, progress, ct));
+
+        static async Task<string> DownloadAndInstallCoreAsync(ReleaseInfo r, IProgress<UpdateStep> progress, CancellationToken ct)
         {
             if (r == null || string.IsNullOrWhiteSpace(r.Url)) return I18n.T("No hay enlace de descarga.");
             if (!r.Url.StartsWith(AllowedPrefix, StringComparison.Ordinal)) return I18n.T("El paquete no viene del almacén de SelectOR. No se ha instalado nada.");
@@ -206,27 +289,45 @@ namespace SelectOR
             string zipPath = Path.Combine(tmp, "update.zip");
             try
             {
-                // 1) Descarga con progreso
-                using (var http = NewHttp(300))
-                using (var resp = await http.GetAsync(r.Url, HttpCompletionOption.ResponseHeadersRead))
+                // 1) Descarga con progreso. Si la conexión se queda parada, no se espera para siempre.
+                progress?.Report(new UpdateStep(UpdatePhase.Downloading, 0, -1));
+                try
                 {
+                    using var http = NewHttp(60);
+                    using var resp = await http.GetAsync(r.Url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
                     if (!resp.IsSuccessStatusCode) return I18n.T("No se pudo descargar la actualización: ") + (int)resp.StatusCode;
                     long total = resp.Content.Headers.ContentLength ?? -1;
                     if (total > 100L * 1024 * 1024) return I18n.T("El paquete es demasiado grande. No se ha instalado nada.");
-                    using var src = await resp.Content.ReadAsStreamAsync();
+                    using var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
                     using var dst = File.Create(zipPath);
                     var buf = new byte[81920]; long got = 0; int n;
-                    while ((n = await src.ReadAsync(buf, 0, buf.Length)) > 0)
+                    var tick = Stopwatch.StartNew();
+                    while (total <= 0 || got < total)
                     {
-                        await dst.WriteAsync(buf, 0, n);
+                        using (var stall = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                        {
+                            stall.CancelAfter(TimeSpan.FromSeconds(StallSeconds));
+                            try { n = await src.ReadAsync(buf.AsMemory(0, buf.Length), stall.Token).ConfigureAwait(false); }
+                            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                            { return I18n.T("La descarga se ha quedado parada. Comprueba la conexión e inténtalo de nuevo."); }
+                        }
+                        if (n <= 0) break;
+                        await dst.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
                         got += n;
                         if (got > 100L * 1024 * 1024) return I18n.T("El paquete es demasiado grande. No se ha instalado nada.");
-                        if (total > 0) progress?.Report(Math.Min(1.0, got / (double)total));
+                        if (tick.ElapsedMilliseconds >= 100) { tick.Restart(); progress?.Report(new UpdateStep(UpdatePhase.Downloading, got, total)); }
                     }
+                    if (total > 0 && got < total) return I18n.T("La descarga se cortó antes de terminar. Inténtalo de nuevo.");
+                    progress?.Report(new UpdateStep(UpdatePhase.Downloading, got, total > 0 ? total : got));
                 }
-                progress?.Report(1.0);
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                { return I18n.T("Descarga cancelada. No se ha instalado nada."); }
+                catch (HttpRequestException e) { return I18n.T("No se pudo descargar la actualización: ") + e.Message; }
+                catch (TaskCanceledException) { return I18n.T("El servidor no responde. Inténtalo de nuevo más tarde."); }
 
+                // A partir de aquí ya no se cancela: se comprueba y se instala de una vez.
                 // 2) Integridad y AUTENTICIDAD: huella SHA-256 y firma del superadmin.
+                progress?.Report(new UpdateStep(UpdatePhase.Verifying));
                 string sha = Sha256File(zipPath);
                 if (!sha.Equals(r.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
                     return I18n.T("La descarga está dañada (la huella SHA-256 no coincide). No se ha instalado nada.");
@@ -241,6 +342,7 @@ namespace SelectOR
                     return I18n.T("El paquete descargado no contiene SelectOR.");
 
                 // 4) Instalar: actual → *.old, nuevo → su sitio. Si algo falla, se deshace.
+                progress?.Report(new UpdateStep(UpdatePhase.Installing));
                 var done = new List<string>();
                 try
                 {
@@ -271,11 +373,9 @@ namespace SelectOR
                     return I18n.T("No se pudo instalar la actualización: ") + e.Message;
                 }
 
-                // 5) Reiniciar con la nueva versión
-                Process.Start(new ProcessStartInfo(Path.Combine(AppDir, "SelectOR.exe"))
-                {
-                    UseShellExecute = true, WorkingDirectory = AppDir, Arguments = "--updated"
-                });
+                // 5) La nueva versión se arranca cuando esta termine de cerrarse (Program → LaunchPending).
+                RestartPending = true;
+                progress?.Report(new UpdateStep(UpdatePhase.Done));
                 return null;
             }
             catch (Exception e) { return I18n.T("No se pudo instalar la actualización: ") + e.Message; }
@@ -293,6 +393,22 @@ namespace SelectOR
         {
             using var s = File.OpenRead(path);
             return Convert.ToHexString(SHA256.HashData(s)).ToLowerInvariant();
+        }
+
+        // ------------------------ Firma Authenticode (SignPath) ------------------------
+        // Los archivos que se publican deberían ser los FIRMADOS por SignPath (flujo «Compilar y firmar» de
+        // GitHub + tools\instalar-firmado.ps1): sin firma, los antivirus desconfían del programa.
+
+        /// <summary>Archivos del paquete (.exe/.dll) que están aquí y NO tienen una firma Authenticode válida.</summary>
+        public static List<string> UnsignedPackageFiles()
+        {
+            var res = new List<string>();
+            foreach (var f in new[] { "SelectOR.exe", "SelectOR.dll" })
+            {
+                string p = Path.Combine(AppDir, f);
+                if (File.Exists(p) && !Authenticode.IsValid(p)) res.Add(f);
+            }
+            return res;
         }
 
         // ------------------------ Publicar (superadmin) ------------------------

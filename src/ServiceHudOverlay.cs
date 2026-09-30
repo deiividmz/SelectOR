@@ -78,6 +78,7 @@ namespace SelectOR
         readonly string _company, _train, _route;
         readonly Image _logo;
         readonly Func<DateTime?> _startUtc;   // inicio del cronómetro (null = el escenario aún está cargando)
+        public Func<bool> Paused;             // Open Rails en pausa: el cronómetro está parado
         readonly AppPrefs _prefs;
         readonly System.Windows.Forms.Timer _tick;
         readonly bool _service;      // true = servicio de empresa (tiempo + viajeros); false = conducción normal
@@ -723,15 +724,18 @@ namespace SelectOR
             {
                 var timerRect = new Rectangle(28, top + 36, 150, 28);
                 bool running = false; try { running = _startUtc?.Invoke() != null; } catch { }
-                DrawDot(g, 15, timerRect.Top + timerRect.Height / 2, Rec, running && _blink);   // quieto mientras carga el escenario
+                bool paused = false; try { paused = Paused?.Invoke() ?? false; } catch { }
+                // Quieto mientras carga el escenario; en pausa, fijo (sin parpadear).
+                DrawDot(g, 15, timerRect.Top + timerRect.Height / 2, Rec, running && (paused || _blink));
                 using var fT = Theme.Font(15f, FontStyle.Bold);
-                TextRenderer.DrawText(g, Elapsed(), fT, timerRect, Theme.Text,
+                TextRenderer.DrawText(g, Elapsed(), fT, timerRect, paused ? Theme.Subtle : Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                if (_km != null)
+                if (_km != null || paused)
                 {
                     int tw = TextRenderer.MeasureText(g, Elapsed(), fT, Size.Empty, TextFormatFlags.NoPadding).Width;
-                    TextRenderer.DrawText(g, "  ·  " + KmText(), Theme.Font(10f, FontStyle.Bold),
-                        new Rectangle(28 + tw, top + 36, Width - 28 - tw - 8, 28), Blend(Theme.Text, Theme.Subtle, 0.35f),
+                    string extra = paused ? "  ·  " + I18n.T("EN PAUSA") : "  ·  " + KmText();
+                    TextRenderer.DrawText(g, extra, Theme.Font(10f, FontStyle.Bold),
+                        new Rectangle(28 + tw, top + 36, Width - 28 - tw - 8, 28), paused ? Theme.Gold : Blend(Theme.Text, Theme.Subtle, 0.35f),
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 }
             }

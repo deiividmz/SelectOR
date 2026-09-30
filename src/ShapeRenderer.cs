@@ -797,6 +797,10 @@ namespace SelectOR
             _gd.DepthStencilState = DepthStencilState.Default;
         }
 
+        /// <summary>Crea ya el dispositivo gráfico (hilo de la interfaz, cuando está libre): así el primer
+        /// render de la vista 3D no tiene que pagar su creación.</summary>
+        public static void WarmUp() { try { EnsureDevice(); } catch { } }
+
         static void EnsureDevice()
         {
             if (_gd != null) return;
@@ -847,12 +851,91 @@ namespace SelectOR
             catch { return path; }
         }
 
+        // ---- Texturas preparadas en segundo plano ----
+        // Descodificar una textura (.ace/.dds), hacer sus versiones reducidas y convertir los colores es lo
+        // que más tarda del primer render (casi un segundo con un tren nuevo). PrefetchTextures lo hace en
+        // cualquier hilo en cuanto hay geometría; al renderizar solo queda subirlo a la tarjeta.
+        sealed class Decoded { public readonly List<(int w, int h, Microsoft.Xna.Framework.Color[] px)> Levels = new(); public int Bits; }
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Decoded> _texReady = new(StringComparer.OrdinalIgnoreCase);
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _texUploaded = new(StringComparer.OrdinalIgnoreCase);
+
+        public static void PrefetchTextures(ShapeGeom geom)
+        {
+            if (geom == null) return;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in geom.Groups)
+            {
+                string p = g?.TexPath;
+                if (string.IsNullOrEmpty(p)) continue;
+                try { p = Redirect(p); } catch { }
+                if (!seen.Add(p) || _texUploaded.ContainsKey(p) || _texReady.ContainsKey(p)) continue;
+                try { var d = Decode(p); if (d != null) _texReady[p] = d; } catch { }
+            }
+            if (_texReady.Count > 300) _texReady.Clear();   // por si se acumulan texturas que nunca se piden
+        }
+
+        static Decoded Decode(string path)
+        {
+            using var bmp = LoadBitmap(path, out int bits);
+            if (bmp == null) return null;
+            var d = new Decoded { Bits = bits };
+            d.Levels.Add((bmp.Width, bmp.Height, ToColors(bmp)));
+            GdiBitmap cur = bmp; bool disposeCur = false; int lw = bmp.Width, lh = bmp.Height;
+            while (lw > 1 || lh > 1)
+            {
+                int nw = Math.Max(1, lw / 2), nh = Math.Max(1, lh / 2);
+                var down = MipDown(cur, nw, nh);
+                if (disposeCur) cur.Dispose();
+                d.Levels.Add((nw, nh, ToColors(down)));
+                cur = down; disposeCur = true; lw = nw; lh = nh;
+            }
+            if (disposeCur) cur.Dispose();
+            return d;
+        }
+
+        static GdiBitmap MipDown(GdiBitmap src, int nw, int nh)
+        {
+            var down = new GdiBitmap(nw, nh, GdiPixel.Format32bppArgb);
+            using (var g = System.Drawing.Graphics.FromImage(down))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                g.DrawImage(src, 0, 0, nw, nh);
+            }
+            return down;
+        }
+
+        static Texture2D FromDecoded(Decoded d)
+        {
+            var l0 = d.Levels[0];
+            Texture2D tex;
+            try
+            {
+                tex = new Texture2D(_gd, l0.w, l0.h, d.Levels.Count > 1, SurfaceFormat.Color);
+                for (int i = 0; i < d.Levels.Count; i++) tex.SetData(i, null, d.Levels[i].px, 0, d.Levels[i].px.Length);
+            }
+            catch
+            {
+                tex = new Texture2D(_gd, l0.w, l0.h, false, SurfaceFormat.Color);
+                tex.SetData(0, null, l0.px, 0, l0.px.Length);
+            }
+            return tex;
+        }
+
         static Texture2D LoadTexture(string path, out int alphaBits)
         {
             alphaBits = 0;
             if (string.IsNullOrEmpty(path)) return null;
             path = Redirect(path);
             if (_texCache.TryGetValue(path, out var t)) { _texAlpha.TryGetValue(path, out alphaBits); return t; }
+            _texUploaded[path] = 0;
+            if (_texReady.TryRemove(path, out var ready))
+            {
+                Texture2D rt = null;
+                try { rt = FromDecoded(ready); } catch { rt = null; }
+                _texCache[path] = rt; _texAlpha[path] = ready.Bits; alphaBits = ready.Bits;
+                return rt;
+            }
             Texture2D tex = null;
             int bits = 0;
             try
@@ -897,6 +980,12 @@ namespace SelectOR
 
         static void SetTexLevel(Texture2D tex, int level, GdiBitmap bmp)
         {
+            var data = ToColors(bmp);
+            tex.SetData(level, null, data, 0, data.Length);
+        }
+
+        static Microsoft.Xna.Framework.Color[] ToColors(GdiBitmap bmp)
+        {
             var data = new Microsoft.Xna.Framework.Color[bmp.Width * bmp.Height];
             var bd = bmp.LockBits(new GdiRect(0, 0, bmp.Width, bmp.Height), GdiLock.ReadOnly, GdiPixel.Format32bppArgb);
             var buf = new byte[bmp.Width * bmp.Height * 4];
@@ -904,7 +993,7 @@ namespace SelectOR
             bmp.UnlockBits(bd);
             for (int i = 0; i < data.Length; i++) // BGRA -> RGBA
                 data[i] = new Microsoft.Xna.Framework.Color(buf[i * 4 + 2], buf[i * 4 + 1], buf[i * 4 + 0], buf[i * 4 + 3]);
-            tex.SetData(level, null, data, 0, data.Length);
+            return data;
         }
 
         static GdiBitmap LoadBitmap(string path, out int alphaBits)

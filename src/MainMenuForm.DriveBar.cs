@@ -24,6 +24,7 @@ namespace SelectOR
         {
             if (_hudWaiting) { _hudWaiting = false; if (HudAlive && !_serviceHud.Visible) _serviceHud.Show(); }
             if (_cabWaiting) { _cabWaiting = false; if (CabHudAlive && !_cabHud.Visible) _cabHud.Show(); }
+            if (_chatWaiting) { _chatWaiting = false; if (ChatHudAlive && !_chatHud.Visible) _chatHud.Show(); }
             if (_barWaiting) { _barWaiting = false; CreateDriveBar(); }
         }
 
@@ -71,7 +72,7 @@ namespace SelectOR
             try
             {
                 _driveBar = new DriveTopBar(DriveBarStateNow, ToggleHudFromBar, ToggleBigMapFromBar, ServiceFromBar, CheckDrivenFleet,
-                                            ToggleCabHudFromBar);
+                                            ToggleCabHudFromBar, ToggleChatHudFromBar);
             }
             catch { _driveBar = null; }
         }
@@ -111,13 +112,15 @@ namespace SelectOR
                 HudVisible = HudAlive && _serviceHud.Visible,
                 BigMapOpen = HudAlive && _serviceHud.BigMapOpen,
                 InService = _pendingServiceId != null,
-                CabVisible = CabHudAlive && _cabHud.Visible
+                CabVisible = CabHudAlive && _cabHud.Visible,
+                ChatVisible = ChatHudAlive && _chatHud.Visible
             };
             if (s.InService)
             {
                 int secs = ServiceSeconds();
                 s.Status = string.Format(Tr("En servicio · {0}"), _empOnDutyCompany?.Name ?? "") + "\n"
-                         + $"{secs / 3600:00}:{secs % 3600 / 60:00}:{secs % 60:00} · " + (_trackedMeters / 1000.0).ToString("0.0", EsEs) + " km";
+                         + $"{secs / 3600:00}:{secs % 3600 / 60:00}:{secs % 60:00} · " + (_trackedMeters / 1000.0).ToString("0.0", EsEs) + " km"
+                         + (_svcPaused ? " · " + Tr("en pausa") : "");
                 s.ServiceEnabled = true;
                 s.ServiceText = Tr("Registrar servicio");
                 return s;
@@ -205,7 +208,7 @@ namespace SelectOR
             // El servicio empieza AHORA: tiempo, km y viajeros desde este momento.
             _pendingServiceId = sid;
             _svcOpenedUtc = DateTime.UtcNow;
-            _svcClockUtc = _tHave ? DateTime.UtcNow : (DateTime?)null;   // si aún carga, arranca con la 1.ª posición
+            StartSvcClock(_tHave ? DateTime.UtcNow : (DateTime?)null);   // si aún carga, arranca con la 1.ª posición
             _estPatKm = 0; _estimatedKm = 0;
             _trackedMeters = 0;
             // Los viajeros ya iban contándose en conducción libre: se conservan los que van a bordo

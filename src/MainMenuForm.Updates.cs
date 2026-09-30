@@ -49,8 +49,8 @@ namespace SelectOR
             if (r == null)
             {
                 if (manual)
-                    MessageBox.Show(this, string.Format(Tr("Tienes la última versión de SelectOR ({0})."), Updater.CurrentVersionText),
-                        "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    FancyDialog.Info(this, Tr("SelectOR está al día"),
+                        string.Format(Tr("Tienes la última versión de SelectOR ({0})."), Updater.CurrentVersionText), "✅");
                 return;
             }
             if (!manual && r.Version == _updDismissedVersion) return;

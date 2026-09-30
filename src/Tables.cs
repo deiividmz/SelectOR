@@ -431,13 +431,22 @@ namespace SelectOR
         }
 
         // Devuelve true si alguna columna creció (para reaplicar anchos).
+        // Medir texto con GDI cuesta: con miles de filas era la mitad del tiempo de llenar la tabla. Un
+        // texto de N letras no puede medir más que N «M» anchas, así que si ni con eso supera el ancho que
+        // ya tiene la columna, no hace falta medirlo.
+        int _wideCharW; Font _wideFont;
+
         bool Measure(Row r)
         {
             if (_maxW == null) return false;
+            if (_wideFont != Font) { _wideFont = Font; _wideCharW = Math.Max(1, Math.Max(TextRenderer.MeasureText("M", Font).Width, TextRenderer.MeasureText("W", Font).Width)); }
             bool grew = false;
             for (int i = 0; i < _cols.Count && i < r.Cells.Length; i++)
             {
-                int w = TextRenderer.MeasureText(r.Cells[i] ?? "", Font).Width + CellPad;
+                string s = r.Cells[i] ?? "";
+                int extra = CellPad + (i == ImageColumn ? ImgSize + ImgGap : 0);
+                if (s.Length * _wideCharW + extra <= _maxW[i]) continue;   // imposible que crezca
+                int w = TextRenderer.MeasureText(s, Font).Width + CellPad;
                 if (i == ImageColumn) w += ImgSize + ImgGap;
                 if (w > _maxW[i]) { _maxW[i] = w; grew = true; }
             }

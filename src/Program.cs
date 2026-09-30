@@ -46,8 +46,18 @@ namespace SelectOR
                 // contenido está leído (lo hace MainMenuForm al terminar la carga).
                 try { Theme.ComputeUiScale(Screen.PrimaryScreen.WorkingArea); } catch { }
                 SplashScreen.Begin();
+                System.Threading.Tasks.Task.Run(AppDataTidy.Run);   // %AppData%: fuera lo que sobra (en segundo plano)
 
                 Application.Run(new MainMenuForm(kiosk));
+
+                // Tras actualizar: la ventana ya se ha cerrado y las preferencias están guardadas. Se arranca
+                // la versión nueva y esta termina YA (sin esperar a hilos que se queden colgados), para que
+                // nunca estén abiertas las dos a la vez.
+                if (Updater.RestartPending)
+                {
+                    Updater.LaunchPending();
+                    Environment.Exit(0);
+                }
             }
             catch (Exception ex)
             {

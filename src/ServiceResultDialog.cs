@@ -22,12 +22,15 @@ namespace SelectOR
             public double Km;
             public int DurationS;
             public int Pax;                 // viajeros embarcados (modelo PseudoPAX; 0 si no aplica)
+            public double Capacity = double.NaN;   // plazas del tren (viajeros); NaN = no se sabe
+            public double MassT = double.NaN;      // toneladas del tren (mercancías: el ingreso se calcula con ellas)
             public double Income, Canon, Energy, Salary, Rental, Maintenance, Net, Balance;
             public string Driver = "";      // maquinista (para la vista de detalle desde Servicios)
             public string DateText = "";    // fecha (vista de detalle)
             public bool History;            // true = vista de detalle desde Servicios (oculta el rango)
             // Datos adicionales del viaje (máxima info que registra OR/servidor)
             public string Consist = "";     // tren conducido
+            public int Cars, Engines;       // coches/vagones de su .con y cuántos son motrices (0 = no se sabe)
             public string Path = "";        // recorrido (.pat)
             public string StatusText = "";  // estado (completado / en curso / …)
             public bool InProgress;         // true = servicio "En conducción": aún no hay km/tiempo/economía
@@ -41,6 +44,11 @@ namespace SelectOR
             public double RankPct;          // progreso al siguiente rango [0..1]
             public string NextRankName;     // null si ya es el rango máximo
             public double NextRankKm;
+            public bool RankFrozen;         // rango congelado (carné por debajo de 6 puntos)
+            // Carné por puntos: infracciones de este servicio y puntos que quedan (−1 = no se sabe).
+            public System.Collections.Generic.List<Carne.Item> Infractions = new System.Collections.Generic.List<Carne.Item>();
+            public int LicensePoints = -1;
+            public DateTime? SuspendedUntil;
         }
 
         static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-ES");
@@ -89,6 +97,8 @@ namespace SelectOR
             void Add(string k, string v) { if (!string.IsNullOrWhiteSpace(v)) det.Add((k, v)); }
             Add(I18n.T("Ruta"), d.Route);
             Add(I18n.T("Tren"), d.Consist);
+            if (d.Cars > 0) Add(I18n.T("Coches"), d.Cars.ToString("N0", Es)
+                + (d.Engines > 0 ? "  (" + d.Engines + " " + I18n.T(d.Engines == 1 ? "motriz" : "motrices") + ")" : ""));
             Add(I18n.T("Recorrido"), d.Path);
             if (d.History) { Add(I18n.T("Maquinista"), d.Driver); Add(I18n.T("Fecha"), d.DateText); }
             Add(I18n.T("Estado"), d.StatusText);
@@ -139,13 +149,23 @@ namespace SelectOR
             kpis.Controls.Add(Kpi(I18n.T("Velocidad media"), vel.ToString("N0", Es) + " km/h", Color.FromArgb(255, 167, 89)), 2, 0);
             body.Controls.Add(kpis);
 
-            // Viajeros transportados (modelo de embarque en andenes)
-            if (d.Pax > 0)
+            // Tren de viajeros: los transportados y las plazas del tren. Mercancías: las toneladas, que son
+            // con las que se calcula el ingreso.
+            string carga = null;
+            if (d.Capacity > 0)
+                carga = "🧍 " + (d.Pax > 0
+                    ? string.Format(I18n.T("{0} viajeros transportados · tren de {1} plazas"), d.Pax.ToString("N0", Es), d.Capacity.ToString("N0", Es))
+                    : string.Format(I18n.T("Tren de {0} plazas · no ha subido ningún viajero"), d.Capacity.ToString("N0", Es)));
+            else if (d.MassT > 0)
+                carga = "⚖ " + string.Format(I18n.T("Carga: {0} t · el ingreso se calcula con esta masa"), d.MassT.ToString("N0", Es));
+            else if (d.Pax > 0)
+                carga = "🧍 " + string.Format(I18n.T("{0} viajeros transportados"), d.Pax.ToString("N0", Es));
+            if (carga != null)
                 body.Controls.Add(new Label
                 {
-                    AutoSize = true, ForeColor = Color.FromArgb(129, 199, 132),
+                    AutoSize = true, MaximumSize = new Size(W, 0), ForeColor = Color.FromArgb(129, 199, 132),
                     Font = Theme.Font(10.5f, FontStyle.Bold),
-                    Text = "🧍 " + string.Format(I18n.T("{0} viajeros transportados"), d.Pax.ToString("N0", Es)),
+                    Text = carga,
                     Margin = new Padding(2, 0, 2, 8)
                 });
             }
@@ -196,6 +216,11 @@ namespace SelectOR
                 body.Controls.Add(warn);
             }
 
+            // Carné por puntos: lo que ha pasado en este servicio y cómo queda el carné.
+            if (!d.History && !d.InProgress && (d.Infractions.Count > 0 || d.SuspendedUntil != null
+                                                || (d.LicensePoints >= 0 && d.LicensePoints < Carne.MaxPoints)))
+                body.Controls.Add(LicenseCard(d, W));
+
             // Rango (solo en el resultado del viaje; en la vista de detalle desde Servicios se oculta)
             if (!d.History && !string.IsNullOrEmpty(d.RankName))
             {
@@ -240,10 +265,10 @@ namespace SelectOR
             {
                 AutoSize = false, Height = 22, Dock = DockStyle.Top, ForeColor = Theme.Subtle,
                 Font = Theme.Font(9f),
-                Text = d.NextRankName == null
+                Text = (d.RankFrozen ? "❄ " + I18n.T("Rango congelado") + "  ·  " : "") + (d.NextRankName == null
                     ? I18n.T("¡Rango máximo alcanzado!")
                     : string.Format(I18n.T("Siguiente: {0}  ·  {1} de {2} km"), d.NextRankName,
-                                    d.ValidKm.ToString("N0", Es), d.NextRankKm.ToString("N0", Es))
+                                    d.ValidKm.ToString("N0", Es), d.NextRankKm.ToString("N0", Es)))
             });
             rank.Controls.Add(rg);
             rank.Height = d.RankedUp ? 118 : 140;
@@ -265,6 +290,61 @@ namespace SelectOR
             int chrome = stripe.Height + header.Height + buttons.Height;
             int screenH = Screen.FromControl(this)?.WorkingArea.Height ?? 1000;
             ClientSize = new Size(W + 36, Math.Min(contentH + chrome + 2, screenH - 60));
+        }
+
+        // Tarjeta del carné: puntos (con la barra de 15 casillas), infracciones del servicio y qué supone.
+        static Control LicenseCard(Data d, int W)
+        {
+            int pts = d.LicensePoints;
+            bool susp = d.SuspendedUntil != null;
+            var card = new Card { Width = W, Fill = d.Infractions.Count > 0 ? Color.FromArgb(56, 46, 40) : Theme.Surface, Radius = 12, Padding = new Padding(16, 10, 16, 12), Margin = new Padding(0, 0, 0, 8) };
+            var col = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0) };
+            int iw = W - 32;
+            var top = new TableLayoutPanel { Width = iw, Height = 26, ColumnCount = 2, BackColor = Color.Transparent, Margin = new Padding(0) };
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            top.Controls.Add(new Label { Text = I18n.T("CARNÉ POR PUNTOS"), AutoSize = false, Dock = DockStyle.Fill, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
+            if (pts >= 0)
+                top.Controls.Add(new Label
+                {
+                    Text = susp ? I18n.T("SUSPENDIDO") : string.Format(I18n.T("{0} de {1} puntos"), pts, Carne.MaxPoints),
+                    AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = susp ? Carne.Red : Carne.PointsColor(pts),
+                    Font = Theme.Font(12f, FontStyle.Bold), Margin = new Padding(0, 2, 0, 0)
+                }, 1, 0);
+            col.Controls.Add(top);
+            if (pts >= 0)
+            {
+                var bar = new Panel { Width = iw, Height = 18, BackColor = Color.Transparent, Margin = new Padding(0, 2, 0, 6) };
+                bar.Paint += (s, e) => Carne.PaintBar(e.Graphics, new Rectangle(0, 5, bar.Width - 1, 8), pts);
+                col.Controls.Add(bar);
+            }
+            foreach (var it in d.Infractions)
+            {
+                string pt = it.Status == "annulled" ? I18n.T("anulada") : Carne.PointsText(it.Points)
+                          + (it.Status == "pending" ? " · " + I18n.T("pendiente de revisión") : "");
+                string txt = "⚠  " + Carne.Label(it.Code) + (it.Detail.Length > 0 ? "  —  " + it.Detail : "") + "   (" + pt + ")";
+                col.Controls.Add(new Label
+                {
+                    Text = txt, AutoSize = true, MaximumSize = new Size(iw, 0), ForeColor = it.Status == "pending" ? Carne.Gold : Carne.Red,
+                    Font = Theme.Font(9.5f, FontStyle.Bold), Margin = new Padding(0, 2, 0, 2)
+                });
+            }
+            var notes = new System.Collections.Generic.List<string>();
+            if (d.Infractions.Exists(x => x.Status == "pending"))
+                notes.Add(I18n.T("Las infracciones graves las revisará el gerente o un gestor de la empresa; hasta entonces no restan puntos."));
+            if (susp)
+                notes.Add(string.Format(I18n.T("Carné suspendido hasta el {0}: no puedes ponerte de servicio. Después vuelves con 8 puntos."), Carne.FmtLocal(d.SuspendedUntil.Value)));
+            else if (pts >= 0 && pts < Carne.PenaltyBelow)
+                notes.Add(I18n.T("Por debajo de 6 puntos: el salario baja un 25 % y el rango queda congelado."));
+            else if (pts >= 0 && pts < Carne.WarnBelow)
+                notes.Add(I18n.T("Aviso: el carné está por debajo de 10 puntos."));
+            if (d.Valid && d.Infractions.Count == 0 && pts >= 0 && pts < Carne.MaxPoints && !susp)
+                notes.Add(string.Format(I18n.T("Servicio sin infracciones: cuenta para recuperar puntos (+1 cada {0} servicios limpios seguidos)."), Carne.CleanForPoint));
+            foreach (var n in notes)
+                col.Controls.Add(new Label { Text = n, AutoSize = true, MaximumSize = new Size(iw, 0), ForeColor = Theme.Subtle, Font = Theme.Font(9f), Margin = new Padding(0, 4, 0, 0) });
+            card.Controls.Add(col);
+            card.Height = col.GetPreferredSize(new Size(iw, 0)).Height + card.Padding.Vertical + 4;
+            return card;
         }
 
         // Tarjeta KPI (icono de color a un lado, valor grande).

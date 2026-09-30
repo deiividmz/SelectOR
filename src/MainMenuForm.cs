@@ -31,7 +31,38 @@ namespace SelectOR
 
         Folder _curFolder;
         Route _curRoute;
-        readonly Dictionary<string, List<TrainItem>> _consistCache = new Dictionary<string, List<TrainItem>>();
+        readonly Dictionary<string, List<TrainItem>> _consistCache = new Dictionary<string, List<TrainItem>>();   // (con lock: se escribe desde hilos)
+
+        // Lectura ADELANTADA de la carpeta que viene marcada mientras el usuario elige en la pantalla de
+        // inicio (casi siempre elige esa): rutas, índice y trenes. La carga normal espera a que termine
+        // antes de tocar nada, así nunca se pisan.
+        Task _prefetchTask; string _prefetchPath; List<Route> _prefetchRoutes;
+
+        void StartPrefetch(Folder f)
+        {
+            _prefetchPath = f.Path;
+            _prefetchTask = Task.Run(() =>
+            {
+                LoadLog("adelantando la carpeta marcada: " + f.Name);
+                var rt = Task.Run(() => SafeList(() => Route.GetRoutes(f).OrderBy(r => r.Name).ToList()));
+                try
+                {
+                    ContentIndex.Open(f.Path);
+                    // Solo si el índice vale (lectura rápida): leer el contenido entero en frío podría
+                    // hacer esperar mucho si al final se elige otra carpeta.
+                    if (ContentIndex.Loaded)
+                    {
+                        var cons = FastConsists.Load(f.Path);
+                        if (cons.Count > 0) lock (_consistCache) _consistCache[f.Path] = cons;
+                    }
+                }
+                catch { }
+                try { _prefetchRoutes = rt.Result; } catch { }
+                LoadLog("carpeta marcada adelantada");
+            });
+        }
+
+        void WaitPrefetch() { try { _prefetchTask?.Wait(); } catch { } }
         int _folderToken, _routeToken;
 
         AppPrefs _prefs;
@@ -84,6 +115,9 @@ namespace SelectOR
         // Multijugador
         RadioButton _rbClient, _rbServer;
         TextBox _txtMPUser, _txtMPHost, _txtMPPort;
+        Label _lblMPInfo;
+        string _mpClientHost;      // la IP escrita para unirse (se guarda mientras el campo enseña la IP propia)
+        bool _mpShowingOwnIp;      // el campo Host enseña la IP de este equipo (modo Servidor)
         Label _lblMPUserRule;
         ListBox _lstServers;
         Label _lblServers;
@@ -968,10 +1002,11 @@ namespace SelectOR
                 Location = new Point(4, 28), Size = new Size(672, 46), ForeColor = Theme.Subtle, BackColor = Theme.Surface, AutoSize = false,
                 Text = Tr("Se lanza la selección de «Exploración» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.")
             };
+            _lblMPInfo = info;
 
             _rbServer = new ThemeRadio { Text = "  " + Tr("Servidor (alojar partida)"), ForeColor = Theme.Text, Location = new Point(8, 86), Size = new Size(300, 26), Checked = true };
             _rbClient = new ThemeRadio { Text = "  " + Tr("Cliente (unirse a un servidor)"), ForeColor = Theme.Text, Location = new Point(8, 116), Size = new Size(300, 26) };
-            _rbClient.CheckedChanged += (s, e) => { _txtMPHost.Enabled = _rbClient.Checked; UpdateStatus(); };
+            _rbClient.CheckedChanged += (s, e) => { ApplyMPMode(); UpdateStatus(); };
 
             _txtMPUser = MPField(inner, Tr("Usuario"), 86, 340);
             // Usuario de Multijugador con las MISMAS reglas que Open Rails (si no, no conecta):
@@ -982,7 +1017,7 @@ namespace SelectOR
             _txtMPUser.TextChanged += (s, e) => OnMPUserChanged();
             _txtMPHost = MPField(inner, Tr("Host (servidor)"), 124, 340);
             _txtMPPort = MPField(inner, Tr("Puerto"), 162, 340);
-            _txtMPHost.Enabled = false;
+            ApplyMPMode();
 
             // CONECTAR vive ahora en la barra inferior, junto al resto de acciones de cada sección.
             inner.Controls.AddRange(new Control[] { lblM, info, _rbServer, _rbClient, _lblMPUserRule });
@@ -1020,6 +1055,71 @@ namespace SelectOR
             TextRenderer.DrawText(g, names, Font, namesRect, Theme.Subtle, LF);
             var pcolor = players > 0 ? Theme.Gold : Theme.Subtle;
             TextRenderer.DrawText(g, "👤 " + sv.Players, Font, playRect, pcolor, TextFormatFlags.VerticalCenter | TextFormatFlags.Right);
+        }
+
+        // Servidor: quien aloja no usa ninguna IP (Open Rails escucha en todas las conexiones del equipo, en el
+        // puerto indicado), así que el campo Host enseña la IP de ESTE equipo en la red local, en solo lectura
+        // (se puede seleccionar y copiar), para dársela a los demás. Cliente: la IP del servidor al que unirse.
+        void ApplyMPMode()
+        {
+            if (_txtMPHost == null || _rbServer == null) return;
+            if (_rbServer.Checked)
+            {
+                if (!_mpShowingOwnIp) _mpClientHost = _txtMPHost.Text;
+                string ip = LocalIPv4();
+                var bg = _txtMPHost.BackColor;
+                _txtMPHost.ReadOnly = true; _txtMPHost.BackColor = bg;
+                _txtMPHost.ForeColor = Theme.AccentHi;
+                _txtMPHost.Text = ip ?? Tr("(sin red)");
+                _mpShowingOwnIp = true;
+                if (_lblMPInfo != null)
+                    _lblMPInfo.Text = ip != null
+                        ? string.Format(Tr("Tu IP en la red local es {0}: dásela a los demás jugadores junto con el puerto. Para jugar por internet, abre ese puerto (TCP) en tu router y da tu IP pública."), ip)
+                        : Tr("No se ha encontrado ninguna red activa en este equipo.");
+            }
+            else
+            {
+                if (_mpShowingOwnIp) _txtMPHost.Text = _mpClientHost ?? "";
+                var bg = _txtMPHost.BackColor;
+                _txtMPHost.ReadOnly = false; _txtMPHost.BackColor = bg;
+                _txtMPHost.ForeColor = Theme.Text;
+                _mpShowingOwnIp = false;
+                if (_lblMPInfo != null)
+                    _lblMPInfo.Text = Tr("Se lanza la selección de «Exploración» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.");
+            }
+            _txtMPHost.Enabled = true;
+        }
+
+        // IP de este equipo en la red local (IPv4): la de la conexión con puerta de enlace, y mejor una física
+        // que una virtual (VPN, máquinas virtuales…). null si no hay ninguna red activa.
+        static string LocalIPv4()
+        {
+            try
+            {
+                string best = null; int bestScore = -1;
+                foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                    if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback
+                        || ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Tunnel) continue;
+                    var props = ni.GetIPProperties();
+                    bool gw = props.GatewayAddresses.Any(g => g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                                                             && !g.Address.Equals(System.Net.IPAddress.Any));
+                    string d = (ni.Description + " " + ni.Name).ToLowerInvariant();
+                    bool virt = d.Contains("virtual") || d.Contains("vmware") || d.Contains("hyper-v") || d.Contains("vbox")
+                             || d.Contains("vpn") || d.Contains("tap-") || d.Contains("wsl") || d.Contains("tailscale") || d.Contains("zerotier");
+                    foreach (var ua in props.UnicastAddresses)
+                    {
+                        if (ua.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                        string ip = ua.Address.ToString();
+                        if (ip.StartsWith("169.254.") || ip.StartsWith("127.")) continue;
+                        int score = (gw ? 2 : 0) + (virt ? 0 : 1);
+                        if (score > bestScore) { bestScore = score; best = ip; }
+                    }
+                }
+                return best;
+            }
+            catch { return null; }
         }
 
         void OnServerSelected()
@@ -1410,7 +1510,8 @@ namespace SelectOR
             try
             {
                 _txtMPUser.Text = MPUserValid(MPUserClean(_settings.Multiplayer_User)) ? MPUserClean(_settings.Multiplayer_User) : MPUserDefault();
-                _txtMPHost.Text = string.IsNullOrEmpty(_settings.Multiplayer_Host) ? "127.0.0.1" : _settings.Multiplayer_Host;
+                _mpClientHost = string.IsNullOrEmpty(_settings.Multiplayer_Host) ? "127.0.0.1" : _settings.Multiplayer_Host;
+                if (_mpShowingOwnIp) ApplyMPMode(); else _txtMPHost.Text = _mpClientHost;
                 _txtMPPort.Text = _settings.Multiplayer_Port > 0 ? _settings.Multiplayer_Port.ToString() : "30000";
             }
             catch { }
@@ -1437,6 +1538,7 @@ namespace SelectOR
             if (_folders.Count > 1)
             {
                 _revealGuard?.Stop();
+                StartPrefetch(_folders[idx]);   // mientras se elige, se va leyendo la marcada
                 idx = await SplashScreen.AskFolder(_folders.Select(f => f.Name).ToArray(), idx);
                 if (idx < 0 || idx >= _folders.Count) idx = 0;
                 if (!_uiRevealed) _revealGuard?.Start();
@@ -1458,7 +1560,10 @@ namespace SelectOR
 
             Task.Run(() =>
             {
-                var routes = SafeList(() => Route.GetRoutes(folder).OrderBy(r => r.Name).ToList());
+                WaitPrefetch();
+                var pre = string.Equals(_prefetchPath, folder.Path, StringComparison.OrdinalIgnoreCase) ? _prefetchRoutes : null;
+                _prefetchRoutes = null;   // se usa una sola vez (F5 vuelve a leer)
+                var routes = pre ?? SafeList(() => Route.GetRoutes(folder).OrderBy(r => r.Name).ToList());
                 try { foreach (var r in routes) ContentImages.ForRoute(r.Path); } catch { }
                 BeginInvoke((Action)(() =>
                 {
@@ -1480,32 +1585,43 @@ namespace SelectOR
             // Los datos de las máquinas (.eng) no dependen de los trenes: se leen ya, en paralelo con
             // el análisis de consists de Open Rails, para que Compra esté lista cuanto antes.
             LoadLog("carpeta elegida: " + folder.Name);
-            Task.Run(() => { try { PrewarmMachineData(); } catch { } finally { LoadStep("engines"); } });
+            // La interfaz queda libre mientras el contenido se lee en segundo plano: se aprovecha para crear
+            // ya el dispositivo gráfico de la vista 3D (si no, lo pagaría el primer render del tren).
+            try { BeginInvoke((Action)(() => { ShapeRenderer.WarmUp(); LoadLog("vista 3D: dispositivo gráfico listo"); })); } catch { }
+            Task.Run(() => { try { WaitPrefetch(); PrewarmMachineData(); } catch { } finally { LoadStep("engines"); } });
 
             _consistsAll = new List<TrainItem>();
             RefreshConsistList();
             Task.Run(() =>
             {
-                if (!_consistCache.TryGetValue(folder.Path, out var consists))
+                WaitPrefetch();
+                List<TrainItem> consists;
+                bool cached; lock (_consistCache) cached = _consistCache.TryGetValue(folder.Path, out consists);
+                if (!cached)
                 {
                     // Lectura propia de los .con (unos 20 veces más rápida que la de Open Rails);
                     // si no encontrase nada, se recurre a la de Open Rails.
                     consists = FastConsists.Load(folder.Path);
                     if (consists.Count == 0)
                         consists = SafeList(() => Consist.GetConsists(folder).Select(FromOrConsist).OrderBy(c => c.Name).ToList());
-                    _consistCache[folder.Path] = consists;
+                    lock (_consistCache) _consistCache[folder.Path] = consists;
                 }
                 BeginInvoke((Action)(() =>
                 {
                     if (token != _folderToken) return;
                     _consistsLoading = false;
                     _consistsAll = consists;
+                    LoadLog($"trenes leídos ({consists.Count}): llenando la lista…");
                     RefreshConsistList();
+                    LoadLog("lista de trenes llena");
                     _consistsOverlay?.SetState(_consistsAll.Count == 0 ? ListStatePanel.Mode.Empty : ListStatePanel.Mode.Hidden, Tr("Sin trenes"));
                     UpdateTimetablePreview();   // ya hay consists → resuelve el tren del timetable (si estaba pendiente)
                     RebuildCompanyEngs();       // recalcula qué trenes son de mis empresas (etiqueta)
+                    LoadLog("horario y trenes de empresa hechos");
                     LoadStep("consists");
                     EditorContentChanged();     // editor de composiciones: lista de .con de esta carpeta
+                    LoadLog("editor preparado");
+                    BeginInvoke((Action)(() => LoadLog("interfaz libre tras los trenes")));
                     // Formaciones fijas (automotores) del contenido: se calculan ya, en segundo plano,
                     // para que abrir Compra no tenga que leer los miles de .con en ese momento.
                     Task.Run(() => { try { EnsureEngUnits(); } catch { } finally { LoadStep("units"); } });
@@ -1542,9 +1658,11 @@ namespace SelectOR
                 BeginInvoke((Action)(() =>
                 {
                     if (token != _routeToken) return;
+                    LoadLog("ruta: actividades, recorridos y horarios leídos; llenando listas…");
                     _activitiesAll = acts; _pathsAll = paths; _timetablesAll = tts;
                     RefreshActivityList(); RefreshPathList(); RefreshTimetableSets();
                     SetIdle(); UpdateStatus();
+                    LoadLog("ruta: listas llenas");
                 }));
             });
         }
@@ -1755,6 +1873,7 @@ namespace SelectOR
             {
                 ShapeGeom geom = null;
                 try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar
                 if (!IsHandleCreated) { lock (_ttRenderingShapes) _ttRenderingShapes.Remove(engPath); return; }
                 BeginInvoke((Action)(() =>
                 {
@@ -1876,7 +1995,10 @@ namespace SelectOR
             Task.Run(() =>
             {
                 ShapeGeom geom = null;
+                LoadLog("vista 3D: construyendo la geometría…");
                 try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar
+                LoadLog("vista 3D: geometría y texturas hechas");
                 if (!IsHandleCreated) { lock (_renderingShapes) _renderingShapes.Remove(engPath); return; }
                 BeginInvoke((Action)(() =>
                 {
@@ -1888,7 +2010,9 @@ namespace SelectOR
                             _previewGeom = geom;
                             _trainPreview.Rotatable = true;
                             // Render a la resolución real del panel (ancho máximo, sin recuadro).
+                            LoadLog("vista 3D: renderizando…");
                             RenderLive();
+                            LoadLog("vista 3D: renderizada");
                         }
                     }
                     catch { }
@@ -2098,12 +2222,29 @@ namespace SelectOR
                 return;
             }
 
+            // Puerto: el que abre el servidor o al que se conecta el cliente. Si no es válido, no se lanza (antes
+            // se ignoraba sin avisar y se usaba el último guardado).
+            if (!int.TryParse(_txtMPPort.Text.Trim(), out int port) || port < 1 || port > 65535)
+            {
+                Warn(Tr("El puerto debe ser un número entre 1 y 65535."));
+                try { _txtMPPort.Focus(); _txtMPPort.SelectAll(); } catch { }
+                return;
+            }
+            // Cliente: hace falta la IP del servidor. (Servidor: no se usa; el campo enseña la IP propia.)
+            string host = _txtMPHost.Text.Trim();
+            if (_rbClient.Checked && host.Length == 0)
+            {
+                Warn(Tr("Escribe la IP del servidor al que te quieres unir."));
+                try { _txtMPHost.Focus(); } catch { }
+                return;
+            }
+
             // Guardar ajustes MP en el registro (RunActivity los lee de ahí)
             try
             {
                 _settings.Multiplayer_User = _txtMPUser.Text.Trim();
-                if (!string.IsNullOrWhiteSpace(_txtMPHost.Text)) _settings.Multiplayer_Host = _txtMPHost.Text.Trim();
-                if (int.TryParse(_txtMPPort.Text.Trim(), out int port)) _settings.Multiplayer_Port = port;
+                if (_rbClient.Checked) _settings.Multiplayer_Host = host;
+                _settings.Multiplayer_Port = port;
                 _settings.Save();
             }
             catch { }
@@ -2200,6 +2341,7 @@ namespace SelectOR
                     StartKmTracking(withPax: true); // posición para el mapa y viajeros (en servicio o conducción libre)
                     ShowServiceHud(svc);            // HUD sobre OR (en servicio o no)
                     if (_prefs.CabHudOn) ShowCabHud();   // pupitre, si lo dejaste abierto la última vez
+                    if (_prefs.ChatHudOn) ShowChatHud(); // chat de empresa, si lo dejaste abierto
                     ShowDriveBar();                 // barra oculta arriba en el centro (HUD · mapa · servicio)
                     p.EnableRaisingEvents = true;
                     p.Exited += (s, e) => { try { BeginInvoke(new Action(OnDriveReturned)); } catch { } };
@@ -2292,7 +2434,7 @@ namespace SelectOR
 
         void OnKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.F5 && _curFolder != null) { _consistCache.Remove(_curFolder.Path); OnFolderChanged(); e.Handled = true; }
+            if (e.KeyCode == Keys.F5 && _curFolder != null) { lock (_consistCache) _consistCache.Remove(_curFolder.Path); OnFolderChanged(); e.Handled = true; }
         }
 
         // Ventana restaurada (no maximizada): Windows a veces la devuelve con el ALTO de la pantalla completa

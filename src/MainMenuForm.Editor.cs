@@ -368,8 +368,14 @@ namespace SelectOR
         {
             if (_edList == null) return;
             _edStockFolder = null; _edListFolder = null;
-            OnEditorShown();
+            // Al arrancar, las listas del editor (miles de filas) se rellenan a trozos con el menú ya
+            // abierto: meterlas de golpe hacía esperar más de un segundo a la pantalla de inicio.
+            _edChunkedFill = !_uiRevealed;
+            try { OnEditorShown(); } finally { _edChunkedFill = false; }
         }
+
+        bool _edChunkedFill;   // la próxima carga de la lista de composiciones va a trozos
+        int _edListFill;       // relleno a trozos en marcha (si cambia, se abandona)
 
         // El material disponible se rastrea en segundo plano (son miles de carpetas): mientras tanto
         // la pestaña enseña la animación de carga en vez de congelarse.
@@ -392,7 +398,9 @@ namespace SelectOR
 
             Task.Run(() =>
             {
+                LoadLog("editor: recorriendo TRAINSET…");
                 var list = ScanEditorStock(root);
+                LoadLog($"editor: {list.Count} vehículos encontrados");
                 try
                 {
                     BeginInvoke((Action)(() =>
@@ -400,8 +408,11 @@ namespace SelectOR
                         if (token != _edStockToken) return;
                         _edStockAll.Clear();
                         _edStockAll.AddRange(list);
-                        RefreshStockTable();
+                        // Con decenas de miles de vehículos, meterlos en la tabla son segundos: no se hace
+                        // esperar al menú por una pestaña que no se ve. Se rellena a trozos con el menú ya
+                        // abierto (sin congelarlo); al abrir el editor ya suele estar entera.
                         LoadStep("stock");
+                        FillStockTableChunked(token);
                     }));
                 }
                 catch { }
@@ -411,7 +422,14 @@ namespace SelectOR
         // Todos los .eng/.wag de <contenido>\TRAINS\TRAINSET, ordenados por carpeta y nombre.
         static List<(string name, string folder, string path, bool isEngine)> ScanEditorStock(string root)
         {
-            var list = new List<(string name, string folder, string path, bool isEngine)>();
+            // Si el índice ya ha recorrido TRAINSET al calcular su huella, se aprovecha esa lista.
+            var list = ContentIndex.StockFor(root);
+            if (list != null)
+            {
+                list.Sort((x, y) => string.Compare(x.folder + "/" + x.name, y.folder + "/" + y.name, StringComparison.CurrentCultureIgnoreCase));
+                return list;
+            }
+            list = new List<(string name, string folder, string path, bool isEngine)>();
             try
             {
                 var trainset = Path.Combine(root, "TRAINS", "TRAINSET");
@@ -430,9 +448,42 @@ namespace SelectOR
             return list;
         }
 
+        // Relleno a trozos (unos 30 ms cada vez, dejando respirar a la interfaz entre uno y otro). Si
+        // mientras tanto se rehace la tabla entera (RefreshStockTable), este relleno se abandona.
+        int _edStockFill;
+
+        void FillStockTableChunked(int token)
+        {
+            if (_edStock == null) return;
+            int gen = ++_edStockFill;
+            _edStock.ClearRows();
+            if (_edStockAll.Count == 0) { _edStock.SetEmpty(Tr("No hay material en TRAINS\\TRAINSET.")); return; }
+            var items = new List<(string name, string folder, string path, bool isEngine)>(_edStockAll);
+            int next = 0, chunk = 200;
+            var t = new System.Windows.Forms.Timer { Interval = 1 };
+            t.Tick += (s, e) =>
+            {
+                if (token != _edStockToken || gen != _edStockFill || IsDisposed) { t.Stop(); t.Dispose(); return; }
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                _edStock.BeginUpdate();
+                int end = Math.Min(items.Count, next + chunk);
+                for (; next < end; next++)
+                {
+                    var st = items[next];
+                    _edStock.AddRow(new[] { st.name, st.folder, VehicleKindLabel(st.path, st.isEngine) },
+                                    new Color?[] { null, Theme.Subtle, st.isEngine ? Theme.AccentHi : Theme.Subtle });
+                }
+                _edStock.EndUpdate();   // aquí es donde Windows mete de verdad las filas
+                chunk = NextChunk(chunk, sw.ElapsedMilliseconds);
+                if (next >= items.Count) { t.Stop(); t.Dispose(); LoadLog("editor: tabla de material rellenada"); }
+            };
+            t.Start();
+        }
+
         void RefreshStockTable()
         {
             if (_edStock == null) return;
+            _edStockFill++;   // cancela un relleno a trozos en marcha
             _edStock.ClearRows();
             _edStock.BeginUpdate();
             foreach (var s in _edStockAll)
@@ -472,13 +523,22 @@ namespace SelectOR
             }
             var files = new List<string>(Directory.GetFiles(dir, "*.con"));
             files.Sort((a, b) => string.Compare(Path.GetFileName(a), Path.GetFileName(b), StringComparison.CurrentCultureIgnoreCase));
-            _edList.BeginUpdate();
             foreach (var f in files)
             {
                 string name = byPath.TryGetValue(f, out var n) && !string.IsNullOrWhiteSpace(n) ? n : Path.GetFileNameWithoutExtension(f);
                 _edFiles.Add(f); _edNames.Add(name);
-                _edList.AddRow(new[] { name, "…" }, new Color?[] { null, Theme.Subtle });
             }
+            int gen = ++_edListFill;
+            if (_edChunkedFill && selectPath == null && _edFiles.Count > 0)
+            {
+                _edListFolder = root;
+                _edSuppressSel = false;
+                FillEditorListChunked(gen, root);
+                return;
+            }
+            _edList.BeginUpdate();
+            for (int i = 0; i < _edFiles.Count; i++)
+                _edList.AddRow(new[] { _edNames[i], "…" }, new Color?[] { null, Theme.Subtle });
             _edList.EndUpdate();
             _edListFolder = root;
             if (_edFiles.Count == 0) _edList.SetEmpty(Tr("No hay composiciones en esta carpeta."));
@@ -495,6 +555,35 @@ namespace SelectOR
                 }));
             }
             catch { _edSuppressSel = false; }
+        }
+
+        // Tamaño del siguiente trozo para que cada uno dure unos 30 ms (contando lo que tarda Windows en
+        // meter las filas al reanudar el repintado): la interfaz responde entre trozo y trozo.
+        static int NextChunk(int chunk, long ms)
+        {
+            if (ms <= 0) return Math.Min(4000, chunk * 2);
+            int ideal = (int)(chunk * 30.0 / ms);
+            return Math.Max(50, Math.Min(4000, Math.Min(chunk * 2, ideal)));
+        }
+
+        // Lista de composiciones a trozos (unos 30 ms cada vez) y, al terminar, el nº de coches.
+        void FillEditorListChunked(int gen, string root)
+        {
+            int next = 0, chunk = 200;
+            var t = new System.Windows.Forms.Timer { Interval = 1 };
+            t.Tick += (s, e) =>
+            {
+                if (gen != _edListFill || _edListFolder != root || IsDisposed) { t.Stop(); t.Dispose(); return; }
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                _edList.BeginUpdate();
+                int end = Math.Min(_edFiles.Count, next + chunk);
+                for (; next < end; next++)
+                    _edList.AddRow(new[] { _edNames[next], "…" }, new Color?[] { null, Theme.Subtle });
+                _edList.EndUpdate();   // aquí es donde Windows mete de verdad las filas
+                chunk = NextChunk(chunk, sw.ElapsedMilliseconds);
+                if (next >= _edFiles.Count) { t.Stop(); t.Dispose(); FillConsistCarCounts(); }
+            };
+            t.Start();
         }
 
         void OnEditorConsistSelected()
@@ -632,6 +721,10 @@ namespace SelectOR
             if (_edDoc.Cars.Count == 0) { Msg(_edMsg, Tr("El tren no tiene ningún coche: añade al menos uno."), true); return; }
             _edDoc.DisplayName = (_edName.Box.Text ?? "").Trim();
             if (_edDoc.DisplayName.Length == 0) _edDoc.DisplayName = Path.GetFileNameWithoutExtension(_edDoc.Path);
+            // Al cambiar el nombre del tren, el identificador de TrainCfg ( … ) lo sigue, igual que el
+            // Name y el nombre del archivo (si no se ha renombrado, se respeta el que traía).
+            if (_edOriginal == null || !string.Equals(_edOriginal.DisplayName, _edDoc.DisplayName, StringComparison.Ordinal))
+                _edDoc.Id = _edDoc.DisplayName;
             string err = _edDoc.Save();
             ClearContentCaches();   // el .con ha cambiado: sus datos se releerán
             if (err != null) { Msg(_edMsg, Tr("No se pudo guardar: ") + err, true); return; }
@@ -715,11 +808,19 @@ namespace SelectOR
                 return res;
             });
             if (_edListFolder != folder || counts.Count != _edFiles.Count) return;   // la lista cambió mientras tanto
+            LoadLog("editor: poniendo el nº de coches…");
             // Se cambia solo esa celda de cada fila: la lista no se rehace, así que no parpadea ni
-            // pierde el desplazamiento ni la selección mientras el usuario ya está trabajando.
-            for (int i = 0; i < _edFiles.Count; i++)
-                _edList.SetCell(i, 1, counts[i] > 0 ? counts[i].ToString() : "—", applyWidths: false);
+            // pierde el desplazamiento ni la selección mientras el usuario ya está trabajando. Con el
+            // repintado parado mientras tanto: miles de filas repintadas una a una eran casi un segundo.
+            _edList.BeginUpdate();
+            try
+            {
+                for (int i = 0; i < _edFiles.Count; i++)
+                    _edList.SetCell(i, 1, counts[i] > 0 ? counts[i].ToString() : "—", applyWidths: false);
+            }
+            finally { _edList.EndUpdate(); }
             _edList.RefreshWidths();
+            LoadLog("editor: nº de coches puesto");
         }
 
         void DeleteConsist()
@@ -1052,7 +1153,7 @@ namespace SelectOR
                     if (l != null) { l.Text = "—"; l.ForeColor = Theme.Text; }
                 return;
             }
-            _stCars.Text = st.Cars.ToString("N0", EsEs) + (st.Engines > 0 ? "  (" + st.Engines + " " + Tr("motrices") + ")" : "");
+            _stCars.Text = st.Cars.ToString("N0", EsEs) + (st.Engines > 0 ? "  (" + st.Engines + " " + Tr(st.Engines == 1 ? "motriz" : "motrices") + ")" : "");
             _stLen.Text = st.LengthM > 0 ? st.LengthM.ToString("N0", EsEs) + " m" : "—";
             _stMass.Text = st.MassT > 0 ? st.MassT.ToString("N0", EsEs) + " t" : "—";
             _stBrake.Text = st.BrakeKn > 0 ? st.BrakeKn.ToString("N0", EsEs) + " kN" : "—";
@@ -1093,14 +1194,14 @@ namespace SelectOR
         {
             var folder = _curFolder;
             if (folder == null) return;
-            _consistCache.Remove(folder.Path);
+            lock (_consistCache) _consistCache.Remove(folder.Path);
             Task.Run(() =>
             {
                 FastConsists.ClearCache();   // el editor ha tocado archivos del contenido
                 var consists = FastConsists.Load(folder.Path);
                 if (consists.Count == 0)
                     consists = SafeList(() => ORTS.Menu.Consist.GetConsists(folder).Select(FromOrConsist).OrderBy(c => c.Name).ToList());
-                _consistCache[folder.Path] = consists;
+                lock (_consistCache) _consistCache[folder.Path] = consists;
                 try
                 {
                     BeginInvoke((Action)(() =>

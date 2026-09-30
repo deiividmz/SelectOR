@@ -5,6 +5,11 @@
 //    si no la tiene, con la base de la ruta. Sin línea elegida, siempre la base.
 //  · El aviso se dispara desde el mismo sondeo que ya mueve a los viajeros (PollPax), sin
 //    temporizadores nuevos, al acercarse a la estación (por metros o por segundos de antelación).
+//  · El acercamiento se mide POR LA VÍA (ViaAdelante): solo cuentan las estaciones a las que el tren
+//    llega por su vía, a los metros de vía que faltan. Si el tren no se puede situar sobre la vía (ruta
+//    sin .tdb, versión de OR sin la conversión, un salto de posición…), como antes: en línea recta.
+//  · Ida y vuelta con la misma megafonía: cada estación se anuncia una vez por PASO; al dejarla atrás
+//    (100 m) vuelve a poder sonar, así a la vuelta se anuncian todas otra vez.
 //  · Vale en servicio de empresa, en Horarios y en conducción libre. Fuera de un servicio, los
 //    audios son los de la empresa que tengas seleccionada en Empresas.
 
@@ -43,6 +48,12 @@ namespace SelectOR
         const double PaJumpM = 500;     // más que esto entre dos sondeos (~1,5 s) es un salto, no marcha
         const double PaMaxSpeedMs = 100;   // 360 km/h: por encima, la lectura es un salto de posición
         double _paLat, _paLon;          // última posición conocida del tren
+        // Vía por delante (se carga en segundo plano al empezar; null mientras tanto o si no se puede).
+        ViaAdelante _paVia; int _paViaGen;
+        HashSet<string> _paViaResolved;   // estaciones de la vía, con el nombre con el que están guardadas
+        readonly Dictionary<string, string> _paResolveCache = new(StringComparer.OrdinalIgnoreCase);
+        const double PaViaMaxM = 6000;    // hasta dónde se mira la vía por delante
+        const double PaPassedM = 100;     // estación dejada atrás esto: vuelve a poder anunciarse
         // Cono de aproximación: la estación tiene que quedar por delante y poco desviada del rumbo.
         // Así no se cuela una estación de una vía PARALELA, que puede estar a cien metros al costado.
         const double PaSideBase = 150;  // desvío lateral admitido de cerca (m)
@@ -81,7 +92,8 @@ namespace SelectOR
 
         // Se llama al empezar a conducir (servicio, horario o libre). No bloquea: si no hay
         // megafonía para esa empresa y ruta, simplemente no se activa nada.
-        async void PaDriveStart(string route)
+        // route = RouteID del .trk (lo que identifica la ruta en el servidor); routeName = su Name.
+        async void PaDriveStart(string route, string routeName)
         {
             PaDriveStop();
             if (_prefs == null || string.IsNullOrWhiteSpace(route) || !Supa.IsLoggedIn) return;
@@ -92,7 +104,7 @@ namespace SelectOR
             string companyName = null;
             foreach (var (id, name) in await PaCandidateCompanies())
             {
-                var (json, err) = await Supa.RpcAsync("pa_bundle", new { p_company = id, p_route = route });
+                var (json, err) = await PaBundle(id, route, routeName);
                 if (err != null || string.IsNullOrWhiteSpace(json)) continue;
                 ParsePaDriveBundle(json);
                 // Solo se considera «con megafonía» si hay algún aviso de estación grabado.
@@ -110,6 +122,8 @@ namespace SelectOR
 
             string dir = _curRoute?.Path;
             _paAlias = await Task.Run(() => PaAliasMap(dir));   // andén → estación, del .tdb
+            _paResolveCache.Clear();
+            _ = PaLoadViaAsync(dir);
 
             int voces = 0;
             foreach (var kv in _paDriveAudio) if (kv.Key.Contains("|nombre|")) voces++;
@@ -120,6 +134,25 @@ namespace SelectOR
             _serviceHud?.NotifyPaChanged();   // la fila del HUD aparece y la ventana crece
             await PaPrecacheAsync();
         }
+
+        // ---- La ruta en el servidor: por su RouteID (rutas-por-routeid.sql) ----
+        // Se envía también el nombre: lo grabado con él (hasta la 1.2.40) se traslada al RouteID.
+        // Si el servidor aún no tiene ese SQL, la megafonía sigue por el nombre, como antes.
+        bool _paLegacyServer;
+
+        async Task<(string json, string err)> PaBundle(string company, string routeId, string routeName)
+        {
+            if (!_paLegacyServer)
+            {
+                var r = await Supa.RpcAsync("pa_bundle", new { p_company = company, p_route = routeId, p_route_name = routeName });
+                if (r.err == null || !NoLeagueOnServer(r.err)) return r;
+                _paLegacyServer = true;
+            }
+            return await Supa.RpcAsync("pa_bundle", new { p_company = company, p_route = string.IsNullOrWhiteSpace(routeName) ? routeId : routeName });
+        }
+
+        // Clave de ruta para guardar (estaciones, líneas, audios): el RouteID, o el nombre con un servidor antiguo.
+        string PaKey(string routeId, string routeName) => _paLegacyServer && !string.IsNullOrWhiteSpace(routeName) ? routeName : routeId;
 
         // Empresas con megafonía habilitada de las que el usuario es socio, por orden de preferencia:
         // la del servicio, la elegida en Empresas, la favorita y el resto por nombre. Se piden al
@@ -176,10 +209,33 @@ namespace SelectOR
             _paSpeedMs = 0; _paPrevUtc = DateTime.MinValue;
             _paOrigin.Clear(); _paHaveLast = false; _paTravel = 0;
             _paLineChosen = false;
+            _paViaGen++; _paVia = null; _paViaResolved = null; _paResolveCache.Clear();
+        }
+
+        // Trazado de la ruta para medir por la vía. Si se para la megafonía mientras carga, no se usa.
+        async Task PaLoadViaAsync(string dir)
+        {
+            int gen = ++_paViaGen;
+            ViaAdelante via = null;
+            try { via = await Task.Run(() => ViaAdelante.Load(dir, NormStation)); } catch { }
+            if (gen != _paViaGen || !_paDriveReady) return;
+            _paVia = via; _paViaResolved = null;
+            PaLog(via != null ? $"VÍA cargada: {via.Stations.Count} estaciones sobre la vía" : "VÍA no disponible: se mide en línea recta", true);
+        }
+
+        // PaResolve con memoria: se llama muchas veces por sondeo y lo que resuelve no cambia en marcha.
+        string PaResolveC(string api)
+        {
+            if (string.IsNullOrEmpty(api)) return api;
+            if (_paResolveCache.TryGetValue(api, out var r)) return r;
+            r = PaResolve(api);
+            _paResolveCache[api] = r;
+            return r;
         }
 
         void ParsePaDriveBundle(string json)
         {
+            _paResolveCache.Clear();
             _paDriveSt.Clear(); _paDriveAudio.Clear(); _paDriveLines.Clear(); _paDriveLineCfg.Clear();
             try
             {
@@ -332,12 +388,6 @@ namespace SelectOR
         {
             _paDriveLine = string.IsNullOrEmpty(id) ? null : id;
             _paLineChosen = true;
-            if (_prefs != null && !string.IsNullOrEmpty(_paDriveRoute))
-            {
-                _prefs.PaLastLine ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                _prefs.PaLastLine[_paDriveRoute] = _paDriveLine ?? "";
-                try { _prefs.Save(); } catch { }
-            }
             _paSaidNext.Clear();
             _serviceHud?.NotifyPaChanged();
             _ = PaPrecacheAsync();
@@ -459,11 +509,31 @@ namespace SelectOR
         {
             if (!_paDriveReady || !PaOn || _paSpeaking || !_paLineChosen) return;   // sin elegir megafonía, en silencio
             if (!_pHaveDir) return;                      // sin rumbo (parado) no se anuncia nada
-            // Candidatas: el andén más cercano de cada estación que quede por delante y dentro del
-            // cono. Se evalúan EN ORDEN de cercanía hasta que una suene: si la primera se descarta
-            // —por no ser parada de la línea, por no tener audio o por estar ya dicha—, la siguiente
-            // se mira en el mismo sondeo, sin esperar al próximo.
+            // Candidatas: cada estación que quede por delante, a su distancia. Se evalúan EN ORDEN de
+            // cercanía hasta que una suene: si la primera se descarta —por no ser parada de la línea, por
+            // no tener audio o por estar ya dicha—, la siguiente se mira en el mismo sondeo.
+            //  1) Por la vía: las estaciones a las que llega el tren por su vía, a los metros de vía.
+            //  2) En línea recta (como antes), por delante y dentro del cono: las que la vía no conoce o,
+            //     si el tren no se sitúa sobre la vía, todas.
             var candidatas = new List<(string api, double dist, double along, double lateral)>();
+            var rutas = new Dictionary<string, List<(string route, double dist)>>(StringComparer.OrdinalIgnoreCase);   // ramas por las que se llega
+            var porVia = PaViaScan(lat, lon);
+            if (porVia != null)
+            {
+                if (_paViaResolved == null)
+                {
+                    _paViaResolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var k in _paVia.Stations) _paViaResolved.Add(PaResolveC(k));
+                }
+                foreach (var h in porVia)
+                {
+                    if (!rutas.TryGetValue(h.Key, out var rl)) rutas[h.Key] = rl = new List<(string, double)>();
+                    rl.Add((h.Route ?? "", h.Dist));
+                    int ya = candidatas.FindIndex(c => string.Equals(c.api, h.Key, StringComparison.OrdinalIgnoreCase));
+                    if (ya < 0) candidatas.Add((h.Key, h.Dist, h.Dist, 0));
+                    else if (h.Dist < candidatas[ya].dist) candidatas[ya] = (h.Key, h.Dist, h.Dist, 0);
+                }
+            }
             string cercaApi = null; double cercaDist = double.MaxValue, cercaAlong = 0, cercaLat = 0;
             foreach (var (station, sLat, sLon) in _paxStations)
             {
@@ -471,6 +541,7 @@ namespace SelectOR
                 if (d > 8000) continue;
                 string api = NormStation(station);
                 if (api.Length == 0) continue;
+                if (porVia != null && _paViaResolved.Contains(PaResolveC(api))) continue;   // esa la mide la vía
                 if (PaAhead(sLat, sLon, out double along, out double lateral))
                 {
                     int ya = candidatas.FindIndex(c => string.Equals(c.api, api, StringComparison.OrdinalIgnoreCase));
@@ -479,6 +550,7 @@ namespace SelectOR
                 }
                 else if (d < cercaDist) { cercaDist = d; cercaApi = api; cercaAlong = along; cercaLat = lateral; }
             }
+            PaRearm(lat, lon, candidatas);
             if (candidatas.Count == 0)
             {
                 if (cercaApi != null)
@@ -487,7 +559,103 @@ namespace SelectOR
             }
             candidatas.Sort((a, b) => a.dist.CompareTo(b.dist));
             foreach (var c in candidatas)
+            {
+                // Por la vía, tras un desvío que se toma de punta: si por la otra rama se llega a OTRA
+                // estación que también sonaría, y también está cerca (a menos de 1 km más), se espera a
+                // pasar el desvío (no se sabe por dónde irá). Una lejana no frena el aviso de la cercana.
+                if (rutas.TryGetValue(c.api, out var mias) && PaBranchConflict(c.api, c.dist + PaBranchNearM, mias, rutas, out string otra))
+                { PaLog($"[{PaResolveC(c.api)}] {c.dist:F0} m por la vía · espera a pasar el desvío (por la otra rama: {otra})"); continue; }
                 if (await PaCheckNext(c.api, c.dist, c.along, c.lateral)) return;   // ha sonado
+            }
+        }
+
+        // Estaciones por delante por la vía (null si no se puede: vía sin cargar, tren fuera de la vía o
+        // sin rumbo). Rumbo = del punto del rastro a 8 m o más hasta el tren.
+        List<ViaAdelante.Hit> PaViaScan(double lat, double lon)
+        {
+            var via = _paVia;
+            if (via == null || !via.ToWorld(lat, lon, out double x, out double z)) return null;
+            for (int i = _paxTrail.Count - 1; i >= 0; i--)
+            {
+                var (pl, pn) = _paxTrail[i];
+                if (Haversine(pl, pn, lat, lon) < 8) continue;
+                if (!via.ToWorld(pl, pn, out double bx, out double bz)) return null;
+                var hits = via.Scan(x, z, x - bx, z - bz, PaViaMaxM, out bool located);
+                return located ? hits : null;
+            }
+            return null;
+        }
+
+        // ¿Puede sonar ahora? (lo mismo que mira PaCheckNext antes de la distancia, sin apuntar nada)
+        bool PaCouldSound(string api)
+        {
+            if (string.IsNullOrEmpty(api) || _paOrigin.Contains(api)) return false;
+            string norm = PaResolveC(api);
+            if (PaIsOrigin(norm) || _paSaidNext.Contains(norm) || !PaServes(norm)) return false;
+            return PaClip(norm, "nombre").path != null;
+        }
+
+        // Conflicto de ramas: otra estación (que podría sonar) a la que se llega por una rama por la que
+        // esta no aparece. Las ramas se anotan «desvío:pata/…»; dos caminos son compatibles si uno empieza
+        // por el otro (el más corto no ha tenido que elegir aún).
+        const double PaBranchNearM = 1000;
+
+        bool PaBranchConflict(string api, double hastaM, List<(string route, double dist)> mias, Dictionary<string, List<(string route, double dist)>> rutas, out string otra)
+        {
+            otra = null;
+            string norm = PaResolveC(api);
+            foreach (var kv in rutas)
+            {
+                if (string.Equals(PaResolveC(kv.Key), norm, StringComparison.OrdinalIgnoreCase)) continue;
+                bool cerca = false;
+                foreach (var (_, d) in kv.Value) if (d <= hastaM) { cerca = true; break; }
+                if (!cerca || !PaCouldSound(kv.Key)) continue;
+                foreach (var (r, d) in kv.Value)
+                {
+                    if (d > hastaM) continue;
+                    bool alguna = false;
+                    foreach (var (m, _) in mias) if (r.StartsWith(m, StringComparison.Ordinal) || m.StartsWith(r, StringComparison.Ordinal)) { alguna = true; break; }
+                    if (!alguna) { otra = PaResolveC(kv.Key); return true; }
+                }
+            }
+            return false;
+        }
+
+        bool PaIsOrigin(string norm)
+        {
+            foreach (var o in _paOrigin)
+                if (string.Equals(o, norm, StringComparison.OrdinalIgnoreCase) || string.Equals(PaResolveC(o), norm, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        // Ida y vuelta: una estación ya anunciada vuelve a poder sonar cuando el tren la ha dejado atrás
+        // (todos sus andenes a PaPassedM o más por detrás) o se ha alejado de ella (1,5 km), siempre que
+        // no siga por delante. Así, al dar la vuelta en la cabecera, a la vuelta se anuncian otra vez.
+        void PaRearm(double lat, double lon, List<(string api, double dist, double along, double lateral)> delante)
+        {
+            if (_paSaidNext.Count == 0) return;
+            var ahora = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in delante) ahora.Add(PaResolveC(c.api));
+            foreach (var norm in new List<string>(_paSaidNext))
+            {
+                if (ahora.Contains(norm)) continue;
+                bool alguno = false, atras = true; double min = double.MaxValue;
+                foreach (var (station, sLat, sLon) in _paxStations)
+                {
+                    string api = NormStation(station);
+                    if (!string.Equals(api, norm, StringComparison.OrdinalIgnoreCase) && !string.Equals(PaResolveC(api), norm, StringComparison.OrdinalIgnoreCase)) continue;
+                    alguno = true;
+                    PaAhead(sLat, sLon, out double along, out _);
+                    if (along > -PaPassedM) atras = false;
+                    min = Math.Min(min, Haversine(lat, lon, sLat, sLon));
+                }
+                if (!alguno) continue;
+                if (atras || min > PaxCfg.ReboardM)
+                {
+                    _paSaidNext.Remove(norm);
+                    PaLog($"[{norm}] dejada atrás ({min:F0} m): puede volver a anunciarse", true);
+                }
+            }
         }
 
         // Devuelve true si ha disparado el aviso: entonces no se miran más candidatas este sondeo.
@@ -497,9 +665,10 @@ namespace SelectOR
             // La estación en la que empieza el escenario NO se anuncia (ni al elegir la megafonía
             // con el tren parado en ella, ni al salir). Vuelve a poder sonar al alejarse 1,5 km.
             if (_paOrigin.Contains(api)) { PaLog($"[{api}] {distM:F0} m · es la estación de ORIGEN: no se anuncia"); return false; }
-            string norm = PaResolve(api);           // el nombre que da OR puede no ser el guardado
+            string norm = PaResolveC(api);          // el nombre que da OR puede no ser el guardado
             if (!string.Equals(api, norm, StringComparison.OrdinalIgnoreCase))
                 PaLog($"[{api}] se reconoce como «{norm}» (alias del .tdb)");
+            if (PaIsOrigin(norm)) { PaLog($"[{norm}] {distM:F0} m · es la estación de ORIGEN: no se anuncia"); return false; }
             string donde = $"{distM:F0} m (por delante {along:F0}, al costado {lateral:F0})";
             if (_paSaidNext.Contains(norm)) { PaLog($"[{norm}] ya anunciada en esta visita"); return false; }
             if (!PaServes(norm)) { PaLog($"[{norm}] {donde} · no es parada de la línea [{PaHudLineName()}]"); return false; }

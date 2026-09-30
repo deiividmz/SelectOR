@@ -22,8 +22,7 @@ namespace SelectOR
         {
             get
             {
-                string d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                                        "Open Rails", "SelectOR", "megafonias");
+                string d = Path.Combine(AppDataTidy.CacheRoot, "megafonias");
                 try { Directory.CreateDirectory(d); } catch { }
                 return d;
             }
@@ -153,7 +152,11 @@ namespace SelectOR
             try
             {
                 if (File.Exists(local) && (string.IsNullOrEmpty(stamp) || (File.Exists(tagf) && File.ReadAllText(tagf) == stamp)))
+                {
+                    // Marca de «en uso»: los audios que pasan 45 días sin sonar se borran al arrancar.
+                    try { File.SetLastWriteTimeUtc(local, DateTime.UtcNow); } catch { }
                     return (local, null);
+                }
             }
             catch { }
             try

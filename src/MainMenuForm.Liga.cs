@@ -16,6 +16,7 @@ namespace SelectOR
         StyledTable _leagueList, _champList;
         Label _leagueInfo, _leaguePrizes, _leagueLeaders, _champInfo;
         Control[] _rankViews;
+        FlowLayoutPanel _rankTabBar;
         int _rankTab;                 // 0 = Liga del mes · 1 = Campeones · 2 = Ranking general
         bool _leagueChecked;          // aviso de premios: una vez por sesión
 
@@ -45,9 +46,22 @@ namespace SelectOR
                 for (int k = 0; k < _rankViews.Length; k++) _rankViews[k].Visible = k == i;
                 LoadRankTab();
             });
+            _rankTabBar = tabs;
             var outer = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
             outer.Controls.Add(body); outer.Controls.Add(tabs);
             return outer;
+        }
+
+        // Abre una pestaña de Ranking por código (0 = Liga del mes · 1 = Campeones · 2 = Ranking general).
+        void SelectRankTab(int i)
+        {
+            if (_rankViews == null || i < 0 || i >= _rankViews.Length) return;
+            if (_rankTabBar != null)
+                for (int k = 0; k < _rankTabBar.Controls.Count; k++)
+                    if (_rankTabBar.Controls[k] is RoundButton b) { b.Active = k == i; b.Invalidate(); }
+            _rankTab = i;
+            for (int k = 0; k < _rankViews.Length; k++) _rankViews[k].Visible = k == i;
+            LoadRankTab();
         }
 
         void LoadRankTab()
@@ -301,7 +315,7 @@ namespace SelectOR
                 var mias = new Dictionary<string, string>();
                 foreach (var co in _empCompanies) mias[co.Id] = co.Name;
                 string visto = _prefs.LeagueSeenMonth ?? "", ultimo = visto;
-                var porEmpresa = new Dictionary<string, List<string>>();
+                var porEmpresa = new Dictionary<string, List<LeagueAwardsDialog.Prize>>();
                 var totales = new Dictionary<string, double>();
                 DateTime mesAviso = DateTime.MinValue;
                 using (var d = JsonDocument.Parse(json))
@@ -316,17 +330,31 @@ namespace SelectOR
                         if (m > mesAviso) mesAviso = m;
                         string cat = Str(e, "category"); int pos = (int)Num(e, "place"); double amt = Num(e, "amount");
                         string txt = cat == "general" ? string.Format(Tr("{0} puesto general"), Ordinal(pos)) : CategoryName(cat);
-                        if (!porEmpresa.TryGetValue(id, out var l)) porEmpresa[id] = l = new List<string>();
-                        l.Add(txt + " (" + Eur(amt) + ")");
+                        if (!porEmpresa.TryGetValue(id, out var l)) porEmpresa[id] = l = new List<LeagueAwardsDialog.Prize>();
+                        var (ico, tinte) = cat switch
+                        {
+                            "general" => pos == 1 ? ("🥇", Theme.Gold) : pos == 2 ? ("🥈", LeagueAwardsDialog.Silver) : pos == 3 ? ("🥉", LeagueAwardsDialog.Bronze) : ("🏅", Theme.Gold),
+                            "viajeros" => ("🧳", Color.FromArgb(120, 170, 235)),
+                            "mercancias" => ("📦", LeagueAwardsDialog.Bronze),
+                            _ => ("⭐", Theme.AccentHi)
+                        };
+                        l.Add(new LeagueAwardsDialog.Prize { Icon = ico, Label = txt, Amount = amt, Tint = tinte });
                         totales[id] = (totales.TryGetValue(id, out var t) ? t : 0) + amt;
                     }
                 if (ultimo != visto) { _prefs.LeagueSeenMonth = ultimo; _prefs.Save(); }
                 if (porEmpresa.Count == 0) return;
-                var sb = new System.Text.StringBuilder(string.Format(Tr("¡Enhorabuena! Resultados de la Liga de {0}:"), MonthName(mesAviso)) + "\n\n");
+                // Aviso propio (trofeo, medallas y lo cobrado por cada empresa), la que más ha ganado primero.
+                var lista = new List<LeagueAwardsDialog.CompanyPrizes>();
                 foreach (var kv in porEmpresa)
-                    sb.Append("• ").Append(mias[kv.Key]).Append(": ").Append(string.Join(", ", kv.Value)).Append(" — ").Append(Eur(totales[kv.Key])).Append('\n');
-                sb.Append('\n').Append(Tr("El dinero ya está en la tesorería de la empresa. Consulta la clasificación en Ranking → Campeones."));
-                MessageBox.Show(this, sb.ToString(), Tr("Liga de empresas"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    lista.Add(new LeagueAwardsDialog.CompanyPrizes { Name = mias[kv.Key], Total = totales[kv.Key], Prizes = kv.Value });
+                lista.Sort((a, b) => b.Total.CompareTo(a.Total));
+                using var dlg = new LeagueAwardsDialog(MonthName(mesAviso), lista, Eur);
+                dlg.ShowDialog(this);
+                if (dlg.WantsChampions)
+                {
+                    OpenEmpresasAt(null, 4);   // Ranking
+                    SelectRankTab(1);           // → Campeones
+                }
             }
             catch { }
         }

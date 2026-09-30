@@ -62,9 +62,13 @@ namespace SelectOR
             {
                 if (_loaded && string.Equals(_folder, folderPath, StringComparison.OrdinalIgnoreCase)) return;
                 Reset(folderPath);
+                Log("índice: calculando la huella…");
                 _fingerprint = Fingerprint(folderPath);
+                Log("índice: huella hecha, leyendo el archivo…");
                 try { _loaded = Load(FilePathFor(folderPath)); }
                 catch { _loaded = false; }
+                // Marca de «en uso»: los índices que pasan 60 días sin usarse se borran al arrancar.
+                if (_loaded) try { File.SetLastWriteTimeUtc(FilePathFor(folderPath), DateTime.UtcNow); } catch { }
                 if (!_loaded) ResetData();
                 Log(_loaded
                     ? $"índice: se reutiliza ({Consists.Count} trenes, {Heads.Count} cabeceras, {Units.Count} formaciones)"
@@ -136,9 +140,66 @@ namespace SelectOR
         {
             var sb = new StringBuilder();
             sb.Append(Huella(Path.Combine(folderPath, "TRAINS", "CONSISTS"), "*.con", false)).Append('|');
-            sb.Append(Huella(Path.Combine(folderPath, "TRAINS", "TRAINSET"), "*.eng", true)).Append('|');
-            sb.Append(Huella(Path.Combine(folderPath, "TRAINS", "TRAINSET"), "*.wag", true));
+            var (eng, wag) = HuellaTrainset(folderPath);
+            sb.Append(eng).Append('|').Append(wag);
             return sb.ToString();
+        }
+
+        // TRAINSET se recorre UNA sola vez (antes, dos: una para los .eng y otra para los .wag; y el editor
+        // una tercera). El resultado es el mismo texto que antes, así que los índices ya guardados valen.
+        // De paso se apunta el material de primer nivel (TRAINSET\<carpeta>\x.eng|wag) para el editor.
+        static string _stockFolder;
+        static List<(string name, string folder, string path, bool isEngine)> _stock;
+
+        static (string eng, string wag) HuellaTrainset(string folderPath)
+        {
+            string dir = Path.Combine(folderPath, "TRAINS", "TRAINSET");
+            var stock = new List<(string name, string folder, string path, bool isEngine)>();
+            try
+            {
+                if (!Directory.Exists(dir)) { _stockFolder = folderPath; _stock = stock; return ("0:0", "0:0"); }
+                long nE = 0, tE = 0, nW = 0, tW = 0;
+                var sync = new object();
+                // Cada carpeta de primer nivel (un tren o un autor) se recorre en paralelo: con decenas de
+                // miles de archivos, el disco y la caché de Windows responden antes a varias peticiones.
+                void Recorre(string d, bool recursivo, bool primerNivel)
+                {
+                    long e = 0, te = 0, w = 0, tw = 0;
+                    var local = new List<(string name, string folder, string path, bool isEngine)>();
+                    var op = new EnumerationOptions { RecurseSubdirectories = recursivo, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.System };
+                    string top = d.TrimEnd('\\', '/');
+                    foreach (var f in new DirectoryInfo(d).EnumerateFiles("*", op))
+                    {
+                        string n = f.Name;
+                        bool eng = n.EndsWith(".eng", StringComparison.OrdinalIgnoreCase);
+                        if (!eng && !n.EndsWith(".wag", StringComparison.OrdinalIgnoreCase)) continue;
+                        long t = f.LastWriteTimeUtc.Ticks;
+                        if (eng) { e++; if (t > te) te = t; } else { w++; if (t > tw) tw = t; }
+                        if (primerNivel && string.Equals(f.DirectoryName?.TrimEnd('\\', '/'), top, StringComparison.OrdinalIgnoreCase))
+                            local.Add((Path.GetFileNameWithoutExtension(n), Path.GetFileName(top), f.FullName, eng));
+                    }
+                    lock (sync)
+                    {
+                        nE += e; if (te > tE) tE = te; nW += w; if (tw > tW) tW = tw;
+                        stock.AddRange(local);
+                    }
+                }
+                Recorre(dir, false, false);   // archivos sueltos en TRAINSET (no son material del editor)
+                var subdirs = new DirectoryInfo(dir).EnumerateDirectories("*", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = FileAttributes.System });
+                System.Threading.Tasks.Parallel.ForEach(subdirs, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Max(2, Math.Min(8, Environment.ProcessorCount)) },
+                    sd => Recorre(sd.FullName, true, true));
+                _stockFolder = folderPath; _stock = stock;
+                return (nE + ":" + tE, nW + ":" + tW);
+            }
+            catch { _stockFolder = null; _stock = null; return ("?", "?"); }
+        }
+
+        /// <summary>Material de TRAINSET (primer nivel) visto al calcular la huella de esta carpeta, o null.</summary>
+        public static List<(string name, string folder, string path, bool isEngine)> StockFor(string folderPath)
+        {
+            lock (_lock)
+                return _stock != null && string.Equals(_stockFolder, folderPath, StringComparison.OrdinalIgnoreCase)
+                    ? new List<(string name, string folder, string path, bool isEngine)>(_stock) : null;
         }
 
         static string Huella(string dir, string patron, bool recursivo)
@@ -167,7 +228,7 @@ namespace SelectOR
 
         static string FilePathFor(string folderPath)
         {
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Open Rails", "SelectOR");
+            string dir = AppDataTidy.CacheRoot;
             Directory.CreateDirectory(dir);
             return Path.Combine(dir, "contenido-" + Hash(folderPath) + ".idx");
         }
