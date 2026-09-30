@@ -1,6 +1,7 @@
 # Compilación .NET
 bin/
 obj/
+out/
 *.user
 .vs/
 

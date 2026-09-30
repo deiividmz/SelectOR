@@ -1,0 +1,109 @@
+# Compila SelectOR y lo firma con Authenticode a través de SignPath (SignPath Foundation).
+#
+# Se lanza al subir una etiqueta de versión (v1.2.41…) o a mano desde la pestaña Actions.
+# Resultado: un .zip con los archivos del paquete de SelectOR FIRMADOS, adjunto a un borrador de
+# release (con etiqueta) y como artefacto del flujo. Desde ahí, tools/instalar-firmado.ps1 los copia a la
+# carpeta de Open Rails del superadmin, que es desde donde SelectOR publica la actualización.
+#
+# Configuración necesaria en el repositorio (Settings → Secrets and variables → Actions):
+#   · Secreto  SIGNPATH_API_TOKEN        token de API de un «CI user» de SignPath (solo «submitter»)
+#   · Variable SIGNPATH_ORGANIZATION_ID  identificador de la organización en SignPath
+#   · Variable SIGNPATH_POLICY           (opcional) «release-signing» por defecto; «test-signing» para probar
+
+name: Compilar y firmar
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # crear el borrador de release
+  actions: read     # SignPath comprueba el origen del artefacto
+
+jobs:
+  firmar:
+    runs-on: windows-latest
+    steps:
+      - name: Código
+        uses: actions/checkout@v4
+
+      - name: .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Contra las bibliotecas de Open Rails de lib/openrails (el servidor no tiene Open Rails instalado).
+      - name: Compilar
+        shell: pwsh
+        run: |
+          dotnet build src/SelectOR.csproj -c Release `
+            -p:ORDir="${{ github.workspace }}\lib\openrails\" `
+            -p:OutputPath="${{ github.workspace }}\out\" `
+            -p:ContinuousIntegrationBuild=true
+
+      # Los mismos archivos que forman el paquete de actualización (Updater.PackageFiles).
+      - name: Reunir el paquete
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force paquete | Out-Null
+          foreach ($f in 'SelectOR.exe','SelectOR.dll','SelectOR.deps.json','SelectOR.runtimeconfig.json','shape.mgfx') {
+            if (-not (Test-Path "out\$f")) { throw "Falta $f en la compilación" }
+            Copy-Item "out\$f" paquete\
+          }
+          $fv = [version](Get-Item paquete\SelectOR.exe).VersionInfo.FileVersion
+          $v = "$($fv.Major).$($fv.Minor).$($fv.Build)"
+          "Versión compilada: $v"
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Subir el paquete sin firmar
+        id: sin-firmar
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelectOR-sin-firmar
+          path: paquete/
+          if-no-files-found: error
+
+      # Con la política de publicación, SignPath pide la aprobación manual del superadmin (en su web):
+      # el flujo espera hasta una hora a que se apruebe.
+      - name: Firmar (SignPath)
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: SelectOR
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY || 'release-signing' }}
+          github-artifact-id: ${{ steps.sin-firmar.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: firmado
+
+      - name: Comprobar la firma
+        shell: pwsh
+        run: |
+          foreach ($f in 'SelectOR.exe','SelectOR.dll') {
+            $s = Get-AuthenticodeSignature "firmado\$f"
+            if ($s.Status -ne 'Valid') { throw "$f no tiene una firma válida: $($s.Status) $($s.StatusMessage)" }
+            "$f firmado por: $($s.SignerCertificate.Subject)"
+          }
+
+      - name: Empaquetar lo firmado
+        shell: pwsh
+        run: Compress-Archive -Path firmado\* -DestinationPath "SelectOR-$env:VERSION-firmado.zip" -Force
+
+      - name: Guardar lo firmado
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelectOR-firmado
+          path: SelectOR-*-firmado.zip
+          if-no-files-found: error
+
+      - name: Borrador de release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" "SelectOR-$env:VERSION-firmado.zip" --draft `
+            --title "SelectOR ${{ github.ref_name }}" `
+            --notes "Archivos de SelectOR $env:VERSION firmados con Authenticode (SignPath Foundation)."

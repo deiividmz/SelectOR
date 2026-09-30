@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Configuración de artefacto para SignPath (se pega en el proyecto «SelectOR» de SignPath.io).
+     El artefacto es el .zip que sube GitHub Actions con los archivos del paquete de SelectOR:
+     se firman con Authenticode el ejecutable y la biblioteca; el resto va tal cual. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="SelectOR.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="SelectOR.dll">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
