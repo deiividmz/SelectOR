@@ -409,8 +409,8 @@ namespace SelectOR
 
         static string Decode(byte[] buf)
         {
-            if (buf.Length >= 2 && ((buf[0] == 0xFF && buf[1] == 0xFE) || (buf[0] == 0xFE && buf[1] == 0xFF)))
-                return Encoding.Unicode.GetString(buf);
+            if (buf.Length >= 2 && buf[0] == 0xFF && buf[1] == 0xFE) return Encoding.Unicode.GetString(buf);
+            if (buf.Length >= 2 && buf[0] == 0xFE && buf[1] == 0xFF) return Encoding.BigEndianUnicode.GetString(buf);   // UTF-16 BE
             int zeros = 0, n = Math.Min(buf.Length, 200);
             for (int i = 0; i < n; i++) if (buf[i] == 0) zeros++;
             return zeros > n / 4 ? Encoding.Unicode.GetString(buf) : Encoding.UTF8.GetString(buf);

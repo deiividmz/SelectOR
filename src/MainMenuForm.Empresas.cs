@@ -1564,9 +1564,18 @@ namespace SelectOR
         void OpenAccountMenu(Control anchor)
         {
             if (!Supa.IsLoggedIn) return;
-            var cm = new ContextMenuStrip { ShowImageMargin = false };
+            var cm = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = true };
             cm.Items.Add(Tr("✎  Editar nombre"), null, (s, e) => EditMaquinistaName());
             cm.Items.Add(Tr("🔑  Cambiar contraseña"), null, (s, e) => ChangeMyPassword());
+            var snd = new ToolStripMenuItem(Tr("🔔  Sonido de avisos y del chat")) { Checked = _prefs?.NotifySound != false, CheckOnClick = true };
+            snd.CheckedChanged += (s, e) =>
+            {
+                if (_prefs == null) return;
+                _prefs.NotifySound = snd.Checked;
+                try { _prefs.Save(); } catch { }
+                if (snd.Checked) NotifySound.Play(force: true);   // para oír cómo suena
+            };
+            cm.Items.Add(snd);
             cm.Items.Add(new ToolStripSeparator());
             var del = new ToolStripMenuItem(Tr("Eliminar mi cuenta…")) { ForeColor = Color.FromArgb(200, 60, 60) };
             del.Click += (s, e) => DeleteMyAccount();
@@ -6539,8 +6548,8 @@ namespace SelectOR
                     int read = fs.Read(buf, 0, buf.Length);
                     if (read < buf.Length) Array.Resize(ref buf, Math.Max(0, read));
                 }
-                if (buf.Length > 1 && ((buf[0] == 0xFF && buf[1] == 0xFE) || (buf[0] == 0xFE && buf[1] == 0xFF)))
-                    return System.Text.Encoding.Unicode.GetString(buf);
+                if (buf.Length > 1 && buf[0] == 0xFF && buf[1] == 0xFE) return System.Text.Encoding.Unicode.GetString(buf);
+                if (buf.Length > 1 && buf[0] == 0xFE && buf[1] == 0xFF) return System.Text.Encoding.BigEndianUnicode.GetString(buf);   // UTF-16 BE
                 int zeros = 0, n2 = Math.Min(buf.Length, 200);
                 for (int i = 0; i < n2; i++) if (buf[i] == 0) zeros++;
                 return zeros > n2 / 4 ? System.Text.Encoding.Unicode.GetString(buf)
@@ -6623,8 +6632,8 @@ namespace SelectOR
                 string t = ReadMstsText(conPath);
                 if (!string.IsNullOrEmpty(t))
                     foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
-                                 t, @"EngineData\s*\(\s*([^\s)]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                        list.Add(m.Groups[1].Value.Trim().Trim('"'));
+                                 t, @"EngineData\s*\(\s*(?:""([^""]*)""|([^\s()""]+))", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        list.Add((m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).Trim());   // con o sin comillas
             }
             catch { }
             return list;
@@ -6804,7 +6813,7 @@ namespace SelectOR
             if (!m.Success || !double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)) return 0;
             string u = m.Groups[2].Value.ToLowerInvariant();
             double kmh;
-            if (u.Contains("kmh") || u.Contains("km/h") || u.Contains("kph")) kmh = v;
+            if (u.Contains("kmh") || u.Contains("km/h") || u.Contains("kph") || u.Contains("kmph")) kmh = v;   // «kmph» antes que «mph»
             else if (u.Contains("mph")) kmh = v * 1.60934;
             else kmh = v * 3.6;                                         // m/s por defecto
             return kmh > 400 ? 400 : kmh;
@@ -6926,7 +6935,7 @@ namespace SelectOR
         // entrecomillada (contiene espacios), p. ej. EngineData ( RN446CerMa_001 "[V3D] UT446-001 …" ).
         // Se compila una vez: se usa en los miles de .con del contenido.
         static readonly System.Text.RegularExpressions.Regex CarRefRx = new(
-            @"(Engine|Wagon)Data\s*\(\s*([^\s)]+)\s+(?:""([^""]*)""|([^\s)]+))",
+            @"(Engine|Wagon)Data\s*\(\s*(?:""([^""]*)""|([^\s()""]+))\s+(?:""([^""]*)""|([^\s()""]+))",   // nombre y carpeta, con o sin comillas
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
         static List<(string name, string folder, bool isEngine)> ConsistCarRefs(string conPath)
@@ -6940,8 +6949,8 @@ namespace SelectOR
                 if (!string.IsNullOrEmpty(t))
                     foreach (System.Text.RegularExpressions.Match m in CarRefRx.Matches(t))
                     {
-                        string name = m.Groups[2].Value.Trim().Trim('"');
-                        string folder = (m.Groups[3].Success ? m.Groups[3].Value : m.Groups[4].Value).Trim().Trim('"');
+                        string name = (m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value).Trim();
+                        string folder = (m.Groups[4].Success ? m.Groups[4].Value : m.Groups[5].Value).Trim();
                         bool isEng = m.Groups[1].Value.Equals("Engine", StringComparison.OrdinalIgnoreCase);
                         list.Add((name, folder, isEng));
                     }

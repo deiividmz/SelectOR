@@ -22,7 +22,7 @@ namespace SelectOR
 
         bool _collapsed, _hover, _down, _dragging, _resizing;
         Point _downScreen, _formAtDown; Size _sizeAtDown;
-        Rectangle _hitCollapse, _hitClose, _hitGrip, _hitMap, _hitAll, _hitNone;
+        Rectangle _hitCollapse, _hitClose, _hitGrip, _hitMap, _hitAll, _hitNone, _hitClock;
         readonly List<(Rectangle hit, int stop)> _dotHits = new();
         int _hoverZone = -1, _scroll, _lastNext = -1;
 
@@ -104,6 +104,7 @@ namespace SelectOR
             if (_hitMap.Contains(p)) return 2;
             if (_hitAll.Contains(p)) return 3;
             if (_hitNone.Contains(p)) return 4;
+            if (_hitClock.Contains(p)) return 5;
             for (int i = 0; i < _dotHits.Count; i++) if (_dotHits[i].hit.Contains(p)) return 10 + i;
             return -1;
         }
@@ -154,6 +155,7 @@ namespace SelectOR
                 if (z == 0) CloseRequested?.Invoke();
                 else if (z == 1) ToggleCollapse();
                 else if (z == 2) OpenMap?.Invoke();
+                else if (z == 5) ToggleClock();
                 else if (z == 3 || z == 4) { _rb.SetAllHalts(z == 3); Changed?.Invoke(); Invalidate(); }
                 else if (z >= 10) { _rb.ToggleHalt(_dotHits[z - 10].stop); Changed?.Invoke(); Invalidate(); }
                 else if (_collapsed) ToggleCollapse();
@@ -171,6 +173,31 @@ namespace SelectOR
         }
 
         double Game() { try { return GameNow?.Invoke() ?? double.NaN; } catch { return double.NaN; } }
+
+        // Horas de la hoja de ruta: las del simulador o las del PC (se recuerda la elección).
+        bool PcClock => _prefs?.RoadHudPcClock == true;
+
+        void ToggleClock()
+        {
+            if (_prefs == null) return;
+            _prefs.RoadHudPcClock = !_prefs.RoadHudPcClock;
+            try { _prefs.Save(); } catch { }
+            Invalidate();
+        }
+
+        // Hora de llegada dentro de etaS segundos (del simulador; en el reloj del PC, se suman a la hora actual).
+        string ArrivalClock(double now, double etaS)
+        {
+            if (double.IsNaN(etaS)) return "--:--";
+            if (PcClock) return DateTime.Now.AddSeconds(etaS).ToString("HH:mm");
+            return double.IsNaN(now) ? "--:--" : Clock(now + etaS);
+        }
+
+        string PassedClock(RoadBook.Stop s)
+        {
+            if (PcClock) return s.PassedAtPc == DateTime.MinValue ? "" : s.PassedAtPc.ToString("HH:mm");
+            return double.IsNaN(s.PassedAt) ? "" : Clock(s.PassedAt);
+        }
 
         static string Clock(double secs)
         {
@@ -196,12 +223,13 @@ namespace SelectOR
             _hitClose = new Rectangle(Width - 28, 5, 22, HdrH - 10);
             _hitCollapse = new Rectangle(_hitClose.Left - 24, 5, 22, HdrH - 10);
             _hitMap = new Rectangle(_hitCollapse.Left - 26, 5, 24, HdrH - 10);
+            _hitClock = new Rectangle(_hitMap.Left - 38, 6, 36, HdrH - 12);
             double now = Game();
             var end = _rb.Stops.Count > 0 ? _rb.Stops[^1] : null;
             string title = I18n.T("Hoja de ruta");
-            if (end != null && !double.IsNaN(end.EtaS) && !double.IsNaN(now)) title += "  ·  " + string.Format(I18n.T("llegada {0}"), Clock(now + end.EtaS));
+            if (end != null && !double.IsNaN(end.EtaS) && (PcClock || !double.IsNaN(now))) title += "  ·  " + string.Format(I18n.T("llegada {0}"), ArrivalClock(now, end.EtaS));
             using (var tf = Theme.Font(9.5f, FontStyle.Bold))
-                TextRenderer.DrawText(g, title, tf, new Rectangle(ico.Right + 8, 0, _hitMap.Left - ico.Right - 10, HdrH), Theme.Text,
+                TextRenderer.DrawText(g, title, tf, new Rectangle(ico.Right + 8, 0, _hitClock.Left - ico.Right - 10, HdrH), Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             if (_hoverZone == 2) using (var hb = new SolidBrush(Theme.SurfaceHi)) using (var hp = Theme.Round(_hitMap, 6)) g.FillPath(hb, hp);
             using (var pen = new Pen(_hoverZone == 2 ? Theme.Text : Theme.Subtle, 1.4f))
@@ -211,6 +239,12 @@ namespace SelectOR
                 g.DrawLine(pen, m.Left + m.Width / 3, m.Top, m.Left + m.Width / 3, m.Bottom);
                 g.DrawLine(pen, m.Left + 2 * m.Width / 3, m.Top, m.Left + 2 * m.Width / 3, m.Bottom);
             }
+            // Reloj de las horas: SIM (simulador) o PC
+            using (var cb = new SolidBrush(_hoverZone == 5 ? Theme.SurfaceHi : Color.FromArgb(40, 255, 255, 255)))
+            using (var cp = Theme.Round(_hitClock, 5)) g.FillPath(cb, cp);
+            using (var cf = Theme.Font(7.6f, FontStyle.Bold))
+                TextRenderer.DrawText(g, PcClock ? "PC" : "SIM", cf, _hitClock, PcClock ? Amber : (_hoverZone == 5 ? Theme.Text : Theme.Subtle),
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             DrawHdrBtn(g, _hitCollapse, _collapsed ? "+" : "–", _hoverZone == 1);
             DrawHdrBtn(g, _hitClose, "×", _hoverZone == 0);
             if (_collapsed) return;
@@ -261,7 +295,7 @@ namespace SelectOR
                     }
                     x += 4;
                 }
-                TextRenderer.DrawText(g, I18n.T("Clic en una estación: parar o pasar"), ff, new Rectangle(x, fy, Width - x - 22, FootH), Color.FromArgb(125, 131, 136),
+                TextRenderer.DrawText(g, _hoverZone == 5 ? (PcClock ? I18n.T("Horas del PC · clic: del simulador") : I18n.T("Horas del simulador · clic: del PC")) : I18n.T("Clic en una estación: parar o pasar"), ff, new Rectangle(x, fy, Width - x - 22, FootH), Color.FromArgb(125, 131, 136),
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             }
             _hitGrip = new Rectangle(Width - 18, Height - 18, 18, 18);
@@ -316,8 +350,8 @@ namespace SelectOR
                 }
 
                 var nameCol = s.Passed ? Color.FromArgb(130, 136, 142) : Theme.Text;
-                string timeTxt = s.Passed ? (double.IsNaN(s.PassedAt) ? "✓" : "✓ " + Clock(s.PassedAt))
-                               : (double.IsNaN(s.EtaS) || double.IsNaN(now) ? "--:--" : Clock(now + s.EtaS));
+                string timeTxt = s.Passed ? (PassedClock(s) is string pc && pc.Length > 0 ? "✓ " + pc : "✓")
+                               : ArrivalClock(now, s.EtaS);
                 int timeW = TextRenderer.MeasureText(g, "✓ 00:00", fTime, Size.Empty, TextFormatFlags.NoPadding).Width + 6;
                 var tRect = new Rectangle(Width - timeW - 14, y, timeW, RowH);
                 TextRenderer.DrawText(g, timeTxt, fTime, tRect, s.Passed ? Color.FromArgb(130, 136, 142) : (isNext ? Amber : Theme.Text),

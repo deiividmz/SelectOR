@@ -34,6 +34,7 @@ namespace SelectOR
         public bool Connected;
         public double SpeedKmh, LimitKmh, Gradient, OdoKm;
         public double SpeedoMax;   // fondo de escala del velocímetro de la cabina (.cvf, ScaleRange); 0 = sin dato
+        public double AirDialMax, BcDialMax;   // fondo de escala de los manómetros de la cabina según Open Rails (en su unidad); 0 = sin dato
         public bool SpeedFromCab, LimitFromCab;   // leídos del mando de la cabina: en SUS unidades (km/h o mph)
         public double Throttle, TrainBrake, EngineBrake, DynBrake;       // %
         public double MrBar, BpBar, EqBar, BcBar;                         // bar
@@ -608,9 +609,13 @@ namespace SelectOR
                 foreach (var e in arr.EnumerateArray())
                 {
                     string type = e.TryGetProperty("TypeName", out var tn) ? tn.GetString() ?? "" : "";
-                    string key = Clase(type); if (key == null || (visto.Contains(key) && key != "panto")) continue;
+                    string key = Clase(type); if (key == null) continue;
                     double min = e.TryGetProperty("MinValue", out var mi) && mi.TryGetDouble(out var a) ? a : 0;
                     double max = e.TryGetProperty("MaxValue", out var ma) && ma.TryGetDouble(out var b) ? b : 1;
+                    // Escala de los manómetros tal como Open Rails ha cargado la cabina (de TODOS sus mandos de presión)
+                    if (key == "mr" || key == "bp") v.AirDialMax = Math.Max(v.AirDialMax, Math.Abs(max));
+                    else if (key == "bc") v.BcDialMax = Math.Max(v.BcDialMax, Math.Abs(max));
+                    if (visto.Contains(key) && key != "panto") continue;
                     if (max == min) max = min + 1;
                     double fr = e.TryGetProperty("RangeFraction", out var rf) && rf.TryGetDouble(out var f) ? f : 0;
                     double real = min + fr * (max - min);

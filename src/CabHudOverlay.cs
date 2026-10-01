@@ -42,8 +42,11 @@ namespace SelectOR
         const double KmhPorMph = 1.609344;
         // Manómetros en la unidad de la cabina: las presiones llegan en bar y se DIBUJAN en esa unidad
         // (f = bar → unidad) con la escala de su esfera.
-        readonly string _airUnit = "bar", _bcUnit = "bar";
-        readonly double _airF = 1, _bcF = 1, _airAuto = 12, _bcAuto = 10;   // escala de la cabina (en su unidad)
+        string _airUnit = "bar", _bcUnit = "bar";
+        double _airF = 1, _bcF = 1, _airAuto = 12, _bcAuto = 10;   // escala de la cabina (en su unidad)
+        readonly string _airCvfUnits, _bcCvfUnits;                 // Units del .cvf (Open Rails no las dice)
+        double _airApi, _bcApi;                                    // escalas que ha dado Open Rails (0 = aún no)
+        double _needMrBar, _needBcBar;                             // presiones máximas reales del tren (.eng), en bar
         double _airMax = 12, _bcMax = 10;                                     // la que se dibuja (la de la cabina o la elegida)
         string _machineKey;                                                   // máquina de cabeza: para recordar la escala elegida
 
@@ -76,8 +79,10 @@ namespace SelectOR
             var (lab, f) = PressUnit(cvfUnits);
             if (scale <= 0 || scale > 5000) return (lab, f, NiceMax(lab == "inHg" ? 30 : defBar * f));
             bool creible = lab == "inHg" ? scale >= 10 && scale <= 40 : scale / f >= 3 && scale / f <= 30;
+            // Si no cuadra, la unidad se deduce por el tamaño de la escala. Vacío (inHg) solo si la cabina lo
+            // declara: un cilindro «psi 0-30» de un tren con freno de aire sigue en psi.
             if (!creible)
-                (lab, f) = scale <= 20 ? ("bar", 1.0) : scale <= 40 ? ("inHg", 29.5299831)
+                (lab, f) = lab == "inHg" && scale <= 40 ? ("inHg", 29.5299831) : scale <= 20 ? ("bar", 1.0)
                          : scale <= 300 ? ("psi", 14.5037738) : ("kPa", 100.0);
             return (lab, f, scale);
         }
@@ -177,6 +182,7 @@ namespace SelectOR
             double cabScale = units.SpeedScale;
             // Manómetros: unidad y escala de las esferas de la cabina; si no las declara, 12 bar
             // (depósito/tubería) y 10 bar (cilindro) pasados a esa unidad y redondeados.
+            _airCvfUnits = units.AirUnits; _bcCvfUnits = units.BcUnits;
             (_airUnit, _airF, _airAuto) = PressDial(units.AirUnits, units.AirScale, 12);
             (_bcUnit, _bcF, _bcAuto) = PressDial(units.BcUnits, units.BcScale, 10);
             _airMax = _airAuto; _bcMax = _bcAuto;
@@ -190,9 +196,9 @@ namespace SelectOR
             _unitsKnown = speedoMph != null;
             _mph = speedoMph == true;
             _uf = _mph ? 1 / KmhPorMph : 1;
-            // Escala: la de la esfera de la cabina (.cvf, ya en su unidad) o, si no la declara, un número
-            // redondo en esa unidad un poco por encima de la velocidad máxima del tren.
-            if (cabScale >= 25 && cabScale <= 600) { _speedMax = cabScale / _uf; _scaleFromCab = true; }
+            // Escala: siempre un número redondo (en la unidad de la cabina) un poco por encima de la velocidad
+            // máxima del tren (MaxVelocity de sus .eng). Solo si no se puede leer, la de la esfera de la cabina.
+            if (_trainMaxKmh <= 0 && cabScale >= 25 && cabScale <= 600) { _speedMax = cabScale / _uf; _scaleFromCab = true; }
             else _speedMax = ScaleForTrain(_trainMaxKmh * _uf) / _uf;
             _scale = Math.Max(ScaleMin, Math.Min(ScaleMax, prefs != null && prefs.CabHudScale > 0 ? prefs.CabHudScale : 1f));
 
@@ -216,11 +222,11 @@ namespace SelectOR
         // vía admite 160 y el tren 120, el límite que manda para el maquinista es 120.
         double TrainCap(double kmh) => _trainMaxKmh > 0 ? Math.Min(kmh, Math.Round(_trainMaxKmh)) : kmh;
 
-        // Escala del velocímetro: la de la esfera de la cabina del tren (ScaleRange del .cvf, que da Open
-        // Rails) y, mientras no llegue, la calculada con la velocidad máxima de sus .eng.
+        // Escala del velocímetro cuando no se sabe la velocidad máxima del tren (sin MaxVelocity en sus .eng):
+        // la de la esfera de la cabina que da Open Rails. Con velocidad máxima, manda siempre esa.
         void ApplyCabScale(double dial)
         {
-            if (_scaleFromCab || dial <= 0) return;
+            if (_scaleFromCab || dial <= 0 || _trainMaxKmh > 0) return;
             // Llega en la unidad de la cabina. Si no se ha podido leer el .cvf, una esfera claramente por
             // debajo de la velocidad del tren es de millas.
             bool enMillas = _unitsKnown ? _mph : _trainMaxKmh > 0 && dial < _trainMaxKmh * 0.9;
@@ -245,6 +251,7 @@ namespace SelectOR
             }
             if (v.Connected) _night = IsNight(v.Time);
             ApplyCabScale(v.SpeedoMax);
+            ApplyApiPressScale(v);
             double sp = v.Has("speed") ? Math.Max(0, Math.Min(_speedMax, Math.Abs(v.SpeedKmh))) : 0;
             if (!_animInit)
             {
@@ -305,8 +312,46 @@ namespace SelectOR
 
         static readonly double[] GaugePresetsBar = { 6, 10, 12, 16 };
 
+        // Presiones máximas que puede marcar el tren (de su .eng, en bar): la escala automática siempre las cubre.
+        public void SetTrainPressures(double mrBar, double bcBar)
+        {
+            _needMrBar = mrBar > 0 && mrBar < 30 ? mrBar : 0;
+            _needBcBar = bcBar > 0 && bcBar < 30 ? bcBar : 0;
+            ApplyGaugeChoice();
+        }
+
+        // Escala de la cabina, ampliada al siguiente fondo redondo de esfera si no llega a la presión real.
+        static double Cover(double scale, double f, string unit, double needBar)
+        {
+            if (needBar <= 0 || unit == "inHg") return scale;
+            double need = needBar * f * 0.999;   // en la unidad de la esfera (una esfera que llega justo a la presión vale)
+            if (scale >= need) return scale;
+            double[] steps = unit == "psi" ? new double[] { 60, 100, 150, 160, 200, 250, 300 }
+                           : unit == "kPa" ? new double[] { 600, 1000, 1200, 1600, 2000, 2500 }
+                           : unit == "MPa" ? new double[] { 0.6, 1, 1.2, 1.6, 2, 2.5 }
+                           : new double[] { 6, 10, 12, 16, 20, 25 };   // bar y kgf/cm²
+            foreach (var s in steps) if (s >= need) return s;
+            return NiceMax(need);
+        }
+
+        double AirAuto => Cover(_airAuto, _airF, _airUnit, _needMrBar);
+        double BcAuto => Cover(_bcAuto, _bcF, _bcUnit, _needBcBar);
+
         // Fondo de escala en la unidad de la esfera para un valor en bar (redondo si no es bar).
         static double InUnit(double bar, double f) => Math.Abs(f - 1) < 1e-9 ? bar : NiceMax(bar * f);
+
+        // Manómetros: la escala de la cabina tal como la ha cargado Open Rails (con sus Include y la carpeta
+        // OpenRails ya resueltos) manda sobre la leída del .cvf. La unidad sigue siendo la del .cvf, y
+        // PressDial corrige las combinaciones imposibles. La escala elegida con clic derecho sigue mandando.
+        void ApplyApiPressScale(CabValues v)
+        {
+            bool ch = false;
+            if (v.AirDialMax > 0 && Math.Abs(v.AirDialMax - _airApi) > 1e-6)
+            { _airApi = v.AirDialMax; (_airUnit, _airF, _airAuto) = PressDial(_airCvfUnits, _airApi, 12); ch = true; }
+            if (v.BcDialMax > 0 && Math.Abs(v.BcDialMax - _bcApi) > 1e-6)
+            { _bcApi = v.BcDialMax; (_bcUnit, _bcF, _bcAuto) = PressDial(_bcCvfUnits, _bcApi, 10); ch = true; }
+            if (ch) ApplyGaugeChoice();
+        }
 
         void ApplyGaugeChoice()
         {
@@ -316,8 +361,8 @@ namespace SelectOR
                 _prefs.CabAirScaleBar?.TryGetValue(_machineKey, out a);
                 _prefs.CabBcScaleBar?.TryGetValue(_machineKey, out b);
             }
-            _airMax = a > 0 ? InUnit(a, _airF) : _airAuto;
-            _bcMax = b > 0 ? InUnit(b, _bcF) : _bcAuto;
+            _airMax = a > 0 ? InUnit(a, _airF) : AirAuto;
+            _bcMax = b > 0 ? InUnit(b, _bcF) : BcAuto;
             _cacheKey = null;   // las esferas se vuelven a dibujar con la escala nueva
             if (IsHandleCreated) Render();
         }
@@ -334,13 +379,13 @@ namespace SelectOR
         void ShowGaugeMenu(int gauge, Point at)
         {
             bool air = gauge == 0;
-            string unit = air ? _airUnit : _bcUnit; double f = air ? _airF : _bcF, auto = air ? _airAuto : _bcAuto;
+            string unit = air ? _airUnit : _bcUnit; double f = air ? _airF : _bcF, auto = air ? AirAuto : BcAuto;
             var dict = air ? _prefs?.CabAirScaleBar : _prefs?.CabBcScaleBar;
             double cur = 0; if (_machineKey != null) dict?.TryGetValue(_machineKey, out cur);
             string Num(double v) => v.ToString(v % 1 == 0 ? "0" : "0.#", System.Globalization.CultureInfo.InvariantCulture);
             var cm = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = true };
             cm.Items.Add(new ToolStripMenuItem(air ? I18n.T("Escala del manómetro TDP/TFA") : I18n.T("Escala del cilindro de freno")) { Enabled = false });
-            var it = new ToolStripMenuItem(string.Format(I18n.T("Automática (de la cabina): 0-{0} {1}"), Num(auto), unit)) { Checked = cur <= 0 };
+            var it = new ToolStripMenuItem(string.Format(I18n.T("Automática: 0-{0} {1}"), Num(auto), unit)) { Checked = cur <= 0 };
             it.Click += (s, e) => SetGauge(air, 0);
             cm.Items.Add(it);
             foreach (double bar in GaugePresetsBar)
@@ -877,7 +922,7 @@ namespace SelectOR
         void Draw(Graphics g)
         {
             var ps = Pictograms();
-            string key = $"{Width}x{Height}|{_scale}|{_speedMax}|{_airMax}|{_bcMax}|{_night}|{_v.Has("speed")}{_v.Has("mr")}{_v.Has("bp")}{_v.Has("bc")}|{string.Join(",", ps)}";
+            string key = $"{Width}x{Height}|{_scale}|{_speedMax}|{_airMax}{_airUnit}|{_bcMax}{_bcUnit}|{_night}|{_v.Has("speed")}{_v.Has("mr")}{_v.Has("bp")}{_v.Has("bc")}|{string.Join(",", ps)}";
             if (_cache == null || _cache.Width != Width || _cache.Height != Height || key != _cacheKey)
             {
                 _cache?.Dispose();

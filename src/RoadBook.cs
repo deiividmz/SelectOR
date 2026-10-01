@@ -375,6 +375,7 @@ namespace SelectOR
             public string Name; public double Dist;      // distancia desde el origen del itinerario
             public bool Halt;                           // se para (true) o se pasa sin parar
             public bool Passed; public double PassedAt = double.NaN;   // hora del juego al pasar
+            public DateTime PassedAtPc = DateTime.MinValue;            // hora del PC al pasar
             public double EtaS = double.NaN;            // segundos desde ahora hasta llegar
             public bool IsEnd;                          // fila final («Destino»), no una estación
             public bool IsReverse;                      // cambio de sentido (el tren invierte la marcha)
@@ -449,7 +450,8 @@ namespace SelectOR
         // Rehace el itinerario desde la posición del tren por los puntos que faltan.
         public void Replan(bool hasPos, double lat, double lon, bool hasHdg, double hdg)
         {
-            var oldPassed = Stops.Where(s => s.Passed && !double.IsNaN(s.PassedAt)).ToDictionary(s => s.Name, s => s.PassedAt, StringComparer.OrdinalIgnoreCase);
+            var oldPassed = Stops.Where(s => s.Passed && (!double.IsNaN(s.PassedAt) || s.PassedAtPc != DateTime.MinValue))
+                .ToDictionary(s => s.Name, s => (s.PassedAt, s.PassedAtPc), StringComparer.OrdinalIgnoreCase);
             ClearPlan(); Problem = null;
             if (Graph == null || Points.Count <= ReachedPoints) return;
             int startIdx = ReachedPoints, e; double off; var dirs = new List<int>();
@@ -489,7 +491,7 @@ namespace SelectOR
 
         void ClearPlanKeepProblem() { var pr = Problem; ClearPlan(); Problem = pr; }
 
-        void Build(List<(int e, double from, double to)> parts, List<double> pointDist, Dictionary<string, double> oldPassed)
+        void Build(List<(int e, double from, double to)> parts, List<double> pointDist, Dictionary<string, (double PassedAt, DateTime PassedAtPc)> oldPassed)
         {
             var xs = new List<float>(); var ys = new List<float>(); var cs = new List<double>();
             var plats = new List<(double d, string name)>();
@@ -533,7 +535,7 @@ namespace SelectOR
                 while (j + 1 < plats.Count && string.Equals(plats[j + 1].name, plats[k].name, StringComparison.OrdinalIgnoreCase) && plats[j + 1].d - plats[j].d < 800) j++;
                 string name = plats[k].name;
                 var s = new Stop { Name = name, Dist = (plats[k].d + plats[j].d) / 2, Halt = _haltChoice.TryGetValue(name, out bool h) ? h : DefaultHalt };
-                if (oldPassed.TryGetValue(name, out double pa) && s.Dist < 30) { s.Passed = true; s.PassedAt = pa; }
+                if (oldPassed.TryGetValue(name, out var pa) && s.Dist < 30) { s.Passed = true; s.PassedAt = pa.PassedAt; s.PassedAtPc = pa.PassedAtPc; }
                 Stops.Add(s);
                 k = j + 1;
             }
@@ -591,7 +593,7 @@ namespace SelectOR
             OffSinceUtc = DateTime.MaxValue;
             Progress = Math.Max(Progress, bestD);   // el tren no retrocede en la hoja de ruta
             foreach (var s in Stops)
-                if (!s.Passed && Progress > s.Dist + 30) { s.Passed = true; s.PassedAt = gameNow; }
+                if (!s.Passed && Progress > s.Dist + 30) { s.Passed = true; s.PassedAt = gameNow; s.PassedAtPc = DateTime.Now; }
             // puntos ya alcanzados: si hay que rehacer el itinerario, no se vuelve a ellos
             for (int i = 0; i < PointDist.Length; i++)
                 if (Progress > PointDist[i] - 30 && ReachedPoints < _firstPlanned + i + 1) ReachedPoints = _firstPlanned + i + 1;

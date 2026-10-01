@@ -129,6 +129,7 @@ namespace SelectOR
         {
             _kiosk = kiosk;
             _prefs = AppPrefs.Load();
+            NotifySound.Enabled = () => _prefs?.NotifySound != false;
             try { _settings = new UserSettings(new string[0]); DetectLanguage(); } catch { }
             // Escala de la interfaz según la pantalla, ANTES de montar nada: las fuentes ya se crean
             // a la medida buena y luego se escalan los tamaños fijos de la maqueta.

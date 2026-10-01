@@ -52,7 +52,8 @@ namespace SelectOR
         {
             if (r == null || r.Loading || !Supa.IsLoggedIn) return;
             r.Loading = true;
-            bool changed = false;
+            bool changed = false, wasLoaded = r.Loaded;
+            int fromOthers = 0;
             try
             {
                 string json, err;
@@ -91,6 +92,7 @@ namespace SelectOR
                         DateTime.TryParse(Str(e, "created_at"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var at);
                         r.Msgs.Add(new ChatMsg { Id = id, UserId = Str(e, "user_id"), User = Str(e, "username"), Role = Str(e, "role"), Body = Str(e, "body"), AtUtc = at, Edited = edited, Deleted = deleted });
                         r.LastId = id; changed = true;
+                        if (wasLoaded && !deleted && !string.Equals(Str(e, "user_id"), Supa.UserId, StringComparison.OrdinalIgnoreCase)) fromOthers++;
                     }
                     if (r.Msgs.Count > 400) { r.Msgs.RemoveRange(0, r.Msgs.Count - 300); changed = true; }
                     if (!r.Loaded) { r.Loaded = true; changed = true; }
@@ -99,6 +101,7 @@ namespace SelectOR
             catch { }
             finally { r.Loading = false; }
             if (changed) ChatRoomUpdated(r);
+            if (fromOthers > 0) NotifySound.Play();   // mensaje nuevo de otro socio (no al cargar el chat)
         }
 
         // Mi permiso en esa empresa (y, si modero, quién no puede escribir).

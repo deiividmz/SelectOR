@@ -28,6 +28,8 @@ namespace SelectOR
                                             TrainBrakeDecel(tren), units);
                 _cabHud.TrainName = tren?.Name;
                 _cabHud.MachineKey = CabMachineKey(tren);   // escala de los manómetros elegida para esta máquina
+                var (mrBar, bcBar) = TrainBrakePressures(tren);
+                _cabHud.SetTrainPressures(mrBar, bcBar);    // la escala automática cubre las presiones reales del tren
                 if (_tHave) _cabHud.SetPosition(_tLat, _tLon);
                 var _ = _cabHud.Handle;
                 if (_scenarioReady || force) _cabHud.Show(); else _cabWaiting = true;   // aparece con el escenario cargado
@@ -71,7 +73,7 @@ namespace SelectOR
         }
 
         // Velocidad máxima del tren: la menor de sus máquinas (MaxVelocity de cada .eng). Es la que
-        // marca el fondo de escala del velocímetro. 0 si no se puede leer (entonces, escala 0-160).
+        // marca el fondo de escala del velocímetro. 0 si no se puede leer (entonces, la de la cabina o 0-160).
         double TrainMaxKmh(TrainItem c)
         {
             double vmax = 0;
@@ -80,12 +82,43 @@ namespace SelectOR
                 foreach (var r in ConsistCarRefs(c?.FilePath))
                 {
                     if (!r.isEngine) continue;
-                    double v = Veh(ResolveCarFile(r.name, r.folder))?.SpeedKmh ?? 0;
+                    double v = EngMaxKmh(ResolveCarFile(r.name, r.folder));
                     if (v > 0) vmax = vmax <= 0 ? v : Math.Min(vmax, v);
                 }
             }
             catch { }
             return vmax;
+        }
+
+        // MaxVelocity de un .eng en km/h. Lo normal es que esté al principio del archivo (Veh), pero muchas
+        // máquinas lo traen en un «include ( ../Common/… )» o muy abajo: entonces se lee el archivo entero y
+        // se siguen sus include, como hace Open Rails (si hay varios, manda el último que se lee).
+        static readonly System.Collections.Generic.Dictionary<string, double> _engMaxKmh = new(StringComparer.OrdinalIgnoreCase);
+        static double EngMaxKmh(string eng)
+        {
+            if (string.IsNullOrEmpty(eng)) return 0;
+            lock (_engMaxKmh) if (_engMaxKmh.TryGetValue(eng, out var hit)) return hit;
+            double v = Veh(eng)?.SpeedKmh ?? 0;
+            if (v <= 0) { try { v = SpeedInFile(eng, 0); } catch { v = 0; } }
+            lock (_engMaxKmh) _engMaxKmh[eng] = v;
+            return v;
+        }
+
+        static double SpeedInFile(string file, int depth)
+        {
+            if (depth > 4 || !File.Exists(file) || !Native.IsLocalFile(file)) return 0;
+            string t = ReadHead(file, 32000000);
+            double v = ExtractSpeedKmh(t);
+            if (v > 0) return v;
+            string dir = Path.GetDirectoryName(file);
+            foreach (Match m in Regex.Matches(t, @"\bInclude\s*\(\s*""?([^"")]+?)""?\s*\)", RegexOptions.IgnoreCase))
+            {
+                string p;
+                try { p = Path.GetFullPath(Path.Combine(dir, m.Groups[1].Value.Trim().Replace("\\\\", "\\").Replace('/', '\\'))); } catch { continue; }
+                double x = SpeedInFile(p, depth + 1);
+                if (x > 0) v = x;
+            }
+            return v;
         }
 
         // Instrumentos de la cabina del tren: el .cvf de la máquina de cabeza («CabView ( … )» en su .eng,
@@ -190,6 +223,42 @@ namespace SelectOR
             }
             catch { return null; }
             return leidos > 0 ? false : (bool?)null;
+        }
+
+        // Presiones máximas reales de la máquina de cabeza (de su .eng o sus Include), en bar: depósito principal
+        // (AirBrakesMainMaxAirPressure) y cilindro de freno (la mayor entre la de frenado máximo y la del freno
+        // de la máquina). Sin unidad, MSTS las da en psi. 0 = no se sabe.
+        (double mr, double bc) TrainBrakePressures(TrainItem c)
+        {
+            try
+            {
+                foreach (var r in ConsistCarRefs(c?.FilePath))
+                {
+                    if (!r.isEngine) continue;
+                    string eng = ResolveCarFile(r.name, r.folder);
+                    if (eng == null) return (0, 0);
+                    double P(string key) => PressToBar(EngFind(eng, @"\b" + key + @"\s*\(\s*([^)]*)\)", 0));
+                    double mr = P("AirBrakesMainMaxAirPressure");
+                    double bc = Math.Max(P("BrakeCylinderPressureForMaxBrakeBrakeForce"), P("EngineBrakesControllerMaxSystemPressure"));
+                    return (mr, bc);
+                }
+            }
+            catch { }
+            return (0, 0);
+        }
+
+        static double PressToBar(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return 0;
+            var m = Regex.Match(s.Trim(), @"^(-?[\d.]+)\s*([A-Za-z/^\d]*)");
+            if (!m.Success || !double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) || v <= 0) return 0;
+            string u = m.Groups[2].Value.ToLowerInvariant();
+            if (u.StartsWith("bar")) return v;
+            if (u.StartsWith("kpa")) return v / 100.0;
+            if (u.StartsWith("mpa")) return v * 10.0;
+            if (u.StartsWith("inhg")) return v * 0.0338639;
+            if (u.StartsWith("kgf")) return v * 0.980665;
+            return v * 0.0689476;   // psi (o sin unidad, como en MSTS)
         }
 
         // Busca un patrón en un .eng/.wag o en sus Include (hasta 3 niveles); devuelve el grupo 1

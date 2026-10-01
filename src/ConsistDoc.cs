@@ -42,8 +42,8 @@ namespace SelectOR
             try
             {
                 var bytes = File.ReadAllBytes(file);
-                if (bytes.Length >= 2 && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF)))
-                    return Encoding.Unicode.GetString(bytes);
+                if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) return Encoding.Unicode.GetString(bytes);
+                if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) return Encoding.BigEndianUnicode.GetString(bytes);   // UTF-16 BE
                 int zeros = 0, n = Math.Min(bytes.Length, 200);
                 for (int i = 0; i < n; i++) if (bytes[i] == 0) zeros++;
                 if (zeros > n / 4) return Encoding.Unicode.GetString(bytes);

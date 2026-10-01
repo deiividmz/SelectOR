@@ -232,6 +232,7 @@ namespace SelectOR
         // ---- Pila de avisos: abajo a la derecha, el más nuevo encima; como mucho 4 a la vez ----
         void EnqueueToast(NotificationToast t)
         {
+            NotifySound.Play();   // un lote de avisos suena una sola vez
             if (_toasts.Count >= MaxToasts) { _toastQueue.Enqueue(t); return; }
             ShowToast(t);
         }

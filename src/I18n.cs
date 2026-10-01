@@ -100,6 +100,7 @@ namespace SelectOR
             ["No se pudo comprobar la contraseña: "] = "The password could not be checked: ",
             ["No se pudo cambiar la contraseña: "] = "The password could not be changed: ",
             ["Contraseña cambiada."] = "Password changed.",
+            ["🔔  Sonido de avisos y del chat"] = "🔔  Sound for notifications and chat",
             ["Vas a eliminar la cuenta {0}. No se puede deshacer."] = "You are about to delete the account {0}. This cannot be undone.",
             ["Se borran tu perfil, tu carné por puntos, tus avisos, tus mensajes del chat y tus solicitudes, y sales de todas tus empresas. Los servicios que condujiste se quedan en sus empresas, pero sin tu nombre."] = "Your profile, points licence, notifications, chat messages and requests are deleted, and you leave all your companies. The services you drove stay in their companies, but without your name.",
             ["Si eres el gerente de una empresa, pasa a otro gerente de esa empresa. Si eres el único gerente, antes tienes que nombrar gerente a otro socio (Socios) o eliminar la empresa."] = "If you are the manager of a company, it passes to another manager of that company. If you are the only manager, first make another member manager (Members) or delete the company.",
@@ -114,7 +115,7 @@ namespace SelectOR
             // Pupitre: escala de los manómetros
             ["Escala del manómetro TDP/TFA"] = "Scale of the MR/BP gauge",
             ["Escala del cilindro de freno"] = "Scale of the brake cylinder gauge",
-            ["Automática (de la cabina): 0-{0} {1}"] = "Automatic (from the cab): 0-{0} {1}",
+            ["Automática: 0-{0} {1}"] = "Automatic: 0-{0} {1}",
             ["Se recuerda para esta máquina"] = "Remembered for this locomotive",
             // Servicio desde Actividad
             ["No se ha podido leer el tren de la actividad elegida."] = "The train of the selected activity could not be read.",
@@ -145,6 +146,8 @@ namespace SelectOR
             ["Abre el mapa grande, pulsa «Itinerario» y haz clic en la vía, en uno o varios puntos."] = "Open the large map, press «Itinerary» and click on the track, at one or more points.",
             ["Clic en ● para parar o pasar sin parar"] = "Click ● to stop or run through",
             ["Clic en una estación: parar o pasar"] = "Click a station: stop or run through",
+            ["Horas del PC · clic: del simulador"] = "PC times · click: simulator",
+            ["Horas del simulador · clic: del PC"] = "Simulator times · click: PC",
             ["Paradas: {0}"] = "Stops: {0}",
             ["pasada"] = "passed",
             ["final"] = "end",

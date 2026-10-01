@@ -25,7 +25,7 @@ namespace SelectOR
 {
     public static class ContentIndex
     {
-        const string Marca = "SELECTOR-INDEX 2";
+        const string Marca = "SELECTOR-INDEX 3";   // 3: coches entre comillas con espacios en los .con
 
         public sealed class UnitRow
         {

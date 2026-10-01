@@ -43,6 +43,7 @@ namespace SelectOR
         public float CabHudScale { get; set; } = 1f;
         // HUD del chat de empresa: si lo dejaste abierto, dónde, su tamaño y si estaba plegado.
         public bool ChatHudOn { get; set; }
+        public bool NotifySound { get; set; } = true;   // sonido suave con los avisos y los mensajes nuevos del chat
         public int ChatHudX { get; set; } = -1;      // -1 = abajo a la derecha
         public int ChatHudY { get; set; } = -1;
         public int ChatHudW { get; set; } = 360;
@@ -54,6 +55,7 @@ namespace SelectOR
         public int RoadHudW { get; set; } = 330;
         public int RoadHudH { get; set; } = 360;
         public bool RoadHudCollapsed { get; set; }
+        public bool RoadHudPcClock { get; set; }     // horas de la hoja de ruta: false = del simulador, true = del PC
         public int RoadDwellS { get; set; } = 30;    // segundos de parada en cada estación (para la hora estimada)
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
         public string FavoriteCompany { get; set; }
