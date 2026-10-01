@@ -301,6 +301,17 @@ namespace SelectOR
             catch (Exception e) { return e.Message; }
         }
 
+        // ---- Cuenta: contraseña nueva (sistema de cuentas de Supabase, con la sesión del usuario) ----
+        public static async Task<string> UpdatePasswordAsync(string newPassword)
+        {
+            try
+            {
+                var (ok, txt, status) = await SendCore(HttpMethod.Put, "/auth/v1/user", JsonSerializer.Serialize(new { password = newPassword }), true);
+                return ok ? null : Err(status, txt);
+            }
+            catch (Exception e) { return e.Message; }
+        }
+
         // ---- DELETE (pathQuery p.ej. "vehicles?id=eq.XXXX") ----
         public static async Task<string> DeleteAsync(string pathQuery)
         {

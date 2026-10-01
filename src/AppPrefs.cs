@@ -48,6 +48,13 @@ namespace SelectOR
         public int ChatHudW { get; set; } = 360;
         public int ChatHudH { get; set; } = 300;
         public bool ChatHudCollapsed { get; set; }
+        // HUD de la hoja de ruta (itinerario marcado en el mapa grande)
+        public int RoadHudX { get; set; } = -1;      // -1 = arriba a la derecha
+        public int RoadHudY { get; set; } = -1;
+        public int RoadHudW { get; set; } = 330;
+        public int RoadHudH { get; set; } = 360;
+        public bool RoadHudCollapsed { get; set; }
+        public int RoadDwellS { get; set; } = 30;    // segundos de parada en cada estación (para la hora estimada)
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
         public string FavoriteCompany { get; set; }
         public string LeagueSeenMonth { get; set; }   // último mes de la liga cuyos premios ya se avisaron (aaaa-MM)
@@ -64,6 +71,10 @@ namespace SelectOR
         public HashSet<string> FavoriteTrains { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Imagen personalizada por tren: clave = ruta del .con, valor = ruta de la imagen.
         public Dictionary<string, string> TrainImages { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Pupitre: fondo de escala elegido para los manómetros, por máquina (clave = .eng de cabeza en
+        // minúsculas), en bar. Sin entrada = la escala de la cabina (.cvf).
+        public Dictionary<string, double> CabAirScaleBar { get; set; } = new Dictionary<string, double>();
+        public Dictionary<string, double> CabBcScaleBar { get; set; } = new Dictionary<string, double>();
 
         static string Dir => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Open Rails");
@@ -92,6 +103,8 @@ namespace SelectOR
                         p.Favorites ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         p.FavoriteTrains ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         p.TrainImages ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        p.CabAirScaleBar ??= new Dictionary<string, double>();
+                        p.CabBcScaleBar ??= new Dictionary<string, double>();
                         return p;
                     }
                 }

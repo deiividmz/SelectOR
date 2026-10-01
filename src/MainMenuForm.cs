@@ -695,14 +695,17 @@ namespace SelectOR
             ShowPage(startTab);
         }
 
-        // Pestaña "Ruta": imagen/título de la ruta + descripción (antes en la cabecera) + mapa.
+        // Pestaña "Ruta": imagen/título de la ruta + descripción (antes en la cabecera) + botón del mapa.
+        // Con trazado disponible (MainMenuForm.RutaMapa.cs): solo la descripción, compacta, y el mapa en vivo.
         Panel BuildRutaPage()
         {
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Bg };
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Theme.Bg };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 46));   // banner
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 54));   // descripción
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // botón mapa
+            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));   // mapa en vivo (si la ruta tiene trazado)
+            _rutaGrid = t;
 
             _banner = new BannerPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 10) };
             t.Controls.Add(_banner, 0, 0);
@@ -721,12 +724,20 @@ namespace SelectOR
             descCard.Controls.Add(gapD);
             descCard.Controls.Add(lblD);
             t.Controls.Add(descCard, 0, 1);
+            _rutaDescCard = descCard; _rutaDescLbl = lblD; _rutaDescGap = gapD;
 
             var btnMap = new RoundButton { Text = Tr("Ver mapa de la ruta"), GlyphKind = "map", Dock = DockStyle.Fill, Height = 40, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 10f, Margin = new Padding(0, 10, 0, 2) };
             btnMap.Click += (s, e) => OpenRouteMap();
             var btnHost = new Panel { Dock = DockStyle.Fill, Height = 52, BackColor = Theme.Bg, Padding = new Padding(0, 10, 0, 2) };
             btnHost.Controls.Add(btnMap);
             t.Controls.Add(btnHost, 0, 2);
+            _rutaBtnHost = btnHost;
+
+            _rutaMap = new RouteLiveMap { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2), Visible = false };
+            t.Controls.Add(_rutaMap, 0, 3);
+            _rutaLiveTimer = new Timer { Interval = RutaLiveIntervalMs };
+            _rutaLiveTimer.Tick += async (s, e) => await RutaLiveTick();
+            t.SizeChanged += (s, e) => RutaDescRelayout();
 
             var page = new Panel { BackColor = Theme.Bg };
             page.Controls.Add(t);
@@ -1465,6 +1476,7 @@ namespace SelectOR
             if (i == PageEditor) OnEditorShown();
             if (i == PageEmpresas) OnEmpresasShown();
             if (i == 3) { UpdateTimetableBriefing(); UpdateTimetablePreview(); }   // resumen + render 3D del tren del timetable
+            RutaLiveTimerUpdate();   // el mapa en vivo de Ruta solo consulta mientras se ve
             UpdateStatus();
             LayoutBottomBar();   // Ruta y el Editor no llevan barra inferior
             if (previous != i && IsHandleCreated)
@@ -1637,6 +1649,7 @@ namespace SelectOR
             _prefs.LastRoute = route.Path;
             _banner.RouteName = route.Name;
             _routeDescBox.Text = string.IsNullOrEmpty(route.Description) ? "" : route.Description;
+            RutaMapRouteChanged(route);
             _banner.Image = null; _banner.Invalidate();
             var imgs = ContentImages.ForRoute(route.Path);
             if (!string.IsNullOrEmpty(imgs.banner))
@@ -2304,7 +2317,7 @@ namespace SelectOR
             _prefs.Save();
             // Teleindicador: el destino elegido para este tren se pone en su carpeta antes de que OR lo cargue.
             if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase))
-                TeleApplyForLaunch(_activePage == 1 ? ActivityConsist(_lstActivities.SelectedItem as Activity) : CurrentDrivenConsist());
+                TeleApplyForLaunch(CurrentDrivenConsist());
 
             // Empresas: si estoy "de servicio", abro el servicio antes de lanzar.
             string serviceId = null;

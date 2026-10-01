@@ -22,6 +22,8 @@ namespace SelectOR
         readonly Dictionary<string, ChatRoom> _chatRooms = new(StringComparer.OrdinalIgnoreCase);
         Timer _chatTimer, _chatRtDebounce;
         bool _chatMutesChanged;
+        static bool _chatNoEdits;   // el servidor aún no tiene chat-editar.sql (sin ediciones ni borrados)
+        ChatMsg _chatEditing;       // mensaje que se está editando en la sección (o null)
 
         // Sección
         Panel _chatPanel, _chatConvPage, _chatPermPage;
@@ -53,7 +55,15 @@ namespace SelectOR
             bool changed = false;
             try
             {
-                var (json, err) = await Supa.RpcAsync("chat_list", new { p_company = r.CompanyId, p_after = r.LastId, p_limit = 80 });
+                string json, err;
+                if (!_chatNoEdits && r.LastChange != null)
+                {
+                    (json, err) = await Supa.RpcAsync("chat_list", new { p_company = r.CompanyId, p_after = r.LastId, p_limit = 80, p_since = r.LastChange });
+                    if (err != null && ChatMissing(err)) _chatNoEdits = true;   // servidor sin chat-editar.sql: como antes
+                    else goto got;
+                }
+                (json, err) = await Supa.RpcAsync("chat_list", new { p_company = r.CompanyId, p_after = r.LastId, p_limit = 80 });
+            got:
                 if (err != null)
                 {
                     string e = ChatMissing(err) ? Tr("El servidor aún no tiene el chat de empresa (falta chat-empresa.sql).") : Tr("Error: ") + err;
@@ -66,9 +76,20 @@ namespace SelectOR
                     foreach (var e in d.RootElement.EnumerateArray())
                     {
                         long id = e.TryGetProperty("id", out var ie) && ie.ValueKind == JsonValueKind.Number ? ie.GetInt64() : 0;
-                        if (id <= r.LastId) continue;
+                        bool edited = e.TryGetProperty("edited", out var ed) && ed.ValueKind == JsonValueKind.True;
+                        bool deleted = e.TryGetProperty("deleted", out var de) && de.ValueKind == JsonValueKind.True;
+                        string ch = Str(e, "changed_at");
+                        if (ch.Length > 0 && (r.LastChange == null || string.CompareOrdinal(ch, r.LastChange) > 0)) r.LastChange = ch;
+                        if (id <= r.LastId)
+                        {
+                            // un mensaje que ya teníamos: editado o eliminado después
+                            var old = r.Msgs.Find(x => x.Id == id);
+                            if (old != null && (old.Body != Str(e, "body") || old.Edited != edited || old.Deleted != deleted))
+                            { old.Body = Str(e, "body"); old.Edited = edited; old.Deleted = deleted; changed = true; }
+                            continue;
+                        }
                         DateTime.TryParse(Str(e, "created_at"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var at);
-                        r.Msgs.Add(new ChatMsg { Id = id, UserId = Str(e, "user_id"), User = Str(e, "username"), Role = Str(e, "role"), Body = Str(e, "body"), AtUtc = at });
+                        r.Msgs.Add(new ChatMsg { Id = id, UserId = Str(e, "user_id"), User = Str(e, "username"), Role = Str(e, "role"), Body = Str(e, "body"), AtUtc = at, Edited = edited, Deleted = deleted });
                         r.LastId = id; changed = true;
                     }
                     if (r.Msgs.Count > 400) { r.Msgs.RemoveRange(0, r.Msgs.Count - 300); changed = true; }
@@ -116,6 +137,28 @@ namespace SelectOR
                 if (err.IndexOf("retirado el permiso", StringComparison.OrdinalIgnoreCase) >= 0) { r.Muted = true; ChatRoomUpdated(r); }
                 return ChatErr(err);
             }
+            await ChatFetch(r);
+            return null;
+        }
+
+        // Editar o eliminar un mensaje propio. Devuelve el error (o null si ha ido bien).
+        async Task<string> ChatEditText(ChatRoom r, ChatMsg m, string text)
+        {
+            text = (text ?? "").Trim();
+            if (text.Length == 0) return Tr("El mensaje está vacío.");
+            if (text.Length > 500) return Tr("El mensaje es demasiado largo (máximo 500 caracteres).");
+            var (_, err) = await Supa.RpcAsync("chat_edit", new { p_id = m.Id, p_body = text });
+            if (err != null) return ChatMissing(err) ? Tr("El servidor aún no permite editar mensajes (falta chat-editar.sql).") : ChatErr(err);
+            m.Body = text; m.Edited = true; ChatRoomUpdated(r);
+            await ChatFetch(r);
+            return null;
+        }
+
+        async Task<string> ChatDeleteMsg(ChatRoom r, ChatMsg m)
+        {
+            var (_, err) = await Supa.RpcAsync("chat_delete", new { p_id = m.Id });
+            if (err != null) return ChatMissing(err) ? Tr("El servidor aún no permite eliminar mensajes (falta chat-editar.sql).") : ChatErr(err);
+            m.Body = ""; m.Deleted = true; ChatRoomUpdated(r);
             await ChatFetch(r);
             return null;
         }
@@ -194,6 +237,14 @@ namespace SelectOR
             conv.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // nota
             var frame = new Card { Dock = DockStyle.Fill, Fill = Color.FromArgb(28, 32, 36), Radius = 12, Padding = new Padding(2, 6, 2, 6), Margin = new Padding(2, 0, 2, 8) };
             _chatView = new ChatView { Dock = DockStyle.Fill, BackColor = Color.FromArgb(28, 32, 36), MyUserId = Supa.UserId ?? "", EmptyText = Tr("Cargando el chat…") };
+            _chatView.EditRequested = m => ChatStartEdit(m);
+            _chatView.DeleteRequested = async m =>
+            {
+                var r = ChatSectionRoom(); if (r == null) return;
+                if (_chatEditing == m) ChatCancelEdit();
+                string err = await ChatDeleteMsg(r, m);
+                Msg(_chatNote, err ?? Tr("Mensaje eliminado."), err != null);
+            };
             frame.Controls.Add(_chatView);
             conv.Controls.Add(frame);
 
@@ -204,6 +255,7 @@ namespace SelectOR
             _chatInput.Box.MaxLength = 500;
             _chatInput.Box.KeyDown += async (s, e) =>
             {
+                if (e.KeyCode == Keys.Escape && _chatEditing != null) { e.SuppressKeyPress = true; ChatCancelEdit(); return; }
                 if (e.KeyCode != Keys.Enter) return;
                 e.SuppressKeyPress = true;
                 await SendFromSection();
@@ -307,7 +359,27 @@ namespace SelectOR
             if (r.StateLoaded && !r.Member) { Msg(_chatNote, Tr("Estás viendo el chat como superadministrador: solo los socios de la empresa pueden escribir."), false); return; }
             if (r.Muted) { Msg(_chatNote, Tr("El gerente te ha retirado el permiso para escribir en este chat. Puedes seguir leyéndolo."), true); return; }
             int n = _chatInput.Box.TextLength;
-            Msg(_chatNote, n > 400 ? string.Format(Tr("{0} de 500 caracteres"), n) : Tr("Intro para enviar. Los mensajes los ven todos los socios de la empresa."), false);
+            if (_chatEditing != null) { Msg(_chatNote, Tr("Editando tu mensaje · Intro para guardar · Esc para cancelar"), false); return; }
+            Msg(_chatNote, n > 400 ? string.Format(Tr("{0} de 500 caracteres"), n) : Tr("Intro para enviar. Los mensajes los ven todos los socios de la empresa. Clic derecho en uno tuyo: editarlo o eliminarlo."), false);
+        }
+
+        void ChatStartEdit(ChatMsg m)
+        {
+            if (m == null || m.Deleted || !_chatInput.Enabled) return;
+            _chatEditing = m;
+            _chatInput.Box.Text = m.Body;
+            _chatInput.Box.SelectionStart = _chatInput.Box.TextLength;
+            _chatSendBtn.Text = Tr("Guardar");
+            UpdateChatNote();
+            _chatInput.Box.Focus();
+        }
+
+        void ChatCancelEdit()
+        {
+            _chatEditing = null;
+            _chatInput.Box.Text = "";
+            _chatSendBtn.Text = Tr("Enviar");
+            UpdateChatNote();
         }
 
         async Task SendFromSection()
@@ -316,6 +388,15 @@ namespace SelectOR
             string t = _chatInput.Box.Text;
             if (r == null || string.IsNullOrWhiteSpace(t) || !_chatSendBtn.Enabled) return;
             _chatSendBtn.Enabled = false;
+            if (_chatEditing != null)
+            {
+                string e2 = await ChatEditText(r, _chatEditing, t);
+                _chatSendBtn.Enabled = r.CanWrite;
+                if (e2 != null) { Msg(_chatNote, e2, true); return; }
+                ChatCancelEdit();
+                Msg(_chatNote, Tr("Mensaje editado."), false);
+                return;
+            }
             string err = await ChatSendText(r, t);
             _chatSendBtn.Enabled = r.CanWrite;
             if (err != null) { Msg(_chatNote, err, true); return; }
@@ -385,6 +466,8 @@ namespace SelectOR
                     Pick = id => { _chatHudManual = true; SetChatHudCompany(id); },
                     WriteState = ChatHudWriteState,
                     Compose = ComposeFromHud,
+                    EditMsg = m => ComposeFromHud(m),
+                    DeleteMsg = async m => { if (!string.IsNullOrEmpty(_chatHudCompanyId)) await ChatDeleteMsg(ChatRoomFor(_chatHudCompanyId), m); },
                     CloseRequested = () => { _chatHud?.Hide(); _prefs.ChatHudOn = false; try { _prefs.Save(); } catch { } },
                     Heartbeat = ChatHudFollowService
                 };
@@ -498,13 +581,18 @@ namespace SelectOR
             return (true, null);
         }
 
-        void ComposeFromHud()
+        void ComposeFromHud() => ComposeFromHud(null);
+
+        // Cajita de escribir del HUD; con un mensaje, para editarlo.
+        void ComposeFromHud(ChatMsg edit)
         {
             if (!ChatHudAlive || string.IsNullOrEmpty(_chatHudCompanyId)) return;
             var r = ChatRoomFor(_chatHudCompanyId);
             try
             {
-                var box = new ChatComposeBox(_chatHud.ComposeScreenRect(), r.Name, t => ChatSendText(r, t));
+                var box = edit == null
+                    ? new ChatComposeBox(_chatHud.ComposeScreenRect(), r.Name, t => ChatSendText(r, t))
+                    : new ChatComposeBox(_chatHud.ComposeScreenRect(), r.Name, t => ChatEditText(r, edit, t), edit.Body);
                 box.Show();
             }
             catch { }

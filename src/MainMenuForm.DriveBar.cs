@@ -43,7 +43,7 @@ namespace SelectOR
             _drivenConsist = null;
             try
             {
-                _drivenConsist = _activePage == 1 ? ActivityConsist(_lstActivities.SelectedItem as Activity) : CurrentDrivenConsist();
+                _drivenConsist = CurrentDrivenConsist();   // en Actividad, el tren de la actividad
             }
             catch { }
             _drivenLabel = _drivenConsist?.Name ?? CurrentConsistLabel();
@@ -72,7 +72,7 @@ namespace SelectOR
             try
             {
                 _driveBar = new DriveTopBar(DriveBarStateNow, ToggleHudFromBar, ToggleBigMapFromBar, ServiceFromBar, CheckDrivenFleet,
-                                            ToggleCabHudFromBar, ToggleChatHudFromBar);
+                                            ToggleCabHudFromBar, ToggleChatHudFromBar, ToggleRoadHudFromBar);
             }
             catch { _driveBar = null; }
         }
@@ -113,7 +113,8 @@ namespace SelectOR
                 BigMapOpen = HudAlive && _serviceHud.BigMapOpen,
                 InService = _pendingServiceId != null,
                 CabVisible = CabHudAlive && _cabHud.Visible,
-                ChatVisible = ChatHudAlive && _chatHud.Visible
+                ChatVisible = ChatHudAlive && _chatHud.Visible,
+                RoadVisible = RoadHudAlive && _roadHud.Visible
             };
             if (s.InService)
             {

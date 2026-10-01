@@ -16,7 +16,7 @@ namespace SelectOR
     {
         public string Id, Name, Short, Train, Company;
         public double Lat, Lon, Heading, SpeedKmh;
-        public bool HasHeading;
+        public bool HasHeading, Me;
         public Color Color;
     }
 
@@ -25,7 +25,8 @@ namespace SelectOR
     {
         public string Id, Name, Train, Company;
         public double Lat, Lon, SpeedKmh;
-        public double? Heading;
+        public double? Heading, AgeS;   // AgeS: segundos desde que el conductor la envió
+        public bool IsMe;
     }
 
     public sealed class LiveMates
@@ -302,7 +303,8 @@ namespace SelectOR
         // Leyenda del mapa grande (arriba a la derecha): tú y los demás usuarios de la ruta, con su color.
         // Devuelve la zona de cada fila para centrar el mapa en ese usuario al hacer clic.
         public static List<(Rectangle hit, LiveMarker m)> Legend(Graphics g, Rectangle area, string meName, string meCompany,
-                                                                 IReadOnlyList<LiveMarker> mates, out Rectangle box)
+                                                                 IReadOnlyList<LiveMarker> mates, out Rectangle box,
+                                                                 bool includeMe = true)
         {
             var hits = new List<(Rectangle, LiveMarker)>();
             box = Rectangle.Empty;
@@ -312,9 +314,10 @@ namespace SelectOR
             using var fl = Theme.Font(8.5f);
             int rowH = Math.Max(20, TextRenderer.MeasureText(g, "Ág", fL, Size.Empty, TF).Height + 6);
             int maxRows = Math.Max(1, (area.Height - 90) / rowH);
-            var rows = new List<(string name, string status, Color c, LiveMarker m)>
-                { (I18n.T("Tú") + (string.IsNullOrWhiteSpace(meName) ? "" : " (" + LiveMates.ShortName(meName) + ")"),
-                   Status(meCompany), Color.FromArgb(120, 210, 150), null) };
+            var rows = new List<(string name, string status, Color c, LiveMarker m)>();
+            if (includeMe)
+                rows.Add((I18n.T("Tú") + (string.IsNullOrWhiteSpace(meName) ? "" : " (" + LiveMates.ShortName(meName) + ")"),
+                          Status(meCompany), Color.FromArgb(120, 210, 150), null));
             foreach (var m in mates) rows.Add((m.Short, Status(m.Company), m.Color, m));
             int extra = Math.Max(0, rows.Count - maxRows);
             if (extra > 0) rows.RemoveRange(maxRows, rows.Count - maxRows);

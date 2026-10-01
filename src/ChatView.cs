@@ -1,4 +1,4 @@
-// Chat de empresa (chat-empresa.sql): la lista de mensajes dibujada a mano (en la sección «Chat» de
+﻿// Chat de empresa (chat-empresa.sql): la lista de mensajes dibujada a mano (en la sección «Chat» de
 // Empresas y en el HUD de conducción), el HUD transparente con su desplegable de empresas y la cajita
 // para escribir desde el HUD.
 //  · El HUD, como los demás, no roba el foco a Open Rails (WS_EX_NOACTIVATE). Para escribir se abre una
@@ -18,6 +18,7 @@ namespace SelectOR
         public long Id;
         public string UserId = "", User = "", Role = "", Body = "";
         public DateTime AtUtc;
+        public bool Edited, Deleted;      // rastro público: «Editado» / «Eliminado»
     }
 
     // Chat de una empresa: mensajes recibidos y mi permiso.
@@ -26,6 +27,7 @@ namespace SelectOR
         public string CompanyId = "", Name = "";
         public readonly List<ChatMsg> Msgs = new();
         public long LastId;
+        public string LastChange;   // hora (del servidor) del último cambio visto: para pedir ediciones y borrados
         public bool Loaded, Loading, StateLoaded;
         public bool Member = true, Muted, CanModerate;
         public bool CanWrite => Member && !Muted;
@@ -39,6 +41,8 @@ namespace SelectOR
         public bool Compact;              // HUD: sin burbujas, más apretado
         public string MyUserId = "";
         public string EmptyText = "";
+        // Mis mensajes: editar o eliminar (clic derecho). Null = sin esas opciones.
+        public Action<ChatMsg> EditRequested, DeleteRequested;
 
         List<ChatMsg> _msgs = new();
         readonly List<Item> _items = new();
@@ -69,12 +73,14 @@ namespace SelectOR
         {
             long last = msgs != null && msgs.Count > 0 ? msgs[^1].Id : 0;
             bool more = last > _lastId && _lastId > 0;
-            bool mineLast = msgs != null && msgs.Count > 0 && msgs[^1].UserId == MyUserId;
+            bool mineLast = more && msgs[^1].UserId == MyUserId;
+            // ¿Estaba abajo del todo ANTES de añadir los nuevos? (después, con más alto, ya no lo parece)
+            bool wasAtBottom = _stick || _scroll >= Math.Max(0, _contentH - Height) - 24;
             _msgs = msgs == null ? new List<ChatMsg>() : new List<ChatMsg>(msgs);
             _lastId = last;
             _layoutW = -1;
-            Relayout();
-            if (_stick || mineLast) { ScrollToBottom(); _newBelow = false; }
+            Relayout(keepBottom: false);
+            if (wasAtBottom || mineLast || _lastId == 0) ScrollToBottom();
             else if (more) _newBelow = true;
             Invalidate();
         }
@@ -93,10 +99,11 @@ namespace SelectOR
 
         int Pad => Compact ? 8 : 16;
 
-        void Relayout()
+        void Relayout(bool keepBottom = true)
         {
             int w = Math.Max(60, ClientSize.Width);
             if (w == _layoutW) return;
+            bool stick = _stick;
             _layoutW = w;
             _items.Clear();
             int y = Compact ? 6 : 12;
@@ -116,7 +123,8 @@ namespace SelectOR
                 it.Header = prev == null || prev.UserId != m.UserId || (m.AtUtc - prev.AtUtc).TotalMinutes > 5;
                 if (it.Header && prev != null) y += Compact ? 4 : 8;
                 it.Y = y;
-                var ts = TextRenderer.MeasureText(m.Body, FBody, new Size(Math.Max(20, maxText), 0), BodyFlags);
+                var ts = TextRenderer.MeasureText(ShownText(m), m.Deleted ? FItalic : FBody, new Size(Math.Max(20, maxText), 0), BodyFlags);
+                if (m.Edited && !m.Deleted) ts.Height += TextRenderer.MeasureText("Ág", FSmall).Height;   // línea «Editado»
                 int headH = it.Header ? (Compact ? 16 : 19) : 0;
                 if (Compact)
                 {
@@ -139,7 +147,11 @@ namespace SelectOR
             }
             _contentH = y + (Compact ? 6 : 12);
             ClampScroll();
+            if (keepBottom && stick) { _scroll = Math.Max(0, _contentH - Height); _stick = true; _newBelow = false; }
         }
+
+        static string ShownText(ChatMsg m) => m.Deleted ? I18n.T("Mensaje eliminado") : m.Body;
+        Font FItalic => Theme.Font(Compact ? 9f : 10f, FontStyle.Italic);
 
         static string DayText(DateTime local)
         {
@@ -177,13 +189,27 @@ namespace SelectOR
         protected override void OnMouseUp(MouseEventArgs e)
         {
             if (_newBelow && _newPill.Contains(e.Location)) { ScrollToBottom(); return; }
-            if (e.Button == MouseButtons.Right && !Compact)
+            if (e.Button == MouseButtons.Right)
             {
-                var it = _items.Find(x => x.M != null && x.Bubble.Contains(e.X, e.Y + _scroll));
-                if (it != null)
+                int yy = e.Y + _scroll;
+                var it = _items.Find(x => x.M != null && (Compact ? (yy >= x.Y && yy < x.Y + x.H) : x.Bubble.Contains(e.X, yy)));
+                if (it != null && !it.M.Deleted)
                 {
+                    var m = it.M;
                     var cm = new ContextMenuStrip();
-                    cm.Items.Add(I18n.T("Copiar mensaje"), null, (s, a) => { try { Clipboard.SetText(it.M.Body); } catch { } });
+                    cm.Items.Add(I18n.T("Copiar mensaje"), null, (s, a) => { try { Clipboard.SetText(m.Body); } catch { } });
+                    if (it.Mine && (EditRequested != null || DeleteRequested != null))
+                    {
+                        cm.Items.Add(new ToolStripSeparator());
+                        if (EditRequested != null) cm.Items.Add(I18n.T("Editar mensaje"), null, (s, a) => EditRequested(m));
+                        if (DeleteRequested != null)
+                        {
+                            // sin diálogos (en el HUD quedarían detrás del simulador): se confirma en un submenú
+                            var del = new ToolStripMenuItem(I18n.T("Eliminar mensaje"));
+                            del.DropDownItems.Add(I18n.T("Sí, eliminarlo (los demás verán «Mensaje eliminado»)"), null, (s, a) => DeleteRequested(m));
+                            cm.Items.Add(del);
+                        }
+                    }
                     cm.Show(this, e.Location);
                 }
             }
@@ -274,7 +300,18 @@ namespace SelectOR
                     var fill = it.Mine ? Color.FromArgb(38, 74, 50) : Theme.Surface;
                     using (var b = new SolidBrush(fill)) using (var p = Theme.Round(br, 10)) g.FillPath(b, p);
                 }
-                TextRenderer.DrawText(g, m.Body, FBody, tr, Theme.Text, BodyFlags);
+                if (m.Deleted)
+                    TextRenderer.DrawText(g, ShownText(m), FItalic, tr, Theme.Subtle, BodyFlags);
+                else
+                {
+                    TextRenderer.DrawText(g, m.Body, FBody, tr, Theme.Text, BodyFlags);
+                    if (m.Edited)
+                    {
+                        int sh = TextRenderer.MeasureText("Ág", FSmall).Height;
+                        TextRenderer.DrawText(g, I18n.T("Editado"), FSmall, new Rectangle(tr.Left, tr.Bottom - sh, tr.Width, sh),
+                            Color.FromArgb(150, 156, 162), TextFormatFlags.NoPadding | (!Compact && it.Mine ? TextFormatFlags.Right : TextFormatFlags.Left));
+                    }
+                }
             }
 
             // Barra de desplazamiento fina
@@ -310,6 +347,7 @@ namespace SelectOR
         public Action Compose;
         public Action CloseRequested;
         public Action Heartbeat;          // cada segundo (la ventana principal sigue la empresa en servicio)
+        public Action<ChatMsg> EditMsg, DeleteMsg;   // mis mensajes: editar (abre la cajita) o eliminar
 
         string _title = "", _serverNote;
         bool _collapsed, _hover, _down, _dragging, _resizing;
@@ -335,6 +373,8 @@ namespace SelectOR
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             Opacity = IdleOpacity;
             _view = new ChatView { Compact = true, MyUserId = myUserId ?? "", BackColor = Color.FromArgb(28, 32, 36), EmptyText = I18n.T("Cargando el chat…") };
+            _view.EditRequested = m => EditMsg?.Invoke(m);
+            _view.DeleteRequested = m => DeleteMsg?.Invoke(m);
             Controls.Add(_view);
             Size = TargetSize();
             Location = InitialLocation();
@@ -688,7 +728,7 @@ namespace SelectOR
         readonly IntPtr _prevFg;
         bool _busy, _closing;
 
-        public ChatComposeBox(Rectangle over, string company, Func<string, System.Threading.Tasks.Task<string>> send)
+        public ChatComposeBox(Rectangle over, string company, Func<string, System.Threading.Tasks.Task<string>> send, string initialText = null)
         {
             _send = send;
             _prevFg = Native.Foreground();
@@ -712,6 +752,11 @@ namespace SelectOR
                 Text = I18n.T("Intro para enviar · Esc para cancelar"), BackColor = Theme.Surface2
             };
             Controls.Add(_box); Controls.Add(_note);
+            if (initialText != null)
+            {
+                _box.Text = initialText; _box.SelectionStart = _box.TextLength;
+                _note.Text = I18n.T("Editando tu mensaje · Intro para guardar · Esc para cancelar");
+            }
             _box.KeyDown += async (s, e) =>
             {
                 if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; Finish(); }

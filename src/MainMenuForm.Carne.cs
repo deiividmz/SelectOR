@@ -27,7 +27,7 @@ namespace SelectOR
     {
         public const int MaxPoints = 15;
         public const int WarnBelow = 10;       // por debajo: aviso
-        public const int PenaltyBelow = 6;     // por debajo: salario −25 % y rango congelado
+        public const int PenaltyBelow = 6;     // por debajo: rango congelado y sin liga ni ranking
         public const int CleanForPoint = 5;    // servicios limpios seguidos para recuperar un punto
 
         public static readonly Color Green = Color.FromArgb(129, 199, 132);
@@ -479,7 +479,7 @@ namespace SelectOR
             if (until != null)
             { _licStateLbl.Text = string.Format(Tr("SUSPENDIDO hasta el {0}"), Carne.FmtLocal(until.Value)); _licStateLbl.ForeColor = Carne.Red; }
             else if (_licPoints < Carne.PenaltyBelow)
-            { _licStateLbl.Text = Tr("Sanción: salario −25 % y rango congelado"); _licStateLbl.ForeColor = Carne.Red; }
+            { _licStateLbl.Text = Tr("Sanción: rango congelado y fuera de la liga"); _licStateLbl.ForeColor = Carne.Red; }
             else if (_licPoints < Carne.WarnBelow)
             { _licStateLbl.Text = Tr("Aviso: por debajo de 10 puntos"); _licStateLbl.ForeColor = Carne.Gold; }
             else
@@ -487,7 +487,7 @@ namespace SelectOR
             _licNoteLbl.Text = until != null
                 ? Tr("Con el carné suspendido no puedes ponerte de servicio. Al terminar la suspensión vuelves con 8 puntos.")
                 : _licPoints >= Carne.MaxPoints
-                    ? Tr("Carné completo. Por debajo de 10: aviso · por debajo de 6: salario −25 % y rango congelado · 0: suspensión de 7 días.")
+                    ? Tr("Carné completo. Por debajo de 10: aviso · por debajo de 6: rango congelado y fuera de la liga · 0: suspensión de 7 días.")
                     : string.Format(Tr("Recuperación: {0} de {1} servicios seguidos sin infracciones para sumar 1 punto."), Math.Min(clean, Carne.CleanForPoint - 1), Carne.CleanForPoint);
             _licBar.Invalidate();
 

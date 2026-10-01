@@ -166,6 +166,8 @@ namespace SelectOR
                 new StyledTable.Col("SENTIDO", 90));
             _edCars.MouseDoubleClick += (s, e) => FlipCar();
             _edCars.SelectedIndexChanged += (s, e) => OnEditorCarSelected();
+            // volver a pulsar el coche ya elegido (tras mirar material disponible) lo enseña otra vez en 3D
+            _edCars.MouseClick += (s, e) => { int i = _edCars.SelectedRow; if (i >= 0 && _ed3DSource != "car" + i) Show3DCar(i); };
             carsGrid.Controls.Add(_edCars, 0, 1);
             mid.Controls.Add(carsGrid, 0, 0);
 
@@ -200,6 +202,9 @@ namespace SelectOR
                 new StyledTable.Col("CARPETA", 130),
                 new StyledTable.Col("TIPO", 90));
             _edStock.MouseDoubleClick += (s, e) => AddCarFromStock();
+            // un clic en el material disponible lo enseña en la vista 3D (sin añadirlo al tren)
+            _edStock.SelectedIndexChanged += (s, e) => Show3DStock(_edStock.SelectedRow);
+            _edStock.MouseClick += (s, e) => Show3DStock(_edStock.SelectedRow);
             stockGrid.Controls.Add(EmpSearch(_edStock, 280), 0, 1);
             stockGrid.Controls.Add(_edStock, 0, 2);
             mid.Controls.Add(stockGrid, 2, 0);
@@ -915,6 +920,7 @@ namespace SelectOR
         }
 
         // 3D del coche elegido (se puede girar arrastrando; doble clic vuelve a la vista inicial).
+        string _ed3DSource;   // qué enseña la vista 3D: "car<n>" (coche del tren) o "stock<n>" (material disponible)
         void Show3DCar(int index)
         {
             if (_edPreview3D == null) return;
@@ -925,6 +931,23 @@ namespace SelectOR
                 path = ResolveCarFile(c.Name, c.Folder);
                 flip = c.Flip; name = c.Name;
             }
+            _ed3DSource = "car" + index;
+            Show3DFile(path, flip, name);
+        }
+
+        // Material disponible: el vehículo elegido en la tabla de la derecha, en su sentido normal.
+        void Show3DStock(int index)
+        {
+            if (_edPreview3D == null || index < 0 || index >= _edStockAll.Count) return;   // sin fila elegida: se deja lo que hay
+            if (_ed3DSource == "stock" + index) return;
+            var it = _edStockAll[index];
+            _ed3DSource = "stock" + index;
+            Show3DFile(File.Exists(it.path) ? it.path : null, false, it.name);
+        }
+
+        void Show3DFile(string path, bool flip, string name)
+        {
+            if (_edPreview3D == null) return;
             _ed3DTitle.Text = Tr("VISTA 3D DEL COCHE") + (name != null ? "  ·  " + name : "");
             _edGeomPath = path; _edGeomFlip = flip; _edGeom = null;
             _edPreview3D.Image = null; _edPreview3D.Rotatable = false;

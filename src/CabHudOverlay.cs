@@ -43,7 +43,9 @@ namespace SelectOR
         // Manómetros en la unidad de la cabina: las presiones llegan en bar y se DIBUJAN en esa unidad
         // (f = bar → unidad) con la escala de su esfera.
         readonly string _airUnit = "bar", _bcUnit = "bar";
-        readonly double _airF = 1, _bcF = 1, _airMax = 12, _bcMax = 10;
+        readonly double _airF = 1, _bcF = 1, _airAuto = 12, _bcAuto = 10;   // escala de la cabina (en su unidad)
+        double _airMax = 12, _bcMax = 10;                                     // la que se dibuja (la de la cabina o la elegida)
+        string _machineKey;                                                   // máquina de cabeza: para recordar la escala elegida
 
         /// <summary>Unidades y escalas de los instrumentos de la cabina del tren (leídas de su .cvf).</summary>
         public sealed class CabUnits
@@ -175,8 +177,9 @@ namespace SelectOR
             double cabScale = units.SpeedScale;
             // Manómetros: unidad y escala de las esferas de la cabina; si no las declara, 12 bar
             // (depósito/tubería) y 10 bar (cilindro) pasados a esa unidad y redondeados.
-            (_airUnit, _airF, _airMax) = PressDial(units.AirUnits, units.AirScale, 12);
-            (_bcUnit, _bcF, _bcMax) = PressDial(units.BcUnits, units.BcScale, 10);
+            (_airUnit, _airF, _airAuto) = PressDial(units.AirUnits, units.AirScale, 12);
+            (_bcUnit, _bcF, _bcAuto) = PressDial(units.BcUnits, units.BcScale, 10);
+            _airMax = _airAuto; _bcMax = _bcAuto;
             _brakeDecel = Math.Max(0.35, Math.Min(1.3, brakeDecel));
             _traction = traction;
             _passenger = passenger;
@@ -292,6 +295,76 @@ namespace SelectOR
         // Un fotograma: acerca lo mostrado a lo leído y redibuja solo si algo ha cambiado.
         // Nombre del tren para el archivo de diagnóstico.
         public string TrainName { set { try { _poller.DiagTrain = value ?? ""; } catch { } } }
+
+        // ============================ escala de los manómetros ============================
+        // Máquina de cabeza (su .eng): con ella se recuerda la escala elegida para sus manómetros.
+        public string MachineKey
+        {
+            set { _machineKey = string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant(); ApplyGaugeChoice(); }
+        }
+
+        static readonly double[] GaugePresetsBar = { 6, 10, 12, 16 };
+
+        // Fondo de escala en la unidad de la esfera para un valor en bar (redondo si no es bar).
+        static double InUnit(double bar, double f) => Math.Abs(f - 1) < 1e-9 ? bar : NiceMax(bar * f);
+
+        void ApplyGaugeChoice()
+        {
+            double a = 0, b = 0;
+            if (_machineKey != null && _prefs != null)
+            {
+                _prefs.CabAirScaleBar?.TryGetValue(_machineKey, out a);
+                _prefs.CabBcScaleBar?.TryGetValue(_machineKey, out b);
+            }
+            _airMax = a > 0 ? InUnit(a, _airF) : _airAuto;
+            _bcMax = b > 0 ? InUnit(b, _bcF) : _bcAuto;
+            _cacheKey = null;   // las esferas se vuelven a dibujar con la escala nueva
+            if (IsHandleCreated) Render();
+        }
+
+        // ¿En qué manómetro está el punto (coordenadas de diseño)? 0 = doble (TDP/TFA), 1 = cilindro, -1 = ninguno.
+        int GaugeAt(PointF d)
+        {
+            float ax = d.X - AirX, ay = d.Y - Cy, bx = d.X - BcX, by = d.Y - Cy;
+            if (ax * ax + ay * ay <= AirR * AirR) return 0;
+            if (bx * bx + by * by <= BcR * BcR) return 1;
+            return -1;
+        }
+
+        void ShowGaugeMenu(int gauge, Point at)
+        {
+            bool air = gauge == 0;
+            string unit = air ? _airUnit : _bcUnit; double f = air ? _airF : _bcF, auto = air ? _airAuto : _bcAuto;
+            var dict = air ? _prefs?.CabAirScaleBar : _prefs?.CabBcScaleBar;
+            double cur = 0; if (_machineKey != null) dict?.TryGetValue(_machineKey, out cur);
+            string Num(double v) => v.ToString(v % 1 == 0 ? "0" : "0.#", System.Globalization.CultureInfo.InvariantCulture);
+            var cm = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = true };
+            cm.Items.Add(new ToolStripMenuItem(air ? I18n.T("Escala del manómetro TDP/TFA") : I18n.T("Escala del cilindro de freno")) { Enabled = false });
+            var it = new ToolStripMenuItem(string.Format(I18n.T("Automática (de la cabina): 0-{0} {1}"), Num(auto), unit)) { Checked = cur <= 0 };
+            it.Click += (s, e) => SetGauge(air, 0);
+            cm.Items.Add(it);
+            foreach (double bar in GaugePresetsBar)
+            {
+                double v = InUnit(bar, f);
+                string txt = Math.Abs(f - 1) < 1e-9 ? $"0-{Num(v)} bar" : $"0-{Num(v)} {unit}  (≈{Num(bar)} bar)";
+                var x = new ToolStripMenuItem(txt) { Checked = cur > 0 && Math.Abs(cur - bar) < 0.01 };
+                x.Click += (s, e) => SetGauge(air, bar);
+                cm.Items.Add(x);
+            }
+            if (_machineKey == null) foreach (ToolStripItem i in cm.Items) if (i != cm.Items[0]) i.Enabled = false;
+            cm.Items.Add(new ToolStripSeparator());
+            cm.Items.Add(new ToolStripMenuItem(I18n.T("Se recuerda para esta máquina")) { Enabled = false });
+            cm.Show(at);
+        }
+
+        void SetGauge(bool air, double bar)
+        {
+            if (_machineKey == null || _prefs == null) return;
+            var dict = air ? (_prefs.CabAirScaleBar ??= new Dictionary<string, double>()) : (_prefs.CabBcScaleBar ??= new Dictionary<string, double>());
+            if (bar > 0) dict[_machineKey] = bar; else dict.Remove(_machineKey);
+            try { _prefs.Save(); } catch { }
+            ApplyGaugeChoice();
+        }
 
         void Animate()
         {
@@ -507,6 +580,12 @@ namespace SelectOR
                 _iconDown = ic;
                 IconPressed(ic, e.Button == MouseButtons.Right);
                 Render();
+                return;
+            }
+            if (e.Button == MouseButtons.Right)
+            {
+                int gauge = GaugeAt(ToDesign(e.Location));
+                if (gauge >= 0) ShowGaugeMenu(gauge, Cursor.Position);   // escala del manómetro
                 return;
             }
             if (e.Button != MouseButtons.Left) return;
@@ -798,7 +877,7 @@ namespace SelectOR
         void Draw(Graphics g)
         {
             var ps = Pictograms();
-            string key = $"{Width}x{Height}|{_scale}|{_speedMax}|{_night}|{_v.Has("speed")}{_v.Has("mr")}{_v.Has("bp")}{_v.Has("bc")}|{string.Join(",", ps)}";
+            string key = $"{Width}x{Height}|{_scale}|{_speedMax}|{_airMax}|{_bcMax}|{_night}|{_v.Has("speed")}{_v.Has("mr")}{_v.Has("bp")}{_v.Has("bc")}|{string.Join(",", ps)}";
             if (_cache == null || _cache.Width != Width || _cache.Height != Height || key != _cacheKey)
             {
                 _cache?.Dispose();

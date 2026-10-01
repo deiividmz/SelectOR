@@ -335,7 +335,7 @@ namespace SelectOR
             if (susp)
                 notes.Add(string.Format(I18n.T("Carné suspendido hasta el {0}: no puedes ponerte de servicio. Después vuelves con 8 puntos."), Carne.FmtLocal(d.SuspendedUntil.Value)));
             else if (pts >= 0 && pts < Carne.PenaltyBelow)
-                notes.Add(I18n.T("Por debajo de 6 puntos: el salario baja un 25 % y el rango queda congelado."));
+                notes.Add(I18n.T("Por debajo de 6 puntos: el rango queda congelado y tus servicios no suman a la liga ni al ranking de maquinistas."));
             else if (pts >= 0 && pts < Carne.WarnBelow)
                 notes.Add(I18n.T("Aviso: el carné está por debajo de 10 puntos."));
             if (d.Valid && d.Infractions.Count == 0 && pts >= 0 && pts < Carne.MaxPoints && !susp)

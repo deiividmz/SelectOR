@@ -109,7 +109,8 @@ namespace SelectOR
                 list.Add(new LiveRow
                 {
                     Id = S(e, "user_id"), Name = S(e, "username"), Train = S(e, "train"), Company = S(e, "company"),
-                    Lat = lat.Value, Lon = lon.Value, Heading = N(e, "heading"), SpeedKmh = N(e, "speed_kmh") ?? 0
+                    Lat = lat.Value, Lon = lon.Value, Heading = N(e, "heading"), SpeedKmh = N(e, "speed_kmh") ?? 0,
+                    AgeS = N(e, "age_s"), IsMe = e.TryGetProperty("is_me", out var me) && me.ValueKind == JsonValueKind.True
                 });
             }
             return list;

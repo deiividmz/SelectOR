@@ -591,8 +591,9 @@ namespace SelectOR
             var ub = new TableLayoutPanel { Dock = DockStyle.Top, Height = 72, ColumnCount = 1, RowCount = 2, BackColor = Theme.BgSidebar, Margin = new Padding(0), Padding = new Padding(0, 6, 0, 0) };
             ub.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             ub.RowStyles.Add(new RowStyle(SizeType.Absolute, 33)); ub.RowStyles.Add(new RowStyle(SizeType.Absolute, 33));
-            var nameBtn = EmpButton(Tr("✎  Editar nombre")); nameBtn.Dock = DockStyle.Fill; nameBtn.Height = 30; nameBtn.FontSize = 9f; nameBtn.Margin = new Padding(0, 0, 0, 3);
-            nameBtn.Click += (s, e) => EditMaquinistaName();
+            // «Mi cuenta»: editar el nombre, cambiar la contraseña o eliminar la cuenta.
+            var nameBtn = EmpButton(Tr("⚙  Mi cuenta  ▾")); nameBtn.Dock = DockStyle.Fill; nameBtn.Height = 30; nameBtn.FontSize = 9f; nameBtn.Margin = new Padding(0, 0, 0, 3);
+            nameBtn.Click += (s, e) => OpenAccountMenu(nameBtn);
             var outBtn = EmpButton(Tr("Cerrar sesión")); outBtn.Dock = DockStyle.Fill; outBtn.Height = 30; outBtn.FontSize = 9f; outBtn.Margin = new Padding(0, 0, 0, 3);
             outBtn.Click += (s, e) => DoSignOut();
             ub.Controls.Add(nameBtn, 0, 0); ub.Controls.Add(outBtn, 0, 1);
@@ -1559,6 +1560,68 @@ namespace SelectOR
             if (_empSel != null) LoadMembers(_empSel);   // refresca el nombre en la lista de socios
         }
 
+        // ---------------------------------------------------------------- Mi cuenta
+        void OpenAccountMenu(Control anchor)
+        {
+            if (!Supa.IsLoggedIn) return;
+            var cm = new ContextMenuStrip { ShowImageMargin = false };
+            cm.Items.Add(Tr("✎  Editar nombre"), null, (s, e) => EditMaquinistaName());
+            cm.Items.Add(Tr("🔑  Cambiar contraseña"), null, (s, e) => ChangeMyPassword());
+            cm.Items.Add(new ToolStripSeparator());
+            var del = new ToolStripMenuItem(Tr("Eliminar mi cuenta…")) { ForeColor = Color.FromArgb(200, 60, 60) };
+            del.Click += (s, e) => DeleteMyAccount();
+            cm.Items.Add(del);
+            cm.Show(anchor, new Point(0, anchor.Height));
+        }
+
+        // Cómo te conoce la cuenta: tu nombre de acceso (o tu correo, en cuentas antiguas).
+        string AccountLabel()
+        {
+            string email = Supa.Email ?? "";
+            if (email.EndsWith("@" + SyntheticEmailDomain, StringComparison.OrdinalIgnoreCase)) return "«" + email.Substring(0, email.IndexOf('@')) + "»";
+            return string.IsNullOrEmpty(Supa.Username) ? email : "«" + Supa.Username + "»";
+        }
+
+        // Cambiar la contraseña: se comprueba la actual (iniciando sesión con ella) y se pone la nueva.
+        void ChangeMyPassword()
+        {
+            if (!Supa.IsLoggedIn) return;
+            using var dlg = new ChangePasswordDialog(AccountLabel(), async (cur, nueva) =>
+            {
+                var e1 = await Supa.SignInAsync(Supa.Email, cur);
+                if (e1 != null)
+                    return e1.IndexOf("invalid", StringComparison.OrdinalIgnoreCase) >= 0 || e1.IndexOf("credentials", StringComparison.OrdinalIgnoreCase) >= 0
+                        ? Tr("La contraseña actual no es correcta.") : Tr("No se pudo comprobar la contraseña: ") + e1;
+                var e2 = await Supa.UpdatePasswordAsync(nueva);
+                if (e2 != null)
+                    return e2.IndexOf("different from the old", StringComparison.OrdinalIgnoreCase) >= 0
+                        ? Tr("La contraseña nueva es igual que la actual.") : Tr("No se pudo cambiar la contraseña: ") + e2;
+                // Si SelectOR recuerda la contraseña, se recuerda la nueva.
+                if (_prefs.RememberPassword) { _prefs.EmpresasPasswordEnc = Native.Protect(nueva); try { _prefs.Save(); } catch { } }
+                return null;
+            });
+            if (dlg.ShowDialog(this) == DialogResult.OK) Msg(_empHomeMsg, Tr("Contraseña cambiada."), false);
+        }
+
+        // Eliminar la cuenta: lo hace el servidor (delete_my_account, comprueba la contraseña).
+        void DeleteMyAccount()
+        {
+            if (!Supa.IsLoggedIn) return;
+            if (_pendingServiceId != null) { Msg(_empHomeMsg, Tr("Termina o registra tu servicio antes de eliminar la cuenta."), true); return; }
+            using var dlg = new DeleteAccountDialog(AccountLabel(), async pw =>
+            {
+                var (_, err) = await Supa.RpcAsync("delete_my_account", new { p_password = pw });
+                if (err == null) return null;
+                return ChatMissing(err) ? Tr("El servidor aún no permite eliminar cuentas (falta cuenta-usuario.sql).") : ChatErr(err);
+            });
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            DoSignOut();
+            _prefs.EmpresasEmail = null; _prefs.FavoriteCompany = null;
+            try { _prefs.Save(); } catch { }
+            if (_empEmail != null) _empEmail.Box.Text = "";
+            FancyDialog.Info(this, Tr("Cuenta eliminada"), Tr("Tu cuenta se ha eliminado. Puedes seguir usando SelectOR sin cuenta o crear otra cuando quieras."), "👋");
+        }
+
         // Muestra/oculta el campo "Nombre de maquinista" (modo registro).
         void SetRegisterMode(bool on) { _empRegisterMode = on; }
 
@@ -2359,6 +2422,7 @@ namespace SelectOR
                 _serviceHud.ToggleCab = ToggleCabHudFromBar;
                 _serviceHud.Mates = LiveMarkers;   // mapa en vivo: los demás usuarios de la ruta
                 _serviceHud.Me = LiveMe;
+                WireRoadToHud();                   // hoja de ruta: itinerario en el mapa grande
                 var _ = _serviceHud.Handle;   // la ventana existe ya (el trazado del mapa se le pasa aunque esté oculta)
                 if (_scenarioReady || force) _serviceHud.Show(); else _hudWaiting = true;
                 PushHudMap();   // descarga el trazado de la ruta y lo pasa al HUD
@@ -2684,6 +2748,13 @@ namespace SelectOR
             _empStartFailReason = null;
             // Fuera de flota no cuenta: la máquina de cabeza de tu tren debe ser una unidad de la
             // empresa disponible (y que tienes en local, ya que estás conduciendo ese .con).
+            if (CurrentDrivenConsist() == null)
+            {
+                _empStartFailReason = _activePage == 1
+                    ? Tr("No se ha podido leer el tren de la actividad elegida.")
+                    : Tr("Elige primero el tren que vas a conducir.");
+                return null;
+            }
             var engNames = CurrentConsistEngineNames();   // la motriz de cabeza y su formación fija
             if (engNames.Count == 0)
             {
@@ -2711,13 +2782,7 @@ namespace SelectOR
         // Nombre del .eng líder (máquina de tracción) del tren seleccionado en la pestaña activa.
         string CurrentLeadEngName()
         {
-            TrainItem c = _activePage switch
-            {
-                2 => _lstConsists.SelectedItem as TrainItem,
-                4 => _lstConsists.SelectedItem as TrainItem,
-                3 => _ttConsist,
-                _ => null
-            };
+            var c = CurrentDrivenConsist();
             var fp = c?.Locomotive?.FilePath;
             return string.IsNullOrEmpty(fp) ? null : System.IO.Path.GetFileNameWithoutExtension(fp);
         }
@@ -2740,6 +2805,22 @@ namespace SelectOR
             {
                 // Con las motrices del .con (motrices-servicio.sql); si el servidor aún no las conoce, sin ellas.
                 int engines = ConsistEngineCount(train.FilePath);
+                // ¿Es un tren de viajeros? (tarifas-equilibrio.sql): sin plazas declaradas cobra como traslado
+                // en vacío, no como un mercancías. Si el servidor aún no lo conoce, se abre sin ese dato.
+                bool? viajeros = TrainIsPassenger(train);
+                if (viajeros != null)
+                {
+                    var (j0, e0) = await Supa.RpcAsync("start_service", new
+                    {
+                        p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle,
+                        p_mass = Math.Round(tot.mass, 1), p_cars = tot.cars, p_capacity = Math.Round(tot.capacity), p_engines = engines,
+                        p_passenger = viajeros.Value
+                    });
+                    bool sinTipo = e0 != null && (e0.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                                                  || e0.IndexOf("p_passenger", StringComparison.OrdinalIgnoreCase) >= 0
+                                                  || e0.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (!sinTipo) return (j0, e0);
+                }
                 var (j, e) = await Supa.RpcAsync("start_service", new
                 {
                     p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle,
@@ -2969,7 +3050,7 @@ namespace SelectOR
         {
             string s = _activePage switch
             {
-                1 => (_lstActivities.SelectedItem as Activity)?.Name,
+                1 => CurrentDrivenConsist()?.Name ?? (_lstActivities.SelectedItem as Activity)?.Name,   // el tren de la actividad
                 2 => (_lstConsists.SelectedItem as TrainItem)?.Name,
                 3 => _cboTTTrain.SelectedItem?.ToString(),
                 4 => (_lstConsists.SelectedItem as TrainItem)?.Name,
@@ -2978,7 +3059,10 @@ namespace SelectOR
             return s ?? "";
         }
 
-        string CurrentPathLabel() => CurrentPath()?.Name ?? "";
+        string CurrentPathLabel() => DrivenPath()?.Name ?? "";
+
+        // Recorrido que se va a conducir: en Actividad, el de la actividad; si no, el elegido en Exploración.
+        OrPath DrivenPath() => _activePage == 1 && _lstActivities.SelectedItem is Activity a && a.Path != null ? a.Path : CurrentPath();
 
         // Llamado cuando OR se cierra tras un lanzamiento con servicio abierto.
         void OnDriveReturned()
@@ -3063,6 +3147,7 @@ namespace SelectOR
         {
             _trackedMeters = 0; _tHave = false; _tLat = _tLon = 0;
             _driveTrail.Clear();   // conducción nueva: rastro nuevo
+            RoadDriveStart();      // y hoja de ruta vacía
             StartSvcClock(null);   // el cronómetro espera a que el escenario esté abierto
             _scenarioReady = false;   // y los HUD también (ver OnScenarioReady)
             _stoppedSinceUtc = null;
@@ -3086,6 +3171,7 @@ namespace SelectOR
         // TrainItem del tren de la pestaña activa (para el que se conduce).
         TrainItem CurrentDrivenConsist() => _activePage switch
         {
+            1 => ActivityConsist(_lstActivities.SelectedItem as Activity),   // Actividad: el tren de la actividad
             2 => _lstConsists.SelectedItem as TrainItem,
             4 => _lstConsists.SelectedItem as TrainItem,
             3 => _ttConsist,
@@ -3885,6 +3971,7 @@ namespace SelectOR
             EndPaxAnimation();
             PaDriveStop();   // megafonía: corta lo que suene y olvida la ruta
             StopLiveMap();   // mapa en vivo: desaparezco del mapa de los demás
+            RoadDriveStop(); // hoja de ruta: se cierra con la conducción
             try { _kmTimer?.Stop(); _kmTimer?.Dispose(); _kmTimer = null; } catch { }
             try { _kmHttp?.Dispose(); _kmHttp = null; } catch { }
             return Math.Round(_trackedMeters / 1000.0, 1);
@@ -8237,7 +8324,7 @@ namespace SelectOR
         {
             try
             {
-                var p = CurrentPath();
+                var p = DrivenPath();
                 if (p != null && !string.IsNullOrEmpty(p.FilePath) && System.IO.File.Exists(p.FilePath))
                     return EstimatePathKm(p.FilePath);
             }

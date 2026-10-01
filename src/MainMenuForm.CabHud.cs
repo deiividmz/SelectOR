@@ -27,11 +27,20 @@ namespace SelectOR
                 _cabHud = new CabHudOverlay(_prefs, OrWebPort(), TrainMaxKmh(tren), CabDayOfYear(), TrainTraction(tren), TrainIsPassenger(tren),
                                             TrainBrakeDecel(tren), units);
                 _cabHud.TrainName = tren?.Name;
+                _cabHud.MachineKey = CabMachineKey(tren);   // escala de los manómetros elegida para esta máquina
                 if (_tHave) _cabHud.SetPosition(_tLat, _tLon);
                 var _ = _cabHud.Handle;
                 if (_scenarioReady || force) _cabHud.Show(); else _cabWaiting = true;   // aparece con el escenario cargado
             }
             catch { _cabHud = null; }
+        }
+
+        // Máquina de cabeza del tren (carpeta\nombre de su .eng): clave para recordar la escala de sus manómetros.
+        static string CabMachineKey(TrainItem tren)
+        {
+            var fp = tren?.Locomotive?.FilePath;
+            if (string.IsNullOrEmpty(fp)) return null;
+            return Path.GetFileName(Path.GetDirectoryName(fp)) + "\\" + Path.GetFileNameWithoutExtension(fp);
         }
 
         // Día del año que usa Open Rails para cada estación (equinoccios y solsticios): con él y la

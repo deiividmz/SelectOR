@@ -123,6 +123,9 @@ namespace SelectOR
         public Func<(string name, string company)> Me;
         List<LiveMarker> CurMates() { try { return Mates?.Invoke(); } catch { return null; } }
         ServiceMapWindow _bigMap;   // ventana de mapa grande con transparencia
+        // Hoja de ruta (itinerario marcado en el mapa grande; lo lleva la ventana principal).
+        public RoadBook Book;
+        public Action BookEnsureGraph, BookChanged;
 
         static readonly Color Rec = Color.FromArgb(224, 86, 86);
         static readonly Color Teal = Color.FromArgb(94, 190, 155);
@@ -771,7 +774,7 @@ namespace SelectOR
             double anchoM = MapWorldWidthM(area);
             var mates = CurMates();
             HudMapRender.Draw(g, area, _segLat, _segLon, _trkLat, _trkLon, _stLat, _stLon, _stName, _crumb,
-                _hasPos, _curLat, _curLon, _hasHeading, _heading, anchoM, 7.5f, 1f, I18n.T("Cargando mapa…"), mates: mates);
+                _hasPos, _curLat, _curLon, _hasHeading, _heading, anchoM, 7.5f, 1f, I18n.T("Cargando mapa…"), mates: mates, book: Book);
             // Cuántos usuarios hay en la ruta (arriba a la derecha; mientras se enseña el zoom, no).
             if (mates != null && mates.Count > 0 && DateTime.UtcNow >= _zoomShownUntil) LiveMapDraw.Chip(g, area, mates.Count);
 
@@ -943,14 +946,15 @@ namespace SelectOR
 
         public const double BaseScale = 216.0 / 1200.0;   // px por metro del mini-mapa (para zoom coherente)
 
-        public static void Draw(Graphics g, Rectangle area,
+        // Devuelve la proyección inversa (píxel → lat/lon) de lo dibujado, o null si no se dibujó el mapa.
+        public static Func<PointF, (double lat, double lon)> Draw(Graphics g, Rectangle area,
             double[][] segLat, double[][] segLon, double[] trkLat, double[] trkLon,
             double[] stLat, double[] stLon, string[] stName,
             System.Collections.Generic.IReadOnlyList<(double lat, double lon)> crumb,
             bool hasPos, double curLat, double curLon, bool hasHeading, double heading,
             double worldWidthM, float labelPt, float arrowScale, string loadingText,
             double viewCenterLat = double.NaN, double viewCenterLon = double.NaN, double viewPxPerM = 0,
-            IReadOnlyList<LiveMarker> mates = null, bool mateDetail = false)
+            IReadOnlyList<LiveMarker> mates = null, bool mateDetail = false, RoadBook book = null)
         {
             segLat ??= Array.Empty<double[]>(); segLon ??= Array.Empty<double[]>();
             trkLat ??= Array.Empty<double>(); trkLon ??= Array.Empty<double>();
@@ -962,18 +966,20 @@ namespace SelectOR
             {
                 using var f0 = Theme.Font(Math.Max(9f, labelPt));
                 TextRenderer.DrawText(g, loadingText, f0, area, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                return;
+                return null;
             }
 
             int pad = 8;
             double availW = area.Width - 2 * pad, availH = area.Height - 2 * pad;
             Func<double, double, PointF> Proj;
+            Func<PointF, (double lat, double lon)> Inv;
             if (viewPxPerM > 0 && !double.IsNaN(viewCenterLat))
             {
                 // VISTA MANUAL (zoom/pan del usuario): centrada en (viewCenterLat/Lon) con escala viewPxPerM.
                 double mLat = 111320.0, mLon = 111320.0 * Math.Cos(viewCenterLat * Math.PI / 180.0);
                 double cx = area.X + area.Width / 2.0, cy = area.Y + area.Height / 2.0;
                 Proj = (la, lo) => new PointF((float)(cx + (lo - viewCenterLon) * mLon * viewPxPerM), (float)(cy - (la - viewCenterLat) * mLat * viewPxPerM));
+                Inv = p => (viewCenterLat - (p.Y - cy) / (mLat * viewPxPerM), viewCenterLon + (p.X - cx) / (mLon * viewPxPerM));
             }
             else if (hasPos)
             {
@@ -981,6 +987,7 @@ namespace SelectOR
                 double sc = availW / worldWidthM;
                 double cx = area.X + area.Width / 2.0, cy = area.Y + area.Height / 2.0;
                 Proj = (la, lo) => new PointF((float)(cx + (lo - curLon) * mLon * sc), (float)(cy - (la - curLat) * mLat * sc));
+                Inv = p => (curLat - (p.Y - cy) / (mLat * sc), curLon + (p.X - cx) / (mLon * sc));
             }
             else
             {
@@ -989,13 +996,14 @@ namespace SelectOR
                 if (haveSeg) for (int s = 0; s < segLat.Length; s++) for (int i = 0; i < segLat[s].Length; i++) Ext(segLat[s][i], segLon[s][i]);
                 else if (haveTrk) for (int i = 0; i < trkLat.Length; i++) Ext(trkLat[i], trkLon[i]);
                 else foreach (var c in crumb) Ext(c.lat, c.lon);
-                if (minLat > maxLat) return;
+                if (minLat > maxLat) return null;
                 double lat0 = (minLat + maxLat) / 2.0;
                 double k = Math.Cos(lat0 * Math.PI / 180.0); if (k < 0.01) k = 0.01;
                 double spanX = Math.Max((maxLon - minLon) * k, 1e-6), spanY = Math.Max(maxLat - minLat, 1e-6);
                 double sc = Math.Min(availW / spanX, availH / spanY);
                 double ox = area.X + pad + (availW - spanX * sc) / 2.0, oy = area.Y + pad + (availH - spanY * sc) / 2.0;
                 Proj = (la, lo) => new PointF((float)(ox + (lo - minLon) * k * sc), (float)(oy + (maxLat - la) * sc));
+                Inv = p => (maxLat - (p.Y - oy) / sc, minLon + (p.X - ox) / (k * sc));
             }
 
             var oldClip = g.Clip; g.SetClip(area);
@@ -1026,6 +1034,47 @@ namespace SelectOR
                         if (p.X < area.Left - 4 || p.X > area.Right + 4 || p.Y < area.Top - 4 || p.Y > area.Bottom + 4) continue;
                         float d = Math.Max(1.4f, 1.1f * arrowScale);
                         g.FillEllipse(b, p.X - d, p.Y - d, 2 * d, 2 * d);
+                    }
+
+            // Itinerario de la hoja de ruta: lo que falta en ámbar, lo recorrido más apagado, y los puntos marcados.
+            if (book != null && book.PathLat.Length >= 2)
+            {
+                var pts = new PointF[book.PathLat.Length];
+                for (int i = 0; i < pts.Length; i++) pts[i] = Proj(book.PathLat[i], book.PathLon[i]);
+                int done = Math.Min(pts.Length - 1, book.PassedIdx);
+                using (var halo = new Pen(Color.FromArgb(70, 0, 0, 0), 6f * Math.Max(1f, arrowScale * 0.7f)) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    try { g.DrawLines(halo, pts); } catch { }
+                using (var pen = new Pen(Color.FromArgb(235, 240, 180, 70), 3.2f * Math.Max(1f, arrowScale * 0.7f)) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    try { g.DrawLines(pen, pts[done..]); } catch { }
+                if (done >= 1)
+                    using (var pen = new Pen(Color.FromArgb(150, 150, 130, 90), 3.2f * Math.Max(1f, arrowScale * 0.7f)) { LineJoin = LineJoin.Round })
+                        try { g.DrawLines(pen, pts[..(done + 1)]); } catch { }
+            }
+            if (book != null && book.HasPlan)
+            {
+                float rs = 5f * Math.Max(1f, arrowScale * 0.6f);
+                using var fill = new SolidBrush(Color.FromArgb(255, 245, 225));
+                using var ring = new Pen(Color.FromArgb(240, 180, 70), 2.4f * Math.Max(1f, arrowScale * 0.5f));
+                foreach (var st in book.Stops)
+                {
+                    if (st.IsEnd || st.Passed || !(st.Halt || st.IsReverse)) continue;
+                    var p = Proj(st.Lat, st.Lon);
+                    if (p.X < area.Left - 10 || p.X > area.Right + 10 || p.Y < area.Top - 10 || p.Y > area.Bottom + 10) continue;
+                    g.FillEllipse(fill, p.X - rs, p.Y - rs, 2 * rs, 2 * rs);
+                    g.DrawEllipse(ring, p.X - rs, p.Y - rs, 2 * rs, 2 * rs);
+                }
+            }
+            if (book != null && book.Points.Count > 0)
+                using (var fN = Theme.Font(Math.Max(7f, labelPt * 0.85f), FontStyle.Bold))
+                    for (int i = 0; i < book.Points.Count; i++)
+                    {
+                        var p = Proj(book.Points[i].Lat, book.Points[i].Lon);
+                        float r = 7f * Math.Max(1f, arrowScale * 0.6f);
+                        bool hecho = i < book.ReachedPoints;
+                        using (var b = new SolidBrush(hecho ? Color.FromArgb(150, 130, 110) : Color.FromArgb(240, 180, 70))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
+                        using (var pen = new Pen(Color.FromArgb(40, 30, 10), 1.4f)) g.DrawEllipse(pen, p.X - r, p.Y - r, 2 * r, 2 * r);
+                        TextRenderer.DrawText(g, (i + 1).ToString(), fN, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.FromArgb(30, 22, 8),
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     }
 
             if (haveCrumb)
@@ -1075,6 +1124,7 @@ namespace SelectOR
             }
 
             g.Clip = oldClip;
+            return Inv;
         }
 
         // Caja (lat/lon) de cada tramo de vía, calculada una vez por mapa.
@@ -1112,6 +1162,11 @@ namespace SelectOR
         bool _panning; Point _lastPan;                                 // desplazamiento del MAPA
         bool _free; double _pxPerM = HudMapRender.BaseScale; double _cLat, _cLon; bool _haveCenter;   // zoom/pan
         Rectangle _hitClose;
+        // Hoja de ruta: botones de la cabecera y clic en la vía para marcar el itinerario.
+        Rectangle _hitRoute, _hitUndo, _hitClearRoute; int _hoverHdr = -1;
+        Func<PointF, (double lat, double lon)> _inv;   // píxel → lat/lon del último dibujo
+        bool _panMoved; Point _panDown;
+        RoadBook Book => _hud?.Book;
         // Leyenda de los demás usuarios de la ruta: su caja y cada fila (clic → centrar en ese usuario).
         Rectangle _legendBox; List<(Rectangle hit, LiveMarker m)> _legendHits = new();
         bool _legendDown;
@@ -1182,7 +1237,7 @@ namespace SelectOR
             if (e.Button != MouseButtons.Left) { base.OnMouseDown(e); return; }
             if (e.Y < HdrH) { _winDrag = true; _moved = false; _downScreen = Cursor.Position; _formAtDown = Location; }   // cabecera → mueve la ventana
             else if (_legendBox.Contains(e.Location)) _legendDown = true;                                                // leyenda → clic en un nombre
-            else { _panning = true; _lastPan = e.Location; }                                                             // mapa → desplaza el contenido
+            else { _panning = true; _lastPan = e.Location; _panDown = e.Location; _panMoved = false; }                    // mapa → desplaza el contenido
             base.OnMouseDown(e);
         }
 
@@ -1196,23 +1251,40 @@ namespace SelectOR
             }
             else if (_panning)
             {
-                PanBy(e.X - _lastPan.X, e.Y - _lastPan.Y);
-                _lastPan = e.Location;
+                if (!_panMoved && (Math.Abs(e.X - _panDown.X) > 4 || Math.Abs(e.Y - _panDown.Y) > 4)) _panMoved = true;
+                if (_panMoved) { PanBy(e.X - _lastPan.X, e.Y - _lastPan.Y); _lastPan = e.Location; }
             }
             else
             {
                 bool sobre = false;
                 foreach (var (hit, _) in _legendHits) if (hit.Contains(e.Location)) { sobre = true; break; }
-                Cursor = sobre ? Cursors.Hand : Cursors.Default;
+                int hh = HdrZone(e.Location);
+                if (hh != _hoverHdr) { _hoverHdr = hh; Invalidate(new Rectangle(0, 0, Width, HdrH)); }
+                Cursor = sobre || hh >= 0 ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
             }
             base.OnMouseMove(e);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
-            bool wasWinDrag = _winDrag, moved = _moved, legend = _legendDown;
-            _winDrag = false; _panning = false; _moved = false; _legendDown = false;
+            bool wasWinDrag = _winDrag, moved = _moved, legend = _legendDown, wasPan = _panning, panMoved = _panMoved;
+            _winDrag = false; _panning = false; _moved = false; _legendDown = false; _panMoved = false;
             if (wasWinDrag && !moved && _hitClose.Contains(e.Location)) { Close(); return; }
+            if (wasWinDrag && !moved && HdrZone(e.Location) is int z && z >= 0) { HdrClick(z); return; }
+            // modo «Itinerario»: un clic (sin arrastrar) sobre la vía añade un punto
+            if (wasPan && !panMoved && Book is RoadBook rb && rb.Editing && _inv != null && e.Button == MouseButtons.Left)
+            {
+                if (rb.Graph == null) { _hud?.BookEnsureGraph?.Invoke(); Invalidate(); }
+                else
+                {
+                    var a = _inv(new PointF(e.X, e.Y)); var b = _inv(new PointF(e.X + 30, e.Y));
+                    double maxM = Math.Max(15, Haversine(a.lat, a.lon, b.lat, b.lon));   // 30 px de margen
+                    if (rb.AddPoint(a.lat, a.lon, maxM)) { try { _hud?.BookChanged?.Invoke(); } catch { } }
+                    Invalidate();
+                }
+                base.OnMouseUp(e);
+                return;
+            }
             if (legend)
                 foreach (var (hit, m) in _legendHits)
                     if (hit.Contains(e.Location))
@@ -1234,6 +1306,41 @@ namespace SelectOR
         {
             if (e.Y >= HdrH && !_legendBox.Contains(e.Location)) { _free = false; _pxPerM = HudMapRender.BaseScale; UpdateFollow(); Invalidate(); }   // volver a centrar en el tren
             base.OnMouseDoubleClick(e);
+        }
+
+        int HdrZone(Point p)
+        {
+            if (p.Y >= HdrH) return -1;
+            if (_hitRoute.Contains(p)) return 0;
+            if (_hitUndo.Contains(p)) return 1;
+            if (_hitClearRoute.Contains(p)) return 2;
+            return -1;
+        }
+
+        void HdrClick(int z)
+        {
+            var rb = Book; if (rb == null) return;
+            if (z == 0) { rb.Editing = !rb.Editing; if (rb.Editing) _hud?.BookEnsureGraph?.Invoke(); }
+            else if (z == 1) { rb.Undo(); try { _hud?.BookChanged?.Invoke(); } catch { } }
+            else if (z == 2) { rb.ClearAll(); try { _hud?.BookChanged?.Invoke(); } catch { } }
+            Invalidate();
+        }
+
+        static double Haversine(double la1, double lo1, double la2, double lo2)
+        {
+            double dLa = (la2 - la1) * Math.PI / 180.0, dLo = (lo2 - lo1) * Math.PI / 180.0;
+            double a = Math.Sin(dLa / 2) * Math.Sin(dLa / 2) + Math.Cos(la1 * Math.PI / 180) * Math.Cos(la2 * Math.PI / 180) * Math.Sin(dLo / 2) * Math.Sin(dLo / 2);
+            return 2 * 6371000.0 * Math.Asin(Math.Min(1, Math.Sqrt(a)));
+        }
+
+        void DrawHdrButton(Graphics g, Rectangle r, string text, bool active, bool hover)
+        {
+            var amber = Color.FromArgb(240, 180, 70);
+            var fill = active ? Blend(Theme.Surface2, amber, 0.25f) : hover ? Theme.SurfaceHi : Theme.Surface2;
+            using (var b = new SolidBrush(fill)) using (var p = Theme.Round(r, 7)) g.FillPath(b, p);
+            if (active) using (var pen = new Pen(amber, 1.2f)) using (var p = Theme.Round(r, 7)) g.DrawPath(pen, p);
+            using var f = Theme.Font(8.8f, FontStyle.Bold);
+            TextRenderer.DrawText(g, text, f, r, active ? amber : Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         void ZoomAt(Point m, double factor)
@@ -1270,11 +1377,35 @@ namespace SelectOR
             var snap = _hud?.Snapshot();
             using (var b = new SolidBrush(Theme.Surface)) g.FillRectangle(b, ClientRectangle);
 
-            // Cabecera (nombre de ruta + pista de uso: rueda para zoom, arrastre para mover, doble clic para centrar)
-            string hdr = I18n.T("rueda: zoom · arrastra: mover · doble clic: centrar");
-            TextRenderer.DrawText(g, hdr, Theme.Font(9.5f, FontStyle.Bold), new Rectangle(14, 0, Width - 48, HdrH), Theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            // Cabecera: pista de uso (o del modo «Itinerario») + botones de la hoja de ruta + cerrar
             _hitClose = new Rectangle(Width - 30, 7, 16, 16);
+            var rb = Book;
+            int bx = _hitClose.Left - 10;
+            _hitRoute = _hitUndo = _hitClearRoute = Rectangle.Empty;
+            if (rb != null)
+            {
+                using var fb = Theme.Font(8.8f, FontStyle.Bold);
+                int W(string t) => TextRenderer.MeasureText(t, fb).Width + 18;
+                string tRoute = rb.Editing ? "✓ " + I18n.T("Listo") : "+ " + I18n.T("Itinerario");
+                _hitRoute = new Rectangle(bx - W(tRoute), 4, W(tRoute), HdrH - 8); bx = _hitRoute.Left - 6;
+                if (rb.Points.Count > 0)
+                {
+                    string tClr = I18n.T("Borrar"), tUndo = "\u21B6 " + I18n.T("Deshacer");
+                    _hitClearRoute = new Rectangle(bx - W(tClr), 4, W(tClr), HdrH - 8); bx = _hitClearRoute.Left - 6;
+                    _hitUndo = new Rectangle(bx - W(tUndo), 4, W(tUndo), HdrH - 8); bx = _hitUndo.Left - 6;
+                    DrawHdrButton(g, _hitClearRoute, tClr, false, _hoverHdr == 2);
+                    DrawHdrButton(g, _hitUndo, tUndo, false, _hoverHdr == 1);
+                }
+                DrawHdrButton(g, _hitRoute, tRoute, rb.Editing, _hoverHdr == 0);
+            }
+            string hdr = rb != null && rb.Editing
+                ? (rb.Building ? I18n.T("Preparando el esquema de vías…")
+                   : rb.Graph == null && rb.Problem != null ? rb.Problem
+                   : I18n.T("Haz clic en la vía para añadir puntos del itinerario"))
+                : I18n.T("rueda: zoom · arrastra: mover · doble clic: centrar");
+            TextRenderer.DrawText(g, hdr, Theme.Font(9.5f, FontStyle.Bold), new Rectangle(14, 0, bx - 20, HdrH),
+                rb != null && rb.Editing ? Color.FromArgb(240, 180, 70) : Theme.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             using (var pen = new Pen(Theme.Subtle, 1.8f))
             {
                 g.DrawLine(pen, _hitClose.Left + 3, _hitClose.Top + 3, _hitClose.Right - 3, _hitClose.Bottom - 3);
@@ -1289,9 +1420,9 @@ namespace SelectOR
             // Vista MANUAL (zoom/pan) si el usuario interactuó; si no, sigue al tren con escala base.
             double vLat = _haveCenter ? _cLat : double.NaN, vLon = _haveCenter ? _cLon : double.NaN;
             double vPx = _haveCenter ? _pxPerM : 0;
-            HudMapRender.Draw(g, area, snap.SegLat, snap.SegLon, snap.TrkLat, snap.TrkLon, snap.StLat, snap.StLon, snap.StName,
+            _inv = HudMapRender.Draw(g, area, snap.SegLat, snap.SegLon, snap.TrkLat, snap.TrkLon, snap.StLat, snap.StLon, snap.StName,
                 snap.Crumb, snap.HasPos, snap.CurLat, snap.CurLon, snap.HasHeading, snap.Heading,
-                worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true);
+                worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true, book: Book);
             _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox);
         }
 

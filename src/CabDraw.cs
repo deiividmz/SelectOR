@@ -119,10 +119,26 @@ namespace SelectOR
             using (var pm = new Pen(Dark, Math.Max(1, size * 0.005f)))
             using (var pM = new Pen(Dim, Math.Max(1.2f, size * 0.009f)))
             using (var ft = F(Math.Max(8, size * 0.074f), true))
+            using (var fs = F(Math.Max(6, size * 0.038f), true))
             {
+                // Escalas grandes (rótulos de 50 o de 100 en 100): las velocidades intermedias, en pequeño,
+                // entre los rótulos (p. ej. 20, 40, 60 y 80 entre 0 y 100), en un aro algo más afuera que
+                // los rótulos grandes. Se elige el paso más fino en el que los números no se pisan.
+                double fino = 0;
+                const float rFino = 0.68f;
+                if (lab >= 50)
+                {
+                    float wMax = g.MeasureString(max.ToString("0", Es), fs, PointF.Empty, StringFormat.GenericTypographic).Width;   // ancho real, sin márgenes
+                    foreach (double paso in new[] { lab / 5, lab / 4, lab / 2 })
+                    {
+                        double arco = R * rFino * (paso / max * sweep) * Math.PI / 180.0;
+                        if (arco >= wMax * 1.3) { fino = paso; break; }
+                    }
+                    if (fino > 0) menor = fino;   // las marcas pequeñas, en las mismas velocidades
+                }
                 for (double v = 0; v <= max + 0.01; v += menor)
                 {
-                    bool major = Math.Abs(v % lab) < 0.01;
+                    bool major = Math.Abs(v % lab) < 0.01 || Math.Abs(v % lab - lab) < 0.01;
                     float r1 = R * 0.86f, r2 = major ? R * 0.70f : R * 0.77f;
                     var q1 = Polar(cx, cy, r1, A(v)); var q2 = Polar(cx, cy, r2, A(v));
                     Mark(g, major ? pM : pm, major, q1, q2);
@@ -130,6 +146,11 @@ namespace SelectOR
                     {
                         var q = Polar(cx, cy, R * 0.545f, A(v));
                         Ink(g, v.ToString("0", Es), ft, avail ? Text : Dark, q.X, q.Y);
+                    }
+                    else if (fino > 0)
+                    {
+                        var q = Polar(cx, cy, R * rFino, A(v));
+                        Ink(g, v.ToString("0", Es), fs, avail ? Dim : Dark, q.X, q.Y);
                     }
                 }
             }
