@@ -121,6 +121,31 @@ namespace SelectOR
         }
     }
 
+    /// <summary>Lista dibujada a mano que pinta cada fila en un búfer en memoria y la copia de una vez: dibujar
+    /// con suavizado directamente sobre la ventana obliga a leer de vuelta sus píxeles (30-60 ms por fila).</summary>
+    public class BufferedListBox : ListBox
+    {
+        protected override void OnDrawItem(DrawItemEventArgs e)
+        {
+            var r = e.Bounds;
+            BufferedGraphics buf = null;
+            if (r.Width > 0 && r.Height > 0)
+                try { buf = BufferedGraphicsManager.Current.Allocate(e.Graphics, r); } catch { buf = null; }
+            if (buf == null) { base.OnDrawItem(e); return; }
+            using (buf)
+            {
+                // La fila se dibuja en coordenadas PROPIAS del búfer (0,0): el texto (TextRenderer, GDI) no
+                // sigue el desplazamiento que el búfer pone a la Graphics, y con las coordenadas de la lista
+                // caía fuera y no se veía. Render lo copia luego en su sitio.
+                var g = buf.Graphics;
+                g.ResetTransform();
+                g.Clear(BackColor);
+                base.OnDrawItem(new DrawItemEventArgs(g, e.Font, new Rectangle(0, 0, r.Width, r.Height), e.Index, e.State, e.ForeColor, e.BackColor));
+                buf.Render(e.Graphics);
+            }
+        }
+    }
+
     /// <summary>Panel con fondo redondeado y borde opcional.</summary>
     public class Card : Panel
     {

@@ -34,6 +34,7 @@ namespace SelectOR
         TrainPreviewPanel _edPreview3D;
         ShapeGeom _edGeom; string _edGeomPath; float _edYaw = 22, _edPitch = 12; bool _edGeomFlip;
         System.Windows.Forms.Timer _ed2DTimer; int _ed2DToken;
+        System.Windows.Forms.Timer _ed3DRerender;   // render 3D tras cambiar de tamaño (una vez, tras un respiro)
         readonly List<(int x0, int x1)> _ed2DSlots = new();          // zona de cada coche en la tira 2D (para el clic)
         static readonly Dictionary<string, ShapeGeom> _geomCache = new(StringComparer.OrdinalIgnoreCase);
         const float Ed2DWorldH = 5.6f;   // altura de encuadre (m) de cada coche
@@ -263,7 +264,9 @@ namespace SelectOR
             _edPreview3D.Dragged += (dx, dy) => { if (_edGeom != null) { _edYaw += dx * 0.6f; _edPitch = Math.Max(-55f, Math.Min(70f, _edPitch - dy * 0.6f)); Render3DLive(); } };
             _edPreview3D.ResetRequested += () => { _edYaw = 22; _edPitch = 12; Render3DLive(); };
             _edPreview3D.Zoomed += () => { if (_edGeom != null) Render3DLive(); };
-            _edPreview3D.Resize += (s, e) => { if (_edGeom != null) Render3DLive(); };
+            _ed3DRerender = new System.Windows.Forms.Timer { Interval = 140 };
+            _ed3DRerender.Tick += (s, e) => { _ed3DRerender.Stop(); Render3DLive(); };
+            _edPreview3D.Resize += (s, e) => { if (_edGeom != null) { _ed3DRerender.Stop(); _ed3DRerender.Start(); } };
             card3D.Controls.Add(_edPreview3D);
             view3D.Controls.Add(card3D, 0, 1);
 
@@ -966,6 +969,7 @@ namespace SelectOR
             {
                 ShapeGeom geom = null;
                 try { geom = ShapeRenderer.BuildGeometry(want); } catch { }
+                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
                 if (geom != null) lock (_geomCache) _geomCache[want] = geom;
                 if (!IsHandleCreated) return;
                 try
@@ -1033,6 +1037,7 @@ namespace SelectOR
                         if (geom == null)
                         {
                             try { geom = ShapeRenderer.BuildGeometry(path); } catch { }
+                            try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
                             if (geom != null) lock (_geomCache) _geomCache[path] = geom;
                         }
                     }

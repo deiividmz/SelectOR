@@ -104,11 +104,7 @@ namespace SelectOR
                 },
                 new Color?[] { null, null, null, null, Theme.Accent });
             if (_ops.Count == 0) _list.SetEmpty(I18n.T("No se ha encontrado ninguna composición con esta máquina."));
-            if (sel >= 0 && sel < _list.Items.Count)
-            {
-                _list.Items[sel].Selected = true;
-                _list.Items[sel].EnsureVisible();
-            }
+            if (sel >= 0) _list.SelectRow(sel);
         }
 
         void Aceptar()

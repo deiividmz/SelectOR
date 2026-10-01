@@ -170,11 +170,7 @@ namespace SelectOR
             _count.Text = q.Length > 0
                 ? string.Format(I18n.T("{0} de {1} marcadas · {2} mostradas"), marcadas, _all.Count, _view.Count)
                 : string.Format(I18n.T("{0} de {1} estaciones marcadas"), marcadas, _all.Count);
-            if (keep >= 0 && keep < _list.Items.Count)
-            {
-                _list.Items[keep].Selected = true;
-                _list.Items[keep].EnsureVisible();
-            }
+            if (keep >= 0) _list.SelectRow(keep);
         }
     }
 }

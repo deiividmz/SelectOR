@@ -31,10 +31,18 @@ namespace SelectOR
             public int OrigIndex;        // orden de inserción (para que la selección mapee a los datos)
             public ListViewItem Item;    // su fila dibujada (si está visible): cambiarla es O(1)
             public string Key;           // identificador opcional (id del vehículo, del servicio…)
+            public int ViewIndex = -1;   // posición en la vista (filas que pasan el filtro, en su orden)
+            public bool SortIsNum; public double SortNum; public string SortStr;   // clave de orden (columna _sortCol)
         }
 
         readonly List<Col> _cols = new();
         readonly List<Row> _rows = new();
+        // Vista: las filas que pasan el filtro, en el orden en que se ven. La lista es VIRTUAL: Windows
+        // solo pide (RetrieveVirtualItem) las que están en pantalla, así que llenar, filtrar u ordenar
+        // decenas de miles de filas no crea decenas de miles de elementos nativos.
+        readonly List<Row> _view = new();
+        bool _needSort;     // se han añadido filas con una columna ordenada: ordenar antes de usar posiciones
+        bool _sizeDirty;    // el número de filas de la lista nativa está por actualizar (mientras se llena)
         int[] _maxW;                    // ancho medido máx. por columna (incluye cabecera)
         string _filter = "";
         string _emptyText;
@@ -63,6 +71,8 @@ namespace SelectOR
         public StyledTable()
         {
             View = View.Details;
+            VirtualMode = true;
+            RetrieveVirtualItem += OnRetrieveItem;
             OwnerDraw = true;
             FullRowSelect = true;
             MultiSelect = false;
@@ -170,14 +180,77 @@ namespace SelectOR
             ApplyWidths();
         }
 
-        public int SelectedRow => SelectedItems.Count > 0 && SelectedItems[0].Tag is Row r ? r.OrigIndex : -1;
+        // Texto de la fila única de aviso («Cargando…», «Sin resultados…»), o null si hay filas normales.
+        string MessageText => _emptyText ?? (_view.Count == 0 && _filter.Length > 0 && _rows.Count > 0 ? I18n.T("Sin resultados para el filtro.") : null);
+        int ViewCount => MessageText != null ? 1 : _view.Count;
+
+        void SyncSize()
+        {
+            _sizeDirty = false;
+            int n = ViewCount;
+            if (VirtualListSize != n) { try { VirtualListSize = n; } catch { } }
+        }
+
+        void SizeChangedRows() { if (_batching) _sizeDirty = true; else SyncSize(); }
+
+        // Antes de usar posiciones: número de filas al día y orden hecho.
+        void EnsureView()
+        {
+            if (_needSort) { _needSort = false; SortView(); }
+            if (_sizeDirty) SyncSize();
+        }
+
+        void OnRetrieveItem(object sender, RetrieveVirtualItemEventArgs e)
+        {
+            if (_needSort) { _needSort = false; SortView(); }
+            string msg = MessageText;
+            ListViewItem it;
+            if (msg != null || e.ItemIndex < 0 || e.ItemIndex >= _view.Count) it = new ListViewItem(msg ?? "");
+            else { var r = _view[e.ItemIndex]; it = r.Item ?? MakeItem(r); }
+            // En modo virtual Windows exige una subcelda por columna (aunque la fila tenga menos datos).
+            int n = Math.Max(1, Columns.Count);
+            while (it.SubItems.Count < n) it.SubItems.Add("");
+            e.Item = it;
+        }
+
+        /// <summary>Número de filas con datos que se ven (las que pasan el filtro).</summary>
+        public int VisibleRowCount { get { EnsureView(); return MessageText != null ? 0 : _view.Count; } }
+
+        public int SelectedRow
+        {
+            get
+            {
+                EnsureView();
+                if (MessageText != null || SelectedIndices.Count == 0) return -1;
+                int i = SelectedIndices[0];
+                return i >= 0 && i < _view.Count ? _view[i].OrigIndex : -1;
+            }
+        }
 
         /// <summary>Selecciona (y hace visible) la fila por su índice de inserción; −1 = ninguna.</summary>
         public void SelectRow(int origIndex)
         {
-            foreach (ListViewItem it in Items)
-                if (it.Tag is Row r && r.OrigIndex == origIndex) { it.Selected = true; it.Focused = true; it.EnsureVisible(); return; }
-            SelectedItems.Clear();
+            EnsureView();
+            int idx = origIndex >= 0 && origIndex < _rows.Count && MessageText == null ? _rows[origIndex].ViewIndex : -1;
+            if (idx < 0 || idx >= _view.Count || _view[idx] != _rows[origIndex]) { SelectedIndices.Clear(); return; }
+            SelectIndex(idx);
+        }
+
+        void SelectIndex(int idx)
+        {
+            if (SelectedIndices.Count == 1 && SelectedIndices[0] == idx) { try { EnsureVisible(idx); } catch { } return; }
+            SelectedIndices.Clear();
+            var it = Items[idx];
+            it.Selected = true; it.Focused = true;
+            try { EnsureVisible(idx); } catch { }
+        }
+
+        int TopIndexSafe() { try { return TopItem?.Index ?? 0; } catch { return 0; } }
+
+        void SetTopIndex(int idx)
+        {
+            if (idx < 0 || idx >= ViewCount) return;
+            try { TopItem = Items[idx]; } catch { }
         }
 
         // ---- Conservar la vista al recargar ----
@@ -195,11 +268,14 @@ namespace SelectOR
         {
             _reloadView = null;
             _reloadArmed = true;
-            if (context != null && context == _viewContext && _emptyText == null && Items.Count > 0)
+            EnsureView();
+            if (context != null && context == _viewContext && MessageText == null && _view.Count > 0)
             {
-                var top = TopItem?.Tag as Row;
-                var sel = SelectedItems.Count > 0 ? SelectedItems[0].Tag as Row : null;
-                _reloadView = (KeyOf(top), TopItem?.Index ?? 0, KeyOf(sel), sel != null ? SelectedItems[0].Index : -1);
+                int topIdx = Math.Min(TopIndexSafe(), _view.Count - 1);
+                int selIdx = SelectedIndices.Count > 0 ? SelectedIndices[0] : -1;
+                var top = topIdx >= 0 ? _view[topIdx] : null;
+                var sel = selIdx >= 0 && selIdx < _view.Count ? _view[selIdx] : null;
+                _reloadView = (KeyOf(top), topIdx, KeyOf(sel), sel != null ? selIdx : -1);
             }
             _viewContext = context;
         }
@@ -209,23 +285,24 @@ namespace SelectOR
             _reloadArmed = false;
             if (_reloadView == null) { EndBatchSoon(); return; }
             var v = _reloadView.Value; _reloadView = null;
-            if (_emptyText != null || Items.Count == 0) { EndBatchSoon(); return; }
-            ListViewItem Find(string key, int idx)
+            EnsureView();
+            if (MessageText != null || _view.Count == 0) { EndBatchSoon(); return; }
+            int Find(string key, int idx)
             {
                 if (key != null)
-                    foreach (ListViewItem it in Items)
-                        if (it.Tag is Row r && KeyOf(r) == key) return it;
-                return idx >= 0 ? Items[Math.Min(idx, Items.Count - 1)] : null;
+                    for (int k = 0; k < _view.Count; k++)
+                        if (KeyOf(_view[k]) == key) return k;
+                return idx >= 0 ? Math.Min(idx, _view.Count - 1) : -1;
             }
-            var sel = v.selIdx >= 0 ? Find(v.selKey, v.selIdx) : null;
-            if (sel != null) { sel.Selected = true; sel.Focused = true; }
-            var top = Find(v.topKey, v.topIdx);
-            if (top == null) { EndBatchSoon(); return; }
-            // En vista de detalles, TopItem a veces no se aplica hasta que la lista termina de maquetar:
-            // se fija ahora y otra vez justo antes de volver a pintar (con el redibujado aún parado).
-            try { TopItem = top; } catch { }
+            int sel = v.selIdx >= 0 ? Find(v.selKey, v.selIdx) : -1;
+            if (sel >= 0) { SelectedIndices.Clear(); var it = Items[sel]; it.Selected = true; it.Focused = true; }
+            int top = Find(v.topKey, v.topIdx);
+            if (top < 0) { EndBatchSoon(); return; }
+            // En vista de detalles, la fila de arriba a veces no se aplica hasta que la lista termina de
+            // maquetar: se fija ahora y otra vez justo antes de volver a pintar (con el redibujado aún parado).
+            SetTopIndex(top);
             if (_batching) { _restoreTop = top; EndBatchSoon(); }
-            else try { BeginInvoke((Action)(() => { try { if (top.ListView == this) TopItem = top; } catch { } })); } catch { }
+            else try { BeginInvoke((Action)(() => SetTopIndex(top))); } catch { }
         }
 
         // ---- Sin parpadeos al recargar ----
@@ -237,7 +314,7 @@ namespace SelectOR
         //    ya con la misma fila arriba y la misma elegida.
         bool _reloadArmed;          // BeginReload llamado y la recarga aún no ha terminado
         bool _batching;             // redibujado parado mientras se vacía y se llena
-        ListViewItem _restoreTop;   // fila que debe quedar arriba al terminar
+        int _restoreTop = -1;       // fila que debe quedar arriba al terminar
 
         /// <summary>Aviso de carga («Cargando…») solo si no hay nada que enseñar mientras tanto.</summary>
         public void ShowLoading(string text)
@@ -266,19 +343,21 @@ namespace SelectOR
         void EndBatch()
         {
             if (!_batching) return;
-            var top = _restoreTop; _restoreTop = null;
-            try { if (top != null && top.ListView == this) TopItem = top; } catch { }
+            int top = _restoreTop; _restoreTop = -1;
+            EnsureView();
+            if (top >= 0) SetTopIndex(top);
             _batching = false;
             EndUpdate();
-            try { if (top != null && top.ListView == this && TopItem != top) TopItem = top; } catch { }
+            if (top >= 0 && TopIndexSafe() != top) SetTopIndex(top);
         }
 
         public void ClearRows()
         {
             StartBatch();
-            _rows.Clear(); _emptyText = null; _hoverItem = -1;
-            Items.Clear();
+            _rows.Clear(); _view.Clear(); _needSort = false; _emptyText = null; _hoverItem = -1;
+            SizeChangedRows();
             ResetMeasures();
+            Invalidate();
         }
 
         public void AddRow(string[] cells, Color?[] colors = null) => AddRow(cells, colors, null);
@@ -295,10 +374,13 @@ namespace SelectOR
             // Al llenar miles de filas, reajustar los anchos en cada una costaba más que las filas:
             // se acumulan y se hace UNA vez cuando la interfaz vuelve a estar libre.
             if (Measure(row)) ScheduleWidths();
-            if (!PassesFilter(row)) return;
-            var it = MakeItem(row);
-            if (_sortCol < 0) Items.Add(it);
-            else Items.Insert(InsertPos(row), it);
+            if (PassesFilter(row))
+            {
+                row.ViewIndex = _view.Count;
+                _view.Add(row);
+                if (_sortCol >= 0) _needSort = true;   // se ordena una vez, al usarla
+            }
+            SizeChangedRows();
         }
 
         // Cambia UNA celda ya existente (por orden de inserción) sin rehacer la tabla: así una carga en
@@ -313,10 +395,13 @@ namespace SelectOR
             bool grew = Measure(row);
             if (grew && applyWidths) ApplyWidths();
             var it = row.Item;
-            if (it == null || it.ListView != this) return;
+            if (it == null) return;   // aún no se ha pedido: se creará con el texto nuevo
             while (it.SubItems.Count <= col) it.SubItems.Add("");
             it.SubItems[col].Text = row.Cells[col];
-            Invalidate(it.Bounds);
+            if (_sortCol == col) _needSort = true;
+            int vi = row.ViewIndex;
+            if (IsHandleCreated && !_batching && MessageText == null && vi >= 0 && vi < _view.Count && _view[vi] == row && vi < VirtualListSize)
+                try { Invalidate(GetItemRect(vi)); } catch { }
         }
 
         // Reajusta los anchos una sola vez después de cambiar muchas celdas seguidas.
@@ -333,13 +418,13 @@ namespace SelectOR
 
         public void SetEmpty(string text)
         {
-            if (_emptyText == text && Items.Count == 1) return;   // ya lo está diciendo: nada que repintar
+            if (_emptyText == text) return;   // ya lo está diciendo: nada que repintar
             StartBatch();
-            _rows.Clear(); _hoverItem = -1;
+            _rows.Clear(); _view.Clear(); _needSort = false; _hoverItem = -1;
             _emptyText = text;
-            Items.Clear();
-            Items.Add(new ListViewItem(text));
+            SizeChangedRows();
             ResetMeasures();
+            Invalidate();
         }
 
         public void Filter(string text) { _filter = (text ?? "").Trim(); Rebuild(); }
@@ -354,17 +439,38 @@ namespace SelectOR
         void Rebuild()
         {
             if (_emptyText != null) return;
-            var visible = new List<Row>();
-            foreach (var r in _rows) if (PassesFilter(r)) visible.Add(r);
-            if (_sortCol >= 0)
-                visible.Sort((a, b) => { int c = CompareCells(a, b, _sortCol); return _sortAsc ? c : -c; });
+            _view.Clear();
+            foreach (var r in _rows) if (PassesFilter(r)) _view.Add(r);
+            _needSort = false;
+            if (_sortCol >= 0) SortView(); else for (int k = 0; k < _view.Count; k++) _view[k].ViewIndex = k;
+            _hoverItem = -1;
+            SelectedIndices.Clear();
+            SyncSize();
+            Invalidate();
+        }
 
-            BeginUpdate();
-            Items.Clear();
-            foreach (var r in visible) Items.Add(MakeItem(r));
-            EndUpdate();
-            if (Items.Count == 0 && _filter.Length > 0)
-                Items.Add(new ListViewItem(I18n.T("Sin resultados para el filtro.")));
+        // Ordena la vista por _sortCol. La clave de cada celda (número o texto) se calcula una vez por fila,
+        // no en cada comparación (con miles de filas, interpretar el número en cada comparación era lo caro).
+        void SortView()
+        {
+            int col = _sortCol;
+            if (col >= 0)
+            {
+                foreach (var r in _view)
+                {
+                    r.SortStr = col < r.Cells.Length ? r.Cells[col] ?? "" : "";
+                    r.SortIsNum = TryNum(r.SortStr, out r.SortNum);
+                }
+                bool asc = _sortAsc;
+                var cmp = StringComparer.CurrentCultureIgnoreCase;
+                _view.Sort((a, b) =>
+                {
+                    int c = a.SortIsNum && b.SortIsNum ? a.SortNum.CompareTo(b.SortNum) : cmp.Compare(a.SortStr, b.SortStr);
+                    return asc ? c : -c;
+                });
+            }
+            for (int k = 0; k < _view.Count; k++) _view[k].ViewIndex = k;
+            if (IsHandleCreated) Invalidate();
         }
 
         ListViewItem MakeItem(Row r)
@@ -373,17 +479,6 @@ namespace SelectOR
             for (int i = 1; i < r.Cells.Length; i++) it.SubItems.Add(r.Cells[i] ?? "");
             r.Item = it;
             return it;
-        }
-
-        int InsertPos(Row r)
-        {
-            for (int i = 0; i < Items.Count; i++)
-            {
-                if (!(Items[i].Tag is Row other)) continue;
-                int c = CompareCells(r, other, _sortCol);
-                if (_sortAsc ? c < 0 : c > 0) return i;
-            }
-            return Items.Count;
         }
 
         bool PassesFilter(Row r)
@@ -518,8 +613,9 @@ namespace SelectOR
         {
             if (idx == _hoverItem) return;
             int old = _hoverItem; _hoverItem = idx;
-            if (old >= 0 && old < Items.Count) Invalidate(Items[old].Bounds);
-            if (idx >= 0 && idx < Items.Count) Invalidate(Items[idx].Bounds);
+            int n = VirtualListSize;
+            try { if (old >= 0 && old < n) Invalidate(GetItemRect(old)); } catch { }
+            try { if (idx >= 0 && idx < n) Invalidate(GetItemRect(idx)); } catch { }
         }
 
         void OnDrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
@@ -543,6 +639,23 @@ namespace SelectOR
         {
           try {
             var row = e.Item.Tag as Row;
+            if (row == null)
+            {
+                // Fila de aviso («Cargando…», «Elige una composición…»): el texto ocupa la fila entera, como
+                // antes de la lista virtual. Cada columna pinta su trozo (recortado a su celda).
+                using (var b = new SolidBrush(RowA)) e.Graphics.FillRectangle(b, e.Bounds);
+                using (var lp = new Pen(SepColor)) e.Graphics.DrawLine(lp, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+                var c0 = _cols.Count > 0 ? _cols[0] : null;
+                var mflags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.PreserveGraphicsClipping
+                             | (c0 != null && c0.Align == HorizontalAlignment.Right ? TextFormatFlags.Right
+                                : c0 != null && c0.Align == HorizontalAlignment.Center ? TextFormatFlags.HorizontalCenter : TextFormatFlags.Left);
+                var full = new Rectangle(0, e.Bounds.Top, Math.Max(e.Bounds.Right, ClientSize.Width), e.Bounds.Height);
+                var state = e.Graphics.Save();
+                e.Graphics.SetClip(e.Bounds);
+                TextRenderer.DrawText(e.Graphics, e.Item.Text ?? "", Font, Rectangle.Inflate(full, -9, 0), Theme.Subtle, mflags);
+                e.Graphics.Restore(state);
+                return;
+            }
             bool sel = e.Item.Selected && row != null;
             bool hover = e.ItemIndex == _hoverItem && row != null;
             Color rowBg = sel ? SelBg : hover ? HoverBg : (e.ItemIndex % 2 == 0 ? RowA : RowB);

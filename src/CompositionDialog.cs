@@ -159,7 +159,13 @@ namespace SelectOR
 
         static ShapeGeom SafeBuild(string model)
         {
-            try { return ShapeRenderer.BuildGeometry(model); } catch { return null; }
+            try
+            {
+                var g = ShapeRenderer.BuildGeometry(model);
+                try { ShapeRenderer.PrefetchTextures(g); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
+                return g;
+            }
+            catch { return null; }
         }
 
         void Compose(List<Car> cars, int missing)

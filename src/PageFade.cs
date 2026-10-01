@@ -23,6 +23,12 @@ namespace SelectOR
         [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
         const uint PW_RENDERFULLCONTENT = 2;
+        [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+        [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr hwnd, IntPtr rect, IntPtr rgn, uint flags);
+        [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int rop);
+        const uint RDW_UPDATENOW = 0x0100, RDW_ALLCHILDREN = 0x0080;
+        const int SRCCOPY = 0x00CC0020;
 
         Bitmap _shot;
         Rectangle _src;                 // trozo de la ventana que ocupa la sección
@@ -56,7 +62,52 @@ namespace SelectOR
             catch { Stop(); }
         }
 
+        // Rápida: se pinta YA lo pendiente de la sección y de sus controles (también las tablas) y se copian
+        // sus píxeles, que acaban de dibujarse en la superficie de la ventana. Unos pocos ms frente a los
+        // ~50 ms de volver a renderizar la ventana entera con PrintWindow.
         bool Capture(Control page)
+        {
+            try { if (CaptureFast(page)) return true; } catch { }
+            return CaptureFull(page);
+        }
+
+        bool CaptureFast(Control page)
+        {
+            var form = page.FindForm();
+            if (form == null || !form.IsHandleCreated || !form.Visible || form.WindowState == FormWindowState.Minimized) return false;
+            int w = page.ClientSize.Width, h = page.ClientSize.Height;
+            if (w < 8 || h < 8) return false;
+            RedrawWindow(page.Handle, IntPtr.Zero, IntPtr.Zero, RDW_UPDATENOW | RDW_ALLCHILDREN);
+            var origin = form.PointToClient(page.PointToScreen(Point.Empty));
+            var bmp = new Bitmap(w, h, PixelFormat.Format32bppRgb);
+            bool ok;
+            using (var g = Graphics.FromImage(bmp))
+            {
+                IntPtr dst = g.GetHdc();
+                IntPtr src = GetDC(form.Handle);
+                try { ok = src != IntPtr.Zero && BitBlt(dst, 0, 0, w, h, src, origin.X, origin.Y, SRCCOPY); }
+                finally { if (src != IntPtr.Zero) ReleaseDC(form.Handle, src); g.ReleaseHdc(dst); }
+            }
+            if (!ok || LooksBlank(bmp)) { bmp.Dispose(); return false; }
+            _shot = bmp;
+            _src = new Rectangle(0, 0, w, h);
+            return true;
+        }
+
+        // ¿Imagen vacía (todo negro)? Se miran unos pocos puntos repartidos.
+        static bool LooksBlank(Bitmap b)
+        {
+            int nonBlack = 0;
+            for (int yy = 1; yy <= 5; yy++)
+                for (int xx = 1; xx <= 5; xx++)
+                {
+                    var c = b.GetPixel(b.Width * xx / 6, b.Height * yy / 6);
+                    if (c.R + c.G + c.B > 12) nonBlack++;
+                }
+            return nonBlack < 3;
+        }
+
+        bool CaptureFull(Control page)
         {
             var form = page.FindForm();
             if (form == null || !form.IsHandleCreated) return false;

@@ -184,6 +184,7 @@ namespace SelectOR
         // Estado del render 3D rotatable del preview de Flota (igual que el de Exploración).
         ShapeGeom _fleetGeom; float _fleetYaw, _fleetPitch; bool _fleetFlip; string _fleetPrevEngPath;
         System.Windows.Forms.Timer _fleetRerender;
+        System.Windows.Forms.Timer _fleetOwnRerender;   // vehículo de la flota: render tras cambiar de tamaño
         readonly HashSet<string> _fleetRenderingShapes = new(StringComparer.OrdinalIgnoreCase);
         // --- Flota (vehículos propios): vista 3D + ficha del vehículo seleccionado (como Compra) ---
         TrainPreviewPanel _fleetOwnPreview; Label _fleetOwnTitle, _voKind, _voProp, _voMaint, _voEstado, _voCap, _voTraction; RoundButton _fleetOwnCompBtn;
@@ -213,6 +214,7 @@ namespace SelectOR
         {
             public string Name, Folder, Path;
             public int UnitCars;                      // >1 si es un automotor de formación fija
+            public bool Extra;                        // fuera del catálogo: está porque la empresa la tiene
             public override string ToString() => Name;
         }
         bool _buyByMachine = true;                       // vista por defecto
@@ -4169,30 +4171,44 @@ namespace SelectOR
 
         // Insignia: pastilla con icono a color (blanco sobre disco del color) + texto.
         // Conseguida = disco a color + fondo teñido + texto claro; bloqueada = disco gris + texto atenuado.
-        static Control BadgeChip(string icon, string text, bool earned, Color color)
+        static Control BadgeChip(string icon, string text, bool earned, Color color) => new BadgeChipControl(icon, text, earned, color);
+
+        sealed class BadgeChipControl : Control
         {
-            var dotColor = earned ? color : Blend(Theme.Surface2, Theme.Bg, 0.3f);
-            var card = new Card
+            const int H = 40, PadL = 7, DotCol = 30, Dot = 26, Gap = 6, PadR = 12, Radius = 11;
+            static readonly Font FBold = Theme.Font(9f, FontStyle.Bold), FReg = Theme.Font(9f, FontStyle.Regular);
+            static Font _emoji;
+            static Font Emoji => _emoji ??= new Font("Segoe UI Emoji", Dot * 0.46f * Theme.DpiComp);
+            readonly string _icon, _text; readonly bool _earned; readonly Color _fill, _border, _dot, _fore;
+
+            public BadgeChipControl(string icon, string text, bool earned, Color color)
             {
-                Fill = earned ? Blend(Theme.Surface, color, 0.14f) : Theme.Surface,
-                BorderColor = earned ? Blend(color, Theme.Bg, 0.15f) : Blend(Theme.Surface, Theme.Bg, 0.35f),
-                Radius = 11, AutoSize = false, Height = 40, Margin = new Padding(0, 0, 8, 8), Padding = new Padding(7, 6, 12, 6)
-            };
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Color.Transparent };
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            var dot = IconDot(icon, dotColor, 26); dot.Anchor = AnchorStyles.Left;
-            var lbl = new Label
+                _icon = icon; _text = text; _earned = earned;
+                _dot = earned ? color : Blend(Theme.Surface2, Theme.Bg, 0.3f);
+                _fill = earned ? Blend(Theme.Surface, color, 0.14f) : Theme.Surface;
+                _border = earned ? Blend(color, Theme.Bg, 0.15f) : Blend(Theme.Surface, Theme.Bg, 0.35f);
+                _fore = earned ? Theme.Text : Theme.Subtle;
+                SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+                Margin = new Padding(0, 0, 8, 8);
+                Size = new Size(DotCol + Gap + TextRenderer.MeasureText(text, earned ? FBold : FReg).Width + 24, H);
+                AccessibleName = text;
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
             {
-                Text = text, AutoSize = true, Anchor = AnchorStyles.Left,
-                ForeColor = earned ? Theme.Text : Theme.Subtle,
-                Font = Theme.Font(9f, earned ? FontStyle.Bold : FontStyle.Regular),
-                Margin = new Padding(6, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft
-            };
-            grid.Controls.Add(dot, 0, 0); grid.Controls.Add(lbl, 1, 0);
-            card.Controls.Add(grid);
-            card.Width = 30 + 6 + TextRenderer.MeasureText(text, lbl.Font).Width + 24;
-            return card;
+                var g = e.Graphics; var r = ClientRectangle;
+                using (var bg = new SolidBrush(Theme.ResolveBg(this))) g.FillRectangle(bg, r);
+                Theme.FillRound(g, r, Radius, _fill);
+                Theme.DrawRoundBorder(g, r, Radius, _border);
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var dr = new Rectangle(PadL, (H - Dot) / 2, Dot, Dot);
+                using (var path = Theme.Round(dr, Dot / 3)) using (var b = new SolidBrush(_dot)) g.FillPath(b, path);
+                TextRenderer.DrawText(g, _icon, Emoji, dr, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                int tx = PadL + DotCol + Gap;
+                TextRenderer.DrawText(g, _text, _earned ? FBold : FReg, new Rectangle(tx, 0, Math.Max(1, Width - tx - 4), H), _fore,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+            }
         }
 
         // ============================ Usuarios (solo superadmin) ============================
@@ -4431,7 +4447,9 @@ namespace SelectOR
             _fleetOwnPreview.Dragged += OnFleetOwnDrag;
             _fleetOwnPreview.ResetRequested += OnFleetOwnReset;
             _fleetOwnPreview.Zoomed += () => { if (_fleetOwnGeom != null) RenderFleetOwnLive(); };
-            _fleetOwnPreview.Resize += (s, e) => { if (_fleetOwnGeom != null) RenderFleetOwnLive(); };
+            _fleetOwnRerender = new System.Windows.Forms.Timer { Interval = 140 };
+            _fleetOwnRerender.Tick += (s, e) => { _fleetOwnRerender.Stop(); RenderFleetOwnLive(); };
+            _fleetOwnPreview.Resize += (s, e) => { if (_fleetOwnGeom != null) { _fleetOwnRerender.Stop(); _fleetOwnRerender.Start(); } };
             fviewport.Controls.Add(_fleetOwnPreview);
             fright.Controls.Add(fviewport, 0, 0);
 
@@ -4517,10 +4535,9 @@ namespace SelectOR
             // tasación y el aviso de «ya la tienes» trabajan sobre los consists del contenido.
             _fleetConsistList = MakeListBox(Theme.Surface2, 30);
 
+            // Altura FIJA: todas las filas son máquinas (ya no hay cabeceras por carpeta). Con altura variable,
+            // Windows pedía la altura de cada una de las miles de filas al rellenar la lista.
             _fleetEngList = MakeListBox(Theme.Surface2, 46);
-            _fleetEngList.DrawMode = DrawMode.OwnerDrawVariable;
-            _fleetEngList.MeasureItem += (s, e) =>
-                e.ItemHeight = (e.Index >= 0 && e.Index < _fleetEngList.Items.Count && _fleetEngList.Items[e.Index] is BuyGroupHeader) ? 34 : 46;
             _fleetEngList.DrawItem += DrawBuyMachineItem;
             _fleetEngList.SelectedIndexChanged += (s, e) =>
             {
@@ -5263,8 +5280,18 @@ namespace SelectOR
         // Los trenes (.con) los tiene cada uno distintos; las máquinas suelen ser las mismas. Aquí se
         // lista UNA fila por modelo: la cabeza de cada locomotora/automotor del contenido (los coches
         // motrices internos de un automotor no se listan: van incluidos al comprar la cabeza).
+        // Catálogo de Compra: solo se recalcula si cambian las máquinas del contenido o las formaciones
+        // (antes se rehacía, con su lista de miles de filas, cada vez que se abría Flota o Compra).
+        object _buySrcEngs, _buySrcUnits;
+
         void PopulateBuyMachines()
         {
+            if (_buyMachines.Count > 0 && ReferenceEquals(_buySrcEngs, _fleetEngs) && ReferenceEquals(_buySrcUnits, _engUnits))
+            {
+                if (_fleetEngList != null && _fleetEngList.Items.Count == 0) FilterBuyList();
+                return;
+            }
+            _buySrcEngs = _fleetEngs; _buySrcUnits = _engUnits;
             _buyMachines.Clear();
             try
             {
@@ -5297,7 +5324,10 @@ namespace SelectOR
         // flota, tienes que verla con su «en tu flota · N».
         void EnsureOwnedMachinesListed()
         {
-            if (_fleetEngList == null || _fleetOwnedCount.Count == 0) return;
+            if (_fleetEngList == null) return;
+            // Las añadidas por estar en la flota se recalculan cada vez (si ya no las tienes, se quitan).
+            _buyMachines.RemoveAll(m => m.Extra);
+            if (_fleetOwnedCount.Count == 0) return;
             var have = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var m in _buyMachines) { have.Add(ModelKey(m.Folder, m.Name)); have.Add(ModelKey("", m.Name)); }
 
@@ -5318,7 +5348,7 @@ namespace SelectOR
                 if (path == null) continue;
                 var u = UnitOfEng(name);
                 bool head = u != null && string.Equals(u.Head, name, StringComparison.OrdinalIgnoreCase);
-                _buyMachines.Add(new BuyMachine { Name = name, Folder = folder, Path = path, UnitCars = head ? u.Cars : 0 });
+                _buyMachines.Add(new BuyMachine { Name = name, Folder = folder, Path = path, UnitCars = head ? u.Cars : 0, Extra = true });
                 added = true;
             }
             if (!added) return;
@@ -5368,7 +5398,7 @@ namespace SelectOR
             _buyGrouped.Clear();
             _fleetEngList.BeginUpdate();
             _fleetEngList.Items.Clear();
-            foreach (var m in shown) _fleetEngList.Items.Add(m);
+            _fleetEngList.Items.AddRange(shown.ToArray());
             _fleetEngList.EndUpdate();
             // La lista se rehace con objetos nuevos: la máquina elegida se reconoce por nombre y carpeta.
             if (prev != null)
@@ -5497,6 +5527,7 @@ namespace SelectOR
             {
                 ShapeGeom geom = null;
                 try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
                 if (!IsHandleCreated) { lock (_fleetRenderingShapes) _fleetRenderingShapes.Remove(engPath); return; }
                 try
                 {
@@ -6658,6 +6689,7 @@ namespace SelectOR
             {
                 ShapeGeom geom = null;
                 try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
                 if (!IsHandleCreated) { lock (_fleetRenderingShapes) _fleetRenderingShapes.Remove(engPath); return; }
                 BeginInvoke((Action)(() =>
                 {
@@ -6736,6 +6768,7 @@ namespace SelectOR
             {
                 ShapeGeom geom = null;
                 try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
                 if (!IsHandleCreated) { lock (_fleetOwnRendering) _fleetOwnRendering.Remove(engPath); return; }
                 BeginInvoke((Action)(() =>
                 {
@@ -8627,7 +8660,7 @@ namespace SelectOR
 
         static ListBox EmpList()
         {
-            var lb = new ListBox
+            var lb = new BufferedListBox
             {
                 Dock = DockStyle.Fill, BorderStyle = BorderStyle.None,
                 BackColor = Theme.Surface2, ForeColor = Theme.Text,

@@ -49,7 +49,7 @@ namespace SelectOR
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
             var header = new Label { Text = "  " + I18n.T("Partidas guardadas"), Dock = DockStyle.Top, Height = 42, Font = Theme.Font(13f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
 
-            _list = new ListBox
+            _list = new BufferedListBox
             {
                 Dock = DockStyle.Fill, BackColor = Theme.Surface, ForeColor = Theme.Text,
                 BorderStyle = BorderStyle.None, IntegralHeight = false,

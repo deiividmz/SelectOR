@@ -1243,7 +1243,7 @@ namespace SelectOR
 
         ListBox MakeListBox(Color bg, int itemHeight)
         {
-            var lb = new ListBox
+            var lb = new BufferedListBox
             {
                 BackColor = bg,
                 ForeColor = Theme.Text,
@@ -1460,6 +1460,8 @@ namespace SelectOR
             int previous = _activePage;
             _activePage = i;
             for (int k = 0; k < _pills.Length; k++) { _pills[k].Active = (k == i); _pills[k].Invalidate(); }
+            _root?.SuspendLayout();
+            _pageHost.SuspendLayout();
             _pageRuta.Visible = i == 0;
             _pageActividad.Visible = i == 1;
             _pageExplora.Visible = i == 2;
@@ -1468,6 +1470,8 @@ namespace SelectOR
             _pageEditor.Visible = i == PageEditor;
             _pageEmpresas.Visible = i == PageEmpresas;
             ApplySidebarForPage(i);   // Editor y Empresas: sin columna RUTAS (todo el ancho para el contenido)
+            _pageHost.ResumeLayout(false);
+            _root?.ResumeLayout(true);    // una sola maquetación con la página y el ancho ya definitivos
             _btnPlay.Visible = i != 0 && i != 4 && i != PageEditor && i != PageEmpresas;   // estas pestañas no usan CONDUCIR
             _btnConnect.Visible = i == 4;                                                  // Multijugador: CONECTAR
             UpdateDutyHostVisible();   // barra "de servicio" en Empresas (solo si perteneces a alguna empresa)
@@ -1726,16 +1730,19 @@ namespace SelectOR
             bool favOnly = _chkTrainFavOnly != null && _chkTrainFavOnly.Checked;
             string coFilter = SelectedCompany(_cboTrainCompany);
             var prev = _lstConsists.SelectedItem as TrainItem;
-            _lstConsists.BeginUpdate();
-            _lstConsists.Items.Clear();
+            var shown = new List<object>(_consistsAll.Count);
             foreach (var c in _consistsAll)
             {
                 if (favOnly && !_prefs.FavoriteTrains.Contains(c.FilePath)) continue;
                 if (q.Length > 0 && (c.Name == null || c.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0)) continue;
                 if (coFilter != null && !HasCo(ConsistCompanies(c), coFilter)) continue;
-                _lstConsists.Items.Add(c);
+                shown.Add(c);
             }
+            _lstConsists.BeginUpdate();
+            _lstConsists.Items.Clear();
+            _lstConsists.Items.AddRange(shown.ToArray());
             _lstConsists.EndUpdate();
+            WarmConsistListSoon();
             if (prev != null)
                 for (int i = 0; i < _lstConsists.Items.Count; i++)
                     if (((TrainItem)_lstConsists.Items[i]).FilePath == prev.FilePath) { _lstConsists.SelectedIndex = i; break; }
@@ -1743,6 +1750,25 @@ namespace SelectOR
                 for (int i = 0; i < _lstConsists.Items.Count; i++)
                     if (((TrainItem)_lstConsists.Items[i]).FilePath == _prefs.LastConsist) { _lstConsists.SelectedIndex = i; break; }
             if (_lstConsists.SelectedIndex < 0 && _lstConsists.Items.Count > 0) _lstConsists.SelectedIndex = 0;
+        }
+
+        // Mientras la pestaña está cerrada, la lista no tiene ventana nativa y Windows se guarda los miles de
+        // trenes para volcarlos al abrirla por primera vez. Se crea poco después de llenarla, con la interfaz
+        // libre, y así abrir Exploración es inmediato.
+        System.Windows.Forms.Timer _consistWarm;
+        void WarmConsistListSoon()
+        {
+            if (_lstConsists == null || _lstConsists.IsHandleCreated || !IsHandleCreated) return;
+            if (_consistWarm == null)
+            {
+                _consistWarm = new System.Windows.Forms.Timer { Interval = 1500 };
+                _consistWarm.Tick += (s, e) =>
+                {
+                    _consistWarm.Stop();
+                    try { if (!_lstConsists.IsHandleCreated && IsHandleCreated) _ = _lstConsists.Handle; } catch { }
+                };
+            }
+            _consistWarm.Stop(); _consistWarm.Start();
         }
 
         void RefreshPathList()
