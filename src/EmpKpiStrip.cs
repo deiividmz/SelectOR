@@ -109,8 +109,20 @@ namespace SelectOR
             ColorText.DrawCells(g, icons, _fIc, Theme.Text, ClientRectangle);
         }
 
+        string _sig;
         public void SetItems(List<Kpi> items, bool fill)
         {
+            // Lo mismo que ya se ve: no se repinta (se llama al abrir cada sección y al llegar cada dato).
+            var sb = new System.Text.StringBuilder(fill ? "F" : "f");
+            if (items != null) foreach (var k in items)
+            {
+                sb.Append('|').Append(k.Icon).Append('·').Append(k.Caption).Append('·').Append(k.Value).Append('·').Append(k.Sub)
+                  .Append('·').Append(k.Tint.ToArgb()).Append('·').Append(k.ValueColor.ToArgb());
+                if (k.Chips != null) foreach (var c in k.Chips) sb.Append('·').Append(c.Item1).Append(c.Item2.ToArgb());
+            }
+            string sig = sb.ToString();
+            if (sig == _sig && Items != null) return;
+            _sig = sig;
             Items = items; Fill = fill;
             int h = PreferredHeight; if (Height != h) Height = h;
             Invalidate();

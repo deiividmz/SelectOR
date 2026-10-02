@@ -43,6 +43,7 @@ namespace SelectOR
         public float CabHudScale { get; set; } = 1f;
         // HUD del chat de empresa: si lo dejaste abierto, dónde, su tamaño y si estaba plegado.
         public bool ChatHudOn { get; set; }
+        public bool TrainListView { get; set; }        // Exploración: trenes en lista (true) o en tarjetas
         public bool NotifySound { get; set; } = true;   // sonido suave con los avisos y los mensajes nuevos del chat
         public int ChatHudX { get; set; } = -1;      // -1 = abajo a la derecha
         public int ChatHudY { get; set; } = -1;

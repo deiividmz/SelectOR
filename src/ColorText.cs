@@ -55,15 +55,60 @@ namespace SelectOR
         }
 
         // Mide un texto con saltos de línea en «maxWidth» píxeles (como TextRenderer con WordBreak).
+        // Rendimiento: las medidas se recuerdan y cada texto ya dibujado se guarda como imagen (con tope de
+        // memoria): al repintar solo se copia. Antes cada repintado medía y dibujaba con DirectWrite otra vez.
+        const int MeasureMax = 4000, ImgMaxCount = 900;
+        const long ImgMaxPixels = 6_000_000;   // ~24 MB como mucho
+        static readonly Dictionary<(string, string, float, int, int), Size> _measure = new();
+        sealed class Img { public Bitmap Bmp; public LinkedListNode<(string, string, float, int, int, int, int, bool)> Node; }
+        static readonly Dictionary<(string, string, float, int, int, int, int, bool), Img> _imgs = new();
+        static readonly LinkedList<(string, string, float, int, int, int, int, bool)> _lru = new();
+        static long _imgPixels;
+
         public static Size Measure(Graphics g, string text, Font font, int maxWidth)
         {
-            if (Available) { try { return Dw.Measure(g, text, font, maxWidth); } catch { _ok = false; } }
-            return TextRenderer.MeasureText(g, text, font, new Size(maxWidth, 0), Flags);
+            text ??= "";
+            var key = (text, font.FontFamily.Name, font.SizeInPoints * g.DpiY / 72f, (int)font.Style, maxWidth);
+            lock (_measure)
+                if (_measure.TryGetValue(key, out var hit)) return hit;
+            Size sz;
+            if (Available) { try { sz = Dw.Measure(g, text, font, maxWidth); goto done; } catch { _ok = false; } }
+            sz = TextRenderer.MeasureText(g, text, font, new Size(maxWidth, 0), Flags);
+            done:
+            lock (_measure)
+            {
+                if (_measure.Count >= MeasureMax) _measure.Clear();
+                _measure[key] = sz;
+            }
+            return sz;
         }
 
         public static void Draw(Graphics g, string text, Font font, Rectangle r, Color color, bool right = false)
         {
-            if (Available) { try { Dw.Draw(g, text, font, r, color, right); return; } catch { _ok = false; } }
+            if (r.Width <= 0 || r.Height <= 0) return;
+            if (Available)
+            {
+                try
+                {
+                    var key = (text ?? "", font.FontFamily.Name, font.SizeInPoints * g.DpiY / 72f, (int)font.Style, color.ToArgb(), r.Width, r.Height, right);
+                    if (!_imgs.TryGetValue(key, out var img))
+                    {
+                        var bmp = Dw.Render(g, text, font, r.Size, color, right);
+                        if (bmp == null) { Dw.Draw(g, text, font, r, color, right); return; }
+                        img = new Img { Bmp = bmp, Node = _lru.AddLast(key) };
+                        _imgs[key] = img; _imgPixels += (long)r.Width * r.Height;
+                        while ((_imgs.Count > ImgMaxCount || _imgPixels > ImgMaxPixels) && _lru.First != null && _lru.First != img.Node)
+                        {
+                            var old = _lru.First.Value; _lru.RemoveFirst();
+                            if (_imgs.TryGetValue(old, out var o)) { _imgPixels -= (long)o.Bmp.Width * o.Bmp.Height; o.Bmp.Dispose(); _imgs.Remove(old); }
+                        }
+                    }
+                    else if (img.Node.Next != null) { _lru.Remove(img.Node); _lru.AddLast(img.Node); }
+                    g.DrawImageUnscaled(img.Bmp, r.X, r.Y);
+                    return;
+                }
+                catch { _ok = false; }
+            }
             TextRenderer.DrawText(g, text, font, r, color, Flags | (right ? TextFormatFlags.Right : 0));
         }
 
@@ -84,6 +129,7 @@ namespace SelectOR
             static SharpDX.Direct2D1.Factory _d2d;
             static SharpDX.DirectWrite.Factory _dw;
             static SharpDX.Direct2D1.DeviceContextRenderTarget _rt;
+            static SharpDX.WIC.ImagingFactory _wic;
             static readonly Dictionary<(string, float, bool, bool), SharpDX.DirectWrite.TextFormat> _formats = new();
 
             [MethodImpl(MethodImplOptions.NoInlining)]
@@ -147,6 +193,34 @@ namespace SelectOR
                     _rt.EndDraw();
                 }
                 finally { g.ReleaseHdc(hdc); }
+            }
+
+            // El texto sobre fondo transparente (para guardarlo y copiarlo en cada repintado). null si no se puede.
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            public static Bitmap Render(Graphics g, string text, Font font, Size size, Color color, bool right)
+            {
+                _wic ??= new SharpDX.WIC.ImagingFactory();
+                using var wb = new SharpDX.WIC.Bitmap(_wic, size.Width, size.Height, SharpDX.WIC.PixelFormat.Format32bppPBGRA, SharpDX.WIC.BitmapCreateCacheOption.CacheOnLoad);
+                var props = new SharpDX.Direct2D1.RenderTargetProperties(
+                    SharpDX.Direct2D1.RenderTargetType.Default,
+                    new SharpDX.Direct2D1.PixelFormat(SharpDX.DXGI.Format.B8G8R8A8_UNorm, SharpDX.Direct2D1.AlphaMode.Premultiplied),
+                    96, 96, SharpDX.Direct2D1.RenderTargetUsage.None, SharpDX.Direct2D1.FeatureLevel.Level_DEFAULT);
+                using (var rt = new SharpDX.Direct2D1.WicRenderTarget(_d2d, wb, props))
+                using (var layout = new SharpDX.DirectWrite.TextLayout(_dw, text ?? "", Format(g, font), size.Width, Math.Max(size.Height, 1)))
+                {
+                    if (right) layout.TextAlignment = SharpDX.DirectWrite.TextAlignment.Trailing;
+                    rt.BeginDraw();
+                    rt.Clear(new SharpDX.Mathematics.Interop.RawColor4(0, 0, 0, 0));
+                    rt.TextAntialiasMode = SharpDX.Direct2D1.TextAntialiasMode.Grayscale;   // con transparencia no cabe ClearType
+                    using (var brush = new SharpDX.Direct2D1.SolidColorBrush(rt, new SharpDX.Mathematics.Interop.RawColor4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f)))
+                        rt.DrawTextLayout(new SharpDX.Mathematics.Interop.RawVector2(0, 0), layout, brush, SharpDX.Direct2D1.DrawTextOptions.EnableColorFont);
+                    rt.EndDraw();
+                }
+                var bmp = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                var bd = bmp.LockBits(new Rectangle(0, 0, size.Width, size.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                try { wb.CopyPixels(bd.Stride, bd.Scan0, bd.Stride * size.Height); }
+                finally { bmp.UnlockBits(bd); }
+                return bmp;
             }
 
             [MethodImpl(MethodImplOptions.NoInlining)]

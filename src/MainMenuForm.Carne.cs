@@ -1,12 +1,13 @@
 // Carné por puntos del maquinista (carne-por-puntos.sql).
-//  · Durante el servicio SelectOR vigila tres cosas que la API de Open Rails deja ver:
+//  · Durante el servicio SelectOR vigila lo que la API de Open Rails deja ver:
 //      A1 salto de posición (el tren aparece a más de 1 km en un sondeo, a más de 400 km/h),
 //      A3 tiempo acelerado (la hora del juego corre más de 1,5 veces más rápido que la real durante 60 s),
 //      B6/B7 exceso de velocidad sobre el límite del Track Monitor durante 30 s
-//            (leve: más de un 10 % y más de 5 km/h por encima; grave: más de un 30 %).
+//            (leve: más de un 10 % y más de 5 km/h por encima; grave: más de un 30 %),
+//      A4 piloto automático (Open Rails lo enseña en su HUD, /API/HUD/0): basta con usarlo un momento.
 //    A2 (velocidad media imposible) la decide el servidor con su propio reloj al cerrar el servicio.
 //  · Al registrar el servicio se envía lo detectado (report_infractions). El SERVIDOR aplica las reglas:
-//    puntos, tope de 6 por servicio, suspensión… A1 y A3 anulan el servicio.
+//    puntos, tope de 6 por servicio, suspensión… A1, A3 y A4 anulan el servicio.
 //  · Todas restan los puntos al momento. B6 y B7 quedan pendientes de revisión: el superadministrador
 //    las confirma o las anula (se devuelven los puntos) en «Revisión», con las de todas las empresas.
 //    En los viajes cortos (menos de 3 km o de 5 minutos) no cuenta ninguna. Mi perfil muestra el carné.
@@ -38,7 +39,7 @@ namespace SelectOR
 
         public static string Code(string code) => code switch
         {
-            "jump" => "A1", "speed_avg" => "A2", "time_accel" => "A3",
+            "jump" => "A1", "speed_avg" => "A2", "time_accel" => "A3", "autopilot" => "A4",
             "overspeed" => "B6", "overspeed_grave" => "B7", "recovery" => "+1", _ => "—"
         };
 
@@ -47,6 +48,7 @@ namespace SelectOR
             "jump" => "Salto de posición",
             "speed_avg" => "Velocidad media imposible",
             "time_accel" => "Tiempo acelerado",
+            "autopilot" => "Piloto automático",
             "overspeed" => "Exceso de velocidad",
             "overspeed_grave" => "Exceso de velocidad grave",
             "recovery" => "Recuperación de un punto",
@@ -88,6 +90,8 @@ namespace SelectOR
                     return double.IsNaN(N("avg_kmh")) ? "" : string.Format(I18n.T("media de {0} km/h ({1} km)"), F(N("avg_kmh")), F(N("km"), "N1"));
                 case "time_accel":
                     return double.IsNaN(N("seconds")) ? "" : string.Format(I18n.T("{0} s acelerado (hasta ×{1})"), F(N("seconds")), F(N("factor"), "N1"));
+                case "autopilot":
+                    return double.IsNaN(N("seconds")) ? "" : string.Format(I18n.T("{0} min y {1} km con el piloto automático"), F(N("seconds") / 60.0, "N0"), F(N("km"), "N1"));
                 case "overspeed":
                 case "overspeed_grave":
                     return double.IsNaN(N("max_kmh")) ? "" : string.Format(I18n.T("{0} km/h con límite {1} · {2} s"), F(N("max_kmh")), F(N("limit_kmh")), F(N("seconds")));
@@ -179,9 +183,65 @@ namespace SelectOR
 
         bool InfrActive => _pendingServiceId != null && _svcClockUtc != null;
 
+        // ---- A4 · Piloto automático ----
+        // Open Rails pone una fila «Autopilot» en su HUD (/API/HUD/0) mientras conduce él. Se mira cada ~1,5 s:
+        // basta una lectura para darlo por puesto (cualquier uso anula el servicio) y hacen falta dos para darlo
+        // por quitado. La infracción se anota y se avisa la primera vez; sus metros y segundos se apuntan aparte,
+        // solo como detalle de la infracción.
+        bool _apOn, _apBusy, _apTold;
+        int _apVotes;
+        double _apMeters, _apSeconds;
+        DateTime _apLastPollUtc;
+        Dictionary<string, object> _apDetail;
+        static readonly string[] AutopilotWords = { "autopilot", "auto pilot", "piloto automático", "piloto automatico", "pilote automatique", "autopilota", "pilota automatico", "autopiloot" };
+
+        // ¿Trae el HUD de Open Rails la fila del piloto automático? (los «???» del final son marcas de color)
+        static bool HudHasAutopilot(string json)
+        {
+            try
+            {
+                using var d = JsonDocument.Parse(json);
+                if (!d.RootElement.TryGetProperty("commonTable", out var t) || !t.TryGetProperty("values", out var vals) || vals.ValueKind != JsonValueKind.Array) return false;
+                foreach (var v in vals.EnumerateArray())
+                {
+                    if (v.ValueKind != JsonValueKind.String) continue;
+                    string s = (v.GetString() ?? "").Trim().TrimEnd('?', '!', '%', '$', ' ').ToLowerInvariant();
+                    foreach (var w in AutopilotWords) if (s == w || s.StartsWith(w + " ") || s.StartsWith(w + ":")) return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        async Task AutopilotPoll()
+        {
+            if (_apBusy || _kmHttp == null || _pendingServiceId == null || (DateTime.UtcNow - _apLastPollUtc).TotalSeconds < 1.4) return;
+            _apBusy = true; _apLastPollUtc = DateTime.UtcNow;
+            try
+            {
+                bool on = HudHasAutopilot(await _kmHttp.GetStringAsync("/API/HUD/0"));
+                if (on == _apOn) _apVotes = 0;
+                else if (on || ++_apVotes >= 2) { _apOn = on; _apVotes = 0; }
+                if (_apOn && !_apTold) OnAutopilotOn();   // también si ya iba puesto al empezar a contar el servicio
+                if (_apDetail != null) { _apDetail["seconds"] = (int)Math.Round(_apSeconds); _apDetail["km"] = Math.Round(_apMeters / 1000.0, 1); }
+            }
+            catch { }
+            finally { _apBusy = false; }
+        }
+
+        void OnAutopilotOn()
+        {
+            if (!InfrActive || _apTold) return;
+            _apTold = true;
+            _apDetail = new Dictionary<string, object> { ["seconds"] = 0, ["km"] = 0.0 };
+            _infrItems.Add(("autopilot", _apDetail));
+            InfrNotify("autopilot", Tr("Open Rails está conduciendo el tren con el piloto automático."));
+        }
+
         // Servicio nuevo: nada detectado todavía.
         void InfrReset()
         {
+            _apOn = _apTold = false; _apVotes = 0; _apMeters = _apSeconds = 0; _apDetail = null;
             _infrItems.Clear();
             _infrJumpDone = _infrAccelDone = false;
             _infrAccelS = _infrAccelMax = 0;
@@ -278,9 +338,9 @@ namespace SelectOR
         {
             try
             {
-                int pts = code switch { "jump" => 6, "time_accel" => 3, "overspeed" => 1, "overspeed_grave" => 3, _ => 0 };
+                int pts = code switch { "jump" => 6, "time_accel" => 3, "overspeed" => 1, "overspeed_grave" => 3, "autopilot" => 5, _ => 0 };
                 string pp = pts + " " + Tr(pts == 1 ? "punto" : "puntos");
-                string then = code == "jump" || code == "time_accel"
+                string then = code == "jump" || code == "time_accel" || code == "autopilot"
                     ? string.Format(Tr("El servicio no se registrará y restará {0} del carné (salvo en un viaje de menos de 3 km o 5 minutos)."), pp)
                     : string.Format(Tr("Si el servicio se registra, restará {0} del carné, pendiente de revisión."), pp);
                 var toast = new NotificationToast("⚠", Tr("Infracción") + " · " + Carne.Label(code), what + "\n" + then,
@@ -394,6 +454,8 @@ namespace SelectOR
                 l.Add(Tr("Salto de posición del tren (teletransporte): el servicio no se registra."));
             if (items.Exists(x => x.Code == "time_accel"))
                 l.Add(Tr("Conducción con el tiempo acelerado: el servicio no se registra."));
+            if (items.Exists(x => x.Code == "autopilot"))
+                l.Add(Tr("Conducción con el piloto automático de Open Rails: el servicio no se registra."));
             if (l.Count == 0) l.Add(Tr("Registro no válido: el servicio no se registra."));
             return l;
         }
@@ -501,7 +563,7 @@ namespace SelectOR
         // ---------------------------------------------------------------- Revisión (gerente / gestores)
         StyledTable _revList; Label _revMsg;
         readonly List<(string id, string status, string driver, string code)> _revRows = new();
-        static bool IsCodeA(string code) => code == "jump" || code == "speed_avg" || code == "time_accel";
+        static bool IsCodeA(string code) => code == "jump" || code == "speed_avg" || code == "time_accel" || code == "autopilot";
 
         Panel BuildReviewSubpanel()
         {
@@ -522,8 +584,8 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            // Todas · Pendientes (B6/B7 por revisar) · A1, A2 y A3 · B6 y B7
-            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3", "B6 · B7" }, i =>
+            // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7" }, i =>
             {
                 _revList.RowFilter = i == 1 ? cells => cells.Length > 0 && cells[^1] == Carne.StatusName("pending")
                                    : i == 2 ? cells => cells.Length > 3 && cells[3].StartsWith("A")

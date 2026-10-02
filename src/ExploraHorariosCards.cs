@@ -18,7 +18,7 @@ namespace SelectOR
     public sealed class TrainSpec
     {
         public string Traction = "", Service = "";
-        public double Kw, Kmh, Capacity;
+        public double Kw, Kmh, Capacity, MassT, LengthM;   // masa (t) y longitud (m) del tren completo
         public int Cars, Engines;
         public bool Freight, Automotor, Known;
     }
@@ -39,13 +39,19 @@ namespace SelectOR
         readonly Font _fT = Theme.Font(9.75f, FontStyle.Bold), _fTag = Theme.Font(7.25f, FontStyle.Bold), _fS = Theme.Font(8.25f), _fSB = Theme.Font(8.25f, FontStyle.Bold), _fStar = Theme.Font(11f, FontStyle.Bold), _fCo = Theme.Font(7.5f, FontStyle.Bold);
         public TrainCardGrid() { BackColor = Theme.Bg; }
         protected override void Dispose(bool disposing) { if (disposing) { _mem.Dispose(); foreach (var f in new[] { _fT, _fTag, _fS, _fSB, _fStar, _fCo }) f.Dispose(); } base.Dispose(disposing); }
+        // Tarjetas (cuadrícula) o lista (una fila por tren, más trenes a la vista).
+        bool _list;
+        public bool ListMode { get => _list; set { if (_list == value) return; _list = value; Relayout(); Invalidate(); } }
         protected override int MinCardW => Theme.Px(230);
-        protected override int CardH => Theme.Px(148);
+        protected override int MaxCols => _list ? 1 : 99;
+        protected override int CardH => _list ? Theme.Px(40) : Theme.Px(148);
+        protected override int Gap => _list ? Theme.Px(4) : base.Gap;
 
         public TrainSpec CachedSpec(object it) { string k = KeyOf?.Invoke(it); return k != null && _spec.TryGetValue(k, out var s) ? s : null; }
 
         protected override void PaintCard(Graphics g, int i, Rectangle rc, bool sel, bool hov)
         {
+            if (_list) { PaintRow(g, i, rc, sel, hov); return; }
             var it = Items[i];
             int rad = Theme.Px(12);
             Fill(g, rc, rad, sel ? CardPaint.Sel : hov ? Color.FromArgb(58, 62, 66) : Color.FromArgb(52, 56, 60));
@@ -97,6 +103,44 @@ namespace SelectOR
             }
         }
 
+        // Modo lista (sin vistas 2D, más ligera): ★ · nombre · tipo · datos · empresas
+        void PaintRow(Graphics g, int i, Rectangle rc, bool sel, bool hov)
+        {
+            var it = Items[i];
+            int rad = Theme.Px(9);
+            Fill(g, rc, rad, sel ? CardPaint.Sel : hov ? Color.FromArgb(58, 62, 66) : Color.FromArgb(48, 52, 56));
+            if (sel) Stroke(g, rc, rad, Theme.Accent);
+            else if (ShowFocus && i == SelectedIndex) Stroke(g, rc, rad, Theme.AccentHi, 1f);
+            int pad = Theme.Px(12), right = rc.Right - pad;
+            if (FavOf?.Invoke(it) == true)
+            {
+                TextRenderer.DrawText(g, "★", _fStar, new Rectangle(right - Theme.Px(20), rc.Y, Theme.Px(20), rc.Height), Theme.Gold, C1);
+                right -= Theme.Px(26);
+            }
+            int x = rc.X + pad, cy = rc.Y + (rc.Height - Theme.Px(20)) / 2;
+            string name = it.ToString();
+            int nameW = Math.Min(TW(name, _fT) + Theme.Px(4), Math.Max(Theme.Px(120), (int)((right - x) * 0.45)));
+            TextRenderer.DrawText(g, name, _fT, new Rectangle(x, rc.Y, nameW, rc.Height), Theme.Text, L1);
+            int cx = x + nameW + Theme.Px(12);
+            var sp = CachedSpec(it);
+            if (sp == null) { TextRenderer.DrawText(g, LblLoading, _fS, new Rectangle(cx, rc.Y, Math.Max(0, right - cx), rc.Height), Theme.Subtle, L1); return; }
+            if (sp.Known)
+            {
+                string t = sp.Freight ? LblFreight : LblPax;
+                var c = sp.Freight ? Color.FromArgb(251, 146, 60) : Color.FromArgb(120, 144, 226);
+                Pill(g, ref cx, cy, right, t, _fTag, c, Color.FromArgb(60, c), Theme.Px(20));
+            }
+            var es = CultureInfo.GetCultureInfo("es-ES");
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(sp.Traction)) parts.Add(sp.Traction);
+            if (sp.Kmh > 0) parts.Add(sp.Kmh.ToString("N0", es) + " km/h");
+            if (!sp.Freight && sp.Capacity > 0) parts.Add(sp.Capacity.ToString("N0", es) + " " + LblSeats);
+            else if (sp.Cars > 0) parts.Add(string.Format(LblCars, sp.Cars));
+            foreach (var p in parts) Pill(g, ref cx, cy, right, p, _fS, Theme.Subtle, CardPaint.Rail, Theme.Px(20));
+            var cos = CompaniesOf?.Invoke(it);
+            if (cos != null) foreach (var co in cos) Pill(g, ref cx, cy + Theme.Px(1), right, "🏢 " + co, _fCo, Theme.AccentHi, Color.FromArgb(40, 76, 175, 80), Theme.Px(18));
+        }
+
         protected override void AfterPaint(Graphics g, int first, int last)
         {
             int pre = Math.Min(Items.Count - 1, last + Cols);
@@ -106,9 +150,27 @@ namespace SelectOR
             {
                 var it = Items[i];
                 string p = PathOf?.Invoke(it) ?? "";
-                if (p.Length > 0) _mem.Request(Thumbs, p, Theme.Px(52), CardW - Theme.Px(30), Invalidate, k => visible.Contains(k));
+                if (p.Length > 0 && !_list) _mem.Request(Thumbs, p, Theme.Px(52), CardW - Theme.Px(30), Invalidate, k => visible.Contains(k));
                 RequestSpec(it);
             }
+        }
+
+        // Pantalla de inicio: vistas 2D y datos de los primeros trenes de la lista, ya en memoria al abrir.
+        public async Task PrefetchAsync(int count)
+        {
+            var items = Items.Take(Math.Min(count, Items.Count)).ToList();
+            var jobs = new List<Task>();
+            foreach (var it in items)
+            {
+                string p = PathOf?.Invoke(it) ?? "";
+                if (p.Length > 0 && !_list) jobs.Add(_mem.Preload(Thumbs, p, Theme.Px(52), Theme.Px(400)));   // en lista no hay vistas 2D
+                string k = KeyOf?.Invoke(it);
+                if (SpecOf != null && !string.IsNullOrEmpty(k) && !_spec.ContainsKey(k))
+                    jobs.Add(SpecOf(it).ContinueWith(t => { if (t.Status == TaskStatus.RanToCompletion) return t.Result; return null; })
+                                       .ContinueWith(t => { var s = t.Result; try { BeginInvoke((Action)(() => { if (!_spec.ContainsKey(k)) _spec[k] = s ?? new TrainSpec(); })); } catch { } }));
+            }
+            try { await Task.WhenAll(jobs); } catch { }
+            if (!IsDisposed) Invalidate();
         }
 
         async void RequestSpec(object it)
@@ -122,6 +184,69 @@ namespace SelectOR
             if (IsDisposed) return;
             _spec[k] = s ?? new TrainSpec();
             Invalidate();
+        }
+    }
+
+    // ------------------------------------------------------------------ conmutador tarjetas / lista
+    public class ViewModeToggle : Control
+    {
+        int _mode, _hot = -1;
+        public event EventHandler ModeChanged;
+        public string TipCards = "Ver en tarjetas", TipList = "Ver en lista";
+        readonly ToolTip _tip = new ToolTip();
+        public int Mode { get => _mode; set { value = value == 1 ? 1 : 0; if (_mode == value) return; _mode = value; Invalidate(); } }
+        public ViewModeToggle()
+        {
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Size = new Size(Theme.Px(72), Theme.Px(34)); Cursor = Cursors.Hand; BackColor = Theme.Bg;
+        }
+        protected override void Dispose(bool disposing) { if (disposing) _tip.Dispose(); base.Dispose(disposing); }
+        Rectangle Seg(int k) { int w = (Width - Theme.Px(6)) / 2; return new Rectangle(Theme.Px(3) + k * w, Theme.Px(3), w, Height - Theme.Px(6)); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int h = Seg(0).Contains(e.Location) ? 0 : Seg(1).Contains(e.Location) ? 1 : -1;
+            if (h != _hot) { _hot = h; Invalidate(); if (h >= 0) _tip.SetToolTip(this, h == 1 ? TipList : TipCards); }
+        }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hot = -1; Invalidate(); }
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            int k = Seg(1).Contains(e.Location) ? 1 : 0;
+            if (k != _mode) { _mode = k; Invalidate(); ModeChanged?.Invoke(this, EventArgs.Empty); }
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Theme.FillRound(g, new Rectangle(0, 0, Width - 1, Height - 1), Theme.Px(9), Theme.Surface2);
+            for (int k = 0; k < 2; k++)
+            {
+                var r = Seg(k);
+                if (k == _mode) Theme.FillRound(g, r, Theme.Px(7), Theme.Accent);
+                else if (k == _hot) Theme.FillRound(g, r, Theme.Px(7), Theme.SurfaceHi);
+                var col = k == _mode ? Color.White : Theme.Text;
+                int s = Theme.Px(14), x0 = r.X + (r.Width - s) / 2, y0 = r.Y + (r.Height - s) / 2;
+                if (k == 0)   // cuadrícula 2×2
+                {
+                    int q = (s - Theme.Px(2)) / 2;
+                    foreach (var (dx, dy) in new[] { (0, 0), (1, 0), (0, 1), (1, 1) })
+                        Theme.FillRound(g, new Rectangle(x0 + dx * (q + Theme.Px(2)), y0 + dy * (q + Theme.Px(2)), q, q), Theme.Px(2), col);
+                }
+                else          // lista: tres renglones
+                {
+                    using var b = new SolidBrush(col);
+                    int lh = Math.Max(2, Theme.Px(3));
+                    for (int j = 0; j < 3; j++)
+                    {
+                        int yy = y0 + j * (s - lh) / 2;
+                        g.FillRectangle(b, x0, yy, lh, lh);
+                        g.FillRectangle(b, x0 + lh + Theme.Px(2), yy, s - lh - Theme.Px(2), lh);
+                    }
+                }
+            }
+            g.SmoothingMode = SmoothingMode.None;
         }
     }
 

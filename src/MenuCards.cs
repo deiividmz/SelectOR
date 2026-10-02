@@ -182,19 +182,48 @@ namespace SelectOR
         protected const TextFormatFlags L1 = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
         protected const TextFormatFlags C1 = L1 | TextFormatFlags.HorizontalCenter;
         protected const TextFormatFlags R1 = L1 | TextFormatFlags.Right;
-        protected static int TW(string s, Font f) => string.IsNullOrEmpty(s) ? 0 : TextRenderer.MeasureText(s, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+        // Anchos de texto recordados: las tarjetas y pastillas se repintan a menudo con los mismos textos.
+        static readonly Dictionary<(string, Font), int> _tw = new Dictionary<(string, Font), int>();
+        protected static int TW(string s, Font f)
+        {
+            if (string.IsNullOrEmpty(s)) return 0;
+            if (_tw.TryGetValue((s, f), out int w)) return w;
+            w = TextRenderer.MeasureText(s, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+            if (_tw.Count > 20000) _tw.Clear();
+            _tw[(s, f)] = w;
+            return w;
+        }
         protected bool ShowFocus => Focused && ShowFocusCues;
 
         // Imagen recortada para llenar el hueco (sin deformar), con esquinas redondeadas.
+        // La imagen ya escalada se recuerda por tamaño: escalar con calidad en cada repintado era lo más caro.
+        static readonly Dictionary<(Image, int, int), Bitmap> _cover = new Dictionary<(Image, int, int), Bitmap>();
+        static readonly LinkedList<(Image, int, int)> _coverOrder = new LinkedList<(Image, int, int)>();
         protected static void Cover(Graphics g, Rectangle r, Image img, int rad, bool roundBottom = true)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using var path = roundBottom ? Theme.Round(r, rad) : TopRound(r, rad);
             var st = g.Save(); g.SetClip(path, CombineMode.Intersect);
-            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-            double k = Math.Max(r.Width / (double)img.Width, r.Height / (double)img.Height);
-            int w = (int)Math.Ceiling(img.Width * k), h = (int)Math.Ceiling(img.Height * k);
-            g.DrawImage(img, r.X + (r.Width - w) / 2, r.Y + (r.Height - h) / 2, w, h);
+            var key = (img, r.Width, r.Height);
+            if (!_cover.TryGetValue(key, out var bmp))
+            {
+                bmp = new Bitmap(Math.Max(1, r.Width), Math.Max(1, r.Height), System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                using (var gb = Graphics.FromImage(bmp))
+                {
+                    gb.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                    gb.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    double k = Math.Max(r.Width / (double)img.Width, r.Height / (double)img.Height);
+                    int w = (int)Math.Ceiling(img.Width * k), h = (int)Math.Ceiling(img.Height * k);
+                    gb.DrawImage(img, (r.Width - w) / 2, (r.Height - h) / 2, w, h);
+                }
+                _cover[key] = bmp; _coverOrder.AddLast(key);
+                while (_cover.Count > 120 && _coverOrder.First != null)
+                {
+                    var old = _coverOrder.First.Value; _coverOrder.RemoveFirst();
+                    if (_cover.TryGetValue(old, out var ob)) { ob.Dispose(); _cover.Remove(old); }
+                }
+            }
+            g.DrawImageUnscaled(bmp, r.X, r.Y);
             g.Restore(st);
             g.SmoothingMode = SmoothingMode.None;
         }

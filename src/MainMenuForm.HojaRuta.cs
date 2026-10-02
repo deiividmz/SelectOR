@@ -27,6 +27,8 @@ namespace SelectOR
         sealed class TtRoadPlan { public string PatFile, Train; public List<(string name, double arr, double dep)> Schedule; }
         TtRoadPlan _roadTtPlan;
         string _roadPatPending;
+        TtRoadPlan _roadPlanWaiting;   // plan de un horario o una actividad a la espera de que el escenario esté abierto
+        bool _roadHudWaiting;
 
         TtRoadPlan BuildTtRoadPlan()
         {
@@ -74,9 +76,13 @@ namespace SelectOR
         }
 
         // Aplica el plan (de un horario o de una actividad) a la hoja de ruta de la conducción en curso.
+        // Como en Exploración, la hoja de ruta sale con la simulación ya abierta (primera posición del tren):
+        // mientras Open Rails carga solo se prepara el grafo de vías.
         void ApplyRoadPlan(TtRoadPlan plan)
         {
             if (plan == null || _roadTimer == null) return;
+            if (!_scenarioReady) { _roadPlanWaiting = plan; EnsureRoadGraph(); return; }
+            _roadPlanWaiting = null;
             _road.Schedule = plan.Schedule;
             if (plan.Schedule != null) _road.ClearHaltChoices();
             _roadPatPending = plan.PatFile;
@@ -141,7 +147,7 @@ namespace SelectOR
             var plan = _roadTtPlan; _roadTtPlan = null;
             _road.Reset(_curRoute?.Path ?? "");
             _road.Schedule = null;
-            _roadPatPending = null;
+            _roadPatPending = null; _roadPlanWaiting = null; _roadHudWaiting = false;
             _roadVmax = 0; _roadLimit = double.NaN; _roadGameS = double.NaN;
             try { _roadVmax = TrainMaxKmh(_drivenConsist ?? CurrentDrivenConsist()); } catch { }
             _road.DefaultHalt = false;   // las paradas las marca el maquinista en la hoja de ruta
@@ -246,8 +252,16 @@ namespace SelectOR
             finally { _roadBusy = false; }
         }
 
-        void ShowRoadHud()
+        // Escenario ya abierto: el plan pendiente (Horarios / Actividad) pasa a la hoja de ruta.
+        void RoadOnScenarioReady()
         {
+            if (_roadPlanWaiting != null) ApplyRoadPlan(_roadPlanWaiting);
+            if (_roadHudWaiting) { _roadHudWaiting = false; if (_road.Points.Count > 0) ShowRoadHud(); }
+        }
+
+        void ShowRoadHud(bool force = false)
+        {
+            if (!_scenarioReady && !force) { _roadHudWaiting = true; return; }   // no flota sobre la pantalla de carga
             if (RoadHudAlive) { if (!_roadHud.Visible) _roadHud.Show(); return; }
             try
             {
@@ -269,7 +283,8 @@ namespace SelectOR
         void ToggleRoadHudFromBar()
         {
             if (_road.Points.Count == 0) { OpenBigMapForRoute(); return; }
-            if (RoadHudAlive && _roadHud.Visible) _roadHud.Hide(); else ShowRoadHud();
+            _roadHudWaiting = false;
+            if (RoadHudAlive && _roadHud.Visible) _roadHud.Hide(); else ShowRoadHud(force: true);   // pedido a mano: sale en el acto
         }
 
         void OpenBigMapForRoute()

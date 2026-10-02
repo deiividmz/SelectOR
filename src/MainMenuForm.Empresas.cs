@@ -107,7 +107,7 @@ namespace SelectOR
             {
                 // Sin dato (API que no responde): se cuenta, como antes, para no perder tiempo por un fallo.
                 bool running = double.IsNaN(game) || double.IsNaN(_svcLastGameS) || Math.Abs(game - _svcLastGameS) > 0.05;
-                if (running) _svcRunS += Math.Max(0, (now - _svcLastTickUtc.Value).TotalSeconds);
+                if (running) { double add = Math.Max(0, (now - _svcLastTickUtc.Value).TotalSeconds); _svcRunS += add; if (_apOn) _apSeconds += add; }   // (A4: tiempo con piloto automático)
                 _svcPaused = !running;
                 // Carné (A3): ¿la hora del juego corre más que la real?
                 if (!double.IsNaN(game) && !double.IsNaN(_svcLastGameS))
@@ -2352,6 +2352,14 @@ namespace SelectOR
             bool show = _empSel != null && SubtabShowsCompanyKpis(_empSubtab);
             _empStatsCard.Visible = show;   // sin empresa (o fuera de la empresa) no hay KPIs que mostrar
             if (_empStatsGap != null) _empStatsGap.Visible = show;
+            // Orden de anclado fijo: título → KPIs → hueco. Si el hueco quedaba por delante, los KPIs bajaban
+            // 12 px y se pegaban a las pestañas de la sección.
+            var par = _empStatsCard.Parent;
+            if (par != null && _empStatsGap != null && _empStatsGap.Parent == par)
+            {
+                int ic = par.Controls.GetChildIndex(_empStatsCard), ig = par.Controls.GetChildIndex(_empStatsGap);
+                if (ic < ig) par.Controls.SetChildIndex(_empStatsCard, ig);
+            }
             if (!show) return;
             Color red = Color.FromArgb(229, 115, 115), blue = Color.FromArgb(120, 144, 226), gold = Color.FromArgb(240, 196, 90), teal = Color.FromArgb(45, 212, 191);
             var treasury = new EmpKpiStrip.Kpi
@@ -4233,9 +4241,10 @@ namespace SelectOR
                     if (dm >= 0.5 && dm < 3000)   // ignora jitter y saltos/teleports
                     {
                         _trackedMeters += dm;
+                        if (_apOn) _apMeters += dm;   // A4: km con piloto automático (detalle de la infracción)
+                        if (_paxOnboard > 0) _paxKm += _paxOnboard * dm / 1000.0;   // viajeros a bordo × km
                         // Con el HUD cerrado el rastro sigue grabándose (con él abierto lo graba el HUD, más fino).
                         if (!HudAlive) _driveTrail.Add(lat, lon);
-                        if (_paxOnboard > 0) _paxKm += _paxOnboard * dm / 1000.0;   // viajeros a bordo × km
                     }
                     // Parado = casi sin desplazamiento entre sondeos (~1,5 s): < 0,8 m ≈ < 2 km/h.
                     if (dm < 0.8) { if (_stoppedSinceUtc == null) _stoppedSinceUtc = DateTime.UtcNow; }
@@ -4246,6 +4255,7 @@ namespace SelectOR
                 if (CabHudAlive) _cabHud.SetPosition(lat, lon);   // pupitre: para saber si es de noche
                 if (_paxActive && _paxStations.Count > 0) await PollPax(lat, lon);   // embarque de viajeros
                 if (InfrActive) _ = InfrSpeedPoll();   // carné (B6/B7): velocidad frente al límite
+                if (_pendingServiceId != null) _ = AutopilotPoll();   // carné (A4): ¿conduce Open Rails?
             }
             catch { }   // servidor aún no listo, pausa, etc.
         }
@@ -4584,7 +4594,7 @@ namespace SelectOR
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(2, 4, 2, 2) };
             var copyBtn = EmpButton(Tr("⧉  Copiar ID")); copyBtn.Width = 160; copyBtn.Margin = new Padding(0, 0, 8, 0);
             copyBtn.Click += (s, e) => { int i = _usersList.SelectedRow; if (i >= 0 && i < _userIds.Count) CopyIdToClipboard(_userIds[i]); else Msg(_usersMsg, Tr("Selecciona un usuario de la lista."), true); };
-            var delBtn = EmpButton(Tr("Eliminar acceso")); delBtn.Width = 200;
+            var delBtn = EmpButton(Tr("Eliminar acceso")); delBtn.Width = 200; delBtn.Margin = new Padding(0);   // alineado con «Copiar ID»
             delBtn.BaseColor = Theme.Surface2; delBtn.HoverColor = Color.FromArgb(150, 60, 60); delBtn.TextColor = RedC;
             delBtn.Click += (s, e) => DeleteUserAccess();
             btns.Controls.Add(copyBtn); btns.Controls.Add(delBtn);

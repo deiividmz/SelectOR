@@ -89,6 +89,7 @@ namespace SelectOR
         Panel _pageRuta, _pageActividad, _pageExplora, _pageHorarios, _pageMulti, _pageEditor, _pageEmpresas;
         // Exploración
         RoundedInput _consistSearch;
+        ViewModeToggle _trainView;
         CheckBox _chkTrainFavOnly;
         ComboBox _cboTrainCompany;   // filtro de trenes por empresa (Exploración)
         Control _trainCompanyHost;   // fila etiqueta+combo del filtro (se oculta si no hay empresas)
@@ -299,6 +300,7 @@ namespace SelectOR
             ("units",     12, "Buscando las formaciones fijas…"),
             ("stock",      7, "Preparando el editor de composiciones…"),
             ("editor",     7, "Preparando el editor de composiciones…"),
+            ("vistas2d",   9, "Preparando los trenes y sus vistas 2D…"),
         };
         readonly HashSet<string> _loadDone = new(StringComparer.Ordinal);
         bool _uiRevealed;
@@ -759,8 +761,7 @@ namespace SelectOR
             center.Controls.Add(_pageHost);
             _center = center;
 
-            int startTab = (_prefs.LastTab >= 0 && _prefs.LastTab < 7) ? _prefs.LastTab : 1;
-            ShowPage(startTab);
+            ShowPage(0);   // SelectOR abre siempre en Ruta (no en la última pestaña usada)
         }
 
         // ============================ RUTA ============================
@@ -1116,9 +1117,10 @@ namespace SelectOR
             top.Controls.Add(cond); top.Controls.Add(tripFoot); top.Controls.Add(od); top.Controls.Add(_tripCap);
 
             // ---- elige tu tren: filtros por tipo ----
-            var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 5, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 6, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -1153,7 +1155,10 @@ namespace SelectOR
             var searchWait = new Timer { Interval = 220 };
             searchWait.Tick += (s, e) => { searchWait.Stop(); RefreshConsistList(); };
             _consistSearch.Box.TextChanged += (s, e) => { searchWait.Stop(); searchWait.Start(); };
-            bar.Controls.Add(lblT, 0, 0); bar.Controls.Add(_trainChips, 1, 0); bar.Controls.Add(_classifyLbl, 2, 0); bar.Controls.Add(coHost, 3, 0); bar.Controls.Add(_consistSearch, 4, 0);
+            // tarjetas o lista (se recuerda)
+            _trainView = new ViewModeToggle { Anchor = AnchorStyles.Right, Margin = new Padding(8, 5, 0, 5), Mode = _prefs.TrainListView ? 1 : 0, TipCards = Tr("Ver en tarjetas"), TipList = Tr("Ver en lista") };
+            _trainView.ModeChanged += (s, e) => { _prefs.TrainListView = _trainView.Mode == 1; _lstConsists.ListMode = _prefs.TrainListView; };
+            bar.Controls.Add(lblT, 0, 0); bar.Controls.Add(_trainChips, 1, 0); bar.Controls.Add(_classifyLbl, 2, 0); bar.Controls.Add(coHost, 3, 0); bar.Controls.Add(_trainView, 4, 0); bar.Controls.Add(_consistSearch, 5, 0);
 
             _thumbs ??= new VehicleThumbs(this);
             _lstConsists = new TrainCardGrid
@@ -1164,12 +1169,21 @@ namespace SelectOR
                 FavOf = o => o is TrainItem t && _prefs.FavoriteTrains.Contains(t.FilePath),
                 CompaniesOf = o => ConsistCompanies(o as TrainItem),
                 LblPax = Tr("VIAJEROS"), LblFreight = Tr("MERCANCÍAS"), LblCars = Tr("{0} coches"), LblSeats = Tr("plazas"), LblLoading = Tr("Calculando…"),
+                ListMode = _prefs.TrainListView,
             };
             _lstConsists.SelectedIndexChanged += (s, e) => OnConsistSelected();
             _lstConsists.ItemActivated += o => ToggleTrainFavorite();
             var consistCtx = new ContextMenuStrip();
             var miTFav = new ToolStripMenuItem(Tr("Añadir / quitar de favoritos")); miTFav.Click += (s, e) => ToggleTrainFavorite();
             consistCtx.Items.Add(miTFav);
+            // El tren en el Editor de composiciones, o a la papelera, sin salir de Exploración.
+            var miTEdit = new ToolStripMenuItem(Tr("Editar composición")); miTEdit.Click += (s, e) => EditConsistFromExplore(_lstConsists.SelectedItem as TrainItem);
+            var miTDel = new ToolStripMenuItem(Tr("Eliminar composición…")) { ForeColor = Color.FromArgb(229, 115, 115) };
+            miTDel.Click += (s, e) => DeleteConsistFromExplore(_lstConsists.SelectedItem as TrainItem);
+            consistCtx.Items.Add(new ToolStripSeparator());
+            consistCtx.Items.Add(miTEdit);
+            consistCtx.Items.Add(miTDel);
+            consistCtx.Opening += (s, e) => { bool has = _lstConsists.SelectedItem is TrainItem t && File.Exists(t.FilePath); miTEdit.Enabled = has; miTDel.Enabled = has; };
             _lstConsists.ContextMenuStrip = consistCtx;
             var trainsHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 4, 0, 0) };
             trainsHost.Controls.Add(_lstConsists);
@@ -1235,13 +1249,15 @@ namespace SelectOR
 
         static string ClassKey(string conPath) { try { return conPath.ToLowerInvariant() + "|" + File.GetLastWriteTimeUtc(conPath).Ticks; } catch { return conPath.ToLowerInvariant(); } }
         static string SpecToLine(TrainSpec s) => string.Join("\t", s.Freight ? "1" : "0", s.Automotor ? "1" : "0", s.Kw.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            s.Kmh.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Capacity.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Cars, s.Engines, (s.Traction ?? "").Replace("\t", " "), (s.Service ?? "").Replace("\t", " "));
+            s.Kmh.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Capacity.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Cars, s.Engines, (s.Traction ?? "").Replace("\t", " "), (s.Service ?? "").Replace("\t", " "),
+            s.MassT.ToString(System.Globalization.CultureInfo.InvariantCulture), s.LengthM.ToString(System.Globalization.CultureInfo.InvariantCulture));
         static TrainSpec SpecFromLine(string l)
         {
-            var p = l.Split('\t'); if (p.Length < 9) return null;
+            var p = l.Split('\t'); if (p.Length < 11) return null;   // líneas antiguas (sin masa ni longitud): se recalculan
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             return new TrainSpec { Freight = p[0] == "1", Automotor = p[1] == "1", Kw = double.Parse(p[2], ci), Kmh = double.Parse(p[3], ci), Capacity = double.Parse(p[4], ci),
-                                   Cars = int.Parse(p[5]), Engines = int.Parse(p[6]), Traction = p[7], Service = p[8], Known = true };
+                                   Cars = int.Parse(p[5]), Engines = int.Parse(p[6]), Traction = p[7], Service = p[8],
+                                   MassT = double.Parse(p[9], ci), LengthM = double.Parse(p[10], ci), Known = true };
         }
 
         TrainSpec KnownSpec(TrainItem c)
@@ -1364,6 +1380,13 @@ namespace SelectOR
                 var an = AnalyzeComposition(c, sp.Kmh);
                 sp.Capacity = an.Capacity; sp.Freight = an.Freight && !an.DeclaredPax; sp.Service = an.ServiceType ?? "";
                 var (e, tot) = ConsistCounts(c.FilePath); sp.Engines = e; sp.Cars = tot;
+                foreach (var r in ConsistCarRefs(c.FilePath))   // masa y longitud: suma de todos los vehículos
+                {
+                    var v = Veh(ResolveCarFile(r.name, r.folder));
+                    if (v == null) continue;
+                    if (v.MassT > 0) sp.MassT += v.MassT;
+                    if (v.Length > 0) sp.LengthM += v.Length;
+                }
                 // Automotor: formación fija conocida, cabeza con plazas o todo motrices; un mercancías nunca lo es.
                 bool auto = false;
                 if (!sp.Freight && !string.IsNullOrEmpty(eng))
@@ -1395,12 +1418,12 @@ namespace SelectOR
             var items = new List<(string, string)>
             {
                 (Tr("TRACCIÓN"), sp.Traction.Length > 0 ? sp.Traction : "—"),
-                (Tr("POTENCIA"), sp.Kw > 0 ? sp.Kw.ToString("N0", es) + " kW" : "—"),
+                (Tr("MASA"), sp.MassT > 0 ? sp.MassT.ToString("N0", es) + " t" : "—"),
                 (Tr("VEL. MÁXIMA"), sp.Kmh > 0 ? sp.Kmh.ToString("N0", es) + " km/h" : "—"),
                 (Tr("SERVICIO"), sp.Service.Length > 0 ? Tr(sp.Service) : (sp.Freight ? Tr("Mercancías") : "—")),
                 (Tr("TIPO"), sp.Freight ? Tr("Mercancías") : (sp.Automotor ? Tr("Automotor") : Tr("Locomotora")) + (sp.Service.Length > 0 ? "  ·  " + Tr(sp.Service) : "")),
                 (sp.Freight ? Tr("VEHÍCULOS") : Tr("PLAZAS"), sp.Freight ? (sp.Cars > 0 ? sp.Cars.ToString("N0", es) : "—") : (sp.Capacity > 0 ? sp.Capacity.ToString("N0", es) : "—")),
-                (Tr("MOTRICES"), sp.Engines > 0 ? sp.Engines.ToString("N0", es) : "—"),
+                (Tr("LONGITUD"), sp.LengthM > 0 ? sp.LengthM.ToString("N0", es) + " m" : "—"),
             };
             items.RemoveAt(3);   // el servicio ya va dentro de «TIPO»: seis casillas en una fila
             _exSpecs.SetItems(items);
@@ -1425,7 +1448,7 @@ namespace SelectOR
             if (_stripMem.TryGetValue(c.FilePath, out var bmp)) { _exStrip.Set(bmp, cap, false); return; }
             _exStrip.Set(null, cap, true);
             string con = c.FilePath, file = StripCacheFile(con);
-            Task.Run(() =>
+            Task.Run(async () =>
             {
                 Bitmap fromDisk = null;
                 try { if (File.Exists(file)) using (var ms = new MemoryStream(File.ReadAllBytes(file))) fromDisk = new Bitmap(Image.FromStream(ms)); } catch { }
@@ -1456,15 +1479,14 @@ namespace SelectOR
                 }
                 try
                 {
-                    BeginInvoke((Action)(() =>
+                    // un modelo por turno de la interfaz: la ventana no se congela mientras se dibuja el tren
+                    Bitmap strip = null;
+                    try { strip = await ServiceImages.ComposeStripAsync(cars, this); } catch { }
+                    if (strip != null)
                     {
-                        Bitmap strip = null;
-                        try { strip = ServiceImages.ComposeStrip(cars); } catch { }
-                        StripReady(c, strip);
-                        if (strip == null) return;
-                        var copy = new Bitmap(strip);
-                        Task.Run(() => { try { Directory.CreateDirectory(SysPath.GetDirectoryName(file)); using (copy) copy.Save(file + ".tmp", System.Drawing.Imaging.ImageFormat.Png); File.Move(file + ".tmp", file, true); } catch { } });
-                    }));
+                        try { Directory.CreateDirectory(SysPath.GetDirectoryName(file)); strip.Save(file + ".tmp", System.Drawing.Imaging.ImageFormat.Png); File.Move(file + ".tmp", file, true); } catch { }
+                    }
+                    BeginInvoke((Action)(() => StripReady(c, strip)));
                 }
                 catch { }
             });
@@ -1794,7 +1816,9 @@ namespace SelectOR
             _rbClient = new ThemeRadio { Text = "  " + Tr("Cliente (unirse a un servidor)") };
             radios.Controls.Add(_rbServer); radios.Controls.Add(_rbClient);
             _rbClient.CheckedChanged += (s, e) => { ApplyMPMode(); UpdateStatus(); _mpMode?.Select(_rbClient.Checked ? 1 : 0, raise: false); };
-            _mpMode.Changed += i => { _rbClient.Checked = i == 1; _rbServer.Checked = i == 0; };
+            // Primero el de servidor: si se desmarcaba antes el de cliente, ApplyMPMode veía los dos sin marcar
+            // y «Alojar partida» se quedaba sin tu IP en «Servidor».
+            _mpMode.Changed += i => { _rbServer.Checked = i == 0; _rbClient.Checked = i == 1; ApplyMPMode(); UpdateStatus(); };
 
             var data = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
             var lblD = new Label { Text = Tr("TUS DATOS"), Location = new Point(0, 0), AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold) };
@@ -2388,6 +2412,7 @@ namespace SelectOR
                     RebuildCompanyEngs();       // recalcula qué trenes son de mis empresas (etiqueta)
                     LoadLog("horario y trenes de empresa hechos");
                     LoadStep("consists");
+                    if (!_uiRevealed) Prewarm2D(); else LoadStep("vistas2d");   // vistas 2D listas antes de abrir el menú
                     EditorContentChanged();     // editor de composiciones: lista de .con de esta carpeta
                     LoadLog("editor preparado");
                     BeginInvoke((Action)(() => LoadLog("interfaz libre tras los trenes")));

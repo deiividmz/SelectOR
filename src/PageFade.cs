@@ -29,6 +29,35 @@ namespace SelectOR
         [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int rop);
         const uint RDW_UPDATENOW = 0x0100, RDW_ALLCHILDREN = 0x0080;
         const int SRCCOPY = 0x00CC0020;
+        // Fundido con AlphaBlend de GDI: unas diez veces más rápido que DrawImage con matriz de color de GDI+
+        // (que tardaba 15–25 ms por fotograma con la página entera y congelaba el cambio de pestaña).
+        [StructLayout(LayoutKind.Sequential)] struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+        [DllImport("msimg32.dll")] static extern bool AlphaBlend(IntPtr dst, int xd, int yd, int wd, int hd, IntPtr src, int xs, int ys, int ws, int hs, BLENDFUNCTION f);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+        [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+        IntPtr _memDc, _hbmp, _oldBmp;
+
+        void MakeGdiCopy()
+        {
+            FreeGdiCopy();
+            if (_shot == null) return;
+            try
+            {
+                _hbmp = _shot.GetHbitmap();
+                _memDc = CreateCompatibleDC(IntPtr.Zero);
+                _oldBmp = SelectObject(_memDc, _hbmp);
+            }
+            catch { FreeGdiCopy(); }
+        }
+
+        void FreeGdiCopy()
+        {
+            if (_memDc != IntPtr.Zero) { if (_oldBmp != IntPtr.Zero) SelectObject(_memDc, _oldBmp); DeleteDC(_memDc); }
+            if (_hbmp != IntPtr.Zero) DeleteObject(_hbmp);
+            _memDc = _hbmp = _oldBmp = IntPtr.Zero;
+        }
 
         Bitmap _shot;
         Rectangle _src;                 // trozo de la ventana que ocupa la sección
@@ -52,6 +81,7 @@ namespace SelectOR
                 Stop();
                 if (page == null || !page.IsHandleCreated || page.Width < 8 || page.Height < 8) return;
                 if (!Capture(page)) return;   // sin imagen válida, mejor sin transición que a oscuras
+                MakeGdiCopy();
                 Bounds = new Rectangle(0, 0, page.Width, page.Height);
                 _clock.Restart();
                 Visible = true;
@@ -143,6 +173,7 @@ namespace SelectOR
             _timer.Stop();
             _clock.Reset();
             if (Visible) Visible = false;
+            FreeGdiCopy();
             var old = _shot; _shot = null;
             old?.Dispose();
         }
@@ -155,12 +186,20 @@ namespace SelectOR
 
             float t = Math.Min(1f, _clock.ElapsedMilliseconds / (float)DurationMs);
             float a = 1f - (1f - t) * (1f - t);   // entra rápido y se posa suave
-            var cm = new ColorMatrix { Matrix33 = Math.Max(0f, Math.Min(1f, a)) };
-            using (var ia = new ImageAttributes())
+            byte alpha = (byte)Math.Round(255 * Math.Max(0f, Math.Min(1f, a)));
+            bool done = false;
+            if (_memDc != IntPtr.Zero)
             {
+                IntPtr hdc = g.GetHdc();
+                try { done = AlphaBlend(hdc, 0, 0, Width, Height, _memDc, _src.X, _src.Y, _src.Width, _src.Height, new BLENDFUNCTION { SourceConstantAlpha = alpha }); }
+                finally { g.ReleaseHdc(hdc); }
+            }
+            if (!done)
+            {
+                var cm = new ColorMatrix { Matrix33 = alpha / 255f };
+                using var ia = new ImageAttributes();
                 ia.SetColorMatrix(cm);
-                g.DrawImage(_shot, new Rectangle(0, 0, Width, Height),
-                            _src.X, _src.Y, _src.Width, _src.Height, GraphicsUnit.Pixel, ia);
+                g.DrawImage(_shot, new Rectangle(0, 0, Width, Height), _src.X, _src.Y, _src.Width, _src.Height, GraphicsUnit.Pixel, ia);
             }
             if (t >= 1f) BeginInvoke((Action)Stop);   // se quita sola aunque el temporizador se retrase
         }
@@ -177,6 +216,7 @@ namespace SelectOR
         protected override void Dispose(bool disposing)
         {
             if (disposing) { _timer?.Dispose(); _shot?.Dispose(); }
+            FreeGdiCopy();
             base.Dispose(disposing);
         }
     }

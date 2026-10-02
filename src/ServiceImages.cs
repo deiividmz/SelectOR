@@ -40,34 +40,73 @@ namespace SelectOR
 
         // ---------------- dibujo ----------------
         // Debe llamarse en el hilo de la interfaz (usa el dispositivo gráfico de la vista 3D).
+        const int StripGap = 3, StripPadX = 10, StripPadY = 8, StripMissingM = 4;
+
+        static float StripPpm(List<(ShapeGeom geom, bool flip, string name)> cars)
+        {
+            float ppm = 11f;
+            double meters = 0;
+            foreach (var c in cars) meters += c.geom != null && !c.geom.IsEmpty ? Math.Max(0.3, c.geom.Max.Z - c.geom.Min.Z) * 1.02 : StripMissingM;
+            double natural = meters * ppm + StripGap * cars.Count + StripPadX * 2;
+            if (natural > MaxWidth) ppm = (float)Math.Max(4.0, ppm * (MaxWidth - StripPadX * 2 - StripGap * cars.Count) / (meters * ppm));
+            return ppm;
+        }
+
+        // Igual que ComposeStrip, pero sin congelar la ventana: cada modelo distinto se dibuja en su propio turno
+        // del hilo de la interfaz (el dispositivo gráfico vive allí) y el montaje se hace en segundo plano.
+        public static async Task<Bitmap> ComposeStripAsync(List<(ShapeGeom geom, bool flip, string name)> cars, System.Windows.Forms.Control ui)
+        {
+            if (cars == null || cars.Count == 0 || ui == null || !ui.IsHandleCreated) return null;
+            float ppm = StripPpm(cars);
+            var rendered = new Dictionary<(ShapeGeom, bool), Bitmap>();
+            foreach (var (geom, flip, _) in cars)
+            {
+                if (geom == null || geom.IsEmpty || rendered.ContainsKey((geom, flip))) continue;
+                var tcs = new TaskCompletionSource<Bitmap>(TaskCreationOptions.RunContinuationsAsynchronously);
+                try
+                {
+                    ui.BeginInvoke((Action)(() =>
+                    {
+                        try { tcs.SetResult(TrimX(ShapeRenderer.RenderSide(geom, ppm, WorldH, flip ^ true))); }
+                        catch { tcs.SetResult(null); }
+                    }));
+                }
+                catch { return null; }
+                rendered[(geom, flip)] = await tcs.Task.ConfigureAwait(false);
+            }
+            return await Task.Run(() => AssembleStrip(cars, rendered, ppm)).ConfigureAwait(false);
+        }
+
         public static Bitmap ComposeStrip(List<(ShapeGeom geom, bool flip, string name)> cars)
         {
             if (cars == null || cars.Count == 0) return null;
-            const int gap = 3, padX = 10, padY = 8, missingM = 4;
-            float ppm = 11f;
-            double meters = 0;
-            foreach (var c in cars) meters += c.geom != null && !c.geom.IsEmpty ? Math.Max(0.3, c.geom.Max.Z - c.geom.Min.Z) * 1.02 : missingM;
-            double natural = meters * ppm + gap * cars.Count + padX * 2;
-            if (natural > MaxWidth) ppm = (float)Math.Max(4.0, ppm * (MaxWidth - padX * 2 - gap * cars.Count) / (meters * ppm));
+            float ppm = StripPpm(cars);
 
             // Un tren suele repetir el mismo coche o vagón muchas veces: cada modelo (y sentido) se dibuja UNA vez
             // y se reutiliza (un mercancías de 12 tolvas iguales pasa de 13 dibujos a 2).
             var rendered = new Dictionary<(ShapeGeom, bool), Bitmap>();
+            foreach (var (geom, flip, _) in cars)
+                if (geom != null && !geom.IsEmpty && !rendered.ContainsKey((geom, flip)))
+                {
+                    Bitmap bmp;
+                    try { bmp = TrimX(ShapeRenderer.RenderSide(geom, ppm, WorldH, flip ^ true)); } catch { bmp = null; }
+                    rendered[(geom, flip)] = bmp;
+                }
+            return AssembleStrip(cars, rendered, ppm);
+        }
+
+        // Monta la tira con los dibujos ya hechos (no usa el dispositivo gráfico: vale en segundo plano) y los libera.
+        static Bitmap AssembleStrip(List<(ShapeGeom geom, bool flip, string name)> cars, Dictionary<(ShapeGeom, bool), Bitmap> rendered, float ppm)
+        {
+            const int gap = StripGap, padX = StripPadX, padY = StripPadY, missingM = StripMissingM;
             var slots = new List<(Bitmap bmp, string name, int w)>();
             foreach (var (geom, flip, name) in cars)
             {
                 Bitmap bmp = null;
-                if (geom != null && !geom.IsEmpty)
-                {
-                    if (!rendered.TryGetValue((geom, flip), out bmp))
-                    {
-                        try { bmp = TrimX(ShapeRenderer.RenderSide(geom, ppm, WorldH, flip ^ true)); } catch { bmp = null; }
-                        rendered[(geom, flip)] = bmp;
-                    }
-                }
+                if (geom != null && !geom.IsEmpty) rendered.TryGetValue((geom, flip), out bmp);
                 slots.Add((bmp, name, bmp?.Width ?? (int)(missingM * ppm)));
             }
-            if (slots.All(s => s.bmp == null)) return null;   // nada que enseñar
+            if (slots.All(s => s.bmp == null)) { foreach (var b in rendered.Values) b?.Dispose(); return null; }   // nada que enseñar
 
             int carH = (int)(WorldH * ppm);
             int width = padX * 2 + slots.Sum(s => s.w) + gap * (slots.Count - 1);

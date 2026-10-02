@@ -166,6 +166,25 @@ namespace SelectOR
             done();
         }
 
+        // Carga previa (pantalla de inicio): sin el tope de peticiones a la vez; las pone en la cola de memoria.
+        public async Task Preload(VehicleThumbs thumbs, string path, int h, int maxW)
+        {
+            if (thumbs == null || string.IsNullOrEmpty(path) || _img.ContainsKey(path) || _pending.Contains(path) || _failed.Contains(path)) return;
+            _pending.Add(path);
+            Bitmap bmp = null;
+            try
+            {
+                string file = await thumbs.FileAsync(path);
+                if (file != null) bmp = await Task.Run(() => VehicleThumbs.Decode(file, h, maxW));
+            }
+            catch { }
+            _pending.Remove(path);
+            if (_disposed) { bmp?.Dispose(); return; }
+            if (bmp == null) _failed.Add(path);
+            else if (!_img.ContainsKey(path)) { _img[path] = bmp; _order.AddLast(path); }
+            else bmp.Dispose();
+        }
+
         bool _disposed;
         public void Clear() { foreach (var b in _img.Values) b.Dispose(); _img.Clear(); _order.Clear(); _failed.Clear(); }
         public void Dispose() { _disposed = true; Clear(); }

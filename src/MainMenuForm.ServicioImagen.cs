@@ -25,7 +25,7 @@ namespace SelectOR
                 models = doc.Cars.Select(c => (ResolveCarFile(c.Name, c.Folder), c.Flip, c.Name)).ToList();
             }
             catch { return; }
-            Task.Run(() =>
+            Task.Run(async () =>
             {
                 var cars = new List<(ShapeGeom geom, bool flip, string name)>();
                 foreach (var (path, flip, name) in models)
@@ -46,23 +46,14 @@ namespace SelectOR
                 if (!IsHandleCreated) return;
                 try
                 {
-                    BeginInvoke((Action)(() =>
-                    {
-                        Bitmap strip = null;
-                        try { strip = ServiceImages.ComposeStrip(cars); } catch { }
-                        if (strip == null) return;
-                        Task.Run(async () =>
-                        {
-                            try
-                            {
-                                byte[] jpg; using (strip) jpg = ServiceImages.ToJpeg(strip);
-                                ServiceImages.SaveLocal(serviceId, jpg);
-                                if (await ServiceImages.UploadAsync(companyId, serviceId, jpg) == null)
-                                    await Supa.RpcAsync("set_service_image", new { p_service = serviceId });
-                            }
-                            catch { }
-                        });
-                    }));
+                    // un modelo por turno de la interfaz (sin congelarla justo al ponerse de servicio)
+                    Bitmap strip = null;
+                    try { strip = await ServiceImages.ComposeStripAsync(cars, this); } catch { }
+                    if (strip == null) return;
+                    byte[] jpg; using (strip) jpg = ServiceImages.ToJpeg(strip);
+                    ServiceImages.SaveLocal(serviceId, jpg);
+                    if (await ServiceImages.UploadAsync(companyId, serviceId, jpg) == null)
+                        await Supa.RpcAsync("set_service_image", new { p_service = serviceId });
                 }
                 catch { }
             });

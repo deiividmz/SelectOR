@@ -163,7 +163,7 @@ namespace SelectOR
             _paTestBtn.Click += (s, e) => TestStationAudio();
             _paCfgBtn = EmpButton(Tr("Antelación…")); _paCfgBtn.Width = 150; _paCfgBtn.Margin = new Padding(0, 0, 8, 0);
             _paCfgBtn.Click += (s, e) => EditStationLead();
-            _paDelBtn = EmpButton(Tr("Quitar audio")); _paDelBtn.Width = 150;
+            _paDelBtn = EmpButton(Tr("Quitar audio")); _paDelBtn.Width = 150; _paDelBtn.Margin = new Padding(0);   // alineado con los demás
             _paDelBtn.BaseColor = Theme.Surface2; _paDelBtn.HoverColor = Color.FromArgb(150, 60, 60); _paDelBtn.TextColor = RedC;
             _paDelBtn.Click += (s, e) => DeleteStationAudio();
             btns.Controls.Add(_paUpBtn); btns.Controls.Add(_paTestBtn); btns.Controls.Add(_paCfgBtn); btns.Controls.Add(_paDelBtn);
@@ -194,7 +194,7 @@ namespace SelectOR
             _paLineStopsBtn.Click += (s, e) => EditPaLineStops();
             _paLineRenBtn = EmpButton(Tr("Renombrar…")); _paLineRenBtn.Width = 150; _paLineRenBtn.Margin = new Padding(0, 0, 8, 0);
             _paLineRenBtn.Click += (s, e) => RenamePaLine();
-            _paLineDelBtn = EmpButton(Tr("Eliminar línea")); _paLineDelBtn.Width = 160;
+            _paLineDelBtn = EmpButton(Tr("Eliminar línea")); _paLineDelBtn.Width = 160; _paLineDelBtn.Margin = new Padding(0);   // alineado con los demás
             _paLineDelBtn.BaseColor = Theme.Surface2; _paLineDelBtn.HoverColor = Color.FromArgb(150, 60, 60); _paLineDelBtn.TextColor = RedC;
             _paLineDelBtn.Click += (s, e) => DeletePaLine();
             btns.Controls.Add(_paLineNewBtn); btns.Controls.Add(_paLineStopsBtn); btns.Controls.Add(_paLineRenBtn); btns.Controls.Add(_paLineDelBtn);

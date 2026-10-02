@@ -853,6 +853,43 @@ namespace SelectOR
             Msg(_edMsg, string.Format(Tr("Composición eliminada: {0}"), Path.GetFileName(file)), false);
         }
 
+        // Exploración → «Editar composición»: el Editor con ese .con ya abierto (si había cambios sin guardar en
+        // otra composición, el Editor pregunta como siempre al cambiar de tren).
+        void EditConsistFromExplore(TrainItem c)
+        {
+            if (c?.FilePath == null || !File.Exists(c.FilePath)) return;
+            string path = c.FilePath;
+            ShowPage(5);
+            int i = _edFiles.FindIndex(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+            if (i >= 0 && _edList != null)
+            {
+                _edList.SelectRow(i);
+                if (_edDoc == null || !string.Equals(_edDoc.Path, path, StringComparison.OrdinalIgnoreCase)) OnEditorConsistSelected();
+                try { _edList.Focus(); } catch { }
+            }
+            else LoadEditorConsists(path);   // la lista aún no tenía ese archivo: se rehace con él elegido
+        }
+
+        // Exploración → «Eliminar composición…»: a la papelera de Windows, como desde el Editor.
+        void DeleteConsistFromExplore(TrainItem c)
+        {
+            if (c?.FilePath == null || !File.Exists(c.FilePath)) return;
+            string file = c.FilePath;
+            if (MessageBox.Show(this, string.Format(Tr("¿Eliminar la composición «{0}»?\n\nSe envía a la papelera de Windows."), Path.GetFileName(file)),
+                    "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            try
+            {
+                Native.RecycleFile(file);
+                ClearContentCaches();
+                if (File.Exists(file + ".bak")) Native.RecycleFile(file + ".bak");
+            }
+            catch (Exception e) { Warn(Tr("No se pudo eliminar: ") + e.Message); return; }
+            _prefs.FavoriteTrains.Remove(file);
+            if (_edDoc != null && string.Equals(_edDoc.Path, file, StringComparison.OrdinalIgnoreCase)) { _edDoc = null; _edOriginal = null; SetEditorEnabled(false); }
+            ReloadConsistsAfterEdit();   // Exploración, Horarios, Compra… sin ese tren
+            LoadEditorConsists();
+        }
+
         static string SafeFileName(string s)
         {
             foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');

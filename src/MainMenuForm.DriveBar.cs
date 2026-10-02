@@ -26,6 +26,7 @@ namespace SelectOR
             if (_cabWaiting) { _cabWaiting = false; if (CabHudAlive && !_cabHud.Visible) _cabHud.Show(); }
             if (_chatWaiting) { _chatWaiting = false; if (ChatHudAlive && !_chatHud.Visible) _chatHud.Show(); }
             if (_barWaiting) { _barWaiting = false; CreateDriveBar(); }
+            RoadOnScenarioReady();   // hoja de ruta de Horarios / Actividad
         }
 
         // La barra superior tampoco existe hasta que el escenario está cargado (como el HUD y el pupitre).
