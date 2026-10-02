@@ -35,10 +35,12 @@ namespace SelectOR
             _notifTimer.Tick += (s, e) => NotifyCheck();
             _notifTimer.Start();
             NotifySoon(2500);   // al entrar: los que llegaron mientras no estabas
+            StartSessionCheck();   // una sesión por conexión: avisa si el servidor cierra esta
         }
 
         void StopNotifications()
         {
+            StopSessionCheck();
             try { _notifTimer?.Stop(); _notifTimer?.Dispose(); } catch { }
             _notifTimer = null;
             _toastQueue.Clear();

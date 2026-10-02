@@ -1,4 +1,4 @@
-// Hoja de ruta: en el mapa grande se marcan uno o varios puntos sobre la vía y SelectOR traza el
+﻿// Hoja de ruta: en el mapa grande se marcan uno o varios puntos sobre la vía y SelectOR traza el
 // itinerario por las vías reales (grafo del .tdb, respetando los desvíos: no se puede entrar por una
 // rama y salir por la otra), con las estaciones por las que pasa y la hora estimada de paso.
 // La hora se calcula con los límites de velocidad de la vía (señales del .tdb, sin pasar de la
@@ -380,6 +380,48 @@ namespace SelectOR
             public bool IsEnd;                          // fila final («Destino»), no una estación
             public bool IsReverse;                      // cambio de sentido (el tren invierte la marcha)
             public double Lat, Lon;                     // dónde está (para marcarla en el mapa)
+            public double SchedArr = double.NaN, SchedDep = double.NaN;   // horario (s desde medianoche; NaN = sin horario)
+            public bool HasSched => !double.IsNaN(SchedArr) || !double.IsNaN(SchedDep);
+        }
+
+        // Horario del tren (modo Horarios): estación → llegada y salida programadas. Con horario, las estaciones
+        // que figuran en él son paradas y el resto se pasan sin parar (el maquinista puede cambiarlo).
+        public List<(string name, double arr, double dep)> Schedule;
+
+        public static string NormName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new System.Text.StringBuilder();
+            foreach (char ch in s.Normalize(System.Text.NormalizationForm.FormD))
+            {
+                var cat = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch);
+                if (cat == System.Globalization.UnicodeCategory.NonSpacingMark) continue;
+                if (char.IsLetterOrDigit(ch)) sb.Append(char.ToLowerInvariant(ch));
+                else if (sb.Length > 0 && sb[^1] != ' ') sb.Append(' ');
+            }
+            return sb.ToString().Trim();
+        }
+
+        // Estación del itinerario (nombre del andén) ↔ estación del horario: igual, una contiene a la otra o
+        // misma primera palabra (de 4 letras o más).
+        bool MatchSchedule(string platform, out double arr, out double dep)
+        {
+            arr = dep = double.NaN;
+            if (Schedule == null) return false;
+            string a = NormName(platform);
+            if (a.Length == 0) return false;
+            int best = -1, score = 0;
+            for (int i = 0; i < Schedule.Count; i++)
+            {
+                string b = NormName(Schedule[i].name);
+                if (b.Length == 0) continue;
+                int sc = a == b ? 3 : (a.Length >= 4 && b.Length >= 4 && (a.Contains(b) || b.Contains(a))) ? 2
+                       : (a.Split(' ')[0] is string fa && fa.Length >= 4 && fa == b.Split(' ')[0]) ? 1 : 0;
+                if (sc > score) { score = sc; best = i; }
+            }
+            if (best < 0) return false;
+            arr = Schedule[best].arr; dep = Schedule[best].dep;
+            return true;
         }
         public const double ReverseS = 120;             // tiempo estimado para invertir la marcha
 
@@ -429,6 +471,7 @@ namespace SelectOR
             return true;
         }
 
+        public void ClearHaltChoices() => _haltChoice.Clear();   // tren nuevo con horario: mandan sus paradas
         public void Undo() { if (Points.Count > ReachedPoints) Points.RemoveAt(Points.Count - 1); if (Points.Count == 0) ReachedPoints = 0; }
         public void ClearAll() { Points.Clear(); ReachedPoints = 0; ClearPlan(); Problem = null; }
 
@@ -534,7 +577,13 @@ namespace SelectOR
                 int j = k;
                 while (j + 1 < plats.Count && string.Equals(plats[j + 1].name, plats[k].name, StringComparison.OrdinalIgnoreCase) && plats[j + 1].d - plats[j].d < 800) j++;
                 string name = plats[k].name;
-                var s = new Stop { Name = name, Dist = (plats[k].d + plats[j].d) / 2, Halt = _haltChoice.TryGetValue(name, out bool h) ? h : DefaultHalt };
+                bool sched = MatchSchedule(name, out double sArr, out double sDep);
+                var s = new Stop
+                {
+                    Name = name, Dist = (plats[k].d + plats[j].d) / 2,
+                    Halt = _haltChoice.TryGetValue(name, out bool h) ? h : Schedule != null ? sched : DefaultHalt,
+                    SchedArr = sArr, SchedDep = sDep
+                };
                 if (oldPassed.TryGetValue(name, out var pa) && s.Dist < 30) { s.Passed = true; s.PassedAt = pa.PassedAt; s.PassedAtPc = pa.PassedAtPc; }
                 Stops.Add(s);
                 k = j + 1;
@@ -556,7 +605,17 @@ namespace SelectOR
             if (Stops.Count == 0 || TotalLen - Stops[^1].Dist > 300)
             {
                 var (la, lo) = LatLonAt(TotalLen);
-                Stops.Add(new Stop { Name = I18n.T("Destino"), Dist = TotalLen, Halt = true, IsEnd = true, Lat = la, Lon = lo });
+                var dest = new Stop { Name = I18n.T("Destino"), Dist = TotalLen, Halt = true, IsEnd = true, Lat = la, Lon = lo };
+                // Con horario: si su última estación no ha salido en el itinerario (el recorrido acaba justo antes de
+                // su andén), el destino es ella, con su hora.
+                if (Schedule != null && Schedule.Count > 0)
+                {
+                    var last = Schedule[^1];
+                    string ln = NormName(last.name);
+                    bool seen = Stops.Any(st => st.HasSched && NormName(st.Name) is string sn && (sn == ln || sn.Contains(ln) || ln.Contains(sn)));
+                    if (!seen) { dest.Name = last.name; dest.SchedArr = last.arr; dest.SchedDep = last.dep; }
+                }
+                Stops.Add(dest);
             }
             else { Stops[^1].IsEnd = true; Stops[^1].Halt = true; }   // el destino es esa estación
             Version++;
@@ -600,10 +659,13 @@ namespace SelectOR
         }
         int _firstPlanned;   // índice (en Points) del punto al que corresponde PointDist[0]
 
+        // Diferencia de horas del día en (−12 h, +12 h] (un horario que pasa de medianoche).
+        public static double Wrap(double secs) { secs %= 86400; if (secs > 43200) secs -= 86400; if (secs <= -43200) secs += 86400; return secs; }
+
         // Hora estimada (segundos desde ahora) de cada parada, con los límites de la vía.
         //   curLimit: límite en vigor ahora (del monitor de Open Rails; NaN si no se sabe).
         //   vmax: velocidad máxima del tren (0 = sin dato). dwell: segundos de parada en cada estación.
-        public void ComputeEtas(double curLimit, double vmax, double dwell)
+        public void ComputeEtas(double curLimit, double vmax, double dwell, double gameNow = double.NaN)
         {
             if (!HasPlan) return;
             double cap = vmax > 0 ? vmax : 999;
@@ -626,7 +688,17 @@ namespace SelectOR
                 s.EtaS = t;
                 // parada: tiempo parado + lo que se pierde al frenar y arrancar (±0,5 m/s²)
                 if (s.IsReverse) { if (s.Dist > Progress + 30) t += Math.Max(ReverseS, dwell) + V(lim); }
-                else if (s.Halt && !s.IsEnd && i < Stops.Count - 1 && s.Dist > Progress + 30) t += dwell + V(lim);
+                else if (s.Halt && !s.IsEnd && i < Stops.Count - 1 && s.Dist > Progress + 30)
+                {
+                    // con horario: la parada dura lo programado (mín. 20 s) y no se sale antes de la hora
+                    double stay = !double.IsNaN(s.SchedArr) && !double.IsNaN(s.SchedDep) && s.SchedDep > s.SchedArr ? Math.Max(20, s.SchedDep - s.SchedArr) : dwell;
+                    t += stay + V(lim);
+                    if (!double.IsNaN(gameNow) && !double.IsNaN(s.SchedDep))
+                    {
+                        double untilDep = Wrap(s.SchedDep - gameNow);
+                        if (untilDep > t) t = untilDep;
+                    }
+                }
             }
         }
     }

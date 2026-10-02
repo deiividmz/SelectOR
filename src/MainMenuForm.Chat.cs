@@ -251,8 +251,9 @@ namespace SelectOR
             frame.Controls.Add(_chatView);
             conv.Controls.Add(frame);
 
-            var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Height = 46, Margin = new Padding(0) };
+            var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Theme.Bg, Height = 46, Margin = new Padding(0) };
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             _chatInput = new RoundedInput(Tr("Escribe un mensaje para la empresa…")) { Dock = DockStyle.Fill, Height = 40, Margin = new Padding(2, 2, 8, 2) };
             _chatInput.Box.MaxLength = 500;
@@ -266,7 +267,8 @@ namespace SelectOR
             _chatInput.Box.TextChanged += (s, e) => UpdateChatNote();
             _chatSendBtn = EmpButton(Tr("Enviar"), primary: true); _chatSendBtn.Width = 130; _chatSendBtn.Height = 40; _chatSendBtn.Margin = new Padding(0, 2, 2, 2);
             _chatSendBtn.Click += async (s, e) => await SendFromSection();
-            row.Controls.Add(_chatInput, 0, 0); row.Controls.Add(_chatSendBtn, 1, 0);
+            var emoji = new EmojiButton { Target = _chatInput.Box, Fill = Theme.Surface, Margin = new Padding(0, 2, 8, 2) };   // 😊 emojis
+            row.Controls.Add(_chatInput, 0, 0); row.Controls.Add(emoji, 1, 0); row.Controls.Add(_chatSendBtn, 2, 0);
             conv.Controls.Add(row);
             _chatNote = EmpMsg(); _chatNote.Margin = new Padding(4, 4, 2, 0); _chatNote.MaximumSize = new Size(900, 0);
             conv.Controls.Add(_chatNote);

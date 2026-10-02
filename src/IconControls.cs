@@ -12,6 +12,7 @@ namespace SelectOR
     {
         public string[] Kinds;      // claves de glifo o "txt:LETRA"
         public string[] Tips;
+        public bool CardStyle;      // opciones como tarjetas (icono y, debajo, su nombre de Tips)
         int _sel;
         int _hover = -1;
         public event Action Changed;
@@ -68,6 +69,7 @@ namespace SelectOR
             g.SmoothingMode = SmoothingMode.AntiAlias;
             int n = Kinds.Length;
             float seg = (float)Width / n;
+            if (CardStyle) { PaintCards(g, n, seg); return; }
             Theme.FillRound(g, new Rectangle(0, 0, Width, Height), 10, Theme.Surface2);
             for (int i = 0; i < n; i++)
             {
@@ -88,6 +90,28 @@ namespace SelectOR
                 int gs = Math.Min(26, Height - 12);
                 var box = new Rectangle((int)(r.X + r.Width / 2 - gs / 2), (int)(r.Y + r.Height / 2 - gs / 2), gs, gs);
                 Glyphs.Draw(g, Kinds[i], box, glyphColor);
+            }
+        }
+
+        // Opciones como tarjetas: la elegida en verde con borde; el icono arriba y el nombre debajo.
+        void PaintCards(Graphics g, int n, float seg)
+        {
+            using var f = Theme.Font(8f, FontStyle.Regular);
+            using var fb = Theme.Font(8f, FontStyle.Bold);
+            int gap = 6;
+            for (int i = 0; i < n; i++)
+            {
+                var r = Rectangle.Round(new RectangleF(i * seg + (i > 0 ? gap / 2f : 0), 0, seg - (i > 0 && i < n - 1 ? gap : gap / 2f), Height - 1));
+                bool sel = i == _sel, hov = i == _hover;
+                Theme.FillRound(g, r, 9, sel ? Color.FromArgb(44, 62, 48) : hov ? Color.FromArgb(62, 66, 70) : Color.FromArgb(52, 56, 60));
+                if (sel) Theme.DrawRoundBorder(g, r, 9, Theme.Accent, 1.5f);
+                bool label = Tips != null && i < Tips.Length && Height >= 46;
+                int gs = Math.Min(22, Height - (label ? 26 : 12));
+                var box = new Rectangle(r.X + r.Width / 2 - gs / 2, label ? r.Y + 6 : r.Y + (r.Height - gs) / 2, gs, gs);
+                Glyphs.Draw(g, Kinds[i], box, sel ? Color.White : Color.FromArgb(196, 200, 205));
+                if (label)
+                    TextRenderer.DrawText(g, Tips[i], sel ? fb : f, new Rectangle(r.X + 2, box.Bottom + 2, r.Width - 4, r.Bottom - box.Bottom - 4), sel ? Theme.Text : Theme.Subtle,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             }
         }
     }

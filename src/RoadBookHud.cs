@@ -186,10 +186,11 @@ namespace SelectOR
         }
 
         // Hora de llegada dentro de etaS segundos (del simulador; en el reloj del PC, se suman a la hora actual).
+        // Con el horario de un tren, siempre la del simulador: es la que se compara con las horas programadas.
         string ArrivalClock(double now, double etaS)
         {
             if (double.IsNaN(etaS)) return "--:--";
-            if (PcClock) return DateTime.Now.AddSeconds(etaS).ToString("HH:mm");
+            if (PcClock && !(_rb.Schedule != null && !double.IsNaN(now))) return DateTime.Now.AddSeconds(etaS).ToString("HH:mm");
             return double.IsNaN(now) ? "--:--" : Clock(now + etaS);
         }
 
@@ -350,12 +351,32 @@ namespace SelectOR
                 }
 
                 var nameCol = s.Passed ? Color.FromArgb(130, 136, 142) : Theme.Text;
-                string timeTxt = s.Passed ? (PassedClock(s) is string pc && pc.Length > 0 ? "✓ " + pc : "✓")
-                               : ArrivalClock(now, s.EtaS);
                 int timeW = TextRenderer.MeasureText(g, "✓ 00:00", fTime, Size.Empty, TextFormatFlags.NoPadding).Width + 6;
                 var tRect = new Rectangle(Width - timeW - 14, y, timeW, RowH);
-                TextRenderer.DrawText(g, timeTxt, fTime, tRect, s.Passed ? Color.FromArgb(130, 136, 142) : (isNext ? Amber : Theme.Text),
-                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                if (s.HasSched)
+                {
+                    // Horario: arriba la hora programada; debajo, cuánto va (o fue) por delante o por detrás.
+                    double target = i == 0 || s.Passed ? (!double.IsNaN(s.SchedDep) ? s.SchedDep : s.SchedArr) : (!double.IsNaN(s.SchedArr) ? s.SchedArr : s.SchedDep);
+                    string main = (s.Passed ? "✓ " : "") + Clock(target);
+                    TextRenderer.DrawText(g, main, fTime, new Rectangle(tRect.X, y + 2, tRect.Width, RowH / 2), s.Passed ? Color.FromArgb(130, 136, 142) : (isNext ? Amber : Theme.Text),
+                        TextFormatFlags.Right | TextFormatFlags.Bottom | TextFormatFlags.NoPadding);
+                    double actual = s.Passed ? s.PassedAt : (double.IsNaN(now) || double.IsNaN(s.EtaS) ? double.NaN : now + s.EtaS);
+                    if (!double.IsNaN(actual))
+                    {
+                        int dmin = (int)Math.Round(RoadBook.Wrap(actual - target) / 60.0);
+                        string dt = dmin > 1 ? "+" + dmin + " min" : dmin < -1 ? "−" + (-dmin) + " min" : I18n.T("en hora");
+                        var dc = dmin > 1 ? Color.FromArgb(229, 115, 115) : dmin < -1 ? Color.FromArgb(120, 170, 235) : Color.FromArgb(102, 197, 106);
+                        TextRenderer.DrawText(g, dt, fSmall, new Rectangle(tRect.X - 20, y + RowH / 2 + 1, tRect.Width + 20, RowH / 2 - 2), dc,
+                            TextFormatFlags.Right | TextFormatFlags.Top | TextFormatFlags.NoPadding);
+                    }
+                }
+                else
+                {
+                    string timeTxt = s.Passed ? (PassedClock(s) is string pc && pc.Length > 0 ? "✓ " + pc : "✓")
+                                   : ArrivalClock(now, s.EtaS);
+                    TextRenderer.DrawText(g, timeTxt, fTime, tRect, s.Passed ? Color.FromArgb(130, 136, 142) : (isNext ? Amber : Theme.Text),
+                        TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                }
                 int nx = cx + 14, nw = tRect.Left - nx - 6;
                 TextRenderer.DrawText(g, s.Name, fName, new Rectangle(nx, y + 2, nw, RowH / 2), nameCol,
                     TextFormatFlags.Left | TextFormatFlags.Bottom | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
@@ -365,7 +386,8 @@ namespace SelectOR
                 {
                     double left = Math.Max(0, s.Dist - _rb.Progress);
                     det = Km(left) + " · " + (s.IsEnd ? I18n.T("final") : s.IsReverse ? I18n.T("invierte la marcha") : s.Halt ? I18n.T("para") : I18n.T("pasa sin parar"));
-                    if (!double.IsNaN(s.EtaS) && s.EtaS < 3600 * 6) det += " · " + string.Format(I18n.T("en {0} min"), Math.Max(0, (int)Math.Round(s.EtaS / 60)));
+                    if (s.HasSched && !double.IsNaN(s.EtaS)) det += " · " + string.Format(I18n.T("estimada {0}"), ArrivalClock(now, s.EtaS));
+                    else if (!double.IsNaN(s.EtaS) && s.EtaS < 3600 * 6) det += " · " + string.Format(I18n.T("en {0} min"), Math.Max(0, (int)Math.Round(s.EtaS / 60)));
                 }
                 TextRenderer.DrawText(g, det, fSmall, new Rectangle(nx, y + RowH / 2 + 1, nw, RowH / 2 - 2), Color.FromArgb(150, 156, 162),
                     TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);

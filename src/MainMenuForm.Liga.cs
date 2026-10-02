@@ -13,11 +13,10 @@ namespace SelectOR
 {
     public partial class MainMenuForm
     {
-        StyledTable _leagueList, _champList;
-        Label _leagueInfo, _leaguePrizes, _leagueLeaders, _champInfo;
+        PodiumBoard _leagueBoard; ChampionsBoard _champBoard;
         Control[] _rankViews;
         FlowLayoutPanel _rankTabBar;
-        int _rankTab;                 // 0 = Liga del mes · 1 = Campeones · 2 = Ranking general
+        int _rankTab;                 // 0 = Liga del mes · 1 = Campeones · 2 = Empresas · 3 = Maquinistas
         bool _leagueChecked;          // aviso de premios: una vez por sesión
 
         static CultureInfo LeagueCul => new CultureInfo(I18n.English ? "en-GB" : "es-ES");
@@ -31,16 +30,16 @@ namespace SelectOR
         static bool NoLeagueOnServer(string err) => err != null && (err.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0
                                                                    || err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0);
 
-        // ---- Pestañas de Ranking: Liga del mes · Campeones · Ranking general ----
-        Panel WrapRankingTabs(Panel general)
+        // ---- Pestañas de Ranking: Liga del mes · Campeones · Empresas · Maquinistas ----
+        Panel WrapRankingTabs(Control companies, Control drivers)
         {
             var league = BuildLeaguePage();
             var champs = BuildChampionsPage();
-            var body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-            general.Visible = false; champs.Visible = false;
-            body.Controls.Add(general); body.Controls.Add(champs); body.Controls.Add(league);
-            _rankViews = new Control[] { league, champs, general };
-            var tabs = MakeSubTabs(new[] { "Liga del mes", "Campeones", "Ranking general" }, i =>
+            var body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 6, 0, 0) };
+            companies.Visible = false; drivers.Visible = false; champs.Visible = false;
+            body.Controls.Add(drivers); body.Controls.Add(companies); body.Controls.Add(champs); body.Controls.Add(league);
+            _rankViews = new Control[] { league, champs, companies, drivers };
+            var tabs = MakeSubTabs(new[] { "Liga del mes", "Campeones", "Empresas", "Maquinistas" }, i =>
             {
                 _rankTab = i;
                 for (int k = 0; k < _rankViews.Length; k++) _rankViews[k].Visible = k == i;
@@ -52,7 +51,7 @@ namespace SelectOR
             return outer;
         }
 
-        // Abre una pestaña de Ranking por código (0 = Liga del mes · 1 = Campeones · 2 = Ranking general).
+        // Abre una pestaña de Ranking por código (0 = Liga del mes · 1 = Campeones · 2 = Empresas · 3 = Maquinistas).
         void SelectRankTab(int i)
         {
             if (_rankViews == null || i < 0 || i >= _rankViews.Length) return;
@@ -70,47 +69,23 @@ namespace SelectOR
             {
                 case 0: LoadLeague(); break;
                 case 1: LoadChampions(); break;
-                default: LoadRankings(); break;
+                default: LoadRankings(); break;   // Empresas y Maquinistas
             }
         }
 
         Panel BuildLeaguePage()
         {
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-            var top = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg };
-            _leagueInfo = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.Font(10.5f, FontStyle.Bold), Margin = new Padding(2, 4, 2, 2), UseMnemonic = false };
-            _leaguePrizes = new Label { AutoSize = true, MaximumSize = new Size(1100, 0), ForeColor = Theme.Subtle, Font = Theme.Font(9f), Margin = new Padding(2, 2, 2, 6), UseMnemonic = false };
-            top.Controls.Add(_leagueInfo); top.Controls.Add(_leaguePrizes);
-            _leagueList = EmpTable();
-            _leagueList.ImageColumn = 1;
-            _leagueList.SetColumns(
-                new StyledTable.Col("#", 44),
-                new StyledTable.Col("EMPRESA", 0, true),
-                new StyledTable.Col("SERV.", 70, false, HorizontalAlignment.Right),
-                new StyledTable.Col("BENEFICIO", 140, false, HorizontalAlignment.Right),
-                new StyledTable.Col("VIAJEROS", 100, false, HorizontalAlignment.Right),
-                new StyledTable.Col("T·KM", 120, false, HorizontalAlignment.Right),
-                new StyledTable.Col("PREMIO", 150, false, HorizontalAlignment.Right));
-            _leagueLeaders = new Label { Dock = DockStyle.Bottom, AutoSize = false, Height = 44, ForeColor = Theme.Subtle, Font = Theme.Font(9f), Padding = new Padding(2, 8, 2, 0), UseMnemonic = false };
-            host.Controls.Add(_leagueList);      // Fill
-            host.Controls.Add(_leagueLeaders);   // Bottom
-            host.Controls.Add(top);              // Top
+            _leagueBoard = new PodiumBoard { Dock = DockStyle.Fill, MineTag = Tr("tu empresa"), EmptyText = Tr("Cargando…") };
+            host.Controls.Add(_leagueBoard);
             return host;
         }
 
         Panel BuildChampionsPage()
         {
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-            _champInfo = new Label { Dock = DockStyle.Top, AutoSize = false, Height = 30, ForeColor = Theme.Subtle, Font = Theme.Font(9.5f), UseMnemonic = false };
-            _champList = EmpTable();
-            _champList.SetColumns(
-                new StyledTable.Col("MES", 130),
-                new StyledTable.Col("CATEGORÍA", 150),
-                new StyledTable.Col("PUESTO", 80, false, HorizontalAlignment.Center),
-                new StyledTable.Col("EMPRESA", 0, true),
-                new StyledTable.Col("RESULTADO", 170, false, HorizontalAlignment.Right),
-                new StyledTable.Col("PREMIO", 150, false, HorizontalAlignment.Right));
-            host.Controls.Add(_champList); host.Controls.Add(_champInfo);
+            _champBoard = new ChampionsBoard { Dock = DockStyle.Fill, EmptyText = Tr("Cargando…") };
+            host.Controls.Add(_champBoard);
             return host;
         }
 
@@ -162,16 +137,15 @@ namespace SelectOR
 
         static string Eur(double v) => v.ToString("N0", EsEs) + " €";
 
-        string PrizesText(LeagueCfg c)
+        // Premios del mes como chips: «1.000.000 € · 1.º general»…
+        List<(string, string)> PrizeChips(LeagueCfg c)
         {
-            var partes = new List<string>();
-            for (int i = 0; i < c.General.Length; i++) if (c.General[i] > 0) partes.Add(Ordinal(i + 1) + " " + Eur(c.General[i]));
-            string s = Tr("Premios · General: ") + (partes.Count > 0 ? string.Join(" · ", partes) : "—");
-            if (c.Viajeros > 0) s += "   |   " + Tr("Viajeros: ") + Eur(c.Viajeros);
-            if (c.Mercancias > 0) s += "   |   " + Tr("Mercancías: ") + Eur(c.Mercancias);
-            if (c.Participacion > 0) s += "   |   " + Tr("Participación: ") + Eur(c.Participacion);
-            s += "\n" + string.Format(Tr("Cuenta el beneficio neto de los servicios registrados en el mes, como mucho {0} por maquinista y día. Para clasificar hacen falta {1} servicios."), c.Cap, c.Min);
-            return s;
+            var l = new List<(string, string)>();
+            for (int i = 0; i < c.General.Length; i++) if (c.General[i] > 0) l.Add((Eur(c.General[i]), string.Format(Tr("{0} general"), Ordinal(i + 1))));
+            if (c.Viajeros > 0) l.Add((Eur(c.Viajeros), Tr("Líder en viajeros")));
+            if (c.Mercancias > 0) l.Add((Eur(c.Mercancias), Tr("Líder en mercancías")));
+            if (c.Participacion > 0) l.Add((Eur(c.Participacion), Tr("Participación")));
+            return l;
         }
 
         static string Countdown(DateTime endsUtc)
@@ -184,32 +158,24 @@ namespace SelectOR
 
         async void LoadLeague()
         {
-            if (_leagueList == null || !Supa.IsLoggedIn) return;
-            _leagueList.BeginReload("liga");
-            _leagueList.ShowLoading(Tr("Cargando…"));
+            if (_leagueBoard == null || !Supa.IsLoggedIn) return;
+            var b = _leagueBoard;
+            if (b.Entries.Count == 0) { b.EmptyText = Tr("Cargando…"); b.Invalidate(); }
             await Supa.RpcAsync("league_close_pending", new { });   // cierra los meses terminados (idempotente)
             var (c, err) = await ReadLeagueCfg();
             if (c == null)
             {
-                _leagueInfo.Text = Tr("Liga del mes");
-                _leaguePrizes.Text = ""; _leagueLeaders.Text = "";
-                _leagueList.SetEmpty(NoLeagueOnServer(err) ? Tr("El servidor aún no tiene la liga mensual.") : Tr("Error: ") + err);
-                _leagueList.EndReload();
-                return;
+                b.Entries = new List<PodiumBoard.Entry>();
+                b.EmptyText = NoLeagueOnServer(err) ? Tr("El servidor aún no tiene la liga mensual.") : Tr("Error: ") + err;
+                b.Relayout(true); return;
             }
             bool pre = c.Month < c.Start;
-            _leagueInfo.Text = !c.Enabled ? Tr("La liga mensual está desactivada.")
-                             : pre ? string.Format(Tr("Pretemporada · la liga empieza en {0}. Esta clasificación es de prueba: no reparte premios."), MonthName(c.Start))
-                             : string.Format(Tr("Liga de {0} · {1}"), MonthName(c.Month), Countdown(c.EndsUtc));
-            _leaguePrizes.Text = PrizesText(c);
-
             var (json, err2) = await Supa.RpcAsync("league_standings", new { });
-            _leagueList.ClearRows();
-            if (err2 != null) { _leagueList.SetEmpty(Tr("Error: ") + err2); _leagueList.EndReload(); return; }
+            if (err2 != null) { b.Entries = new List<PodiumBoard.Entry>(); b.EmptyText = Tr("Error: ") + err2; b.Relayout(true); return; }
             var mias = new HashSet<string>();
             foreach (var co in _empCompanies) mias.Add(co.Id);
-            string lidV = null, lidM = null;
-            int n = 0;
+            var entries = new List<PodiumBoard.Entry>();
+            var leaders = new List<(string, string, string, string)>();
             try
             {
                 using var d = JsonDocument.Parse(json);
@@ -224,30 +190,45 @@ namespace SelectOR
                     if (ok && !pre && c.Enabled)
                     {
                         premio += c.GeneralPrize(pg) + c.Participacion;
-                        if (pv == 1) { premio += c.Viajeros; }
-                        if (pm == 1) { premio += c.Mercancias; }
+                        if (pv == 1) premio += c.Viajeros;
+                        if (pm == 1) premio += c.Mercancias;
                     }
-                    if (pv == 1) lidV = string.Format(Tr("{0} ({1} viajeros)"), name, pax.ToString("N0", EsEs));
-                    if (pm == 1) lidM = string.Format(Tr("{0} ({1} t·km)"), name, tkm.ToString("N0", EsEs));
+                    if (pv == 1) leaders.Add(("🧍", Tr("LÍDER EN VIAJEROS"), name, string.Format(Tr("{0} viajeros"), pax.ToString("N0", EsEs))));
+                    if (pm == 1) leaders.Add(("⚖", Tr("LÍDER EN MERCANCÍAS"), name, string.Format(Tr("{0} t·km"), tkm.ToString("N0", EsEs))));
                     Image logo = null;
-                    try { logo = LogoFor(id, Str(e, "logo")) ?? PlaceholderLogo(name); } catch { }
-                    bool mia = mias.Contains(id);
-                    Color? gris = ok ? (Color?)null : Theme.Subtle;
-                    _leagueList.AddRow(new[]
+                    try { logo = LogoFor(id, Str(e, "logo")); } catch { }
+                    var parts = new List<string> { string.Format(Tr("{0} servicios"), serv.ToString("N0", EsEs)) };
+                    if (pax > 0) parts.Add(string.Format(Tr("{0} viajeros"), pax.ToString("N0", EsEs)));
+                    if (tkm > 0) parts.Add(string.Format(Tr("{0} t·km"), tkm.ToString("N0", EsEs)));
+                    int faltan = Math.Max(0, c.Min - serv);
+                    entries.Add(new PodiumBoard.Entry
+                    {
+                        Id = id, Name = name, Logo = logo, Pos = ok ? pg : 0, Out = !ok, Mine = mias.Contains(id),
+                        Value = Eur(net), ValueColor = net < 0 ? RedC : (Color?)null, Detail = string.Join(" · ", parts),
+                        Prize = premio > 0 ? Tr("premio") + " " + Eur(premio) : "",
+                        OutNote = string.Format(Tr(faltan == 1 ? "le falta {0} servicio para clasificar" : "le faltan {0} servicios para clasificar"), faltan),
+                        OutProgress = !ok && c.Min > 0 ? Math.Min(1, serv / (double)c.Min) : -1,
+                        Cols = new (string, string, Color?)[]
                         {
-                            ok ? pg + "." : "—", name, serv.ToString("N0", EsEs), Eur(net), pax.ToString("N0", EsEs),
-                            tkm.ToString("N0", EsEs), premio > 0 ? Eur(premio) : "—"
-                        },
-                        new Color?[] { ok && pg <= 3 ? Theme.Accent : gris, mia ? Theme.AccentHi : gris, gris, net < 0 ? RedC : gris, gris, gris, premio > 0 ? Theme.Accent : gris },
-                        logo, id);
-                    n++;
+                            (Tr("SERVICIOS"), serv.ToString("N0", EsEs), null), (Tr("BENEFICIO"), Eur(net), net < 0 ? RedC : (Color?)null),
+                            (Tr("VIAJEROS"), pax.ToString("N0", EsEs), null), (Tr("T·KM"), tkm.ToString("N0", EsEs), null)
+                        }
+                    });
                 }
             }
             catch { }
-            if (n == 0) _leagueList.SetEmpty(Tr("Aún no hay servicios este mes."));
-            _leagueList.EndReload();
-            _leagueLeaders.Text = Tr("Líder en viajeros: ") + (lidV ?? "—") + "      " + Tr("Líder en mercancías: ") + (lidM ?? "—")
-                                + "\n" + Tr("Las empresas en gris aún no tienen los servicios mínimos para clasificar.");
+            b.Title = !c.Enabled ? Tr("La liga mensual está desactivada.")
+                    : pre ? string.Format(Tr("Pretemporada · la liga empieza en {0}. Esta clasificación es de prueba: no reparte premios."), MonthName(c.Start))
+                    : "🏆  " + string.Format(Tr("Liga de {0}"), MonthName(c.Month));
+            b.Pills = new List<string>();
+            if (c.Enabled && !pre) b.Pills.Add("⏱  " + Countdown(c.EndsUtc));
+            b.Pills.Add(string.Format(Tr("hasta {0} servicios por maquinista y día · mínimo {1} para clasificar"), c.Cap, c.Min));
+            b.Prizes = c.Enabled && !pre ? PrizeChips(c) : new List<(string, string)>();
+            b.Leaders = leaders;
+            b.Entries = entries;
+            b.EmptyText = null;
+            b.Footnote = entries.Count == 0 ? Tr("Aún no hay servicios este mes.") : "";
+            b.Relayout(true);
         }
 
         static string Ordinal(int n) => !I18n.English ? n + ".º"
@@ -260,20 +241,22 @@ namespace SelectOR
 
         async void LoadChampions()
         {
-            if (_champList == null || !Supa.IsLoggedIn) return;
-            _champList.BeginReload("campeones");
-            _champList.ShowLoading(Tr("Cargando…"));
+            if (_champBoard == null || !Supa.IsLoggedIn) return;
+            var b = _champBoard;
+            if (b.Months.Count == 0) { b.EmptyText = Tr("Cargando…"); b.Invalidate(); }
             await Supa.RpcAsync("league_close_pending", new { });
             var (json, err) = await Supa.RpcAsync("league_awards_list", new { p_limit = 300 });
-            _champList.ClearRows();
             if (err != null)
             {
-                _champList.SetEmpty(NoLeagueOnServer(err) ? Tr("El servidor aún no tiene la liga mensual.") : Tr("Error: ") + err);
-                _champList.EndReload(); return;
+                b.Months = new List<ChampionsBoard.Month>(); b.SummaryTitle = "";
+                b.EmptyText = NoLeagueOnServer(err) ? Tr("El servidor aún no tiene la liga mensual.") : Tr("Error: ") + err;
+                b.Relayout(true); return;
             }
             var mias = new HashSet<string>();
             foreach (var co in _empCompanies) mias.Add(co.Id);
-            int n = 0; double total = 0;
+            var months = new List<ChampionsBoard.Month>();
+            var byKey = new Dictionary<string, ChampionsBoard.Month>();
+            int premios = 0, primeros = 0; double total = 0;
             try
             {
                 using var d = JsonDocument.Parse(json);
@@ -281,25 +264,27 @@ namespace SelectOR
                 {
                     DateTime.TryParse(Str(e, "month"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var m);
                     string cat = Str(e, "category"), id = Str(e, "company_id");
-                    int pos = (int)Num(e, "place"); double amt = Num(e, "amount"), val = Num(e, "value");
-                    string res = cat switch
+                    int pos = (int)Num(e, "place"); double amt = Num(e, "amount");
+                    string key = m.ToString("yyyy-MM");
+                    if (!byKey.TryGetValue(key, out var mo)) { mo = new ChampionsBoard.Month { Title = MonthName(m, true) }; byKey[key] = mo; months.Add(mo); }
+                    string icon = cat switch
                     {
-                        "general" => Eur(val),
-                        "viajeros" => string.Format(Tr("{0} viajeros"), val.ToString("N0", EsEs)),
-                        "mercancias" => string.Format(Tr("{0} t·km"), val.ToString("N0", EsEs)),
-                        _ => string.Format(Tr("{0} servicios"), val.ToString("N0", EsEs))
+                        "general" => pos == 1 ? "🥇" : pos == 2 ? "🥈" : pos == 3 ? "🥉" : "🏅",
+                        "viajeros" => "🧍", "mercancias" => "⚖", _ => "⭐"
                     };
+                    string label = Str(e, "company_name") + (cat == "general" || cat == "participacion" ? "" : "  ·  " + CategoryName(cat));
                     bool mia = mias.Contains(id);
-                    if (mia) total += amt;
-                    _champList.AddRow(new[] { MonthName(m, true), CategoryName(cat), pos > 0 ? Ordinal(pos) : "—", Str(e, "company_name"), res, Eur(amt) },
-                        new Color?[] { Theme.Subtle, null, pos == 1 ? Theme.Accent : (Color?)null, mia ? Theme.AccentHi : (Color?)null, Theme.Subtle, Theme.Accent });
-                    n++;
+                    if (cat == "participacion" && !mia) continue;   // la participación de los demás no aporta nada aquí
+                    mo.Rows.Add((icon, cat == "participacion" ? Str(e, "company_name") + "  ·  " + CategoryName(cat) : label, Eur(amt), mia));
+                    if (mia) { premios++; total += amt; if (cat == "general" && pos == 1) primeros++; }
                 }
             }
             catch { }
-            if (n == 0) _champList.SetEmpty(Tr("Aún no hay campeones: se conocerán al terminar la primera temporada."));
-            _champList.EndReload();
-            _champInfo.Text = n == 0 ? "" : string.Format(Tr("Premios ganados por tus empresas: {0}"), Eur(total));
+            b.Months = months;
+            b.SummaryTitle = months.Count > 0 ? Tr("Palmarés de tus empresas") : "";
+            b.SummaryText = string.Format(Tr("{0} premios · {1} primeros puestos · {2} en premios"), premios, primeros, Eur(total));
+            b.EmptyText = months.Count == 0 ? Tr("Aún no hay campeones: se conocerán al terminar la primera temporada.") : null;
+            b.Relayout(true);
         }
 
         // Aviso al abrir Empresas si alguna de mis empresas ha cobrado premios desde la última vez.

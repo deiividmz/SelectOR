@@ -92,9 +92,32 @@ namespace SelectOR
             Invalidate();
         }
 
-        Font FName => Theme.Font(Compact ? 8.5f : 9f, FontStyle.Bold);
-        Font FBody => Theme.Font(Compact ? 9f : 10f);
-        Font FSmall => Theme.Font(Compact ? 7.5f : 8f);
+        // Fuentes creadas una vez (antes se creaba una nueva en cada pintado); cambian si cambia Compact.
+        Font _fName, _fBody, _fSmall, _fItalic, _fBig; bool _fCompact;
+        void EnsureFonts()
+        {
+            if (_fBody != null && _fCompact == Compact) return;
+            _fName?.Dispose(); _fBody?.Dispose(); _fSmall?.Dispose(); _fItalic?.Dispose(); _fBig?.Dispose();
+            _fName = Theme.Font(Compact ? 8.5f : 9f, FontStyle.Bold);
+            _fBody = Theme.Font(Compact ? 9f : 10f);
+            _fSmall = Theme.Font(Compact ? 7.5f : 8f);
+            _fItalic = Theme.Font(Compact ? 9f : 10f, FontStyle.Italic);
+            _fBig = Theme.Font(Compact ? 16f : 22f);   // mensajes de solo emojis
+            _fCompact = Compact;
+        }
+        Font FName { get { EnsureFonts(); return _fName; } }
+        Font FBody { get { EnsureFonts(); return _fBody; } }
+        Font FSmall { get { EnsureFonts(); return _fSmall; } }
+        Font FItalic { get { EnsureFonts(); return _fItalic; } }
+        Font FBig { get { EnsureFonts(); return _fBig; } }
+        // Letra del mensaje: más grande si es solo de emojis (hasta 3).
+        Font BodyFont(ChatMsg m) => !m.Deleted && ColorText.Available && ColorText.EmojiOnly(m.Body) ? FBig : FBody;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _fName?.Dispose(); _fBody?.Dispose(); _fSmall?.Dispose(); _fItalic?.Dispose(); _fBig?.Dispose(); }
+            base.Dispose(disposing);
+        }
         const TextFormatFlags BodyFlags = TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
 
         int Pad => Compact ? 8 : 16;
@@ -109,6 +132,9 @@ namespace SelectOR
             int y = Compact ? 6 : 12;
             int maxText = Compact ? w - Pad * 2 - 6 : Math.Min((int)(w * 0.70), 640) - 24;
             ChatMsg prev = null; DateTime prevDay = DateTime.MinValue;
+            Graphics mg = null;   // para medir los mensajes con emojis (DirectWrite); solo si hay alguno
+            try
+            {
             foreach (var m in _msgs)
             {
                 var local = m.AtUtc.ToLocalTime();
@@ -123,7 +149,13 @@ namespace SelectOR
                 it.Header = prev == null || prev.UserId != m.UserId || (m.AtUtc - prev.AtUtc).TotalMinutes > 5;
                 if (it.Header && prev != null) y += Compact ? 4 : 8;
                 it.Y = y;
-                var ts = TextRenderer.MeasureText(ShownText(m), m.Deleted ? FItalic : FBody, new Size(Math.Max(20, maxText), 0), BodyFlags);
+                Size ts;
+                if (!m.Deleted && ColorText.HasEmoji(m.Body) && ColorText.Available)
+                {
+                    mg ??= CreateGraphics();
+                    ts = ColorText.Measure(mg, m.Body, BodyFont(m), Math.Max(20, maxText));
+                }
+                else ts = TextRenderer.MeasureText(ShownText(m), m.Deleted ? FItalic : FBody, new Size(Math.Max(20, maxText), 0), BodyFlags);
                 if (m.Edited && !m.Deleted) ts.Height += TextRenderer.MeasureText("Ág", FSmall).Height;   // línea «Editado»
                 int headH = it.Header ? (Compact ? 16 : 19) : 0;
                 if (Compact)
@@ -145,13 +177,14 @@ namespace SelectOR
                 _items.Add(it);
                 prev = m;
             }
+            }
+            finally { mg?.Dispose(); }
             _contentH = y + (Compact ? 6 : 12);
             ClampScroll();
             if (keepBottom && stick) { _scroll = Math.Max(0, _contentH - Height); _stick = true; _newBelow = false; }
         }
 
         static string ShownText(ChatMsg m) => m.Deleted ? I18n.T("Mensaje eliminado") : m.Body;
-        Font FItalic => Theme.Font(Compact ? 9f : 10f, FontStyle.Italic);
 
         static string DayText(DateTime local)
         {
@@ -304,7 +337,8 @@ namespace SelectOR
                     TextRenderer.DrawText(g, ShownText(m), FItalic, tr, Theme.Subtle, BodyFlags);
                 else
                 {
-                    TextRenderer.DrawText(g, m.Body, FBody, tr, Theme.Text, BodyFlags);
+                    if (ColorText.HasEmoji(m.Body) && ColorText.Available) ColorText.Draw(g, m.Body, BodyFont(m), tr, Theme.Text);   // emojis en color
+                    else TextRenderer.DrawText(g, m.Body, FBody, tr, Theme.Text, BodyFlags);
                     if (m.Edited)
                     {
                         int sh = TextRenderer.MeasureText("Ág", FSmall).Height;
@@ -724,6 +758,9 @@ namespace SelectOR
     {
         readonly TextBox _box;
         readonly Label _note;
+        readonly EmojiButtonFlat _emojiBtn;
+        EmojiPicker _picker;
+        readonly int _baseH;
         readonly Func<string, System.Threading.Tasks.Task<string>> _send;   // devuelve el error o null
         readonly IntPtr _prevFg;
         bool _busy, _closing;
@@ -740,10 +777,11 @@ namespace SelectOR
             int h = 58;
             Bounds = new Rectangle(over.Left, over.Bottom - h, over.Width, h);
             using (var p = Theme.Round(new Rectangle(0, 0, Width, Height), 10)) Region = new Region(p);
+            _baseH = h;
             _box = new TextBox
             {
                 BorderStyle = BorderStyle.None, BackColor = Theme.Surface2, ForeColor = Theme.Text, Font = Theme.Font(10f),
-                MaxLength = 500, Bounds = new Rectangle(12, 10, Width - 24, 22),
+                MaxLength = 500, Bounds = new Rectangle(12, 10, Width - 24 - 34, 22),
                 PlaceholderText = string.Format(I18n.T("Mensaje para {0}"), company)
             };
             _note = new Label
@@ -751,7 +789,9 @@ namespace SelectOR
                 AutoSize = false, Bounds = new Rectangle(12, 34, Width - 24, 18), ForeColor = Theme.Subtle, Font = Theme.Font(8f),
                 Text = I18n.T("Intro para enviar · Esc para cancelar"), BackColor = Theme.Surface2
             };
-            Controls.Add(_box); Controls.Add(_note);
+            _emojiBtn = new EmojiButtonFlat { Bounds = new Rectangle(Width - 12 - 30, 6, 30, 30), BackColor = Theme.Surface2 };
+            _emojiBtn.Click += (s, e) => ToggleEmojis();
+            Controls.Add(_box); Controls.Add(_note); Controls.Add(_emojiBtn);
             if (initialText != null)
             {
                 _box.Text = initialText; _box.SelectionStart = _box.TextLength;
@@ -790,6 +830,33 @@ namespace SelectOR
         {
             base.OnShown(e);
             Native.ForceForeground(Handle);
+            _box.Focus();
+        }
+
+        // Abre o cierra los emojis: la cajita crece hacia arriba y el selector queda encima del texto.
+        void ToggleEmojis()
+        {
+            int bottom = Bottom;
+            if (_picker == null)
+            {
+                _picker = new EmojiPicker(cols: Math.Max(6, (Width - 24) / Theme.Px(36))) { BackColor = Theme.Surface2 };
+                _picker.EmojiChosen += em => { EmojiPicker.InsertInto(_box, em); _box.Focus(); };
+                _picker.Location = new Point((Width - _picker.Width) / 2, 6);
+                Controls.Add(_picker);
+                int h = _baseH + _picker.Height + 6;
+                int top = Math.Max(Screen.FromControl(this).WorkingArea.Top, bottom - h);
+                Bounds = new Rectangle(Left, top, Width, h);
+                foreach (Control c in new Control[] { _box, _note, _emojiBtn }) c.Top += _picker.Height + 6;
+            }
+            else
+            {
+                int shift = _picker.Height + 6;
+                Controls.Remove(_picker); _picker.Dispose(); _picker = null;
+                foreach (Control c in new Control[] { _box, _note, _emojiBtn }) c.Top -= shift;
+                Bounds = new Rectangle(Left, bottom - _baseH, Width, _baseH);
+            }
+            using (var p = Theme.Round(new Rectangle(0, 0, Width, Height), 10)) Region = new Region(p);
+            Invalidate();
             _box.Focus();
         }
 

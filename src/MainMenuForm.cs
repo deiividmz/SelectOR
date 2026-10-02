@@ -73,7 +73,7 @@ namespace SelectOR
         ComboBox _cboFolder;
         RoundedInput _routeSearch;
         CheckBox _chkFavOnly;
-        ListBox _lstRoutes;
+        RouteCardList _lstRoutes;
         BannerPanel _banner;
         TextBox _routeDescBox;
         Panel _pageHost;
@@ -84,7 +84,7 @@ namespace SelectOR
 
         // Actividad
         RoundedInput _actSearch;
-        ListBox _lstActivities;
+        ActivityCardGrid _lstActivities;
         TextBox _txtBriefing;
         Panel _pageRuta, _pageActividad, _pageExplora, _pageHorarios, _pageMulti, _pageEditor, _pageEmpresas;
         // Exploración
@@ -92,7 +92,7 @@ namespace SelectOR
         CheckBox _chkTrainFavOnly;
         ComboBox _cboTrainCompany;   // filtro de trenes por empresa (Exploración)
         Control _trainCompanyHost;   // fila etiqueta+combo del filtro (se oculta si no hay empresas)
-        ListBox _lstConsists;
+        TrainCardGrid _lstConsists;
         ListStatePanel _routesOverlay, _consistsOverlay;   // "Cargando…" / "Sin rutas" / "Sin trenes"
 
         PageFade _pageFade;      // fundido al cambiar de sección
@@ -119,7 +119,6 @@ namespace SelectOR
         string _mpClientHost;      // la IP escrita para unirse (se guarda mientras el campo enseña la IP propia)
         bool _mpShowingOwnIp;      // el campo Host enseña la IP de este equipo (modo Servidor)
         Label _lblMPUserRule;
-        ListBox _lstServers;
         Label _lblServers;
         List<GameServer> _serversAll = new List<GameServer>();
 
@@ -260,7 +259,7 @@ namespace SelectOR
         {
             if (_center == null) return;
             int bottom = PageHasBottomBar(_activePage) ? BottomBarH() + Theme.Px(4) : Theme.Px(10);
-            var pad = new Padding(Theme.Px(12), Theme.Px(6), Theme.Px(16), bottom);
+            var pad = new Padding(Theme.Px(14), Theme.Px(12), Theme.Px(16), bottom);
             if (_center.Padding != pad) _center.Padding = pad;
         }
 
@@ -424,24 +423,7 @@ namespace SelectOR
 
         // Los iconos de las pestañas solo se dibujan si con ellos cabe el texto de TODAS: o los llevan
         // todas o ninguna, para que la barra no quede desigual.
-        void ApplyTabIcons()
-        {
-            if (_pills == null) return;
-            bool room = true;
-            try
-            {
-                foreach (var pill in _pills)
-                {
-                    if (pill == null || pill.Width <= 0) continue;
-                    using var f = Theme.Font(pill.FontSize, pill.FontStyle);
-                    int w = TextRenderer.MeasureText(pill.Text, f, Size.Empty, TextFormatFlags.NoPadding).Width;
-                    if (w + 26 > pill.Width - 6) { room = false; break; }
-                }
-            }
-            catch { }
-            foreach (var pill in _pills)
-                if (pill != null && pill.ShowGlyph != room) { pill.ShowGlyph = room; pill.Invalidate(); }
-        }
+        void ApplyTabIcons() => _header?.PerformLayout();
 
         // Al cambiar el tamaño de la ventana (maximizar / restaurar / redimensionar): adaptar la maqueta.
         void OnWindowSizeChanged()
@@ -474,56 +456,112 @@ namespace SelectOR
 
         Label _lblVersion;
 
+        // Barra superior ÚNICA: logotipo, las secciones (pestañas) y las herramientas (contenido, reanudar,
+        // opciones y acerca de). Las pestañas miden lo que su texto; si no caben, primero se quitan los
+        // rótulos de las herramientas, luego los iconos de las pestañas y por último se acortan.
+        static readonly string[] TabNames = { "Ruta", "Actividad", "Exploración", "Horarios", "Multijugador", "Editor de composiciones", "Empresas" };
+        static readonly string[] TabKinds = { "map", "activity", "explore", "clock", "globe", "train", "bank" };
+
         void BuildHeader()
         {
-            var top = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.Surface, Name = "top" };
+            var top = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.BgSidebar, Name = "top" };
             var stripe = new LiveryStripe { Dock = DockStyle.Bottom };   // franja verde: separa cabecera y contenido
-            var logo = new SelectorLogo { Location = new Point(16, 11), Width = 190, Height = 40 };
-            _lblVersion = new Label { Text = "", ForeColor = Theme.Subtle, AutoSize = true, Location = new Point(210, 24), Font = Theme.Font(8f) };
+            var logo = new SelectorLogo { Location = new Point(16, 11), Width = 170, Height = 40 };
+            var tip = new ToolTip();
+            // La versión de Open Rails ya no ocupa sitio en la barra: sale al pasar el ratón por el logotipo.
+            _lblVersion = new Label { Text = "", Visible = false };
+            _lblVersion.TextChanged += (s, e) => tip.SetToolTip(logo, _lblVersion.Text);
 
-            var lblPack = new Label { Text = Tr("Contenido"), ForeColor = Theme.Subtle, AutoSize = true };
-            _cboFolder = new ThemeCombo { Width = 210, DropDownHeight = 300 };
+            var lblPack = new Label { Text = Tr("Contenido"), ForeColor = Theme.Subtle, AutoSize = true, BackColor = Theme.BgSidebar, Font = Theme.Font(8.5f) };
+            _cboFolder = new ThemeCombo { Width = 190, DropDownHeight = 300 };
             StyleCombo(_cboFolder);
             _cboFolder.SelectedIndexChanged += (s, e) => OnFolderChanged();
 
-            var btnResume = MakeChip(Tr("Reanudar"), 138, "resume");
+            var btnResume = MakeChip(Tr("Reanudar"), 120, "resume");
             btnResume.Click += (s, e) => OpenResume();
-            var btnOptions = MakeChip(Tr("Opciones OR"), 176, "gear");
+            var btnOptions = MakeChip("", 36, "gear");
             btnOptions.Click += (s, e) => LaunchSibling("Menu.exe", "");
-            var btnAbout = MakeChip(Tr("Acerca de SelectOR"), 210, "info");
+            tip.SetToolTip(btnOptions, Tr("Opciones OR"));
+            var btnAbout = MakeChip("", 36, "info");
             btnAbout.Click += (s, e) => ShowAbout();
+            tip.SetToolTip(btnAbout, Tr("Acerca de SelectOR"));
+            tip.SetToolTip(btnResume, Tr("Reanudar"));
+
+            _pills = new RoundButton[TabNames.Length];
+            for (int i = 0; i < TabNames.Length; i++)
+            {
+                int idx = i;
+                var pill = new RoundButton { Text = Tr(TabNames[i]), GlyphKind = TabKinds[i], Tab = true, TabFill = true, FontSize = 10f, Margin = new Padding(0) };
+                pill.Click += (s, e) => ShowPage(idx);
+                _pills[i] = pill;
+                top.Controls.Add(pill);
+            }
 
             top.Controls.AddRange(new Control[] { logo, _lblVersion, lblPack, _cboFolder, btnResume, btnOptions, btnAbout });
-            _lblVersion.TextChanged += (s, e) => top.PerformLayout();   // la versión se rellena más tarde
             top.Layout += (s, e) =>
             {
-                // Todo el contenido se reparte dentro del hueco que queda SOBRE la franja verde y
-                // centrado en él: así, cuando la cabecera se encoge (ventana baja o escala pequeña),
-                // el logotipo y los botones se ajustan en vez de quedar cortados por la franja.
                 int band = Math.Max(Theme.Px(28), top.ClientSize.Height - stripe.Height);
-                int chipH = Math.Max(Theme.Px(24), Math.Min(Theme.Px(32), band - Theme.Px(10)));
+                int chipH = Math.Max(Theme.Px(24), Math.Min(Theme.Px(34), band - Theme.Px(14)));
                 int chipY = Math.Max(0, (band - chipH) / 2);
-                int gap = Theme.Px(8), edge = Theme.Px(16);
-
-                logo.Height = Math.Max(Theme.Px(26), Math.Min(Theme.Px(40), band - Theme.Px(6)));
-                logo.Width = Theme.Px(190);
+                int gap = Theme.Px(6), edge = Theme.Px(14);
+                logo.Height = Math.Max(Theme.Px(26), Math.Min(Theme.Px(38), band - Theme.Px(10)));
+                logo.Width = Theme.Px(165);
                 logo.Location = new Point(edge, (band - logo.Height) / 2);
+                int tabsX = logo.Right + Theme.Px(14);
 
-                btnAbout.Height = btnOptions.Height = btnResume.Height = chipH;
+                using var fTab = Theme.Font(10f, FontStyle.Bold);
+                int TabW(int i, bool glyph, bool shortEditor)
+                {
+                    string t = i == PageEditor && shortEditor ? Tr("Editor") : Tr(TabNames[i]);
+                    return TextRenderer.MeasureText(t, fTab, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.Px(24) + (glyph ? Theme.Px(26) : 0);
+                }
+                int TabsW(bool glyph, bool shortEd) { int w = 0; for (int i = 0; i < _pills.Length; i++) w += TabW(i, glyph, shortEd) + Theme.Px(2); return w; }
+
+                // Herramientas, de más a menos holgadas; se elige la primera con la que caben las pestañas.
                 int right = top.ClientSize.Width - edge;
+                using var fChip = Theme.Font(btnResume.FontSize);
+                int resumeFull = TextRenderer.MeasureText(Tr("Reanudar"), fChip).Width + 22 + 10 + 28;   // texto + icono + separación + márgenes (como lo dibuja el botón)
+                var configs = new[] { (label: true, resume: true, combo: 190), (label: false, resume: true, combo: 170), (label: false, resume: false, combo: 150) };
+                var pick = configs[configs.Length - 1]; bool glyphs = false, shortEd = true;
+                foreach (var withGlyphs in new[] { true, false })
+                {
+                    bool found = false;
+                    foreach (var c in configs)
+                        foreach (var se in new[] { false, true })
+                        {
+                            int tools = Theme.Px(36) * 2 + gap * 2 + (c.resume ? resumeFull : Theme.Px(36)) + gap + Theme.Px(c.combo) + Theme.Px(14)
+                                      + (c.label ? TextRenderer.MeasureText(lblPack.Text, lblPack.Font).Width + gap : 0);
+                            if (tabsX + TabsW(withGlyphs, se) + Theme.Px(10) <= right - tools) { pick = c; glyphs = withGlyphs; shortEd = se; found = true; goto done; }
+                        }
+                    done:
+                    if (found) break;
+                }
+
+                btnAbout.Size = btnOptions.Size = new Size(Theme.Px(36), chipH);
                 btnAbout.Location = new Point(right - btnAbout.Width, chipY);
                 btnOptions.Location = new Point(btnAbout.Left - btnOptions.Width - gap, chipY);
+                btnResume.Text = pick.resume ? Tr("Reanudar") : "";
+                btnResume.Size = new Size(pick.resume ? resumeFull : Theme.Px(36), chipH);
                 btnResume.Location = new Point(btnOptions.Left - btnResume.Width - gap, chipY);
-
-                // Ventana estrecha: el selector de contenido se encoge (hasta 150 px) para no pisar la versión
-                // de Open Rails; si aun así no cabe, la versión se oculta (sigue en «Acerca de SelectOR»).
-                _lblVersion.Location = new Point(logo.Right + Theme.Px(14), (band - _lblVersion.PreferredHeight) / 2);
-                int verRight = _lblVersion.Left + _lblVersion.PreferredWidth + edge;
-                int room = btnResume.Left - Theme.Px(14) - (verRight + lblPack.Width + gap);
-                _cboFolder.Width = Math.Max(Theme.Px(150), Math.Min(Theme.Px(210), room));
-                _cboFolder.Location = new Point(btnResume.Left - _cboFolder.Width - Theme.Px(14), (band - _cboFolder.Height) / 2);
+                _cboFolder.Width = Theme.Px(pick.combo);
+                _cboFolder.Location = new Point(btnResume.Left - _cboFolder.Width - Theme.Px(12), (band - _cboFolder.Height) / 2);
+                lblPack.Visible = pick.label;
                 lblPack.Location = new Point(_cboFolder.Left - lblPack.Width - gap, (band - lblPack.PreferredHeight) / 2);
-                _lblVersion.Visible = lblPack.Left >= verRight;
+
+                int tabsRight = (pick.label ? lblPack.Left : _cboFolder.Left) - Theme.Px(10);
+                int need = TabsW(glyphs, shortEd), avail = Math.Max(10, tabsRight - tabsX);
+                double k = need > avail ? avail / (double)need : 1.0;   // último recurso: encoger todas por igual
+                int x = tabsX, tabH = Math.Max(Theme.Px(28), Math.Min(Theme.Px(42), band - Theme.Px(10)));
+                for (int i = 0; i < _pills.Length; i++)
+                {
+                    var p = _pills[i];
+                    string t = i == PageEditor && shortEd ? Tr("Editor") : Tr(TabNames[i]);
+                    if (p.Text != t) p.Text = t;
+                    if (p.ShowGlyph != glyphs) { p.ShowGlyph = glyphs; p.Invalidate(); }
+                    int w = (int)(TabW(i, glyphs, shortEd) * k);
+                    p.Bounds = new Rectangle(x, (band - tabH) / 2, w, tabH);
+                    x += w + Theme.Px(2);
+                }
             };
 
             // La franja va DENTRO del panel de cabecera (evita ambigüedades de docking a nivel de formulario)
@@ -590,7 +628,7 @@ namespace SelectOR
             dutyFlow.Controls.Add(_empDutyBtn); dutyFlow.Controls.Add(_empCloseOpenBtn);
             _empDutyHost.Controls.Add(dutyFlow);
 
-            _lblStatus = new Label { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.Subtle, Padding = new Padding(20, 0, 0, 0), Font = Theme.Font(10f) };
+            _lblStatus = new StatusPills { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Padding = new Padding(18, 0, 0, 0), Font = Theme.Font(10f) };
 
             bottom.Controls.Add(_lblStatus);
             bottom.Controls.Add(rightCol);
@@ -599,25 +637,41 @@ namespace SelectOR
             _bottomBar = bottom;   // se añade dentro del panel central en BuildCenter
         }
 
+        Label _routesCap;
+        FlowLayoutPanel _routeChips;
+
+        // Lateral de RUTAS: buscador, «Todas / ★ Favoritas» y las rutas en tarjetas con su imagen.
         void BuildSidebar()
         {
-            var left = new Panel { Dock = DockStyle.Left, Width = 340, BackColor = Theme.BgSidebar, Padding = new Padding(16, 14, 10, 14), Name = "left" };
-            var lbl = MakeSectionLabel("RUTAS");
-            lbl.Dock = DockStyle.Top;
+            var left = new Panel { Dock = DockStyle.Left, Width = 340, BackColor = Theme.BgSidebar, Padding = new Padding(14, 12, 8, 12), Name = "left" };
+            _routesCap = new Label { Text = Tr("RUTAS"), Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Subtle, BackColor = Theme.BgSidebar, Font = Theme.Font(8f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
 
             _routeSearch = new RoundedInput(Tr("Buscar ruta…")) { Dock = DockStyle.Top, Margin = new Padding(0) };
             _routeSearch.Box.TextChanged += (s, e) => RefreshRouteList();
             var searchHost = Pad(_routeSearch, 0, 6, 0, 6);
             searchHost.Dock = DockStyle.Top;
 
+            // «Solo favoritas» sigue existiendo (lo consultan otras partes), pero lo mandan las pastillas.
             _chkFavOnly = MakeCheck("★  Solo favoritas");
-            _chkFavOnly.Dock = DockStyle.Top;
+            _chkFavOnly.Visible = false;
             _chkFavOnly.CheckedChanged += (s, e) => RefreshRouteList();
+            _routeChips = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.BgSidebar, Margin = new Padding(0), Padding = new Padding(0, 0, 0, 4) };
+            var chAll = BankChip(Tr("Todas"), true); var chFav = BankChip("★ " + Tr("Favoritas"), false);
+            chAll.BaseColor = chFav.BaseColor = Theme.Surface;
+            chAll.Click += (s, e) => { SetChipActive(_routeChips, 0); _chkFavOnly.Checked = false; };
+            chFav.Click += (s, e) => { SetChipActive(_routeChips, 1); _chkFavOnly.Checked = true; };
+            _routeChips.Controls.Add(chAll); _routeChips.Controls.Add(chFav);
 
-            _lstRoutes = MakeListBox(Theme.BgSidebar, 50);
-            _lstRoutes.DrawItem += DrawRouteItem;
+            _lstRoutes = new RouteCardList
+            {
+                Dock = DockStyle.Fill,
+                TitleOf = o => ((Route)o).Name,
+                SubOf = o => RouteCardSub((Route)o),
+                FavOf = o => _prefs.Favorites.Contains(((Route)o).Path),
+                ImageOf = o => RouteCardImage((Route)o),
+            };
             _lstRoutes.SelectedIndexChanged += (s, e) => OnRouteChanged();
-            _lstRoutes.MouseDoubleClick += (s, e) => { if (_lstRoutes.SelectedItem is Route) ToggleRouteFavorite(); };
+            _lstRoutes.ItemActivated += o => ToggleRouteFavorite();
             var routeCtx = new ContextMenuStrip();
             var miFav = new ToolStripMenuItem(Tr("Añadir / quitar de favoritas"));
             miFav.Click += (s, e) => ToggleRouteFavorite();
@@ -625,11 +679,12 @@ namespace SelectOR
             _lstRoutes.ContextMenuStrip = routeCtx;
 
             left.Controls.Add(_lstRoutes);
-            left.Controls.Add(_chkFavOnly);
+            left.Controls.Add(_routeChips);
             left.Controls.Add(searchHost);
-            left.Controls.Add(lbl);
+            left.Controls.Add(_routesCap);
+            left.Controls.Add(_chkFavOnly);
 
-            _routesOverlay = new ListStatePanel { Bg = Theme.BgSidebar };
+            _routesOverlay = new ListStatePanel { Bg = Theme.BgSidebar, Icon = "🗺️" };
             left.Controls.Add(_routesOverlay);
             void syncRoutesOverlay() { if (_routesOverlay != null) { _routesOverlay.Bounds = _lstRoutes.Bounds; if (_routesOverlay.Visible) _routesOverlay.BringToFront(); } }
             _lstRoutes.SizeChanged += (s, e) => syncRoutesOverlay();
@@ -639,39 +694,52 @@ namespace SelectOR
             _sidebar = left;
         }
 
+        // Imagen de la tarjeta de una ruta: la de cabecera si la hay (es apaisada), si no la miniatura.
+        Image RouteCardImage(Route r)
+        {
+            try
+            {
+                var imgs = ContentImages.ForRoute(r.Path);
+                string f = !string.IsNullOrEmpty(imgs.banner) ? imgs.banner : imgs.thumb;
+                if (string.IsNullOrEmpty(f)) return null;
+                return ImageCache.Get(f, 420, 120, SafeInvalidateRoutes);
+            }
+            catch { return null; }
+        }
+
+        // «3 actividades · 2 horarios» de cada ruta: se cuentan los archivos (rápido), una vez y en segundo plano.
+        readonly Dictionary<string, string> _routeSub = new(StringComparer.OrdinalIgnoreCase);
+        string RouteCardSub(Route r)
+        {
+            if (r?.Path == null) return "";
+            lock (_routeSub) { if (_routeSub.TryGetValue(r.Path, out var v)) return v; _routeSub[r.Path] = ""; }
+            string path = r.Path;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                int acts = 0, tts = 0;
+                try { var d = SysPath.Combine(path, "ACTIVITIES"); if (Directory.Exists(d)) acts = Directory.GetFiles(d, "*.act").Length; } catch { }
+                try
+                {
+                    var d = SysPath.Combine(path, "OPENRAILS");
+                    if (Directory.Exists(d)) tts = Directory.GetFiles(d, "*.timetable_or").Length + Directory.GetFiles(d, "*.timetable-or").Length
+                                                 + Directory.GetFiles(d, "*.timetablelist_or").Length + Directory.GetFiles(d, "*.timetablelist-or").Length;
+                }
+                catch { }
+                var parts = new List<string>();
+                if (acts > 0) parts.Add(string.Format(Tr(acts == 1 ? "{0} actividad" : "{0} actividades"), acts));
+                if (tts > 0) parts.Add(string.Format(Tr(tts == 1 ? "{0} horario" : "{0} horarios"), tts));
+                if (parts.Count == 0) parts.Add(Tr("solo exploración"));
+                lock (_routeSub) _routeSub[path] = string.Join("  ·  ", parts);
+                SafeInvalidateRoutes();
+            });
+            return "";
+        }
+
         void BuildCenter()
         {
             var center = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(12, 6, 16, 84), Name = "center" };
 
             _pageHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-
-            // barra de pestañas tipo "segmented": TableLayoutPanel con columnas iguales
-            // (reparto determinista, independiente del orden de acoplado de los paneles).
-            var names = new[] { "Ruta", "Actividad", "Exploración", "Horarios", "Multijugador", "Editor de composiciones", "Empresas" };
-            var kinds = new[] { "map", "activity", "explore", "clock", "globe", "train", "bank" };
-            var pillHost = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top, Height = 46, BackColor = Theme.Bg, Padding = new Padding(0, 0, 0, 1),
-                ColumnCount = names.Length, RowCount = 1, Margin = new Padding(0)
-            };
-            for (int i = 0; i < names.Length; i++) pillHost.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / names.Length));
-            pillHost.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            // Línea fina bajo la barra de pestañas (el subrayado verde de la activa se apoya en ella).
-            pillHost.Paint += (s, e) => { using var p = new Pen(Theme.Border); e.Graphics.DrawLine(p, 0, pillHost.Height - 1, pillHost.Width, pillHost.Height - 1); };
-            _pills = new RoundButton[names.Length];
-            for (int i = 0; i < names.Length; i++)
-            {
-                int idx = i;
-                var pill = new RoundButton
-                {
-                    Text = Tr(names[i]), GlyphKind = kinds[i], Tab = true, Dock = DockStyle.Fill,
-                    Margin = new Padding(0), FontSize = 10f
-                };
-                pill.Click += (s, e) => ShowPage(idx);
-                if (i == PageEditor) AddAdaptiveText(pill, Tr("Editor de composiciones"), Tr("Editor"));   // ventana estrecha
-                _pills[i] = pill;
-                pillHost.Controls.Add(pill, i, 0);
-            }
 
             _pageRuta = BuildRutaPage();
             _pageActividad = BuildActividadPage();
@@ -689,384 +757,1141 @@ namespace SelectOR
             _pageHost.Controls.Add(_pageFade);
 
             center.Controls.Add(_pageHost);
-            center.Controls.Add(pillHost);
             _center = center;
 
             int startTab = (_prefs.LastTab >= 0 && _prefs.LastTab < 7) ? _prefs.LastTab : 1;
             ShowPage(startTab);
         }
 
-        // Pestaña "Ruta": imagen/título de la ruta + descripción (antes en la cabecera) + botón del mapa.
-        // Con trazado disponible (MainMenuForm.RutaMapa.cs): solo la descripción, compacta, y el mapa en vivo.
+        // ============================ RUTA ============================
+        // Portada (imagen, datos en pastillas y descripción con «Leer más»); debajo, el mapa en vivo (o la
+        // imagen y «Ver mapa de la ruta» si no hay trazado) y, a la derecha, «Empezar a conducir» y cifras.
+        RouteHero _rutaHero;
+        RouteGoPanel _rutaGo;
+        RouteWelcome _rutaWelcome;
+        (string last, string lastSub, string km, string kmSub) _routeStats = ("—", "", "—", "");
+
         Panel BuildRutaPage()
         {
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Theme.Bg };
-            t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            t.RowStyles.Add(new RowStyle(SizeType.Percent, 46));   // banner
-            t.RowStyles.Add(new RowStyle(SizeType.Percent, 54));   // descripción
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // botón mapa
-            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));   // mapa en vivo (si la ruta tiene trazado)
-            _rutaGrid = t;
+            var page = new Panel { BackColor = Theme.Bg };
+            _rutaHero = new RouteHero { Dock = DockStyle.Top, Height = 170, Caption = Tr("RUTA"), LblMore = Tr("Leer más"), LblLess = Tr("Leer menos"), Placeholder = Tr("Selecciona una ruta para empezar") };
+            _rutaHero.ImageOf = () => _banner?.Image;
+            _rutaHero.HeightChanged += FitRutaHero;
+            _rutaHero.SizeChanged += (s, e) => FitRutaHero();
+            var gap = new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg };
 
-            _banner = new BannerPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 10) };
-            t.Controls.Add(_banner, 0, 0);
+            var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
+            body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            var descCard = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(14, 12, 14, 12) };
-            var lblD = MakeSectionLabel("DESCRIPCIÓN DE LA RUTA"); lblD.Dock = DockStyle.Top;
-            _routeDescBox = new TextBox
-            {
-                Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, WordWrap = true, ScrollBars = ScrollBars.Vertical,
-                BorderStyle = BorderStyle.None, BackColor = Theme.Surface, ForeColor = Theme.Subtle,
-                Font = Theme.Font(10f), TabStop = false, Cursor = Cursors.Default
-            };
-            Native.UseDarkScrollBars(_routeDescBox);
-            var gapD = new Panel { Dock = DockStyle.Top, Height = 8, BackColor = Theme.Surface };
-            descCard.Controls.Add(_routeDescBox);
-            descCard.Controls.Add(gapD);
-            descCard.Controls.Add(lblD);
-            t.Controls.Add(descCard, 0, 1);
-            _rutaDescCard = descCard; _rutaDescLbl = lblD; _rutaDescGap = gapD;
-
-            var btnMap = new RoundButton { Text = Tr("Ver mapa de la ruta"), GlyphKind = "map", Dock = DockStyle.Fill, Height = 40, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 10f, Margin = new Padding(0, 10, 0, 2) };
+            var left = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0, 0, 14, 0) };
+            _banner = new BannerPanel { Dock = DockStyle.Fill };
+            _banner.ImageChanged += () => _rutaHero?.Invalidate();
+            _rutaMap = new RouteLiveMap { Dock = DockStyle.Fill, Visible = false };
+            var btnMap = new RoundButton { Text = Tr("Ver mapa de la ruta"), GlyphKind = "map", Dock = DockStyle.Fill, Height = 40, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 10f };
             btnMap.Click += (s, e) => OpenRouteMap();
-            var btnHost = new Panel { Dock = DockStyle.Fill, Height = 52, BackColor = Theme.Bg, Padding = new Padding(0, 10, 0, 2) };
-            btnHost.Controls.Add(btnMap);
-            t.Controls.Add(btnHost, 0, 2);
-            _rutaBtnHost = btnHost;
+            _rutaBtnHost = new Panel { Dock = DockStyle.Bottom, Height = 52, BackColor = Theme.Bg, Padding = new Padding(0, 10, 0, 2) };
+            _rutaBtnHost.Controls.Add(btnMap);
+            left.Controls.Add(_rutaMap); left.Controls.Add(_banner); left.Controls.Add(_rutaBtnHost);
 
-            _rutaMap = new RouteLiveMap { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2), Visible = false };
-            t.Controls.Add(_rutaMap, 0, 3);
+            _rutaGo = new RouteGoPanel { Dock = DockStyle.Fill, Margin = new Padding(0), Caption = Tr("EMPEZAR A CONDUCIR") };
+            _rutaGo.GoTo += ShowPage;
+            body.Controls.Add(left, 0, 0); body.Controls.Add(_rutaGo, 1, 0);
+
+            // La descripción completa sigue en esta caja (oculta): la usa la portada y el resto del programa.
+            _routeDescBox = new TextBox { Visible = false, Multiline = true, ReadOnly = true };
+            page.Controls.Add(body); page.Controls.Add(gap); page.Controls.Add(_rutaHero); page.Controls.Add(_routeDescBox);
+            // Hasta que se elige una ruta: bienvenida con el logotipo, encima de todo.
+            _rutaWelcome = new RouteWelcome
+            {
+                Title = Tr("Elige una ruta para empezar"),
+                Sub = Tr("Las rutas de tu contenido están en la lista de la izquierda. Elige una para ver su mapa, sus actividades, recorridos y horarios."),
+                Arrow = "←  " + Tr("Elige una ruta en la lista"),
+                Footer = "SelectOR " + Updater.CurrentVersionText,
+                Copyright = Tr("© 2026 David MZP. SelectOR. Todos los derechos reservados.")
+            };
+            _lblVersion.TextChanged += (s, e) => { _rutaWelcome.Footer = "SelectOR " + Updater.CurrentVersionText + (_lblVersion.Text.Length > 0 ? "   ·   " + _lblVersion.Text.Replace("  ", " ") : ""); _rutaWelcome.Invalidate(); };
+            page.Controls.Add(_rutaWelcome);
+            // sin acoplar: cubre la página entera (portada incluida)
+            page.Resize += (s, e) => _rutaWelcome.Bounds = page.ClientRectangle;
+            _rutaWelcome.Bounds = page.ClientRectangle;
+            _rutaWelcome.BringToFront();
+
             _rutaLiveTimer = new Timer { Interval = RutaLiveIntervalMs };
             _rutaLiveTimer.Tick += async (s, e) => await RutaLiveTick();
-            t.SizeChanged += (s, e) => RutaDescRelayout();
-
-            var page = new Panel { BackColor = Theme.Bg };
-            page.Controls.Add(t);
             return page;
         }
+
+        void FitRutaHero()
+        {
+            if (_rutaHero == null || _rutaHero.Width <= 0) return;
+            int h = _rutaHero.NeededHeight(_rutaHero.Width);
+            if (Math.Abs(_rutaHero.Height - h) > 1) _rutaHero.Height = h;
+        }
+
+        // Portada y cifras de la ruta elegida (se llama al elegirla y cada vez que llega algo nuevo).
+        void UpdateRouteOverview()
+        {
+            if (_rutaHero == null || _rutaGo == null) return;
+            var r = _curRoute;
+            int stations = 0;
+            if (r?.Path != null && _rutaMapCache.TryGetValue(r.Path, out var md) && md?.StName != null) stations = md.StName.Length;
+            int ttFiles = 0, ttTrains = 0;
+            foreach (var t in _timetablesAll) { if (t?.ORTTList == null) continue; ttFiles += t.ORTTList.Count; foreach (var f in t.ORTTList) ttTrains += f?.Trains?.Count ?? 0; }
+            var chips = new List<string>();
+            if (r != null)
+            {
+                if (stations > 0) chips.Add("🚉 " + Plural(stations, "{0} estación", "{0} estaciones"));
+                chips.Add("🧭 " + Plural(_pathsAll.Count, "{0} recorrido", "{0} recorridos"));
+                chips.Add("🏁 " + Plural(_activitiesAll.Count, "{0} actividad", "{0} actividades"));
+                chips.Add("🕒 " + Plural(ttFiles, "{0} horario", "{0} horarios"));
+                if (_curFolder != null) chips.Add("📁 " + _curFolder.Name);
+            }
+            _rutaHero.SetContent(r?.Name, r?.Description, chips);
+            FitRutaHero();
+            if (_rutaWelcome != null)
+            {
+                bool show = r == null;
+                if (show)
+                {
+                    int favs = 0; foreach (var x in _routesAll) if (_prefs.Favorites.Contains(x.Path)) favs++;
+                    var wc = new List<string>();
+                    if (_routesAll.Count > 0) wc.Add("🗺️ " + Plural(_routesAll.Count, "{0} ruta", "{0} rutas"));
+                    if (favs > 0) wc.Add("★ " + Plural(favs, "{0} favorita", "{0} favoritas"));
+                    if (_consistsAll.Count > 0) wc.Add("🚆 " + Plural(_consistsAll.Count, "{0} tren", "{0} trenes"));
+                    if (_curFolder != null) wc.Add("📁 " + _curFolder.Name);
+                    _rutaWelcome.Chips = wc;
+                    _rutaWelcome.Invalidate();
+                }
+                // Se asigna siempre: con la pestaña Ruta oculta, Visible devuelve false aunque la portada esté puesta
+                // (si se elegía la ruta desde otra pestaña, la portada seguía al volver a Ruta).
+                _rutaWelcome.Visible = show; if (show) _rutaWelcome.BringToFront();
+            }
+            _rutaGo.Items = new List<RouteGoPanel.Go>
+            {
+                new() { Icon = "🏁", Title = Tr("Actividades"), Sub = Tr("con briefing, paradas y horario"), Count = _activitiesAll.Count.ToString("N0", EsEs), Tint = Color.FromArgb(251, 146, 60), Page = 1 },
+                new() { Icon = "🧭", Title = Tr("Exploración"), Sub = Tr("tu tren, tu recorrido, tu hora"), Count = _pathsAll.Count.ToString("N0", EsEs), Tint = Theme.AccentHi, Page = 2 },
+                new() { Icon = "🕒", Title = Tr("Horarios"), Sub = Tr("trenes con su itinerario"), Count = ttTrains.ToString("N0", EsEs), Tint = Color.FromArgb(120, 144, 226), Page = 3 },
+            };
+            _rutaGo.Stats = new List<(string, string, string)>
+            {
+                (Tr("TRENES"), _consistsAll.Count.ToString("N0", EsEs), Tr("en tu contenido")),
+                (Tr("ESTACIONES"), stations > 0 ? stations.ToString("N0", EsEs) : "—", stations > 0 ? Tr("en el mapa") : Tr("sin trazado")),
+                (Tr("TU ÚLTIMA VEZ"), _routeStats.last, _routeStats.lastSub),
+                (Tr("KM QUE LLEVAS"), _routeStats.km, _routeStats.kmSub),
+            };
+            _rutaGo.Invalidate();
+        }
+
+        // Tus servicios en esta ruta (si has iniciado sesión en Empresas): cuándo fue el último y cuántos km llevas.
+        async void LoadRouteStats(Route r)
+        {
+            string login = Tr("inicia sesión en Empresas");
+            _routeStats = Supa.IsLoggedIn ? ("…", "", "…", "") : ("—", login, "—", login);
+            UpdateRouteOverview();
+            if (!Supa.IsLoggedIn || r == null) return;
+            var (json, err) = await Supa.SelectAsync(
+                $"services?select=km,started_at,status,validated&driver_id=eq.{Uri.EscapeDataString(Supa.UserId ?? "")}&route=eq.{Uri.EscapeDataString(r.Name ?? "")}&order=started_at.desc&limit=1000");
+            if (!ReferenceEquals(_curRoute, r)) return;
+            int n = 0; double km = 0; DateTime last = DateTime.MinValue;
+            if (err == null)
+            {
+                try
+                {
+                    using var d = System.Text.Json.JsonDocument.Parse(json);
+                    foreach (var e in d.RootElement.EnumerateArray())
+                    {
+                        if (e.TryGetProperty("started_at", out var sa) && sa.ValueKind == System.Text.Json.JsonValueKind.String
+                            && DateTime.TryParse(sa.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal, out var t)
+                            && t > last) last = t;
+                        bool ok = e.TryGetProperty("validated", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.True
+                               && e.TryGetProperty("status", out var st) && st.GetString() == "completed";
+                        if (!ok) continue;
+                        n++;
+                        if (e.TryGetProperty("km", out var k) && k.ValueKind == System.Text.Json.JsonValueKind.Number) km += k.GetDouble();
+                    }
+                }
+                catch { }
+            }
+            string lastTxt = "—", lastSub = Tr("aún no la has conducido");
+            if (last != DateTime.MinValue)
+            {
+                var loc = DateTime.SpecifyKind(last, DateTimeKind.Utc).ToLocalTime();
+                int days = (DateTime.Today - loc.Date).Days;
+                lastTxt = days <= 0 ? Tr("hoy") : days == 1 ? Tr("ayer") : days < 30 ? string.Format(Tr("hace {0} días"), days) : loc.ToString("d MMM yyyy", I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : EsEs);
+                lastSub = Plural(n, "{0} servicio registrado", "{0} servicios registrados");
+            }
+            _routeStats = (lastTxt, lastSub, km.ToString("N0", EsEs) + " km", Tr("en esta ruta"));
+            UpdateRouteOverview();
+        }
+
+        // ============================ ACTIVIDAD ============================
+        // Filtros (todas · fácil · media · difícil · menos de 1 h) y búsqueda; las actividades en tarjetas y,
+        // a la derecha, la ficha de la elegida.
+        ActivityDetail _actDetail;
+        FlowLayoutPanel _actChips;
+        int _actFilter;
+        readonly Dictionary<object, ActMeta> _actMeta = new();
+        static readonly string[] ActFilterNames = { "Todas", "Fácil", "Media", "Difícil", "Menos de 1 h" };
+        // «Media» ya se traduce como tipo de servicio (Regional): la dificultad lleva sus propias palabras.
+        static string DiffWord(int i) => I18n.English ? new[] { "Easy", "Medium", "Hard" }[i] : new[] { "Fácil", "Media", "Difícil" }[i];
+        static string ActFilterText(int k) => k >= 1 && k <= 3 ? DiffWord(k - 1) : Tr(ActFilterNames[k]);
 
         Panel BuildActividadPage()
         {
             var page = new Panel { BackColor = Theme.Bg };
-            _actSearch = new RoundedInput(Tr("Buscar actividad…")) { Dock = DockStyle.Top };
+            var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _actChips = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
+            for (int k = 0; k < ActFilterNames.Length; k++)
+            {
+                int idx = k;
+                var b = BankChip(ActFilterText(k), k == 0);
+                b.Click += (s, e) => { _actFilter = idx; SetChipActive(_actChips, idx); RefreshActivityList(); };
+                _actChips.Controls.Add(b);
+            }
+            _actSearch = new RoundedInput(Tr("Buscar actividad…")) { Width = 240, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
             _actSearch.Box.TextChanged += (s, e) => RefreshActivityList();
-            var searchHost = Pad(_actSearch, 0, 0, 0, 8); searchHost.Dock = DockStyle.Top;
+            bar.Controls.Add(_actChips, 0, 0); bar.Controls.Add(_actSearch, 1, 0);
 
-            _lstActivities = MakeListBox(Theme.Surface, 30);
-            _lstActivities.DrawItem += (s, e) => DrawTextRow(_lstActivities, e, false);
+            var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 400));
+            split.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _lstActivities = new ActivityCardGrid
+            {
+                Dock = DockStyle.Fill, Margin = new Padding(0, 4, 12, 0), MetaOf = ActMetaOf,
+                DiffNames = new[] { DiffWord(0).ToUpperInvariant(), DiffWord(1).ToUpperInvariant(), DiffWord(2).ToUpperInvariant() }, SeasonName = SeasonText, WeatherName = WeatherText
+            };
             _lstActivities.SelectedIndexChanged += (s, e) => OnActivitySelected();
-            _lstActivities.DoubleClick += (s, e) => Play();
-            var listCard = WrapCard(_lstActivities);
-            listCard.Dock = DockStyle.Fill;
+            _lstActivities.ItemActivated += o => Play();
 
-            var briefingCard = new Card { Dock = DockStyle.Bottom, Height = 172, Fill = Theme.Surface, Radius = 12, Padding = new Padding(14, 12, 14, 12) };
-            var lblB = MakeSectionLabel("RESUMEN"); lblB.Dock = DockStyle.Top;
-            _txtBriefing = MakeReadonlyText(); _txtBriefing.Dock = DockStyle.Fill;
-            var gapAct = new Panel { Dock = DockStyle.Top, Height = 10, BackColor = Theme.Surface };  // separación etiqueta→texto
-            briefingCard.Controls.Add(_txtBriefing);
-            briefingCard.Controls.Add(gapAct);
-            briefingCard.Controls.Add(lblB);
-            var briefHost = Pad(briefingCard, 0, 8, 0, 0); briefHost.Dock = DockStyle.Bottom;
+            var card = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(2, 6, 2, 10), Margin = new Padding(0, 4, 0, 0) };
+            _thumbs ??= new VehicleThumbs(this);
+            _actDetail = new ActivityDetail { Dock = DockStyle.Fill, Thumbs = _thumbs, Caption = Tr("ACTIVIDAD ELEGIDA"), SummaryCap = Tr("RESUMEN"), Empty = Tr("Elige una actividad") };
+            var btnMap = new RoundButton { Text = Tr("Ver el recorrido en el mapa"), GlyphKind = "map", Dock = DockStyle.Fill, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f };
+            btnMap.Click += (s, e) => OpenActivityMap();
+            var btnHost = new Panel { Dock = DockStyle.Bottom, Height = 44, BackColor = Theme.Surface, Padding = new Padding(12, 6, 12, 2) };
+            btnHost.Controls.Add(btnMap);
+            card.Controls.Add(_actDetail); card.Controls.Add(btnHost);
+            split.Controls.Add(_lstActivities, 0, 0); split.Controls.Add(card, 1, 0);
 
-            page.Controls.Add(listCard);
-            page.Controls.Add(briefHost);
-            page.Controls.Add(searchHost);
+            _txtBriefing = MakeReadonlyText(); _txtBriefing.Visible = false;   // (lo siguen rellenando; no se enseña)
+            page.Controls.Add(split); page.Controls.Add(bar); page.Controls.Add(_txtBriefing);
             return page;
         }
+
+        string SeasonText(string k) => Tr(k switch { "spring" => "Primavera", "summer" => "Verano", "autumn" => "Otoño", "winter" => "Invierno", _ => k });
+        string WeatherText(string k) => Tr(k switch { "clear" => "Despejado", "snow" => "Nieve", "rain" => "Lluvia", _ => k });
+
+        // Datos de una actividad para su tarjeta (se leen una vez; por nombre de campo, vale para cualquier versión de OR).
+        ActMeta ActMetaOf(object o)
+        {
+            if (o is not Activity a) return new ActMeta();
+            if (_actMeta.TryGetValue(a, out var m)) return m;
+            m = new ActMeta();
+            static int? Num(object v, string n)
+            {
+                if (v == null) return null;
+                var t = v.GetType();
+                object x = t.GetField(n)?.GetValue(v) ?? t.GetProperty(n)?.GetValue(v);
+                return x == null ? null : Convert.ToInt32(x);
+            }
+            try { int? h = Num(a.StartTime, "Hour"), mi = Num(a.StartTime, "Minute"); if (h != null && mi != null) m.Start = $"{h:00}:{mi:00}"; } catch { }
+            try
+            {
+                int? h = Num(a.Duration, "Hour"), mi = Num(a.Duration, "Minute");
+                if (h != null && mi != null && h + mi > 0) { m.DurMin = h.Value * 60 + mi.Value; m.Duration = h > 0 ? (mi > 0 ? $"{h} h {mi} min" : $"{h} h") : $"{mi} min"; }
+            }
+            catch { }
+            try { string d = a.Difficulty.ToString(); m.Diff = d == "Easy" ? 0 : d == "Medium" ? 1 : d == "Hard" ? 2 : -1; } catch { }
+            try { m.SeasonKind = a.Season.ToString().ToLowerInvariant(); } catch { }
+            try { m.WeatherKind = a.Weather.ToString().ToLowerInvariant(); } catch { }
+            try { m.Consist = a.Consist?.Name ?? ""; m.LocoPath = a.Consist?.Locomotive?.FilePath ?? ""; } catch { }
+            // Open Rails llama «<missing: nombre>» al tren que no está en el contenido: se muestra el nombre y se avisa
+            if ((m.Consist ?? "").StartsWith("<missing:", StringComparison.OrdinalIgnoreCase))
+                m.Consist = m.Consist.Substring(9).TrimEnd('>').Trim() + " · " + Tr("no está en tu contenido");
+            try { m.From = a.Path?.Start ?? ""; m.To = a.Path?.End ?? ""; m.PathFile = a.Path?.FilePath ?? ""; } catch { }
+            _actMeta[a] = m;
+            return m;
+        }
+
+        void OpenActivityMap()
+        {
+            var a = _lstActivities.SelectedItem as Activity;
+            var m = ActMetaOf(a);
+            if (a == null || string.IsNullOrEmpty(m.PathFile)) { Warn(Tr("Esta actividad no tiene un recorrido reconocible.")); return; }
+            using (var dlg = new PathMapDialog(m.PathFile, _curRoute?.Path ?? "", m.From, m.To, overview: true)) dlg.ShowDialog(this);   // el recorrido entero
+        }
+
+        // ============================ EXPLORACIÓN ============================
+        // Arriba «Tu viaje» (salida, llegada, mapa y modo actividad); luego hora, estación y clima en tarjetas;
+        // debajo los trenes en tarjetas con filtros; a la derecha el tren elegido con su vista 3D y su ficha.
+        Label _tripCap, _tripMeta;
+        FlowLayoutPanel _trainChips;
+        SpecTiles _exSpecs;
+
+        static Color TripFill => Color.FromArgb(40, 47, 43);
+
+        Panel Field(string cap, Control ctl, Color bg, int right = 12)
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = bg, Margin = new Padding(0, 0, right, 0) };
+            var l = new Label { Text = Tr(cap), Dock = DockStyle.Top, Height = 18, ForeColor = Theme.Subtle, BackColor = bg, Font = Theme.Font(7.75f, FontStyle.Bold) };
+            ctl.Dock = DockStyle.Top;
+            p.Controls.Add(ctl); p.Controls.Add(l);
+            return p;
+        }
+
+        Card CondCard(string cap, Control body, out Panel inner)
+        {
+            var c = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(12, 8, 12, 8), Margin = new Padding(0, 0, 10, 0) };
+            inner = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
+            var l = new Label { Text = Tr(cap), Dock = DockStyle.Top, Height = 20, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(7.75f, FontStyle.Bold) };
+            body.Dock = DockStyle.Top;
+            inner.Controls.Add(body);
+            c.Controls.Add(inner); c.Controls.Add(l);
+            return c;
+        }
+
+        int _trainKind;                       // 0 todos · 1 viajeros · 2 mercancías · 3 automotores · 4 locomotoras · 5 favoritos
+        Label _classifyLbl;
+        ConsistStripView _exStrip;
+        static readonly string[] TrainKindNames = { "Todos", "Viajeros", "Mercancías", "Automotores", "Locomotoras", "★ Favoritos" };
 
         Panel BuildExploraPage()
         {
             var page = new Panel { BackColor = Theme.Bg };
-            var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg };
-            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 54));
-            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 46));
 
-            // ---- izquierda: trenes ----
-            var pTrain = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 0, 8, 0) };
-            var lblT = MakeSectionLabel("TREN (composición)"); lblT.Dock = DockStyle.Top;
-            _consistSearch = new RoundedInput(Tr("Buscar tren…")) { Dock = DockStyle.Top };
-            _consistSearch.Box.TextChanged += (s, e) => RefreshConsistList();
-            var cSearchHost = Pad(_consistSearch, 0, 6, 0, 6); cSearchHost.Dock = DockStyle.Top;
-            _chkTrainFavOnly = MakeCheck("★  Solo favoritos"); _chkTrainFavOnly.Dock = DockStyle.Top;
+            // ---- arriba: tu viaje y condiciones, en una sola tarjeta ----
+            var top = new Card { Dock = DockStyle.Top, Height = 210, Fill = TripFill, Radius = 14, Padding = new Padding(16, 10, 16, 10) };
+            _tripCap = new Label { Text = Tr("TU VIAJE"), Dock = DockStyle.Top, Height = 20, ForeColor = Theme.AccentHi, BackColor = TripFill, Font = Theme.Font(8f, FontStyle.Bold) };
+            _cboStart = NewCombo(); _cboStart.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cboStart.SelectedIndexChanged += (s, e) => { OnStartChanged(); UpdateTripMeta(); };
+            _cboEnd = NewCombo(); _cboEnd.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cboEnd.SelectedIndexChanged += (s, e) => { UpdateStatus(); UpdateTripMeta(); };
+            var od = new TableLayoutPanel { Dock = DockStyle.Top, Height = 52, ColumnCount = 3, RowCount = 1, BackColor = TripFill, Margin = new Padding(0) };
+            od.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            od.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            od.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));
+            od.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var btnMap = new RoundButton { Text = Tr("Ver mapa del recorrido"), GlyphKind = "map", Dock = DockStyle.Top, Height = 32, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f };
+            btnMap.Click += (s, e) => OpenPathMap();
+            var mapHost = new Panel { Dock = DockStyle.Fill, BackColor = TripFill, Padding = new Padding(0, 18, 0, 0), Margin = new Padding(0) };
+            mapHost.Controls.Add(btnMap);
+            od.Controls.Add(Field("SALIDA", _cboStart, TripFill), 0, 0);
+            od.Controls.Add(Field("LLEGADA", _cboEnd, TripFill), 1, 0);
+            od.Controls.Add(mapHost, 2, 0);
+            var tripFoot = new Panel { Dock = DockStyle.Top, Height = 26, BackColor = TripFill };
+            _tripMeta = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Subtle, BackColor = TripFill, Font = Theme.Font(8.5f), TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
+            _chkExploreActivity = MakeCheck("Explorar en modo actividad");
+            _chkExploreActivity.Dock = DockStyle.Right; _chkExploreActivity.Width = 240; _chkExploreActivity.BackColor = TripFill;
+            AddAdaptiveText(_chkExploreActivity, Tr("Explorar en modo actividad"), Tr("Modo actividad"));
+            tripFoot.Controls.Add(_tripMeta); tripFoot.Controls.Add(_chkExploreActivity);
+
+            var cond = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = TripFill, Margin = new Padding(0), Padding = new Padding(0, 6, 0, 0) };
+            cond.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+            cond.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+            cond.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
+            cond.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _hourSlider = new HourSlider { Minutes = 12 * 60, Height = 34 };
+            _hourSlider.Changed += UpdateStatus;
+            var hourBody = new Panel { Height = 64, BackColor = TripFill };
+            var presets = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 30, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = TripFill, Margin = new Padding(0) };
+            foreach (var (t, min) in new[] { ("06:30", 390), ("12:00", 720), ("19:45", 1185), ("23:00", 1380) })
+            {
+                var b = BankChip(t, false); b.Height = 26; b.Margin = new Padding(0, 2, 6, 2); b.BaseColor = Color.FromArgb(52, 60, 55);
+                b.Click += (s, e) => { _hourSlider.Minutes = min; UpdateStatus(); };
+                presets.Controls.Add(b);
+            }
+            _hourSlider.Dock = DockStyle.Top;
+            hourBody.Controls.Add(presets); hourBody.Controls.Add(_hourSlider);
+            _segSeason = new Segmented(new[] { "spring", "summer", "autumn", "winter" }, new[] { Tr("Primavera"), Tr("Verano"), Tr("Otoño"), Tr("Invierno") }) { SelectedIndex = 1, CardStyle = true, Height = 56 };
+            _segWeather = new Segmented(new[] { "clear", "snow", "rain" }, new[] { Tr("Despejado"), Tr("Nieve"), Tr("Lluvia") }) { SelectedIndex = 0, CardStyle = true, Height = 56 };
+            cond.Controls.Add(Field("HORA DE SALIDA", hourBody, TripFill, 16), 0, 0);
+            cond.Controls.Add(Field("ESTACIÓN DEL AÑO", _segSeason, TripFill, 16), 1, 0);
+            cond.Controls.Add(Field("CLIMA", _segWeather, TripFill, 0), 2, 0);
+            top.Controls.Add(cond); top.Controls.Add(tripFoot); top.Controls.Add(od); top.Controls.Add(_tripCap);
+
+            // ---- elige tu tren: filtros por tipo ----
+            var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 5, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var lblT = new Label { Text = Tr("ELIGE TU TREN"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 0, 12, 0) };
+            _chkTrainFavOnly = MakeCheck("★  Solo favoritos"); _chkTrainFavOnly.Visible = false;
             _chkTrainFavOnly.CheckedChanged += (s, e) => RefreshConsistList();
-            // filtro por empresa: etiqueta "Empresa" (AutoSize, nunca se parte) a la izquierda +
-            // desplegable que rellena el ancho restante. Oculto hasta que haya empresas con trenes.
-            var coGrid = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, Height = 44, BackColor = Theme.Bg, Padding = new Padding(2, 6, 0, 8) };
-            coGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            coGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            coGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var coLbl = new Label { Text = Tr("Empresa"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 12, 0) };
-            _cboTrainCompany = new ThemeCombo { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 3, 0, 3) };
+            _trainChips = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
+            for (int k = 0; k < TrainKindNames.Length; k++)
+            {
+                int idx = k;
+                var b = BankChip(TrainKindText(k), k == 0);
+                b.Click += (s, e) =>
+                {
+                    _trainKind = idx; SetChipActive(_trainChips, idx);
+                    _chkTrainFavOnly.Checked = idx == 5;   // (dispara RefreshConsistList)
+                    RefreshConsistList();
+                };
+                _trainChips.Controls.Add(b);
+            }
+            _classifyLbl = new Label { AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Margin = new Padding(8, 0, 4, 0), Text = "" };
+            var coHost = new Panel { Width = 250, Height = 34, BackColor = Theme.Bg, Anchor = AnchorStyles.Right, Margin = new Padding(8, 3, 0, 3) };
+            var coLbl = new Label { Text = Tr("Empresa"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(9f), Dock = DockStyle.Left, Padding = new Padding(0, 8, 8, 0) };
+            _cboTrainCompany = new ThemeCombo { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
             StyleCombo(_cboTrainCompany);
             _cboTrainCompany.Items.Add(Tr(AllCompaniesLabel)); _cboTrainCompany.SelectedIndex = 0;
             _cboTrainCompany.SelectedIndexChanged += (s, e) => { if (!_companyFilterLoading) RefreshConsistList(); };
-            coGrid.Controls.Add(coLbl, 0, 0);
-            coGrid.Controls.Add(_cboTrainCompany, 1, 0);
-            _trainCompanyHost = coGrid; _trainCompanyHost.Visible = false;   // solo si hay empresas con trenes
-            _lstConsists = MakeListBox(Theme.Surface, 28);
-            _lstConsists.DrawItem += DrawConsistItem;
+            coHost.Controls.Add(_cboTrainCompany); coHost.Controls.Add(coLbl);
+            _trainCompanyHost = coHost; _trainCompanyHost.Visible = false;
+            _consistSearch = new RoundedInput(Tr("Buscar tren…")) { Width = 220, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(8, 3, 0, 3) };
+            // Con miles de trenes, se filtra cuando dejas de escribir (no a cada letra).
+            var searchWait = new Timer { Interval = 220 };
+            searchWait.Tick += (s, e) => { searchWait.Stop(); RefreshConsistList(); };
+            _consistSearch.Box.TextChanged += (s, e) => { searchWait.Stop(); searchWait.Start(); };
+            bar.Controls.Add(lblT, 0, 0); bar.Controls.Add(_trainChips, 1, 0); bar.Controls.Add(_classifyLbl, 2, 0); bar.Controls.Add(coHost, 3, 0); bar.Controls.Add(_consistSearch, 4, 0);
+
+            _thumbs ??= new VehicleThumbs(this);
+            _lstConsists = new TrainCardGrid
+            {
+                Dock = DockStyle.Fill, Thumbs = _thumbs,
+                PathOf = o => (o as TrainItem)?.Locomotive?.FilePath, KeyOf = o => (o as TrainItem)?.FilePath,
+                SpecOf = o => TrainSpecAsync(o as TrainItem),
+                FavOf = o => o is TrainItem t && _prefs.FavoriteTrains.Contains(t.FilePath),
+                CompaniesOf = o => ConsistCompanies(o as TrainItem),
+                LblPax = Tr("VIAJEROS"), LblFreight = Tr("MERCANCÍAS"), LblCars = Tr("{0} coches"), LblSeats = Tr("plazas"), LblLoading = Tr("Calculando…"),
+            };
             _lstConsists.SelectedIndexChanged += (s, e) => OnConsistSelected();
+            _lstConsists.ItemActivated += o => ToggleTrainFavorite();
             var consistCtx = new ContextMenuStrip();
             var miTFav = new ToolStripMenuItem(Tr("Añadir / quitar de favoritos")); miTFav.Click += (s, e) => ToggleTrainFavorite();
             consistCtx.Items.Add(miTFav);
             _lstConsists.ContextMenuStrip = consistCtx;
-            _lstConsists.MouseDoubleClick += (s, e) => { if (_lstConsists.SelectedItem is TrainItem) ToggleTrainFavorite(); };
-            var trainListCard = WrapCard(_lstConsists); trainListCard.Dock = DockStyle.Fill;
-            _consistsOverlay = new ListStatePanel { Bg = Theme.Surface };
-            trainListCard.Controls.Add(_consistsOverlay);
+            var trainsHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 4, 0, 0) };
+            trainsHost.Controls.Add(_lstConsists);
+            _consistsOverlay = new ListStatePanel { Bg = Theme.Bg, Icon = "🚆" };
+            trainsHost.Controls.Add(_consistsOverlay);
             void syncConsistsOverlay() { if (_consistsOverlay != null) { _consistsOverlay.Bounds = _lstConsists.Bounds; if (_consistsOverlay.Visible) _consistsOverlay.BringToFront(); } }
             _lstConsists.SizeChanged += (s, e) => syncConsistsOverlay();
             _lstConsists.LocationChanged += (s, e) => syncConsistsOverlay();
-            trainListCard.SizeChanged += (s, e) => syncConsistsOverlay();
+            trainsHost.SizeChanged += (s, e) => syncConsistsOverlay();
             syncConsistsOverlay();
-            pTrain.Controls.Add(trainListCard);
-            pTrain.Controls.Add(_trainCompanyHost);   // justo encima de la lista
-            pTrain.Controls.Add(cSearchHost);
-            pTrain.Controls.Add(_chkTrainFavOnly);
-            pTrain.Controls.Add(lblT);
 
-            // ---- derecha: condiciones + preview ----
-            var pOpt = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(8, 0, 0, 0) };
-            var lblO = MakeSectionLabel("RECORRIDO Y CONDICIONES"); lblO.Dock = DockStyle.Top;
-            var grid = MakeFieldGrid(210);
-            _cboStart = NewCombo(); _cboStart.DropDownStyle = ComboBoxStyle.DropDownList;
-            _cboStart.SelectedIndexChanged += (s, e) => OnStartChanged();
-            _cboEnd = NewCombo(); _cboEnd.DropDownStyle = ComboBoxStyle.DropDownList;
-            _cboEnd.SelectedIndexChanged += (s, e) => UpdateStatus();
-            _hourSlider = new HourSlider { Minutes = 12 * 60 };
-            _hourSlider.Changed += UpdateStatus;
-            _segSeason = new Segmented(new[] { "spring", "summer", "autumn", "winter" }, new[] { Tr("Primavera"), Tr("Verano"), Tr("Otoño"), Tr("Invierno") }) { SelectedIndex = 1 };
-            _segWeather = new Segmented(new[] { "clear", "snow", "rain" }, new[] { Tr("Despejado"), Tr("Nieve"), Tr("Lluvia") }) { SelectedIndex = 0 };
-            _chkExploreActivity = MakeCheck("Explorar en modo actividad");
-            AddAdaptiveText(_chkExploreActivity, Tr("Explorar en modo actividad"), Tr("Modo actividad"));
-            AddField(grid, 0, "Empezar en", _cboStart);
-            AddField(grid, 1, "Ir hacia", _cboEnd);
-            AddField(grid, 2, "Hora", _hourSlider);
-            AddField(grid, 3, "Estación", _segSeason);
-            AddField(grid, 4, "Clima", _segWeather);
-            AddField(grid, 5, "", _chkExploreActivity);
-
-            var previewCard = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 10, 0, 14) };
-            var lblP = MakeSectionLabel("TREN SELECCIONADO"); lblP.Dock = DockStyle.Top;
-            _trainPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
+            // ---- abajo: el tren elegido (vista 3D · composición 2D · ficha) ----
+            var sel = new Card { Dock = DockStyle.Bottom, Height = 250, Fill = Theme.Surface, Radius = 12, Padding = new Padding(10, 8, 14, 10), Margin = new Padding(0) };
+            var selGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0) };
+            selGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
+            selGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            selGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _trainPreview = new TrainPreviewPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 14, 0), BaseDistance = 3.1f };
             _trainPreview.Dragged += OnPreviewDrag;
             _trainPreview.ResetRequested += OnPreviewReset;
             _trainPreview.Zoomed += () => { if (_previewGeom != null) RenderLive(); };
             _previewRerender = new Timer { Interval = 140 };
             _previewRerender.Tick += (s, e) => { _previewRerender.Stop(); RenderLive(); };
             _trainPreview.Resize += (s, e) => { if (_previewGeom != null) { _previewRerender.Stop(); _previewRerender.Start(); } };
-            var btnComp = new RoundButton { Text = Tr("Ver composición 2D"), GlyphKind = "train", Dock = DockStyle.Fill, Height = 34, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f };
-            btnComp.Click += (s, e) => OpenComposition();
-            AddAdaptiveText(btnComp, Tr("Ver composición 2D"), Tr("Composición 2D"),
-                            () => _buyWrapExplore != null && !_buyWrapExplore.Visible ? _buyWrapExplore.Width : 0);
-            var btnCompHost = new Panel { Dock = DockStyle.Bottom, Height = 42, BackColor = Theme.Bg, Padding = new Padding(0, 8, 0, 0) };
-            _buyWrapExplore = MakeBuyTrainWrap(() => _lstConsists?.SelectedItem as TrainItem, 34);   // oculto salvo gerente/gestor/superadmin
-            btnCompHost.Controls.Add(btnComp);           // Fill
-            btnCompHost.Controls.Add(_buyWrapExplore);   // Right
+            var info = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
+            var lblP = MakeSectionLabel("TREN ELEGIDO"); lblP.Dock = DockStyle.Top;
             var (hdrP, stChip) = MakeTrainHeader(lblP); _lblStatusExplore = stChip;   // título + estado en la flota
             _teleExplore = MakeTeleUi(hdrP, () => RenderLive());                       // teleindicador (si el tren tiene destinos)
-            previewCard.Controls.Add(_trainPreview);
-            previewCard.Controls.Add(btnCompHost);
-            previewCard.Controls.Add(hdrP);
+            _buyWrapExplore = MakeBuyTrainWrap(() => _lstConsists?.SelectedItem as TrainItem, 32);   // oculto salvo gerente/gestor/superadmin
+            var headRow = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Theme.Surface };
+            hdrP.Dock = DockStyle.Fill;
+            _buyWrapExplore.Padding = new Padding(8, 3, 0, 5);
+            headRow.Controls.Add(hdrP); headRow.Controls.Add(_buyWrapExplore);
+            _exStrip = new ConsistStripView { Dock = DockStyle.Top, Height = 104, Hint = Tr("clic: ver la composición completa"), Placeholder = Tr("Elige un tren") };
+            _exStrip.Click += (s, e) => OpenComposition();
+            _exSpecs = new SpecTiles { Dock = DockStyle.Top, Height = 0, Columns = 6 };
+            info.Controls.Add(_exSpecs);
+            info.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8, BackColor = Theme.Surface });
+            info.Controls.Add(_exStrip);
+            info.Controls.Add(headRow);
+            selGrid.Controls.Add(_trainPreview, 0, 0); selGrid.Controls.Add(info, 1, 0);
+            sel.Controls.Add(selGrid);
 
-            var btnMap = new RoundButton { Text = Tr("Ver mapa del recorrido"), GlyphKind = "map", Dock = DockStyle.Top, Height = 32, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f };
-            btnMap.Click += (s, e) => OpenPathMap();
-            var btnMapHost = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Theme.Bg, Padding = new Padding(0, 4, 0, 4) };
-            btnMapHost.Controls.Add(btnMap);
-
-            pOpt.Controls.Add(previewCard);
-            pOpt.Controls.Add(btnMapHost);
-            pOpt.Controls.Add(grid);
-            pOpt.Controls.Add(lblO);
-
-            split.Controls.Add(pTrain, 0, 0);
-            split.Controls.Add(pOpt, 1, 0);
-            page.Controls.Add(split);
+            page.Controls.Add(trainsHost);
+            page.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 10, BackColor = Theme.Bg });
+            page.Controls.Add(sel);
+            page.Controls.Add(bar);
+            page.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10, BackColor = Theme.Bg });
+            page.Controls.Add(top);
+            page.Controls.Add(_chkTrainFavOnly);
             return page;
         }
+
+        string TrainKindText(int k) => k == 5 ? "★ " + Tr("Favoritos") : Tr(TrainKindNames[k]);
+
+        // ---- tipo de cada tren (para los filtros): se calcula en segundo plano y se guarda en disco ----
+        System.Threading.CancellationTokenSource _classifyCts;
+        int _classDone, _classTotal, _classShown = -1;
+        Timer _classifyTimer;
+        static string ClassCacheFile => SysPath.Combine(AppDataTidy.CacheRoot, "trenes_tipo.txt");
+        static readonly Dictionary<string, string> _classDisk = new(StringComparer.OrdinalIgnoreCase);
+        static bool _classDiskLoaded;
+
+        static string ClassKey(string conPath) { try { return conPath.ToLowerInvariant() + "|" + File.GetLastWriteTimeUtc(conPath).Ticks; } catch { return conPath.ToLowerInvariant(); } }
+        static string SpecToLine(TrainSpec s) => string.Join("\t", s.Freight ? "1" : "0", s.Automotor ? "1" : "0", s.Kw.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            s.Kmh.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Capacity.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Cars, s.Engines, (s.Traction ?? "").Replace("\t", " "), (s.Service ?? "").Replace("\t", " "));
+        static TrainSpec SpecFromLine(string l)
+        {
+            var p = l.Split('\t'); if (p.Length < 9) return null;
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            return new TrainSpec { Freight = p[0] == "1", Automotor = p[1] == "1", Kw = double.Parse(p[2], ci), Kmh = double.Parse(p[3], ci), Capacity = double.Parse(p[4], ci),
+                                   Cars = int.Parse(p[5]), Engines = int.Parse(p[6]), Traction = p[7], Service = p[8], Known = true };
+        }
+
+        TrainSpec KnownSpec(TrainItem c)
+        {
+            if (c?.FilePath == null) return null;
+            lock (_trainSpecs) return _trainSpecs.TryGetValue(c.FilePath, out var t) && t.IsCompletedSuccessfully ? t.Result : null;
+        }
+
+        void StartTrainClassification(List<TrainItem> list)
+        {
+            _classifyCts?.Cancel();
+            var cts = new System.Threading.CancellationTokenSource(); _classifyCts = cts;
+            _classTotal = list.Count; _classDone = 0; _classShown = -1;
+            if (_classifyTimer == null)
+            {
+                _classifyTimer = new Timer { Interval = 600 };
+                _classifyTimer.Tick += (s, e) => ClassifyTick();
+            }
+            _classifyTimer.Start();
+            var items = new List<TrainItem>(list);
+            Task.Run(() =>
+            {
+                lock (_classDisk)
+                {
+                    if (!_classDiskLoaded)
+                    {
+                        _classDiskLoaded = true;
+                        try { if (File.Exists(ClassCacheFile)) foreach (var l in File.ReadAllLines(ClassCacheFile)) { int t = l.IndexOf('\t'); if (t > 0) _classDisk[l.Substring(0, t)] = l.Substring(t + 1); } } catch { }
+                    }
+                }
+                var todo = new List<(TrainItem c, string key)>();
+                foreach (var c in items)
+                {
+                    if (cts.IsCancellationRequested) return;
+                    if (c?.FilePath == null) { System.Threading.Interlocked.Increment(ref _classDone); continue; }
+                    string key = ClassKey(c.FilePath);
+                    TrainSpec sp = null;
+                    lock (_classDisk) if (_classDisk.TryGetValue(key, out var line)) { try { sp = SpecFromLine(line); } catch { } }
+                    if (sp != null) { lock (_trainSpecs) _trainSpecs[c.FilePath] = Task.FromResult(sp); System.Threading.Interlocked.Increment(ref _classDone); }
+                    else if (KnownSpec(c) != null) System.Threading.Interlocked.Increment(ref _classDone);
+                    else todo.Add((c, key));
+                }
+                int sinceSave = 0;
+                var worker = new System.Threading.Thread(() =>
+                {
+                    foreach (var x in todo)
+                    {
+                        if (cts.IsCancellationRequested) break;
+                        TrainSpec sp;
+                        Task<TrainSpec> pending = null;
+                        lock (_trainSpecs) _trainSpecs.TryGetValue(x.c.FilePath, out pending);
+                        if (pending != null) { try { sp = pending.Result ?? ComputeTrainSpec(x.c); } catch { sp = ComputeTrainSpec(x.c); } }   // ya pedido por una tarjeta
+                        else { sp = ComputeTrainSpec(x.c); lock (_trainSpecs) _trainSpecs[x.c.FilePath] = Task.FromResult(sp); }
+                        if (sp.Known) lock (_classDisk) { _classDisk[x.key] = SpecToLine(sp); sinceSave++; }
+                        System.Threading.Interlocked.Increment(ref _classDone);
+                        if (sinceSave >= 500) { SaveClassDisk(); sinceSave = 0; }   // por si se cierra a medias
+                    }
+                    if (sinceSave > 0) SaveClassDisk();
+                }) { IsBackground = true, Priority = System.Threading.ThreadPriority.BelowNormal, Name = "Clasificar trenes" };
+                worker.Start();
+            });
+        }
+
+        static void SaveClassDisk()
+        {
+            try
+            {
+                List<string> lines; lock (_classDisk) { lines = new List<string>(_classDisk.Count); foreach (var kv in _classDisk) lines.Add(kv.Key + "\t" + kv.Value); }
+                Directory.CreateDirectory(SysPath.GetDirectoryName(ClassCacheFile));
+                File.WriteAllLines(ClassCacheFile + ".tmp", lines);
+                File.Move(ClassCacheFile + ".tmp", ClassCacheFile, true);
+            }
+            catch { }
+        }
+
+        void ClassifyTick()
+        {
+            int done = _classDone, total = _classTotal;
+            bool finished = done >= total;
+            if (_classifyLbl != null)
+            {
+                string t = finished || total == 0 ? "" : string.Format(Tr("Clasificando trenes… {0} %"), done * 100 / Math.Max(1, total));
+                if (_classifyLbl.Text != t) _classifyLbl.Text = t;
+            }
+            if (done != _classShown) { _classShown = done; RefreshConsistList(); }
+            if (finished) _classifyTimer?.Stop();
+        }
+
+        void UpdateTripMeta()
+        {
+            if (_tripMeta == null) return;
+            if (_tripCap != null) _tripCap.Text = Tr("TU VIAJE") + (_curRoute != null ? "  ·  " + _curRoute.Name.ToUpper() : "");
+            var p = CurrentPath();
+            int from = _pathsAll.Count(x => (x.Start ?? "") == (_cboStart.SelectedItem as string ?? ""));
+            _tripMeta.Text = p == null ? (_pathsAll.Count == 0 ? Tr("Esta ruta no tiene recorridos.") : "")
+                : string.Format(Tr("Recorrido {0}  ·  {1} desde {2}"), SysPath.GetFileNameWithoutExtension(p.FilePath), Plural(from, "{0} recorrido sale", "{0} recorridos salen"), p.Start);
+        }
+
+        // Datos de un tren para su tarjeta y su ficha (los mismos cálculos que Compra; en segundo plano).
+        readonly Dictionary<string, Task<TrainSpec>> _trainSpecs = new(StringComparer.OrdinalIgnoreCase);
+        Task<TrainSpec> TrainSpecAsync(TrainItem c)
+        {
+            if (c?.FilePath == null) return Task.FromResult<TrainSpec>(null);
+            lock (_trainSpecs)
+            {
+                if (_trainSpecs.TryGetValue(c.FilePath, out var t)) return t;
+                t = Task.Run(() => ComputeTrainSpec(c));
+                _trainSpecs[c.FilePath] = t;
+                return t;
+            }
+        }
+
+        TrainSpec ComputeTrainSpec(TrainItem c)
+        {
+            var sp = new TrainSpec();
+            try
+            {
+                string eng = c.Locomotive?.FilePath;
+                if (!string.IsNullOrEmpty(eng)) { var (kw, kmh, type) = ReadEngineSpecs(eng); sp.Kw = kw; sp.Kmh = kmh; sp.Traction = string.IsNullOrEmpty(type) ? "" : TractionName(type); }
+                var an = AnalyzeComposition(c, sp.Kmh);
+                sp.Capacity = an.Capacity; sp.Freight = an.Freight && !an.DeclaredPax; sp.Service = an.ServiceType ?? "";
+                var (e, tot) = ConsistCounts(c.FilePath); sp.Engines = e; sp.Cars = tot;
+                // Automotor: formación fija conocida, cabeza con plazas o todo motrices; un mercancías nunca lo es.
+                bool auto = false;
+                if (!sp.Freight && !string.IsNullOrEmpty(eng))
+                {
+                    try
+                    {
+                        var unit = UnitOfPath(eng);
+                        if (unit != null && (unit.Members.Count > 1 || unit.Cars > 1) && string.Equals(unit.Head, SysPath.GetFileNameWithoutExtension(eng), StringComparison.OrdinalIgnoreCase)) auto = true;
+                    }
+                    catch { }
+                    try { if (!auto && (Veh(eng)?.Capacity ?? 0) > 0) auto = true; } catch { }
+                    if (!auto && e >= 2 && e == tot) auto = true;
+                }
+                sp.Automotor = auto;
+                sp.Known = true;
+            }
+            catch { }
+            return sp;
+        }
+
+        async void UpdateExploreSpecs(TrainItem c)
+        {
+            if (_exSpecs == null) return;
+            ShowExploreStrip(c);
+            if (c == null) { _exSpecs.SetItems(null); return; }
+            var sp = await TrainSpecAsync(c);
+            if (!ReferenceEquals(_lstConsists.SelectedItem, c) || sp == null) return;
+            var es = EsEs;
+            var items = new List<(string, string)>
+            {
+                (Tr("TRACCIÓN"), sp.Traction.Length > 0 ? sp.Traction : "—"),
+                (Tr("POTENCIA"), sp.Kw > 0 ? sp.Kw.ToString("N0", es) + " kW" : "—"),
+                (Tr("VEL. MÁXIMA"), sp.Kmh > 0 ? sp.Kmh.ToString("N0", es) + " km/h" : "—"),
+                (Tr("SERVICIO"), sp.Service.Length > 0 ? Tr(sp.Service) : (sp.Freight ? Tr("Mercancías") : "—")),
+                (Tr("TIPO"), sp.Freight ? Tr("Mercancías") : (sp.Automotor ? Tr("Automotor") : Tr("Locomotora")) + (sp.Service.Length > 0 ? "  ·  " + Tr(sp.Service) : "")),
+                (sp.Freight ? Tr("VEHÍCULOS") : Tr("PLAZAS"), sp.Freight ? (sp.Cars > 0 ? sp.Cars.ToString("N0", es) : "—") : (sp.Capacity > 0 ? sp.Capacity.ToString("N0", es) : "—")),
+                (Tr("MOTRICES"), sp.Engines > 0 ? sp.Engines.ToString("N0", es) : "—"),
+            };
+            items.RemoveAt(3);   // el servicio ya va dentro de «TIPO»: seis casillas en una fila
+            _exSpecs.SetItems(items);
+            if (_exStrip != null && sp.Cars > 0) { _exStrip.Caption = Tr("COMPOSICIÓN 2D") + "  ·  " + Plural(sp.Cars, "{0} vehículo", "{0} vehículos"); _exStrip.Invalidate(); }
+        }
+
+        // ---- composición 2D del tren elegido (todos sus vehículos), con caché en disco ----
+        readonly Dictionary<string, Bitmap> _stripMem = new(StringComparer.OrdinalIgnoreCase);
+        static string StripCacheFile(string conPath)
+        {
+            string k = ClassKey(conPath);
+            using var sha = System.Security.Cryptography.SHA1.Create();
+            var h = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(k));
+            return SysPath.Combine(AppDataTidy.CacheRoot, "composiciones", BitConverter.ToString(h, 0, 10).Replace("-", "").ToLowerInvariant() + ".png");
+        }
+
+        void ShowExploreStrip(TrainItem c)
+        {
+            if (_exStrip == null) return;
+            string cap = Tr("COMPOSICIÓN 2D");
+            if (c?.FilePath == null) { _exStrip.Set(null, cap, false); return; }
+            if (_stripMem.TryGetValue(c.FilePath, out var bmp)) { _exStrip.Set(bmp, cap, false); return; }
+            _exStrip.Set(null, cap, true);
+            string con = c.FilePath, file = StripCacheFile(con);
+            Task.Run(() =>
+            {
+                Bitmap fromDisk = null;
+                try { if (File.Exists(file)) using (var ms = new MemoryStream(File.ReadAllBytes(file))) fromDisk = new Bitmap(Image.FromStream(ms)); } catch { }
+                if (fromDisk != null) { try { BeginInvoke((Action)(() => StripReady(c, fromDisk))); } catch { } return; }
+                List<(string path, bool flip, string name)> models;
+                try
+                {
+                    var doc = ConsistDoc.Load(con);
+                    if (doc == null || doc.Cars.Count == 0) { try { BeginInvoke((Action)(() => StripReady(c, null))); } catch { } return; }
+                    models = doc.Cars.Select(x => (ResolveCarFile(x.Name, x.Folder), x.Flip, x.Name)).ToList();
+                }
+                catch { try { BeginInvoke((Action)(() => StripReady(c, null))); } catch { } return; }
+                var cars = new List<(ShapeGeom geom, bool flip, string name)>();
+                foreach (var (path, flip, name) in models)
+                {
+                    ShapeGeom g = null;
+                    if (path != null)
+                    {
+                        lock (_geomCache) _geomCache.TryGetValue(path, out g);
+                        if (g == null)
+                        {
+                            try { g = ShapeRenderer.BuildGeometry(path); } catch { }
+                            try { ShapeRenderer.PrefetchTextures(g); } catch { }
+                            if (g != null) lock (_geomCache) _geomCache[path] = g;
+                        }
+                    }
+                    cars.Add((g, flip, name));
+                }
+                try
+                {
+                    BeginInvoke((Action)(() =>
+                    {
+                        Bitmap strip = null;
+                        try { strip = ServiceImages.ComposeStrip(cars); } catch { }
+                        StripReady(c, strip);
+                        if (strip == null) return;
+                        var copy = new Bitmap(strip);
+                        Task.Run(() => { try { Directory.CreateDirectory(SysPath.GetDirectoryName(file)); using (copy) copy.Save(file + ".tmp", System.Drawing.Imaging.ImageFormat.Png); File.Move(file + ".tmp", file, true); } catch { } });
+                    }));
+                }
+                catch { }
+            });
+        }
+
+        void StripReady(TrainItem c, Bitmap bmp)
+        {
+            if (bmp != null)
+            {
+                if (_stripMem.Count > 40) { foreach (var b in _stripMem.Values) if (!ReferenceEquals(b, _exStrip?.Image)) b.Dispose(); _stripMem.Clear(); }
+                _stripMem[c.FilePath] = bmp;
+            }
+            if (_exStrip != null && ReferenceEquals(_lstConsists?.SelectedItem, c)) _exStrip.Set(bmp, _exStrip.Caption, false);
+        }
+
+        // ============================ HORARIOS ============================
+        // Arriba los conjuntos (y, si los hay, sus horarios) como pastillas; el panel de salidas a la izquierda y,
+        // a la derecha, el tren elegido: vista 3D, su itinerario con paradas y horas, estación y clima.
+        TimetableList _ttList;
+        Label _ttListCap;
+        RoundedInput _ttListSearch;
+        string _ttEntriesKey;
+        bool _ttListSyncing;
+        DepartureBoard _ttBoard;
+        ItineraryView _ttItin;
+        RoundedInput _ttSearch;
+        bool _ttSyncing;
+        readonly Dictionary<object, List<TtStops.Stop>> _ttStops = new();
 
         Panel BuildHorariosPage()
         {
             var page = new Panel { BackColor = Theme.Bg };
-            var lblH = MakeSectionLabel("HORARIOS (TIMETABLE)"); lblH.Dock = DockStyle.Top;
-            var grid = MakeFieldGrid(150);
-            _cboTTSet = NewCombo(); _cboTTSet.SelectedIndexChanged += (s, e) => OnTimetableSetChanged();
-            _cboTT = NewCombo(); _cboTT.SelectedIndexChanged += (s, e) => OnTimetableChanged();
-            _cboTTTrain = NewCombo(); _cboTTTrain.SelectedIndexChanged += (s, e) => { UpdateStatus(); UpdateTimetableBriefing(); UpdateTimetablePreview(); };
-            _cboTTCompany = NewCombo(); _cboTTCompany.DropDownStyle = ComboBoxStyle.DropDownList;
+            // Los desplegables de siempre siguen siendo los que mandan (otras partes los consultan), pero no se ven.
+            var hidden = new Panel { Visible = false };
+            _cboTTSet = NewCombo(); _cboTTSet.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cboTTSet.FormattingEnabled = true; _cboTTSet.Format += (s, e) => { if (e.ListItem is TimetableInfo t) e.Value = TtLabel(t.Description, t.ToString()); };
+            _cboTTSet.SelectedIndexChanged += (s, e) => { OnTimetableSetChanged(); BuildTTChips(); };
+            _cboTT = NewCombo();
+            _cboTT.FormattingEnabled = true; _cboTT.Format += (s, e) => { if (e.ListItem is Orts.Formats.OR.TimetableFileLite t) e.Value = TtLabel(t.Description, t.ToString()); };
+            _cboTT.SelectedIndexChanged += (s, e) => { OnTimetableChanged(); BuildTTChips(); };
+            _cboTTTrain = NewCombo(); _cboTTTrain.SelectedIndexChanged += (s, e) => { UpdateStatus(); UpdateTimetableBriefing(); UpdateTimetablePreview(); SyncBoardFromCombo(); UpdateItinerary(); };
+            hidden.Controls.Add(_cboTT); hidden.Controls.Add(_cboTTTrain);
+            _txtTTBriefing = MakeReadonlyText(); hidden.Controls.Add(_txtTTBriefing);
+            page.Controls.Add(hidden);
+
+            // ---- columna: primero el CONJUNTO (desplegable) y debajo sus HORARIOS (lista, con buscador) ----
+            var ttCol = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(10, 8, 8, 10), Margin = new Padding(0, 0, 14, 0) };
+            var setCap = new Label { Text = Tr("CONJUNTO"), Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold) };
+            _cboTTSet.Dock = DockStyle.Top;
+            _ttListCap = new Label { Text = Tr("HORARIO"), Dock = DockStyle.Top, Height = 30, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(0, 0, 0, 4) };
+            _ttListSearch = new RoundedInput(Tr("Buscar horario…")) { Dock = DockStyle.Top, Height = 34 };
+            _ttListSearch.Box.TextChanged += (s, e) => { _ttEntriesKey = null; BuildTTChips(); };
+            _ttList = new TimetableList { Dock = DockStyle.Fill, Margin = new Padding(0) };
+            _ttList.SelectedIndexChanged += (s, e) => OnTTEntryChosen();
+            ttCol.Controls.Add(_ttList);
+            ttCol.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 8, BackColor = Theme.Surface });
+            ttCol.Controls.Add(_ttListSearch);
+            ttCol.Controls.Add(_ttListCap);
+            ttCol.Controls.Add(_cboTTSet);
+            ttCol.Controls.Add(setCap);
+
+            var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280));
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 400));
+            split.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            // ---- izquierda: buscador, empresa y panel de salidas ----
+            var left = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0, 0, 14, 0) };
+            var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 3, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var lblH = new Label { Text = Tr("SALIDAS DEL HORARIO"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold) };
+            _cboTTCompany = NewCombo(); _cboTTCompany.DropDownStyle = ComboBoxStyle.DropDownList; _cboTTCompany.Dock = DockStyle.Fill;
             _cboTTCompany.Items.Add(Tr(AllCompaniesLabel)); _cboTTCompany.SelectedIndex = 0;
             _cboTTCompany.SelectedIndexChanged += (s, e) => { if (!_companyFilterLoading) OnTimetableChanged(); };
-            _segTTSeason = new Segmented(new[] { "spring", "summer", "autumn", "winter" }, new[] { Tr("Primavera"), Tr("Verano"), Tr("Otoño"), Tr("Invierno") }) { SelectedIndex = 1 };
-            _segTTWeather = new Segmented(new[] { "clear", "snow", "rain" }, new[] { Tr("Despejado"), Tr("Nieve"), Tr("Lluvia") }) { SelectedIndex = 0 };
-            AddField(grid, 0, "Conjunto", _cboTTSet);
-            AddField(grid, 1, "Horario", _cboTT);
-            (_ttCompanyLbl, _ttCompanyHost) = AddFieldCore(grid, 2, "Empresa", _cboTTCompany);
-            _ttGrid = grid; _ttCompanyRow = 2;
-            AddField(grid, 3, "Tren", _cboTTTrain);
-            AddField(grid, 4, "Estación", _segTTSeason);
-            AddField(grid, 5, "Clima", _segTTWeather);
+            var coHost = new Panel { Width = 250, Height = 34, BackColor = Theme.Bg, Anchor = AnchorStyles.Right, Margin = new Padding(8, 3, 0, 3) };
+            _ttCompanyLbl = new Label { Text = Tr("Empresa"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(9f), Dock = DockStyle.Left, Padding = new Padding(0, 8, 8, 0) };
+            coHost.Controls.Add(_cboTTCompany); coHost.Controls.Add(_ttCompanyLbl);
+            _ttCompanyHost = coHost; _ttGrid = null; _ttCompanyRow = -1;
+            _ttSearch = new RoundedInput(Tr("Tren o estación…")) { Width = 220, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(8, 3, 0, 3) };
+            _ttSearch.Box.TextChanged += (s, e) => FillBoard();
+            bar.Controls.Add(lblH, 0, 0); bar.Controls.Add(coHost, 1, 0); bar.Controls.Add(_ttSearch, 2, 0);
             SetTTCompanyVisible(false);   // oculto hasta que haya empresas con trenes
 
-            var briefingCard = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(14, 12, 14, 12) };
-            var lblB = MakeSectionLabel("RESUMEN DEL TREN"); lblB.Dock = DockStyle.Top;
-            _txtTTBriefing = MakeReadonlyText(); _txtTTBriefing.Dock = DockStyle.Fill;
-            var gapTT = new Panel { Dock = DockStyle.Top, Height = 10, BackColor = Theme.Surface };  // separación etiqueta→texto
-            briefingCard.Controls.Add(_txtTTBriefing);
-            briefingCard.Controls.Add(gapTT);
-            briefingCard.Controls.Add(lblB);
-            var briefHost = Pad(briefingCard, 0, 10, 8, 0); briefHost.Dock = DockStyle.Fill;
+            _ttBoard = new DepartureBoard
+            {
+                Dock = DockStyle.Fill, Hint = Tr("elige un tren para conducirlo"),
+                Heads = new[] { Tr("HORA"), Tr("TREN"), Tr("RECORRIDO"), Tr("PARADAS"), Tr("COMPOSICIÓN") },
+                LblStops = Tr("{0} paradas"), LblStop = Tr("1 parada"), LblNoStops = Tr("sin paradas"),
+            };
+            _ttBoard.SelectedIndexChanged += (s, e) =>
+            {
+                if (_ttSyncing || _ttBoard.SelectedItem is not DepartureBoard.Row r) return;
+                _ttSyncing = true;
+                try { if (!ReferenceEquals(_cboTTTrain.SelectedItem, r.Train)) _cboTTTrain.SelectedItem = r.Train; }
+                finally { _ttSyncing = false; }
+            };
+            _ttBoard.ItemActivated += o => Play();
+            var boardCard = new Card { Dock = DockStyle.Fill, Fill = Color.FromArgb(11, 12, 13), Radius = 12, Padding = new Padding(2, 4, 2, 4), Margin = new Padding(0, 4, 0, 0) };
+            boardCard.Controls.Add(_ttBoard);
+            left.Controls.Add(boardCard); left.Controls.Add(bar);
 
-            // Derecha: TREN SELECCIONADO (render 3D rotable + composición 2D), igual que en Exploración.
-            var previewCard = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(8, 10, 0, 0) };
-            var lblP = MakeSectionLabel("TREN SELECCIONADO"); lblP.Dock = DockStyle.Top;
-            _ttPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
+            // ---- derecha: tren elegido ----
+            var right = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(12, 8, 12, 12), Margin = new Padding(0) };
+            var lblP = MakeSectionLabel("TREN ELEGIDO"); lblP.Dock = DockStyle.Top;
+            _ttPreview = new TrainPreviewPanel { Dock = DockStyle.Top, Height = 170, BaseDistance = 3.1f };
             _ttPreview.Dragged += OnTTPreviewDrag;
             _ttPreview.ResetRequested += OnTTPreviewReset;
             _ttPreview.Zoomed += () => { if (_ttPreviewGeom != null) RenderTTLive(); };
             _ttRerender = new Timer { Interval = 140 };
             _ttRerender.Tick += (s, e) => { _ttRerender.Stop(); RenderTTLive(); };
             _ttPreview.Resize += (s, e) => { if (_ttPreviewGeom != null) { _ttRerender.Stop(); _ttRerender.Start(); } };
-            var btnMapTT = new RoundButton { Text = Tr("Ver mapa del recorrido"), GlyphKind = "map", Dock = DockStyle.Top, Height = 34, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f };
-            btnMapTT.Click += (s, e) => OpenTTPathMap();
-            var btnCompTT = new RoundButton { Text = Tr("Ver composición 2D"), GlyphKind = "train", Dock = DockStyle.Fill, Height = 34, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f };
+            _ttItin = new ItineraryView { Dock = DockStyle.Fill, Empty = Tr("Elige un tren del panel de salidas"), LblOrigin = Tr("origen"), LblDest = Tr("destino"),
+                                         LblNoStops = Tr("Este horario no detalla las paradas de este tren."), BriefCap = Tr("RESUMEN") };
+            _segTTSeason = new Segmented(new[] { "spring", "summer", "autumn", "winter" }, new[] { Tr("Primavera"), Tr("Verano"), Tr("Otoño"), Tr("Invierno") }) { SelectedIndex = 1, CardStyle = true, Height = 50 };
+            _segTTWeather = new Segmented(new[] { "clear", "snow", "rain" }, new[] { Tr("Despejado"), Tr("Nieve"), Tr("Lluvia") }) { SelectedIndex = 0, CardStyle = true, Height = 50 };
+            var conds = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 78, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0), Padding = new Padding(0, 6, 0, 0) };
+            conds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+            conds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            conds.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            conds.Controls.Add(Field("ESTACIÓN DEL AÑO", _segTTSeason, Theme.Surface, 8), 0, 0);
+            conds.Controls.Add(Field("CLIMA", _segTTWeather, Theme.Surface, 0), 1, 0);
+            // «Composición 2D» y «Comprar este tren» a partes iguales (o la primera sola si no se puede comprar).
+            var btnCompTT = new RoundButton { Text = Tr("Composición 2D"), GlyphKind = "train", Dock = DockStyle.Fill, Height = 34, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f, Margin = new Padding(0, 0, 4, 0) };
             btnCompTT.Click += (s, e) => OpenTTComposition();
-            AddAdaptiveText(btnCompTT, Tr("Ver composición 2D"), Tr("Composición 2D"),
-                            () => _buyWrapTT != null && !_buyWrapTT.Visible ? _buyWrapTT.Width : 0);
-            // Fila «Ver composición 2D» + «Comprar este tren» (este último oculto salvo gerente/gestor/superadmin).
-            var compRowTT = new Panel { Dock = DockStyle.Top, Height = 34, BackColor = Theme.Bg };
+            var compRowTT = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 42, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Padding = new Padding(0, 8, 0, 0), Margin = new Padding(0) };
+            compRowTT.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); compRowTT.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            compRowTT.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             _buyWrapTT = MakeBuyTrainWrap(CurrentTTConsist, 34);
-            compRowTT.Controls.Add(btnCompTT);    // Fill
-            compRowTT.Controls.Add(_buyWrapTT);   // Right
-            var btnsTTHost = new Panel { Dock = DockStyle.Bottom, Height = 90, BackColor = Theme.Bg, Padding = new Padding(0, 8, 0, 0) };
-            var gapBtnsTT = new Panel { Dock = DockStyle.Top, Height = 6, BackColor = Theme.Bg };
-            btnsTTHost.Controls.Add(compRowTT);   // añadido 1º → queda abajo
-            btnsTTHost.Controls.Add(gapBtnsTT);
-            btnsTTHost.Controls.Add(btnMapTT);    // añadido 2º → queda arriba
+            _buyWrapTT.Dock = DockStyle.Fill; _buyWrapTT.Margin = new Padding(4, 0, 0, 0); _buyWrapTT.Padding = new Padding(0);
+            compRowTT.Controls.Add(btnCompTT, 0, 0); compRowTT.Controls.Add(_buyWrapTT, 1, 0);
+            void fitCompRow()
+            {
+                bool buy = _buyWrapTT.Visible;
+                compRowTT.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, buy ? 50 : 100);
+                compRowTT.ColumnStyles[1] = buy ? new ColumnStyle(SizeType.Percent, 50) : new ColumnStyle(SizeType.Absolute, 0);
+                btnCompTT.Margin = new Padding(0, 0, buy ? 4 : 0, 0);
+            }
+            _buyWrapTT.VisibleChanged += (s, e) => fitCompRow();
+            fitCompRow();
             var (hdrTT, stChipTT) = MakeTrainHeader(lblP); _lblStatusTT = stChipTT;   // título + estado en la flota
             _teleTT = MakeTeleUi(hdrTT, () => RenderTTLive());                          // teleindicador (si el tren tiene destinos)
-            previewCard.Controls.Add(_ttPreview);
-            previewCard.Controls.Add(btnsTTHost);
-            previewCard.Controls.Add(hdrTT);
+            right.Controls.Add(_ttItin);
+            right.Controls.Add(_ttPreview);
+            right.Controls.Add(conds);
+            right.Controls.Add(compRowTT);
+            right.Controls.Add(hdrTT);
 
-            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg };
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 54));
-            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 46));
-            bottom.Controls.Add(briefHost, 0, 0);
-            bottom.Controls.Add(previewCard, 1, 0);
-
-            page.Controls.Add(bottom);
-            page.Controls.Add(grid);
-            page.Controls.Add(lblH);
+            split.Controls.Add(ttCol, 0, 0);
+            split.Controls.Add(left, 1, 0);
+            split.Controls.Add(right, 2, 0);
+            page.Controls.Add(split);
             return page;
+        }
+
+        // Lista de HORARIOS del conjunto elegido (con el nº de trenes de cada uno) y buscador.
+        void BuildTTChips()
+        {
+            if (_ttList == null) return;
+            string q = _ttListSearch?.Box.Text.Trim() ?? "";
+            var set = _cboTTSet.SelectedItem as TimetableInfo;
+            string key = _cboTTSet.SelectedIndex + "|" + q + "|" + (set?.ORTTList?.Count ?? 0) + "|" + _cboTTSet.Items.Count;
+            if (key != _ttEntriesKey)
+            {
+                _ttEntriesKey = key;
+                var entries = new List<TimetableList.Entry>();
+                int files = set?.ORTTList?.Count ?? 0;
+                string setName = set == null ? "" : TtLabel(set.Description, set.ToString());
+                for (int fi = 0; fi < files; fi++)
+                {
+                    var f = set.ORTTList[fi];
+                    int n = f?.Trains?.Count ?? 0;
+                    string fname = f != null ? TtLabel(f.Description, f.ToString()) : setName;
+                    var en = new TimetableList.Entry { Set = _cboTTSet.SelectedIndex, File = fi, Title = fname, Sub = Plural(n, "{0} tren", "{0} trenes"), Trains = n };
+                    if (q.Length > 0 && !(en.Title + " " + en.Sub).Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
+                    entries.Add(en);
+                }
+                _ttListCap.Text = Tr("HORARIO") + (files > 0 ? "  ·  " + files : "");
+                _ttList.EmptyText = _cboTTSet.Items.Count == 0 ? Tr("Esta ruta no tiene horarios (timetables).") : Tr("Nada coincide con el filtro.");
+                _ttListSyncing = true;
+                try
+                {
+                    _ttList.BeginUpdate();
+                    _ttList.Items.Clear();
+                    foreach (var en in entries) _ttList.Items.Add(en);
+                    _ttList.EndUpdate();
+                }
+                finally { _ttListSyncing = false; }
+            }
+            _ttListSyncing = true;
+            try
+            {
+                int idx = -1;
+                for (int k = 0; k < _ttList.Items.Count; k++)
+                    if (_ttList.Items[k] is TimetableList.Entry en && en.File == Math.Max(0, _cboTT.SelectedIndex)) { idx = k; break; }
+                _ttList.SelectedIndex = idx;
+            }
+            finally { _ttListSyncing = false; }
+        }
+
+        void OnTTEntryChosen()
+        {
+            if (_ttListSyncing || _ttList.SelectedItem is not TimetableList.Entry en) return;
+            if (en.File < _cboTT.Items.Count && _cboTT.SelectedIndex != en.File) _cboTT.SelectedIndex = en.File;
+        }
+
+        static string FirstHm(string t)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(t ?? "", @"(\d{1,2}):(\d{2})");
+            return m.Success ? int.Parse(m.Groups[1].Value).ToString("00") + ":" + m.Groups[2].Value : "";
+        }
+
+        // Rellena el panel de salidas con los trenes del horario elegido (y sus paradas, del propio archivo).
+        void FillBoard()
+        {
+            if (_ttBoard == null) return;
+            var set = _cboTTSet.SelectedItem as TimetableInfo;
+            int fi = _cboTT.SelectedIndex;
+            TtStops.Table table = null;
+            try
+            {
+                var files = set == null ? new List<string>() : TtStops.FilesOf(set.fileName);
+                string file = fi >= 0 && fi < files.Count ? files[fi] : files.Count == 1 ? files[0] : null;
+                table = TtStops.Load(file);
+            }
+            catch { }
+            string q = _ttSearch?.Box.Text.Trim() ?? "";
+            _ttStops.Clear();
+            var rows = new List<DepartureBoard.Row>();
+            foreach (var o in _cboTTTrain.Items)
+            {
+                var tr = o as Orts.Formats.OR.TimetableFileLite.TrainInformation;
+                if (tr == null) continue;
+                var stops = TtStops.StopsOf(table, TtStops.ColumnOf(table, tr.Train, tr.Column));
+                _ttStops[tr] = stops;
+                var r = new DepartureBoard.Row
+                {
+                    Train = tr, Name = tr.Train ?? "", Via = tr.Path ?? "",
+                    Time = stops.Count > 0 ? stops[0].Dep : FirstHm(tr.StartTime),
+                    From = stops.Count > 0 ? stops[0].Station : "", To = stops.Count > 1 ? stops[^1].Station : "",
+                    Consist = !string.IsNullOrWhiteSpace(tr.LeadingConsist) ? tr.LeadingConsist : tr.Consist ?? "",
+                    Stops = stops.Count >= 2 ? stops.Count - 2 : (table == null ? -1 : 0),
+                };
+                if (q.Length > 0 && !(r.Name + " " + r.From + " " + r.To + " " + r.Consist + " " + r.Via).Contains(q, StringComparison.OrdinalIgnoreCase)
+                    && !stops.Any(x => x.Station.Contains(q, StringComparison.OrdinalIgnoreCase))) continue;
+                rows.Add(r);
+            }
+            rows.Sort((a, b) => TtStops.Minutes(a.Time).CompareTo(TtStops.Minutes(b.Time)));
+            string setName = set == null ? "" : TtLabel(set.Description, set.ToString());
+            _ttBoard.Title = (Tr("SALIDAS") + (_curRoute != null ? "  ·  " + _curRoute.Name : "") + (setName.Length > 0 ? "  ·  " + setName : "")).ToUpper();
+            _ttBoard.EmptyText = _cboTTSet.Items.Count == 0 ? Tr("Esta ruta no tiene horarios (timetables).") : Tr("Nada coincide con el filtro.");
+            using (var fn = new Font("Consolas", 10f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold))
+            {
+                int nw = 0; foreach (var r in rows) nw = Math.Max(nw, TextRenderer.MeasureText(r.Name, fn, Size.Empty, TextFormatFlags.NoPadding).Width);
+                _ttBoard.NameW = nw + Theme.Px(12);
+            }
+            _ttBoard.BeginUpdate();
+            _ttBoard.Items.Clear();
+            foreach (var r in rows) _ttBoard.Items.Add(r);
+            _ttBoard.EndUpdate();
+            SyncBoardFromCombo();
+            UpdateItinerary();
+        }
+
+        void SyncBoardFromCombo()
+        {
+            if (_ttBoard == null || _ttSyncing) return;
+            _ttSyncing = true;
+            try
+            {
+                int idx = -1;
+                for (int k = 0; k < _ttBoard.Items.Count; k++)
+                    if (_ttBoard.Items[k] is DepartureBoard.Row r && ReferenceEquals(r.Train, _cboTTTrain.SelectedItem)) { idx = k; break; }
+                _ttBoard.SelectedIndex = idx;
+            }
+            finally { _ttSyncing = false; }
+        }
+
+        void UpdateItinerary()
+        {
+            if (_ttItin == null) return;
+            var tr = _cboTTTrain.SelectedItem as Orts.Formats.OR.TimetableFileLite.TrainInformation;
+            if (tr == null) { _ttItin.SetContent(null, null, null, null, null); return; }
+            _ttStops.TryGetValue(tr, out var stops);
+            stops ??= new List<TtStops.Stop>();
+            string sub;
+            if (stops.Count >= 2)
+            {
+                int mins = TtStops.Minutes(stops[^1].Arr) - TtStops.Minutes(stops[0].Dep); if (mins < 0) mins += 1440;
+                sub = string.Format(Tr("Sale {0} de {1}  ·  llega {2}  ·  {3}"), stops[0].Dep, stops[0].Station, stops[^1].Arr,
+                                    mins >= 60 ? $"{mins / 60} h {mins % 60:00} min" : $"{mins} min");
+            }
+            else sub = string.Format(Tr("Sale a las {0}  ·  recorrido {1}"), FirstHm(tr.StartTime), tr.Path ?? "—");
+            var brief = new List<string>();
+            foreach (var block in new[] { tr.Briefing, (_cboTT.SelectedItem as Orts.Formats.OR.TimetableFileLite)?.Briefing })
+                foreach (var p in (block ?? "").Replace("\r", "").Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries))
+                    if (p.Trim().Length > 0 && !brief.Contains(p.Trim())) brief.Add(p.Trim());
+            _ttItin.SetContent("", tr.Train, sub, stops, brief);
         }
 
         Panel BuildMultijugadorPage()
         {
             var page = new Panel { BackColor = Theme.Bg };
 
-            // ---- lista de servidores públicos (relleno) ----
-            var srvPanel = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 10, 0, 0) };
-            var srvHeader = new Panel { Dock = DockStyle.Top, Height = 34, BackColor = Theme.Bg };
-            _lblServers = MakeSectionLabel("SERVIDORES PÚBLICOS (tsimserver.com)"); _lblServers.Dock = DockStyle.Left; _lblServers.AutoSize = false; _lblServers.Width = 640;
-            var btnRefresh = new RoundButton { Text = Tr("Actualizar"), Icon = "⟲", Width = 120, Height = 26, Radius = 8, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9f, Dock = DockStyle.Right };
-            btnRefresh.Click += (s, e) => LoadServers();
-            srvHeader.Controls.Add(_lblServers);
-            srvHeader.Controls.Add(btnRefresh);
-
-            _lstServers = MakeListBox(Theme.Surface, 30);
-            _lstServers.DrawItem += DrawServerItem;
-            _lstServers.SelectedIndexChanged += (s, e) => OnServerSelected();
-            _lstServers.DoubleClick += (s, e) => { OnServerSelected(); PlayMultiplayer(); };
-            var srvCard = WrapCard(_lstServers); srvCard.Dock = DockStyle.Fill;
-
-            // Cabecera de columnas alineada con las filas (Servidor · Ruta · Nombres · Jugadores).
-            var colHead = new Panel { Dock = DockStyle.Top, Height = 22, BackColor = Theme.Bg };
-            colHead.Paint += (s2, pe) =>
-            {
-                var g = pe.Graphics; int pad = 6, H = colHead.Height;
-                var row = new Rectangle(pad, 0, Math.Max(60, colHead.Width - 2 * pad), H);
-                var addrRect = new Rectangle(row.X + 14, 0, 200, H);
-                var playRect = new Rectangle(row.Right - 78, 0, 70, H);
-                int mid0 = addrRect.Right + 8, mid1 = playRect.Left - 8, midW = Math.Max(40, mid1 - mid0);
-                var routeRect = new Rectangle(mid0, 0, (int)(midW * 0.42f), H);
-                var namesRect = new Rectangle(routeRect.Right + 8, 0, mid1 - (routeRect.Right + 8), H);
-                using (var f = Theme.Font(8f, FontStyle.Bold))
-                {
-                    var lf = TextFormatFlags.VerticalCenter | TextFormatFlags.Left;
-                    TextRenderer.DrawText(g, Tr("SERVIDOR"), f, addrRect, Theme.Subtle, lf);
-                    TextRenderer.DrawText(g, Tr("RUTA"), f, routeRect, Theme.Subtle, lf);
-                    TextRenderer.DrawText(g, Tr("NOMBRES"), f, namesRect, Theme.Subtle, lf);
-                    TextRenderer.DrawText(g, "👤", f, playRect, Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.Right);
-                }
-            };
-            colHead.Resize += (s2, e2) => colHead.Invalidate();
-
-            srvPanel.Controls.Add(srvCard);
-            srvPanel.Controls.Add(colHead);
-            srvPanel.Controls.Add(srvHeader);
-
-            var card = new Card { Dock = DockStyle.Top, Height = 228, Fill = Theme.Surface, Radius = 12 };
-            var inner = new Panel { Size = new Size(680, 196), BackColor = Theme.Surface };
-
-            var lblM = new Label { Text = Tr("MULTIJUGADOR"), ForeColor = Theme.Accent, BackColor = Theme.Surface, Font = Theme.Font(8.5f, FontStyle.Bold), AutoSize = true, Location = new Point(4, 6) };
-            var info = new Label
-            {
-                Location = new Point(4, 28), Size = new Size(672, 46), ForeColor = Theme.Subtle, BackColor = Theme.Surface, AutoSize = false,
-                Text = Tr("Se lanza la selección de «Exploración» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.")
-            };
+            // ---- arriba: cómo quieres jugar · tus datos ----
+            // (Los tamaños fijos de aquí los escala la ventana; el alto de arriba se calcula con el contenido, ver LayoutMpTop.)
+            var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 212, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Padding = new Padding(0, 0, 0, 12) };
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            var right = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(14, 10, 14, 10), Margin = new Padding(6, 0, 0, 0) };
+            _mpMode = new MpModeCards(new[] { ("🖥", Tr("Alojar partida"), Tr("Tu PC es el servidor (red local o puerto abierto)")),
+                                              ("🔗", Tr("Unirme a un servidor"), Tr("Elige uno público abajo o escribe la dirección")) })
+                      { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0), Caption = Tr("CÓMO QUIERES JUGAR") };
+            // La nota sigue en una etiqueta (la rellena ApplyMPMode), pero la pinta la tarjeta.
+            var info = new Label { Visible = false, Text = Tr("Se lanza la selección de «Exploración» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.") };
             _lblMPInfo = info;
+            info.TextChanged += (s, e) => { _mpMode.Info = info.Text; LayoutMpTop(); };
+            _mpMode.Info = info.Text;
+            var left = _mpMode;
 
-            _rbServer = new ThemeRadio { Text = "  " + Tr("Servidor (alojar partida)"), ForeColor = Theme.Text, Location = new Point(8, 86), Size = new Size(300, 26), Checked = true };
-            _rbClient = new ThemeRadio { Text = "  " + Tr("Cliente (unirse a un servidor)"), ForeColor = Theme.Text, Location = new Point(8, 116), Size = new Size(300, 26) };
-            _rbClient.CheckedChanged += (s, e) => { ApplyMPMode(); UpdateStatus(); };
+            // Los dos «radio» siguen existiendo (el resto del programa los consulta), pero no se ven: los mandan las tarjetas.
+            var radios = new Panel { Visible = false };
+            _rbServer = new ThemeRadio { Text = "  " + Tr("Servidor (alojar partida)"), Checked = true };
+            _rbClient = new ThemeRadio { Text = "  " + Tr("Cliente (unirse a un servidor)") };
+            radios.Controls.Add(_rbServer); radios.Controls.Add(_rbClient);
+            _rbClient.CheckedChanged += (s, e) => { ApplyMPMode(); UpdateStatus(); _mpMode?.Select(_rbClient.Checked ? 1 : 0, raise: false); };
+            _mpMode.Changed += i => { _rbClient.Checked = i == 1; _rbServer.Checked = i == 0; };
 
-            _txtMPUser = MPField(inner, Tr("Usuario"), 86, 340);
+            var data = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
+            var lblD = new Label { Text = Tr("TUS DATOS"), Location = new Point(0, 0), AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold) };
+            data.Controls.Add(lblD);
+            _txtMPUser = MPField(data, Tr("Usuario"), 28, 0);
             // Usuario de Multijugador con las MISMAS reglas que Open Rails (si no, no conecta):
             // de 4 a 10 caracteres, sin espacios, ni ', " o -, y que no empiece por un número.
             _txtMPUser.MaxLength = 10;
-            _lblMPUserRule = new Label { Location = new Point(8, 150), Size = new Size(326, 42), ForeColor = Theme.Subtle, BackColor = Theme.Surface, AutoSize = false, Font = Theme.Font(8.25f),
-                                         Text = Tr("Usuario: de 4 a 10 caracteres, sin espacios ni ' \" -, y sin empezar por un número (lo exige Open Rails).") };
             _txtMPUser.TextChanged += (s, e) => OnMPUserChanged();
-            _txtMPHost = MPField(inner, Tr("Host (servidor)"), 124, 340);
-            _txtMPPort = MPField(inner, Tr("Puerto"), 162, 340);
+            _txtMPHost = MPField(data, Tr("Servidor"), 66, 0);
+            _txtMPPort = MPField(data, Tr("Puerto"), 104, 0);
+            _lblMPUserRule = new Label { Location = new Point(0, 142), Size = new Size(380, 34), ForeColor = Theme.Subtle, BackColor = Theme.Surface, AutoSize = false, Font = Theme.Font(8f),
+                                         Text = Tr("Usuario: de 4 a 10 caracteres, sin espacios ni ' \" -, y sin empezar por un número (lo exige Open Rails).") };
+            data.Controls.Add(_lblMPUserRule); data.Controls.Add(radios);
+            right.Controls.Add(data);
+            top.Controls.Add(left, 0, 0); top.Controls.Add(right, 1, 0);
+            right.Controls.Add(info);
+            _mpTop = top; _mpRight = right;
+            top.SizeChanged += (s, e) => LayoutMpTop();
             ApplyMPMode();
 
-            // CONECTAR vive ahora en la barra inferior, junto al resto de acciones de cada sección.
-            inner.Controls.AddRange(new Control[] { lblM, info, _rbServer, _rbClient, _lblMPUserRule });
-            card.Controls.Add(inner);
-            Action centerInner = () => inner.Location = new Point(Math.Max(8, (card.ClientSize.Width - inner.Width) / 2), 16);
-            card.Resize += (s, e) => centerInner();
-            card.HandleCreated += (s, e) => centerInner();
+            // ---- servidores públicos ----
+            var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 4, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _lblServers = new Label { Text = Tr("Servidores públicos"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Text, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 0, 14, 0) };
+            _srvTabs = MakeSubTabs(new[] { "Todos", "Con jugadores", "Rutas que tengo" }, i => { _srvFilter = i; FillServerCards(); });
+            _srvTabs.Dock = DockStyle.Fill; _srvTabs.Margin = new Padding(0);
+            _srvAge = new Label { AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Text = "", Margin = new Padding(10, 0, 10, 0) };
+            var btnRefresh = new RoundButton { Text = Tr("Actualizar"), Icon = "⟲", Width = 120, Height = 30, Radius = 8, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9f, Anchor = AnchorStyles.Right };
+            btnRefresh.Click += (s, e) => LoadServers();
+            bar.Controls.Add(_lblServers, 0, 0); bar.Controls.Add(_srvTabs, 1, 0); bar.Controls.Add(_srvAge, 2, 0); bar.Controls.Add(btnRefresh, 3, 0);
+            // Si no caben las pestañas enteras, fuera la hora de la lista (las pestañas no se cortan).
+            bar.SizeChanged += (s, e) => FitServerBar(bar, btnRefresh);
+            _srvBar = bar; _srvRefreshBtn = btnRefresh;
 
-            page.Controls.Add(srvPanel);
-            page.Controls.Add(card);
+            _srvGrid = new ServerCardGrid
+            {
+                Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0),
+                LblHave = "✓ " + Tr("la tienes"), LblNoRoute = Tr("Ruta que no tienes en tu contenido"), LblNoPlayers = Tr("sin jugadores"), LblJoin = Tr("Unirme"),
+                LblWaiting = Tr("Sin ruta todavía"), LblFree = "🔓 " + Tr("Libre"), LblLocked = "🔒 " + Tr("Protegido por {0} · desde las {1}"), LblOpen = "🔓 " + Tr("Abierto por {0} · sin contraseña"),
+                ThumbOf = name =>
+                {
+                    var r = _routesAll.FirstOrDefault(x => string.Equals(x.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase)
+                                                        || string.Equals(System.IO.Path.GetFileName((x.Path ?? "").TrimEnd('\\', '/')), name, StringComparison.OrdinalIgnoreCase));
+                    if (r == null) return null;
+                    var imgs = ContentImages.ForRoute(r.Path);
+                    return ImageCache.Get(imgs.thumb, 300, 184, () => { try { BeginInvoke((Action)(() => _srvGrid?.Invalidate())); } catch { } });
+                }
+            };
+            _srvGrid.Selected += it => SelectServer(it.S);
+            _srvGrid.Join += it => { SelectServer(it.S); PlayMultiplayer(); };
+            var srvHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 6, 0, 0) };
+            srvHost.Controls.Add(_srvGrid);
+
+            // Se actualiza solo cada 30 s mientras la página está a la vista (lista + candados, de una vez y sin
+            // repintar si nada ha cambiado); el contador «hace X s» corre cada segundo.
+            _mpStatusTimer = new Timer { Interval = 30000 };
+            _mpStatusTimer.Tick += (s, e) => { if (page.Visible && !IsMinimizedNow()) LoadServers(); };
+            var ageTimer = new Timer { Interval = 1000 };
+            ageTimer.Tick += (s, e) => UpdateServerAge();
+            page.VisibleChanged += (s, e) => { if (page.Visible) { _mpStatusTimer.Start(); ageTimer.Start(); LayoutMpTop(); } else { _mpStatusTimer.Stop(); ageTimer.Stop(); } };
+
+            page.Controls.Add(srvHost);
+            page.Controls.Add(bar);
+            page.Controls.Add(top);
             return page;
         }
 
-        void DrawServerItem(object sender, DrawItemEventArgs e)
+        bool IsMinimizedNow() => WindowState == FormWindowState.Minimized;
+
+        TableLayoutPanel _mpTop; Control _mpRight, _srvBar, _srvRefreshBtn;
+
+        // Alto de «Cómo quieres jugar · Tus datos» según lo que ocupa cada tarjeta con su ancho real.
+        void LayoutMpTop()
         {
-            if (e.Index < 0) return;
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-            var sv = (GameServer)_lstServers.Items[e.Index];
-            bool selected = (e.State & DrawItemState.Selected) != 0;
-            DrawRowBackground(g, e.Bounds, _lstServers.BackColor, selected);
-            int players = 0; int.TryParse(sv.Players, out players);
-            // 4 columnas: Servidor (ip:puerto) · Ruta · Nombres de jugadores · Nº jugadores
-            var addrRect = new Rectangle(e.Bounds.X + 14, e.Bounds.Y, 200, e.Bounds.Height);
-            var playRect = new Rectangle(e.Bounds.Right - 78, e.Bounds.Y, 70, e.Bounds.Height);
-            int mid0 = addrRect.Right + 8, mid1 = playRect.Left - 8;
-            int midW = Math.Max(40, mid1 - mid0);
-            var routeRect = new Rectangle(mid0, e.Bounds.Y, (int)(midW * 0.42f), e.Bounds.Height);
-            var namesRect = new Rectangle(routeRect.Right + 8, e.Bounds.Y, mid1 - (routeRect.Right + 8), e.Bounds.Height);
-            const TextFormatFlags LF = TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis;
-            using (var fb = Theme.Font(9.5f, FontStyle.Bold))
-                TextRenderer.DrawText(g, sv.Ip + ":" + sv.Port, fb, addrRect, Theme.Text, LF);
-            var route = string.IsNullOrWhiteSpace(sv.Route) || sv.Route == "-" ? Tr("(sin ruta)") : sv.Route;
-            TextRenderer.DrawText(g, route, Font, routeRect, Theme.Subtle, LF);
-            var names = string.IsNullOrWhiteSpace(sv.PlayerNames) || sv.PlayerNames == "-" ? "—" : sv.PlayerNames.Replace("\t", ", ");
-            TextRenderer.DrawText(g, names, Font, namesRect, Theme.Subtle, LF);
-            var pcolor = players > 0 ? Theme.Gold : Theme.Subtle;
-            TextRenderer.DrawText(g, "👤 " + sv.Players, Font, playRect, pcolor, TextFormatFlags.VerticalCenter | TextFormatFlags.Right);
+            if (_mpTop == null || _mpMode == null || _mpRight == null || _mpTop.Width <= 0) return;
+            int leftW = _mpMode.Width > 0 ? _mpMode.Width : _mpTop.Width / 2;
+            int need = _mpMode.NeededHeight(leftW);
+            int rightNeed = 0;
+            foreach (Control c in _mpRight.Controls) foreach (Control k in c.Controls) if (k.Visible) rightNeed = Math.Max(rightNeed, k.Bottom);
+            rightNeed += _mpRight.Padding.Vertical + 6;
+            int h = Math.Max(need, rightNeed) + _mpTop.Padding.Vertical;
+            if (Math.Abs(_mpTop.Height - h) > 1) _mpTop.Height = h;
+            _mpMode.Invalidate();
+        }
+
+        void FitServerBar(Control bar, Control btn)
+        {
+            if (_srvTabs == null || _lblServers == null || _srvAge == null) return;
+            int tabsW = 0; foreach (Control c in _srvTabs.Controls) tabsW += c.Width + c.Margin.Horizontal;
+            int ageW = TextRenderer.MeasureText(_srvAge.Text.Length > 0 ? _srvAge.Text : "actualizado hace 59 s", _srvAge.Font).Width + _srvAge.Margin.Horizontal;
+            int free = bar.Width - _lblServers.Width - _lblServers.Margin.Horizontal - btn.Width - btn.Margin.Horizontal - tabsW;
+            bool show = free >= ageW;
+            _srvAge.Visible = show;   // siempre: con la pestaña oculta, Visible devuelve false
         }
 
         // Servidor: quien aloja no usa ninguna IP (Open Rails escucha en todas las conexiones del equipo, en el
@@ -1134,9 +1959,9 @@ namespace SelectOR
             catch { return null; }
         }
 
-        void OnServerSelected()
+        void SelectServer(GameServer sv)
         {
-            if (!(_lstServers.SelectedItem is GameServer sv)) return;
+            if (sv == null) return;
             _rbClient.Checked = true;
             _txtMPHost.Text = sv.Ip;
             _txtMPPort.Text = sv.Port;
@@ -1145,22 +1970,19 @@ namespace SelectOR
 
         void LoadServers()
         {
-            _lblServers.Text = Tr("SERVIDORES PÚBLICOS — cargando…");
-            _lstServers.Items.Clear();
+            if (_srvGrid != null && (_serversAll == null || _serversAll.Count == 0)) { _srvGrid.EmptyText = Tr("Cargando…"); _srvGrid.Invalidate(); }
             Task.Run(async () =>
             {
                 var list = await Servers.FetchAsync();
-                BeginInvoke((Action)(() =>
+                BeginInvoke((Action)(async () =>
                 {
-                    _serversAll = list;
-                    _lstServers.BeginUpdate();
-                    _lstServers.Items.Clear();
-                    foreach (var s in list.OrderByDescending(v => { int.TryParse(v.Players, out int n); return n; }))
-                        _lstServers.Items.Add(s);
-                    _lstServers.EndUpdate();
-                    _lblServers.Text = list.Count > 0
-                        ? string.Format(Tr("SERVIDORES PÚBLICOS ({0}) — doble clic para conectar"), list.Count)
-                        : Tr("SERVIDORES PÚBLICOS — no disponible (sin conexión o lista vacía)");
+                    bool first = _serversAll == null || _serversAll.Count == 0;
+                    // Si la descarga falla, se queda la lista que hay (nada desaparece de golpe).
+                    if (list != null && (list.Count > 0 || first)) _serversAll = list;
+                    _srvLoadedUtc = DateTime.UtcNow;
+                    if (first) FillServerCards();   // la primera vez se enseña ya; el candado llega enseguida
+                    await LoadMpLocks();             // quién protege cada uno (si hay sesión y el SQL)
+                    FillServerCards();
                 }));
             });
         }
@@ -1212,7 +2034,7 @@ namespace SelectOR
         // ---------- helpers de estilo ----------
         // Altura suficiente para que el TEXTO no se corte (contenido = Height - padding vertical >= alto de
         // la fuente) MÁS un hueco inferior de separación. AutoEllipsis por si el ancho no alcanza.
-        Label MakeSectionLabel(string t) => new Label { Text = Tr(t), ForeColor = Theme.Accent, Font = Theme.Font(8.5f, FontStyle.Bold), Height = 34, Dock = DockStyle.Top, Padding = new Padding(2, 3, 0, 11), AutoEllipsis = true, UseCompatibleTextRendering = false };
+        Label MakeSectionLabel(string t) => new Label { Text = Tr(t), ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Height = 34, Dock = DockStyle.Top, Padding = new Padding(2, 3, 0, 11), AutoEllipsis = true, UseCompatibleTextRendering = false };
 
         CheckBox MakeCheck(string t) => new ThemeCheck { Text = Tr(t), ForeColor = Theme.Text, Height = 28, AutoSize = false };
 
@@ -1374,79 +2196,6 @@ namespace SelectOR
             TextRenderer.DrawText(e.Graphics, item.ToString(), Font, textRect, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
         }
 
-        void DrawRouteItem(object sender, DrawItemEventArgs e)
-        {
-            if (e.Index < 0) return;
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-            var route = (Route)_lstRoutes.Items[e.Index];
-            bool selected = (e.State & DrawItemState.Selected) != 0;
-            DrawRowBackground(g, e.Bounds, _lstRoutes.BackColor, selected);
-
-            var thumbRect = new Rectangle(e.Bounds.Left + 8, e.Bounds.Top + 5, 66, e.Bounds.Height - 10);
-            Theme.FillRound(g, thumbRect, 6, Color.FromArgb(12, 11, 16));
-            var imgs = ContentImages.ForRoute(route.Path);
-            var thumb = ImageCache.Get(imgs.thumb, 132, 92, SafeInvalidateRoutes);
-            if (thumb != null)
-            {
-                using (var clip = Theme.Round(thumbRect, 6)) g.SetClip(clip);
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                // Ajuste automático: recorta (cover) si las proporciones son parecidas; si no, encaja (contain).
-                double sCover = Math.Max((double)thumbRect.Width / thumb.Width, (double)thumbRect.Height / thumb.Height);
-                double sFit = Math.Min((double)thumbRect.Width / thumb.Width, (double)thumbRect.Height / thumb.Height);
-                double arImg = (double)thumb.Width / thumb.Height, arBox = (double)thumbRect.Width / thumbRect.Height;
-                double s = (arImg / arBox > 2.2 || arBox / arImg > 2.2) ? sFit : sCover;
-                int w = (int)(thumb.Width * s), h = (int)(thumb.Height * s);
-                g.DrawImage(thumb, thumbRect.X + (thumbRect.Width - w) / 2, thumbRect.Y + (thumbRect.Height - h) / 2, w, h);
-                g.ResetClip();
-            }
-
-            int left = thumbRect.Right + 10;
-            if (_prefs.Favorites.Contains(route.Path))
-            {
-                TextRenderer.DrawText(g, "★", Font, new Rectangle(left, e.Bounds.Y, 16, e.Bounds.Height), Theme.Gold, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
-                left += 18;
-            }
-            var textRect = new Rectangle(left, e.Bounds.Y, e.Bounds.Right - left - 8, e.Bounds.Height);
-            using (var f = Theme.Font(10f))
-                TextRenderer.DrawText(g, route.Name, f, textRect, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
-        }
-
-        void DrawConsistItem(object sender, DrawItemEventArgs e)
-        {
-            if (e.Index < 0) return;
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-            var consist = (TrainItem)_lstConsists.Items[e.Index];
-            bool selected = (e.State & DrawItemState.Selected) != 0;
-            DrawRowBackground(g, e.Bounds, _lstConsists.BackColor, selected);
-            int left = e.Bounds.X + 12;
-            if (_prefs.FavoriteTrains.Contains(consist.FilePath))
-            {
-                TextRenderer.DrawText(g, "★", Font, new Rectangle(left, e.Bounds.Y, 16, e.Bounds.Height), Theme.Gold, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
-                left += 18;
-            }
-            int rightEdge = e.Bounds.Right - 8;
-            // Una etiqueta por cada empresa (de la que soy socio) que tenga este tren. Se apilan de
-            // derecha a izquierda; si el maquinista está en varias con el mismo tren, salen todas.
-            var cos = ConsistCompanies(consist);
-            for (int ci = 0; ci < cos.Count; ci++)
-            {
-                string co = cos[ci];
-                if (string.IsNullOrEmpty(co)) continue;
-                string label = co;   // nombre completo de la empresa; la pill se adapta al ancho
-                Size ts = TextRenderer.MeasureText(g, label, BadgeFont);
-                int ph = Math.Min(e.Bounds.Height - 6, 18);
-                int pw = ts.Width + 14;
-                int px = rightEdge - pw, py = e.Bounds.Y + (e.Bounds.Height - ph) / 2;
-                if (px < left + 30) break;   // sin sitio para más etiquetas
-                var pill = new Rectangle(px, py, pw, ph);
-                Theme.FillRound(g, pill, ph / 2, Color.FromArgb(38, Theme.Accent));
-                TextRenderer.DrawText(g, label, BadgeFont, pill, Theme.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                rightEdge = px - 6;
-            }
-            var textRect = new Rectangle(left, e.Bounds.Y, Math.Max(20, rightEdge - left), e.Bounds.Height);
-            TextRenderer.DrawText(g, consist.Name, Font, textRect, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
-        }
-
         static readonly Font BadgeFont = Theme.Font(7.5f, FontStyle.Bold);
 
         void SafeInvalidateRoutes()
@@ -1476,7 +2225,7 @@ namespace SelectOR
             _btnConnect.Visible = i == 4;                                                  // Multijugador: CONECTAR
             UpdateDutyHostVisible();   // barra "de servicio" en Empresas (solo si perteneces a alguna empresa)
             _prefs.LastTab = i;
-            if (i == 4 && _serversAll.Count == 0 && _lstServers != null && _lstServers.Items.Count == 0) LoadServers();
+            if (i == 4 && (_serversAll == null || _serversAll.Count == 0)) LoadServers();
             // El editor enseña su estructura al momento y cada lista va con su propio «Cargando…».
             if (i == PageEditor) OnEditorShown();
             if (i == PageEmpresas) OnEmpresasShown();
@@ -1587,7 +2336,8 @@ namespace SelectOR
                     if (token != _folderToken) return;
                     _routesAll = routes;
                     RefreshRouteList();
-                    _routesOverlay?.SetState(_routesAll.Count == 0 ? ListStatePanel.Mode.Empty : ListStatePanel.Mode.Hidden, Tr("Sin rutas"));
+                    UpdateRouteOverview();
+                    _routesOverlay?.SetState(_routesAll.Count == 0 ? ListStatePanel.Mode.Empty : ListStatePanel.Mode.Hidden, Tr("Sin rutas"), Tr("Esta carpeta de contenido no tiene rutas. Elige otra arriba, en «Contenido»."));
                     SetIdle();
                     LoadStep("routes");
                     if (!string.IsNullOrEmpty(_prefs.LastRoute))
@@ -1630,8 +2380,10 @@ namespace SelectOR
                     _consistsAll = consists;
                     LoadLog($"trenes leídos ({consists.Count}): llenando la lista…");
                     RefreshConsistList();
+                    UpdateRouteOverview();
+                    StartTrainClassification(consists);   // tipo de cada tren para los filtros (en segundo plano)
                     LoadLog("lista de trenes llena");
-                    _consistsOverlay?.SetState(_consistsAll.Count == 0 ? ListStatePanel.Mode.Empty : ListStatePanel.Mode.Hidden, Tr("Sin trenes"));
+                    _consistsOverlay?.SetState(_consistsAll.Count == 0 ? ListStatePanel.Mode.Empty : ListStatePanel.Mode.Hidden, Tr("Sin trenes"), Tr("Esta carpeta de contenido no tiene composiciones (.con) en TRAINS\\CONSISTS."));
                     UpdateTimetablePreview();   // ya hay consists → resuelve el tren del timetable (si estaba pendiente)
                     RebuildCompanyEngs();       // recalcula qué trenes son de mis empresas (etiqueta)
                     LoadLog("horario y trenes de empresa hechos");
@@ -1641,7 +2393,7 @@ namespace SelectOR
                     BeginInvoke((Action)(() => LoadLog("interfaz libre tras los trenes")));
                     // Formaciones fijas (automotores) del contenido: se calculan ya, en segundo plano,
                     // para que abrir Compra no tenga que leer los miles de .con en ese momento.
-                    Task.Run(() => { try { EnsureEngUnits(); } catch { } finally { LoadStep("units"); } });
+                    Task.Run(() => { try { EnsureEngUnits(); } catch { } finally { LoadStep("units"); } try { PrewarmFleetLists(); } catch { } });
                 }));
             });
         }
@@ -1649,11 +2401,14 @@ namespace SelectOR
         void OnRouteChanged()
         {
             var route = _lstRoutes.SelectedItem as Route;
-            if (route == null) { _curRoute = null; return; }
+            if (route == null) { _curRoute = null; UpdateRouteOverview(); return; }
             _curRoute = route;
             _prefs.LastRoute = route.Path;
             _banner.RouteName = route.Name;
             _routeDescBox.Text = string.IsNullOrEmpty(route.Description) ? "" : route.Description;
+            _actMeta.Clear();
+            UpdateRouteOverview();
+            LoadRouteStats(route);
             RutaMapRouteChanged(route);
             _banner.Image = null; _banner.Invalidate();
             var imgs = ContentImages.ForRoute(route.Path);
@@ -1679,6 +2434,7 @@ namespace SelectOR
                     LoadLog("ruta: actividades, recorridos y horarios leídos; llenando listas…");
                     _activitiesAll = acts; _pathsAll = paths; _timetablesAll = tts;
                     RefreshActivityList(); RefreshPathList(); RefreshTimetableSets();
+                    UpdateRouteOverview();
                     SetIdle(); UpdateStatus();
                     LoadLog("ruta: listas llenas");
                 }));
@@ -1700,6 +2456,7 @@ namespace SelectOR
                 _lstRoutes.Items.Add(r);
             }
             _lstRoutes.EndUpdate();
+            if (_routesCap != null) _routesCap.Text = Tr("RUTAS") + "  ·  " + _lstRoutes.Items.Count;
             if (prev != null) SelectRouteInList(prev);
         }
 
@@ -1712,14 +2469,30 @@ namespace SelectOR
         void RefreshActivityList()
         {
             string q = _actSearch.Box.Text.Trim();
+            var counts = new int[ActFilterNames.Length];
             _lstActivities.BeginUpdate();
             _lstActivities.Items.Clear();
             foreach (var a in _activitiesAll)
             {
                 if (q.Length > 0 && (a.Name == null || a.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0)) continue;
+                var m = ActMetaOf(a);
+                bool[] pass = { true, m.Diff == 0, m.Diff == 1, m.Diff == 2, m.DurMin >= 0 && m.DurMin < 60 };
+                for (int k = 0; k < pass.Length; k++) if (pass[k]) counts[k]++;
+                if (!pass[_actFilter]) continue;
                 _lstActivities.Items.Add(a);
             }
+            _lstActivities.EmptyText = _activitiesAll.Count == 0 ? Tr("Esta ruta no tiene actividades. Usa «Exploración» u «Horarios».") : Tr("Nada coincide con el filtro.");
             _lstActivities.EndUpdate();
+            if (_actChips != null)
+            {
+                using var f = Theme.Font(9f, FontStyle.Bold);
+                for (int k = 0; k < counts.Length && k < _actChips.Controls.Count; k++)
+                    if (_actChips.Controls[k] is RoundButton b)
+                    {
+                        string t = ActFilterText(k) + "  " + counts[k];
+                        if (b.Text != t) { b.Text = t; b.Width = TextRenderer.MeasureText(t, f).Width + 28; b.Invalidate(); }
+                    }
+            }
             if (_lstActivities.SelectedIndex < 0 && _lstActivities.Items.Count > 0) _lstActivities.SelectedIndex = 0;
             if (_activitiesAll.Count == 0) _txtBriefing.Text = Tr("Esta ruta no tiene actividades. Usa «Exploración» u «Horarios».");
         }
@@ -1731,17 +2504,39 @@ namespace SelectOR
             string coFilter = SelectedCompany(_cboTrainCompany);
             var prev = _lstConsists.SelectedItem as TrainItem;
             var shown = new List<object>(_consistsAll.Count);
+            var kindCount = new int[6];
             foreach (var c in _consistsAll)
             {
                 if (favOnly && !_prefs.FavoriteTrains.Contains(c.FilePath)) continue;
                 if (q.Length > 0 && (c.Name == null || c.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0)) continue;
                 if (coFilter != null && !HasCo(ConsistCompanies(c), coFilter)) continue;
+                var sp = KnownSpec(c);
+                if (sp != null) { kindCount[sp.Freight ? 2 : 1]++; kindCount[sp.Automotor ? 3 : (sp.Freight || !sp.Automotor ? 4 : 0)]++; }
+                kindCount[0]++;
+                if (_trainKind >= 1 && _trainKind <= 4)
+                {
+                    if (sp == null) continue;   // aún sin clasificar: entra en cuanto se sepa
+                    bool ok = _trainKind switch { 1 => !sp.Freight, 2 => sp.Freight, 3 => sp.Automotor, 4 => !sp.Automotor, _ => true };
+                    if (!ok) continue;
+                }
                 shown.Add(c);
             }
+            bool same = shown.Count == _lstConsists.Items.Count;
+            for (int k = 0; same && k < shown.Count; k++) same = ReferenceEquals(shown[k], _lstConsists.Items[k]);
             _lstConsists.BeginUpdate();
-            _lstConsists.Items.Clear();
-            _lstConsists.Items.AddRange(shown.ToArray());
+            if (!same) { _lstConsists.Items.Clear(); _lstConsists.Items.AddRange(shown.ToArray()); }
+            _lstConsists.EmptyText = _trainKind >= 1 && _trainKind <= 4 && _classDone < _classTotal ? Tr("Clasificando los trenes del contenido…") : Tr("Nada coincide con el filtro.");
             _lstConsists.EndUpdate();
+            if (_trainChips != null)
+            {
+                using var f = Theme.Font(9f, FontStyle.Bold);
+                for (int k = 0; k < 5 && k < _trainChips.Controls.Count; k++)
+                    if (_trainChips.Controls[k] is RoundButton b)
+                    {
+                        string t = TrainKindText(k) + (k == 0 || _classDone >= _classTotal ? "  " + kindCount[k].ToString("N0", EsEs) : "");
+                        if (b.Text != t) { b.Text = t; b.Width = TextRenderer.MeasureText(t, f).Width + 28; b.Invalidate(); }
+                    }
+            }
             WarmConsistListSoon();
             if (prev != null)
                 for (int i = 0; i < _lstConsists.Items.Count; i++)
@@ -1777,6 +2572,15 @@ namespace SelectOR
             foreach (var st in _pathsAll.Select(p => p.Start ?? "").Distinct().OrderBy(s => s, StringComparer.CurrentCultureIgnoreCase)) _cboStart.Items.Add(st);
             if (_cboStart.Items.Count > 0) _cboStart.SelectedIndex = 0;   // dispara OnStartChanged → rellena destinos
             else _cboEnd.Items.Clear();
+            UpdateTripMeta();
+        }
+
+        // Nombre de un conjunto o un horario: su descripción o, si no la trae, el nombre del archivo (no la ruta completa).
+        static string TtLabel(string desc, string fallback)
+        {
+            if (!string.IsNullOrWhiteSpace(desc)) return desc.Trim();
+            fallback ??= "";
+            return fallback.IndexOf('\\') >= 0 || fallback.IndexOf('/') >= 0 ? SysPath.GetFileNameWithoutExtension(fallback) : fallback;
         }
 
         void RefreshTimetableSets()
@@ -1784,7 +2588,8 @@ namespace SelectOR
             _cboTTSet.Items.Clear();
             foreach (var t in _timetablesAll) _cboTTSet.Items.Add(t);
             if (_cboTTSet.Items.Count > 0) _cboTTSet.SelectedIndex = 0;
-            else { _cboTT.Items.Clear(); _cboTTTrain.Items.Clear(); _txtTTBriefing.Text = "Esta ruta no tiene horarios (timetables)."; }
+            else { _cboTT.Items.Clear(); _cboTTTrain.Items.Clear(); _txtTTBriefing.Text = "Esta ruta no tiene horarios (timetables)."; FillBoard(); }
+            BuildTTChips();
         }
 
         void OnTimetableSetChanged()
@@ -1815,6 +2620,7 @@ namespace SelectOR
             UpdateStatus();
             UpdateTimetableBriefing();
             UpdateTimetablePreview();
+            FillBoard();
         }
 
         // Rellena "RESUMEN DEL TREN" (Horarios) con toda la info del timetable y del tren
@@ -1873,7 +2679,8 @@ namespace SelectOR
             TeleRefresh(_teleTT, c);   // destinos del tren (antes del render: la vista 3D ya sale con el cartel elegido)
             _ttPreviewGeom = null; _ttYaw = 0; _ttPitch = 0;
             _ttPreview.Image = null; _ttPreview.Rotatable = false; _ttPreview.Invalidate();
-            _ttPreview.Caption = c?.Locomotive != null ? c.Locomotive.Name : (c != null ? c.Name : "");
+            _ttPreview.Caption = c?.FilePath != null ? SysPath.GetFileNameWithoutExtension(c.FilePath) : (c != null ? c.Name : "");   // el .con
+            _ttPreview.EmptyText = c == null ? (tr == null ? Tr("Elige un tren del panel de salidas") : Tr("Este tren no está en tu contenido")) : null;
             if (c == null) return;
             string eng = c.Locomotive?.FilePath;
             if (string.IsNullOrEmpty(eng)) return;
@@ -1896,7 +2703,11 @@ namespace SelectOR
         TrainItem ResolveConsist(string ttConsist)
         {
             if (string.IsNullOrWhiteSpace(ttConsist)) return null;
-            string name = ttConsist.Split('+')[0].Trim();
+            // «A+B» une composiciones; un nombre que lleva «+» va entre < > («<UT 447 + 448>»): ahí no se parte.
+            string name = ttConsist.Trim();
+            if (name.StartsWith("<")) { int gt = name.IndexOf('>'); name = gt > 0 ? name.Substring(1, gt - 1) : name.TrimStart('<'); }
+            else name = name.Split('+')[0];
+            name = name.Trim();
             int sp = name.IndexOf('$'); if (sp > 0) name = name.Substring(0, sp).Trim();
             if (name.Length == 0) return null;
             foreach (var c in _consistsAll)
@@ -1984,7 +2795,28 @@ namespace SelectOR
         void OnActivitySelected()
         {
             var a = _lstActivities.SelectedItem as Activity;
-            if (a == null) { _txtBriefing.Text = ""; return; }
+            if (a == null) { _txtBriefing.Text = ""; _actDetail?.SetContent(null, null, null, null, null); return; }
+            if (_actDetail != null)
+            {
+                var m = ActMetaOf(a);
+                Color[] dc = ActivityCardGrid.DiffColors;
+                string[] dn = { DiffWord(0), DiffWord(1), DiffWord(2) };
+                var facts = new List<(string, string, Color)>
+                {
+                    (Tr("SALIDA"), m.Start.Length > 0 ? m.Start : "—", Theme.Text),
+                    (Tr("DURACIÓN"), m.Duration.Length > 0 ? m.Duration : "—", Theme.Text),
+                    (Tr("DIFICULTAD"), m.Diff >= 0 ? dn[m.Diff] : "—", m.Diff >= 0 ? dc[m.Diff] : Theme.Text),
+                    (Tr("TREN"), m.Consist.Length > 0 ? m.Consist : "—", Theme.Text),
+                    (Tr("ESTACIÓN DEL AÑO"), m.SeasonKind.Length > 0 ? SeasonText(m.SeasonKind) : "—", Theme.Text),
+                    (Tr("CLIMA"), m.WeatherKind.Length > 0 ? WeatherText(m.WeatherKind) : "—", Theme.Text),
+                };
+                var paras = new List<string>();
+                foreach (var block in new[] { a.Description, a.Briefing })
+                    foreach (var p in (block ?? "").Replace("\r", "").Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries))
+                        if (p.Trim().Length > 0 && !paras.Contains(p.Trim())) paras.Add(p.Trim());
+                string sub = m.From.Length > 0 ? m.From + (m.To.Length > 0 && m.To != m.From ? "  →  " + m.To : "") : (_curRoute?.Name ?? "");
+                _actDetail.SetContent(a.Name, sub, m.LocoPath, facts, paras);
+            }
             var sb = new System.Text.StringBuilder();
             if (!string.IsNullOrEmpty(a.Description)) sb.AppendLine(a.Description).AppendLine();
             if (!string.IsNullOrEmpty(a.Briefing)) sb.AppendLine(a.Briefing);
@@ -2012,7 +2844,9 @@ namespace SelectOR
         {
             var c = _lstConsists.SelectedItem as TrainItem;
             if (c != null) _prefs.LastConsist = c.FilePath;
-            _trainPreview.Caption = c?.Locomotive != null ? c.Locomotive.Name : "";
+            UpdateExploreSpecs(c);
+            _trainPreview.Caption = c?.FilePath != null ? SysPath.GetFileNameWithoutExtension(c.FilePath) : "";   // el .con: así se encuentra luego
+            _trainPreview.EmptyText = c == null ? Tr("Elige un tren") : null;
             _trainPreview.Image = null; _trainPreview.Rotatable = false; _trainPreview.Invalidate();
             _previewGeom = null; _yaw = 0; _pitch = 0; _previewConsistPath = c?.FilePath;
             TeleRefresh(_teleExplore, c);   // destinos del tren (antes del render: la vista 3D ya sale con el cartel elegido)
@@ -2247,7 +3081,7 @@ namespace SelectOR
             Launch(args);
         }
 
-        void PlayMultiplayer()
+        async void PlayMultiplayer()
         {
             if (_curRoute == null) { Warn(Tr("Selecciona primero una ruta.")); return; }
             var c = _lstConsists.SelectedItem as TrainItem;
@@ -2294,6 +3128,12 @@ namespace SelectOR
             int weather = Math.Max(0, _segWeather.SelectedIndex);
             string flag = _rbServer.Checked ? "-multiplayerserver" : "-multiplayerclient";
             var args = $"{flag} -explorer \"{p.FilePath}\" \"{c.FilePath}\" {time} {season} {weather}";
+            // Servidor PÚBLICO: la contraseña la gestiona SelectOR (el primero la pone; los demás la escriben).
+            if (_rbClient.Checked)
+            {
+                var pub = PublicServerFor(host, port.ToString());
+                if (pub != null && !await MpGate(pub)) return;
+            }
             Launch(args);
         }
 
@@ -2353,6 +3193,7 @@ namespace SelectOR
                 SetBusy(Tr("Registrando servicio…"));
                 serviceId = await EmpStartService();
                 SetIdle();
+                if (serviceId != null) PublishServiceStrip(serviceId, _empOnDutyCompany?.Id, CurrentDrivenConsist());   // composición 2D del servicio
                 if (serviceId == null)
                 {
                     string why = _empStartFailReason;
@@ -2378,13 +3219,24 @@ namespace SelectOR
                     _svcOpenedUtc = svc ? DateTime.UtcNow : (DateTime?)null;
                     if (!svc) _driveStartUtc = DateTime.UtcNow;
                     CaptureDrivenTrain();           // tren conducido (para ponerse de servicio desde la barra superior)
+                    // Horarios: la hoja de ruta sale ya con el recorrido del tren y sus horas de paso.
+                    try { _roadTtPlan = args.IndexOf("-timetable", StringComparison.OrdinalIgnoreCase) >= 0 ? BuildTtRoadPlan() : null; } catch { _roadTtPlan = null; }
                     StartKmTracking(withPax: true); // posición para el mapa y viajeros (en servicio o conducción libre)
+                    // Actividad: lo mismo con su recorrido y las paradas del tren del jugador (el .tdb se lee aparte).
+                    if (args.IndexOf("-activity", StringComparison.OrdinalIgnoreCase) >= 0 && _lstActivities.SelectedItem is Activity actSel)
+                    {
+                        string rdir = _curRoute?.Path ?? "";
+                        _ = Task.Run(() => BuildActRoadPlan(actSel, rdir)).ContinueWith(t =>
+                        {
+                            try { if (t.Status == TaskStatus.RanToCompletion && t.Result != null) BeginInvoke((Action)(() => { if (string.Equals(_road.RouteDir, rdir, StringComparison.OrdinalIgnoreCase)) ApplyRoadPlan(t.Result); })); } catch { }
+                        });
+                    }
                     ShowServiceHud(svc);            // HUD sobre OR (en servicio o no)
                     if (_prefs.CabHudOn) ShowCabHud();   // pupitre, si lo dejaste abierto la última vez
                     if (_prefs.ChatHudOn) ShowChatHud(); // chat de empresa, si lo dejaste abierto
                     ShowDriveBar();                 // barra oculta arriba en el centro (HUD · mapa · servicio)
                     p.EnableRaisingEvents = true;
-                    p.Exited += (s, e) => { try { BeginInvoke(new Action(OnDriveReturned)); } catch { } };
+                    p.Exited += (s, e) => { try { BeginInvoke(new Action(() => { MpRelease(); OnDriveReturned(); })); } catch { } };
                 }
             }
             catch (Exception ex) { Warn(Tr("No se pudo iniciar el simulador:\n") + ex.Message); }
@@ -2442,6 +3294,7 @@ namespace SelectOR
                         + TeleSuffix(_teleTT) + EmpSuffix(ResolveConsist(ttc));
                     break;
                 case 4: _lblStatus.Text = $"{r}   ·   {Tr("Multijugador")}: {(_rbServer.Checked ? Tr("Servidor") : Tr("Cliente"))}"; break;
+                case PageEmpresas: _lblStatus.Text = _empSel != null ? $"{Tr("Empresa")}: {_empSel.Name}   ·   {r}" : r; break;
             }
             if (_empOnDutyCompany != null && _activePage != PageEmpresas)
                 _lblStatus.Text += $"   ·   🟢 {Tr("De servicio: ")}{_empOnDutyCompany.Name}";

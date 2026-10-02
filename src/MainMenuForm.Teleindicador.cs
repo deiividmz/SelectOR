@@ -38,13 +38,14 @@ namespace SelectOR
             var cb = new ThemeCombo
             {
                 DrawMode = DrawMode.OwnerDrawVariable, ItemHeight = TeleEditH + 4, BackColor = Theme.Surface2, ForeColor = Theme.Text,
-                Font = Theme.Font(9f), IntegralHeight = false, MaxDropDownItems = 9, Width = 160, TabStop = false
+                Font = Theme.Font(9f), IntegralHeight = false, MaxDropDownItems = 9, Width = 160, TabStop = false,
+                PaintEditItem = true, BoxFill = Theme.Surface2   // se ve el cartel elegido, no un texto
             };
             cb.MeasureItem += (s, e) => e.ItemHeight = TeleListH + 4;
             cb.DrawItem += (s, e) => DrawTeleItem(cb, e, ui.Chosen);
             cb.SelectedIndexChanged += (s, e) => { if (!cb.DroppedDown) OnTeleChosen(ui); };
             cb.DropDownClosed += (s, e) => OnTeleChosen(ui);
-            var host = new Panel { Dock = DockStyle.Left, Width = cb.Width + 12, BackColor = Theme.Bg, Visible = false, Padding = new Padding(10, 0, 0, 0) };
+            var host = new Panel { Dock = DockStyle.Left, Width = cb.Width + 12, BackColor = hdr.BackColor, Visible = false, Padding = new Padding(10, 0, 0, 0) };   // mismo fondo que la tarjeta
             host.Controls.Add(cb);
             void Place() { cb.Location = new Point(10, Math.Max(0, (host.Height - cb.Height) / 2)); }
             host.Resize += (s, e) => Place();

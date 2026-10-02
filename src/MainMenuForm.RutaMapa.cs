@@ -20,11 +20,7 @@ namespace SelectOR
     public partial class MainMenuForm
     {
         RouteLiveMap _rutaMap;
-        TableLayoutPanel _rutaGrid;
         Panel _rutaBtnHost;
-        Card _rutaDescCard;
-        Label _rutaDescLbl;
-        Panel _rutaDescGap;
         bool _rutaMapMode;
         readonly Dictionary<string, RouteMapData> _rutaMapCache = new(StringComparer.OrdinalIgnoreCase);
         readonly HashSet<string> _rutaMapNone = new(StringComparer.OrdinalIgnoreCase);   // rutas sin trazado utilizable
@@ -60,6 +56,7 @@ namespace SelectOR
                         if (token != _rutaMapToken) return;
                         if (d == null) { SetRutaMapMode(false); return; }
                         _rutaMap.SetData(d);
+                        UpdateRouteOverview();   // nº de estaciones
                         RutaLiveKick();
                     }));
                 }
@@ -73,62 +70,16 @@ namespace SelectOR
             catch { return false; }
         }
 
-        // Diseño de la pestaña: mapa (descripción compacta + mapa) o el de siempre (cabecera + descripción + botón).
+        // Con trazado: el mapa en vivo; sin él, la imagen de la ruta y «Ver mapa de la ruta».
         void SetRutaMapMode(bool on)
         {
-            if (_rutaGrid == null) return;
+            if (_rutaMap == null) return;
             _rutaMapMode = on;
-            _rutaGrid.SuspendLayout();
-            var rs = _rutaGrid.RowStyles;
             _banner.Visible = !on;
             _rutaBtnHost.Visible = !on;
             _rutaMap.Visible = on;
-            if (on)
-            {
-                rs[0] = new RowStyle(SizeType.Absolute, 0);
-                rs[1] = new RowStyle(SizeType.Absolute, RutaDescHeight());
-                rs[2] = new RowStyle(SizeType.Absolute, 0);
-                rs[3] = new RowStyle(SizeType.Percent, 100);
-                _rutaDescCard.Padding = new Padding(14, 7, 14, 6);
-                _rutaDescCard.Margin = new Padding(0, 0, 0, 8);
-                _rutaDescLbl.Height = 20; _rutaDescLbl.Padding = new Padding(2, 1, 0, 2);
-                _rutaDescGap.Height = 2;
-            }
-            else
-            {
-                rs[0] = new RowStyle(SizeType.Percent, 46);
-                rs[1] = new RowStyle(SizeType.Percent, 54);
-                rs[2] = new RowStyle(SizeType.AutoSize);
-                rs[3] = new RowStyle(SizeType.Absolute, 0);
-                _rutaDescCard.Padding = new Padding(14, 12, 14, 12);
-                _rutaDescCard.Margin = new Padding(3);
-                _rutaDescLbl.Height = 34; _rutaDescLbl.Padding = new Padding(2, 3, 0, 11);
-                _rutaDescGap.Height = 8;
-            }
-            _rutaGrid.ResumeLayout(true);
             RutaLiveTimerUpdate();
-        }
-
-        // Alto justo para la descripción: de 1 a 3 líneas según lo que ocupe (si hay más, barra de desplazamiento).
-        int RutaDescHeight()
-        {
-            int w = Math.Max(200, (_rutaGrid?.ClientSize.Width ?? 600) - 28 - SystemInformation.VerticalScrollBarWidth);
-            string text = _routeDescBox.Text ?? "";
-            int lineH = _routeDescBox.Font.Height;   // interlineado real de la caja de texto
-            int lines = 1;
-            if (text.Trim().Length > 0)
-            {
-                var sz = TextRenderer.MeasureText(text, _routeDescBox.Font, new Size(w, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
-                lines = Math.Max(1, Math.Min(3, (int)Math.Ceiling(sz.Height / (double)lineH)));
-            }
-            return 7 + 20 + 2 + lines * lineH + 2 + 6 + 8;   // relleno + etiqueta + hueco + texto + relleno + margen
-        }
-
-        void RutaDescRelayout()
-        {
-            if (!_rutaMapMode || _rutaGrid == null) return;
-            int h = RutaDescHeight();
-            if (Math.Abs(_rutaGrid.RowStyles[1].Height - h) > 0.5f) _rutaGrid.RowStyles[1] = new RowStyle(SizeType.Absolute, h);
+            UpdateRouteOverview();
         }
 
         // ---------------- posiciones en vivo ----------------

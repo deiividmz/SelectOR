@@ -208,6 +208,7 @@ namespace SelectOR
 
             // El servicio empieza AHORA: tiempo, km y viajeros desde este momento.
             _pendingServiceId = sid;
+            PublishServiceStrip(sid, co.Id, _drivenConsist);   // composición 2D del servicio
             _svcOpenedUtc = DateTime.UtcNow;
             StartSvcClock(_tHave ? DateTime.UtcNow : (DateTime?)null);   // si aún carga, arranca con la 1.ª posición
             _estPatKm = 0; _estimatedKm = 0;

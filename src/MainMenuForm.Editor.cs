@@ -110,7 +110,7 @@ namespace SelectOR
             head.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             head.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
             head.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
-            _edTitle = new Label { Text = Tr("Elige una composición"), AutoSize = true, ForeColor = Theme.Accent, Font = Theme.Font(12.5f, FontStyle.Bold), Margin = new Padding(2, 2, 2, 2) };
+            _edTitle = new Label { Text = Tr("Elige una composición"), AutoSize = true, ForeColor = Theme.Text, Font = Theme.Font(12.5f, FontStyle.Bold), Margin = new Padding(2, 2, 2, 2) };
             head.Controls.Add(_edTitle, 0, 0);
             // Avisos («guardado», «añadido», errores…) en la misma línea del título, a la derecha.
             _edMsg = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Subtle, Font = Theme.Font(9f), TextAlign = ContentAlignment.MiddleRight, AutoEllipsis = true, Margin = new Padding(8, 4, 2, 2) };

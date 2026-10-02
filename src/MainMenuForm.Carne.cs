@@ -403,7 +403,7 @@ namespace SelectOR
         Panel _licBar;
         int _licPoints = Carne.MaxPoints;
         double _licFrozenKm = double.NaN;   // km del rango congelado (NaN = no congelado)
-        StyledTable _licHist;
+        LicenseTimeline _licHist;
 
         Control BuildLicenseCard()
         {
@@ -425,17 +425,10 @@ namespace SelectOR
             return card;
         }
 
-        StyledTable BuildLicenseHistory()
+        LicenseTimeline BuildLicenseHistory()
         {
-            _licHist = EmpTable();
-            _licHist.Dock = DockStyle.Fill;
-            _licHist.SetColumns(
-                new StyledTable.Col("FECHA", 92),
-                new StyledTable.Col("INFRACCIÓN", 230),
-                new StyledTable.Col("DETALLE", 0, true),
-                new StyledTable.Col("EMPRESA", 140),
-                new StyledTable.Col("PUNTOS", 80, false, HorizontalAlignment.Right),
-                new StyledTable.Col("ESTADO", 170));
+            _licHist = new LicenseTimeline { Dock = DockStyle.Top, Empty = Tr("Sin infracciones. ¡Buena conducción!"),
+                                             EmptySub = Tr("Aquí aparecerán las infracciones del carné y los puntos que recuperes.") };
             return _licHist;
         }
 
@@ -445,7 +438,7 @@ namespace SelectOR
             if (_licPtsLbl == null) return;
             var (json, err) = await Supa.RpcAsync("my_license", new { });
             int pts = Carne.MaxPoints, clean = 0; DateTime? until = null; _licFrozenKm = double.NaN;
-            var rows = new List<(string[] cells, Color?[] colors, string id)>();
+            var rows = new List<LicenseTimeline.Entry>();
             if (err == null && !string.IsNullOrWhiteSpace(json) && json.Trim() != "null")
             {
                 try
@@ -465,10 +458,13 @@ namespace SelectOR
                             string route = Str(e, "route");
                             if (route.Length > 0) det = det.Length > 0 ? route + " · " + det : route;
                             if (code == "recovery") det = string.Format(Tr("{0} servicios seguidos sin infracciones"), Carne.CleanForPoint);
-                            rows.Add((new[] { FmtDate(Str(e, "created_at")), Carne.Label(code), det, Str(e, "company"), Carne.PointsText(p), Carne.StatusName(status) },
-                                      new Color?[] { null, code == "recovery" ? Carne.Green : (Color?)null, Theme.Subtle, Theme.Subtle,
-                                                     p > 0 ? Carne.Green : status == "annulled" ? Theme.Subtle : Carne.Red, code == "recovery" ? Carne.Green : Carne.StatusColor(status) },
-                                      Str(e, "id")));
+                            DateTime.TryParse(Str(e, "created_at"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var at);
+                            rows.Add(new LicenseTimeline.Entry
+                            {
+                                Local = at == DateTime.MinValue ? at : DateTime.SpecifyKind(at, DateTimeKind.Utc).ToLocalTime(),
+                                Code = code, CodeTag = Carne.Code(code), Title = Carne.Name(code), Detail = det, Company = Str(e, "company"), Points = p, Status = status,
+                                StatusText = code == "recovery" ? Tr("Recuperado") : Carne.StatusName(status)
+                            });
                         }
                 }
                 catch { }
@@ -493,12 +489,9 @@ namespace SelectOR
 
             if (_licHist != null)
             {
-                _licHist.BeginReload("lic");
-                _licHist.ClearRows();
-                foreach (var (cells, colors, id) in rows) _licHist.AddRow(cells, colors, null, id);
-                if (rows.Count == 0) _licHist.SetEmpty(err != null && err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) < 0
-                    ? Tr("Error: ") + err : Tr("Sin infracciones. ¡Buena conducción!"));
-                _licHist.EndReload();
+                bool realErr = err != null && err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) < 0;
+                _licHist.Empty = realErr ? Tr("Error: ") + err : Tr("Sin infracciones. ¡Buena conducción!");
+                _licHist.SetEntries(rows);
             }
         }
 
@@ -507,7 +500,8 @@ namespace SelectOR
 
         // ---------------------------------------------------------------- Revisión (gerente / gestores)
         StyledTable _revList; Label _revMsg;
-        readonly List<(string id, string status, string driver)> _revRows = new();
+        readonly List<(string id, string status, string driver, string code)> _revRows = new();
+        static bool IsCodeA(string code) => code == "jump" || code == "speed_avg" || code == "time_accel";
 
         Panel BuildReviewSubpanel()
         {
@@ -519,7 +513,7 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tabla
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // acciones
 
-            var intro = EmpIntro("Infracciones del carné por puntos de todas las empresas. Todas restan los puntos al momento. Los excesos de velocidad (B6 y B7) quedan pendientes de revisión: confírmalos o anúlalos para devolver los puntos al maquinista.");
+            var intro = EmpIntro("Todas las infracciones del carné de todos los usuarios. En cualquier momento puedes aprobarlas (los puntos quedan restados), anularlas (se devuelven los puntos) o eliminarlas (se devuelven los puntos y se borran). Los excesos de velocidad (B6 y B7) llegan pendientes de revisión.");
             intro.MaximumSize = new Size(900, 0);
             t.Controls.Add(intro);
 
@@ -528,13 +522,17 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var tabs = MakeSubTabs(new[] { "Pendientes", "Todas" }, i =>
+            // Todas · Pendientes (B6/B7 por revisar) · A1, A2 y A3 · B6 y B7
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3", "B6 · B7" }, i =>
             {
-                _revList.RowFilter = i == 0 ? cells => cells.Length > 0 && cells[^1] == Carne.StatusName("pending") : (Func<string[], bool>)null;
+                _revList.RowFilter = i == 1 ? cells => cells.Length > 0 && cells[^1] == Carne.StatusName("pending")
+                                   : i == 2 ? cells => cells.Length > 3 && cells[3].StartsWith("A")
+                                   : i == 3 ? cells => cells.Length > 3 && cells[3].StartsWith("B")
+                                   : (Func<string[], bool>)null;
                 _revList.Refilter();
             });
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
-            _revList.RowFilter = cells => cells.Length > 0 && cells[^1] == Carne.StatusName("pending");
+            _revList.RowFilter = null;   // de entrada, todas
             var search = EmpSearch(_revList, 260); search.Anchor = AnchorStyles.Right; search.Margin = new Padding(10, 3, 0, 3);
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
@@ -551,11 +549,14 @@ namespace SelectOR
             t.Controls.Add(_revList);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
-            var ok = EmpButton(Tr("Confirmar infracción"), primary: true); ok.Width = 220;
-            ok.Click += (s, e) => ReviewInfraction(true);
+            var ok = EmpButton(Tr("Aprobar"), primary: true); ok.Width = 170;
+            ok.Click += (s, e) => AdminInfraction("confirm");
             var no = EmpButton(Tr("Anular")); no.Width = 150; no.Margin = new Padding(8, 10, 2, 2);
-            no.Click += (s, e) => ReviewInfraction(false);
-            btns.Controls.Add(ok); btns.Controls.Add(no);
+            no.Click += (s, e) => AdminInfraction("annul");
+            var del = EmpButton(Tr("Eliminar")); del.Width = 150; del.Margin = new Padding(8, 10, 2, 2);
+            del.BaseColor = Color.FromArgb(60, 44, 44); del.HoverColor = Color.FromArgb(150, 60, 60); del.TextColor = Color.FromArgb(229, 115, 115);
+            del.Click += (s, e) => AdminInfraction("delete");
+            btns.Controls.Add(ok); btns.Controls.Add(no); btns.Controls.Add(del);
             _revMsg = EmpMsg(); _revMsg.Margin = new Padding(12, 20, 2, 2); _revMsg.MaximumSize = new Size(600, 0);
             btns.Controls.Add(_revMsg);
             t.Controls.Add(btns);
@@ -573,10 +574,10 @@ namespace SelectOR
             if (_revLoading && onlyCount) return;   // un contador ya en camino basta
             _revLoading = true;
             string json, err;
-            try { (json, err) = await Supa.RpcAsync("list_all_infractions", new { p_limit = 500 }); }
+            try { (json, err) = await Supa.RpcAsync("list_all_infractions", new { p_limit = 2000 }); }
             finally { _revLoading = false; }
             int pending = 0;
-            var rows = new List<(string[] cells, Color?[] colors, string id, string status, string driver)>();
+            var rows = new List<(string[] cells, Color?[] colors, string id, string status, string driver, string code)>();
             if (err == null)
             {
                 try
@@ -598,7 +599,7 @@ namespace SelectOR
                         string co = Str(e, "company_name"); if (co.Length == 0) co = "—";
                         rows.Add((new[] { FmtDate(Str(e, "created_at")), co, who, Carne.Label(code), det, train, Carne.PointsText(p), st },
                                   new Color?[] { null, Theme.Subtle, null, null, Theme.Subtle, Theme.Subtle, status == "annulled" ? Theme.Subtle : Carne.Red, Carne.StatusColor(status) },
-                                  Str(e, "id"), status, Str(e, "driver_id")));
+                                  Str(e, "id"), status, Str(e, "driver_id"), code));
                     }
                 }
                 catch { }
@@ -607,12 +608,12 @@ namespace SelectOR
             if (onlyCount || _revList == null) return;
             _revList.BeginReload("todas");
             _revList.ClearRows(); _revRows.Clear();
-            foreach (var r in rows) { _revRows.Add((r.id, r.status, r.driver)); _revList.AddRow(r.cells, r.colors, null, r.id); }
+            foreach (var r in rows) { _revRows.Add((r.id, r.status, r.driver, r.code)); _revList.AddRow(r.cells, r.colors, null, r.id); }
             if (rows.Count == 0)
                 _revList.SetEmpty(err != null
                     ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no tiene la revisión del superadministrador (falta carne-revision-superadmin.sql).") : Tr("Error: ") + err)
                     : Tr("No hay infracciones."));
-            else if (pending == 0) _revList.SetEmpty(Tr("No hay infracciones pendientes de revisión."));
+
             _revList.EndReload();
         }
 
@@ -623,17 +624,69 @@ namespace SelectOR
             if (_empSubtabs[6].Text != txt) { _empSubtabs[6].Text = txt; _empSubtabs[6].Invalidate(); }
         }
 
-        async void ReviewInfraction(bool confirm)
+        // Superadministrador: aprobar, anular o eliminar CUALQUIER infracción, en cualquier momento (revision-total.sql).
+        // Sin ese SQL, se hace lo que se podía antes (B6/B7 pendientes y anular A1, A2 y A3).
+        async void AdminInfraction(string action)
+        {
+            if (_revList == null || !Supa.IsSuperadmin) return;
+            int i = _revList.SelectedRow;
+            if (i < 0 || i >= _revRows.Count) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
+            var (id, status, driver, code) = _revRows[i];
+            if (action == "confirm" && status == "applied") { Msg(_revMsg, Tr("Esta infracción ya está aprobada."), true); return; }
+            if (action == "annul" && status == "annulled") { Msg(_revMsg, Tr("Esta infracción ya está anulada."), true); return; }
+            string q = action == "confirm" ? Tr("¿Aprobar la infracción? Los puntos quedan restados al maquinista.")
+                     : action == "annul" ? Tr("¿Anular la infracción? Se devolverán los puntos al maquinista.")
+                     : Tr("¿Eliminar la infracción? Si restó puntos, se devuelven al maquinista y la infracción se borra para siempre.");
+            if (MessageBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, action == "delete" ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.Yes) return;
+            Msg(_revMsg, action == "confirm" ? Tr("Aprobando…") : action == "annul" ? Tr("Anulando…") : Tr("Eliminando…"), false);
+            var (_, err) = await Supa.RpcAsync("admin_set_infraction", new { p_id = id, p_action = action });
+            if (err != null && err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                // servidor sin revision-total.sql
+                if (action == "delete") { Msg(_revMsg, Tr("El servidor aún no permite eliminar infracciones (falta revision-total.sql)."), true); return; }
+                if (status == "pending") { ReviewInfractionCore(action == "confirm", ask: false); return; }
+                if (action == "annul" && IsCodeA(code)) (_, err) = await Supa.RpcAsync("annul_infraction", new { p_id = id });
+                else { Msg(_revMsg, Tr("El servidor aún no permite cambiar esta infracción (falta revision-total.sql)."), true); return; }
+            }
+            if (err != null) { Msg(_revMsg, Tr("Error: ") + err, true); return; }
+            Msg(_revMsg, action == "confirm" ? Tr("Infracción aprobada.") : action == "annul" ? Tr("Infracción anulada: se han devuelto los puntos.") : Tr("Infracción eliminada."), false);
+            LoadReview();
+            if (_empSel != null) LoadMembers(_empSel);   // columna PUNTOS de Socios
+        }
+
+        void ReviewInfraction(bool confirm) => ReviewInfractionCore(confirm, ask: true);
+
+        async void ReviewInfractionCore(bool confirm, bool ask)
         {
             if (_revList == null) return;
             int i = _revList.SelectedRow;
             if (i < 0 || i >= _revRows.Count) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
-            var (id, status, driver) = _revRows[i];
-            if (status != "pending") { Msg(_revMsg, Tr("Esta infracción ya está revisada."), true); return; }
+            var (id, status, driver, code) = _revRows[i];
             if (!Supa.IsSuperadmin) return;
+            // A1, A2 y A3: no hay nada que confirmar (ya están aplicadas), pero se pueden anular.
+            if (IsCodeA(code) && status != "pending")
+            {
+                if (confirm) { Msg(_revMsg, Tr("Las A1, A2 y A3 ya están aplicadas: solo se pueden anular."), true); return; }
+                if (status == "annulled") { Msg(_revMsg, Tr("Esta infracción ya está anulada."), true); return; }
+                if (MessageBox.Show(this, Tr("¿Anular la infracción? Se devolverán los puntos al maquinista. El servicio, que no se registró, no se recupera."),
+                                    Tr("Revisión"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                Msg(_revMsg, Tr("Anulando…"), false);
+                var (_, errA) = await Supa.RpcAsync("annul_infraction", new { p_id = id });
+                if (errA != null)
+                {
+                    Msg(_revMsg, errA.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                        ? Tr("El servidor aún no permite anular las A1, A2 y A3 (falta revision-infracciones-a.sql).") : Tr("Error: ") + errA, true);
+                    return;
+                }
+                Msg(_revMsg, Tr("Infracción anulada: se han devuelto los puntos."), false);
+                LoadReview();
+                if (_empSel != null) LoadMembers(_empSel);
+                return;
+            }
+            if (status != "pending") { Msg(_revMsg, Tr("Esta infracción ya está revisada."), true); return; }
             string q = confirm ? Tr("¿Confirmar la infracción? Los puntos siguen restados al maquinista.")
                                : Tr("¿Anular la infracción? Se devolverán los puntos al maquinista.");
-            if (MessageBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (ask && MessageBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             Msg(_revMsg, confirm ? Tr("Confirmando…") : Tr("Anulando…"), false);
             var (_, err) = await Supa.RpcAsync("review_infraction", new { p_id = id, p_confirm = confirm });
             if (err != null) { Msg(_revMsg, Tr("Error: ") + err, true); return; }

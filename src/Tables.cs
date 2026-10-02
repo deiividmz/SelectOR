@@ -629,9 +629,9 @@ namespace SelectOR
             string title = e.Header.Text;
             if (e.ColumnIndex == _sortCol) title += _sortAsc ? "  ▲" : "  ▼";
             var r = Rectangle.Inflate(e.Bounds, -10, 0);
-            TextRenderer.DrawText(e.Graphics, title, HeaderFont, r, Theme.Accent, flags);
-            // línea de acento bajo la cabecera
-            using (var pen = new Pen(Blend(Theme.Accent, Theme.Bg, 0.55f)))
+            TextRenderer.DrawText(e.Graphics, title, HeaderFont, r, e.ColumnIndex == _sortCol ? Theme.AccentHi : Theme.Subtle, flags);
+            // línea fina bajo la cabecera (el verde queda para la columna por la que se ordena)
+            using (var pen = new Pen(Theme.Border))
                 e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
         }
 

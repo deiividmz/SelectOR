@@ -30,7 +30,7 @@ namespace SelectOR
         Label _empIdChip;   // chip pequeño con el ID de usuario, copiable con un clic
         ComboBox _empCoCombo;                       // selector de empresa (arriba del menú lateral)
         bool _suppressCoSel;                        // ignora SelectedIndexChanged del selector durante la recarga
-        Panel _empStatsCard, _empStatsGap;           // KPIs de la empresa (se ocultan sin empresa y en Ranking / Mi perfil)
+        EmpKpiStrip _empStatsCard; Panel _empStatsGap;           // KPIs de la empresa (se ocultan sin empresa y en Ranking / Mi perfil)
         // Valores de los KPIs (la tira se pinta en DrawKpiStrip; se actualizan y se hace Invalidate).
         string _kpiTreasuryTxt = "—", _kpiMembersTxt = "—", _kpiServicesTxt = "—", _kpiKmTxt = "—";
         Color _kpiTreasuryCol = Theme.Accent;
@@ -38,7 +38,12 @@ namespace SelectOR
         PictureBox _empLogoPic; Label _logoLink;   // logotipo en la cabecera + enlace para cambiarlo
         Label _empRenameLink;                       // icono ✎ junto al nombre de empresa (renombrar)
         readonly Dictionary<string, (string src, Image img)> _logoCache = new();
-        StyledTable _empSvcList;
+        ServiceCardList _svcCards;          // servicios de la empresa, en tarjetas
+        FlowLayoutPanel _svcTabs;
+        string _svcCardsCompany;            // empresa de las tarjetas (si cambia, «Cargando…»)
+        string _svcLastJson, _svcLastTrenJson;   // última respuesta: si no cambia, no se rehace nada
+        int _svcLoadSeq;                    // descarta respuestas de cargas anteriores
+        int _svcColsLevel;                  // columnas que admite el servidor (se recuerda: sin reintentos)
         Panel _empCreateHost;              // acciones bajo el selector: crear / unirse / eliminar
         bool? _createAreaSuper;            // rol con el que se construyó la zona (para rehacerla al cambiar)
         // --- Refresco en vivo (Supabase Realtime) ---
@@ -136,17 +141,25 @@ namespace SelectOR
         double _paxDemandBase = 60;                  // antigua demanda base fija (app_settings.fleet_pax_demand): ya no se usa, la afluencia sale de las plazas del tren
         Panel _soloPanel;   // panel "Mi perfil"
         // Panel "Mi perfil" (estadísticas privadas del maquinista)
-        BarChart _profTrains; DonutChart _profRoutes;
+        TrainTopList _profTrains; RouteBars _profRoutes; ProfileHero _profHero; BadgeGrid _badgeGrid;
         Label _profKmVal, _profTripsVal, _profTimeVal, _profSpeedVal, _profPaxVal;
         // Rango + insignias (Mi perfil)
         Label _rankName, _rankNext, _rankStep; Panel _rankTrack; double _rankPct; FlowLayoutPanel _badges;
         // Panel financiero (dentro de Banca)
-        Label _finIncome, _finExpense, _finNet; DonutChart _finBreakdown; AreaChart _finMonthly;
+        BankSummary _bankSummary; BankStatement _bankStmt;
+        readonly List<BankStatement.Move> _ledgerAll = new();
+        int _bankPeriod = 1;                 // 0 este mes · 1 seis meses · 2 todo
+        int _bankConcept;                    // filtro de concepto del extracto (0 = todos)
+        string _bankSearch = "";
+        FlowLayoutPanel _bankChips;
         RoundButton _empDutyBtn, _empCloseOpenBtn;
         // --- Socios ---
         readonly List<EmpMember> _members = new();
         string _myRole;                    // mi rol en la empresa seleccionada (owner/manager/driver)
-        StyledTable _memberList;
+        MemberCardGrid _memberCards;   // socios como carnets
+        RoundedInput _memberSearch;
+        readonly Dictionary<string, (DateTime joined, double rankKm, double services, double km, double net)> _memberCardData = new(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, DateTime> _memberJoined = new(StringComparer.OrdinalIgnoreCase);
         RoundedInput _memberEmail;
         ComboBox _memberRole;
         Label _memberMsg;
@@ -154,7 +167,7 @@ namespace SelectOR
         // Solicitudes de ingreso (un maquinista pide unirse a la empresa)
         StyledTable _joinList; readonly List<string> _joinIds = new();
         // --- Banca (historial de movimientos) ---
-        StyledTable _bankList; Label _bankMsg; Panel _bankPanel;
+        Label _bankMsg; Panel _bankPanel;
         // --- Cabecera profesional ---
         Label _empRoleLbl;
         RoundButton _memberRoleBtn;
@@ -170,7 +183,10 @@ namespace SelectOR
         Panel _allCompPanel; StyledTable _allCompList; Label _allCompMsg;
         readonly List<string> _allCompIds = new();
         // Flota de la empresa (vehículos por .eng) — tabla + preview 3D
-        Panel _fleetPanel; StyledTable _fleetList; Label _fleetMsg;
+        Panel _fleetPanel; FleetCardList _fleetCards; Label _fleetMsg;
+        // Vistas 2D de los modelos (caché en disco) y visores 2D/3D de Flota y Compra
+        VehicleThumbs _thumbs; VehicleViewport _fleetOwnView, _buyView;
+        FlowLayoutPanel _fleetTabs, _buyKindTabs; int _buyKind;   // Compra: 0 todas · 1 en tu flota · 2 automotores · 3 locomotoras
         // Compra/alquiler (subpestaña aparte): se compra/alquila un CONSIST completo (no un .eng
         // suelto); cada máquina de tracción que contiene (menos las ya en la flota) se da de alta
         // por separado, así que esa misma máquina queda desbloqueada para cualquier otro consist
@@ -240,7 +256,7 @@ namespace SelectOR
         HashSet<string> _engHidden;                   // .eng que NO se ofrecen sueltos (van con su cabeza)
         string _engUnitsFolder; int _engUnitsConsistCount = -1;
         readonly object _engUnitsLock = new();
-        ListBox _fleetEngList;                           // lista de máquinas
+        BuyCardGrid _fleetEngList;                       // máquinas en venta, en tarjetas
         Control _buyConsistCard, _buyEngCard;
         readonly List<BuyMachine> _buyMachines = new();
         readonly Dictionary<string, int> _fleetOwnedCount = new(StringComparer.OrdinalIgnoreCase);   // carpeta|.eng → unidades en la flota
@@ -265,7 +281,7 @@ namespace SelectOR
         }
         // Borrado por el superadmin (servicios y movimientos de banca)
         RoundButton _svcDelBtn, _ledgerDelBtn;
-        readonly List<string> _svcIds = new(), _ledgerIds = new();
+        readonly List<string> _ledgerIds = new();
         readonly List<SvcRow> _svcRows = new();   // datos por servicio (para la ventana de detalle)
 
         sealed class SvcRow
@@ -276,6 +292,9 @@ namespace SelectOR
             public string Train = "";                                   // tren conducido (composición)
             public int Cars, Engines;                                   // vehículos de su .con y cuántos son motrices (0 = no se sabe)
             public bool Valid;
+            public string Path = "";                                    // recorrido (.pat)
+            public DateTime Start = DateTime.MinValue;                  // salida, hora local
+            public bool HasImage;                                       // tiene composición 2D guardada
         }
 
         // «300 plazas» si el tren lleva viajeros; «1.250 t» si es de mercancías (el ingreso se calcula con esa
@@ -297,8 +316,7 @@ namespace SelectOR
         RoundedInput _fsScale, _fsRentPct, _fsMaintPct, _fsFareBase, _fsFareKm, _fsPaxDemand; RoundButton _fsSaveBtn; Panel _fleetSettingsRow;
         double _fsCapBaseVal = 300;   // capacidad de referencia: ya no se usa (sin celda), se reenvía tal cual al guardar
         // --- Ranking ---
-        StyledTable _rankCompanies, _rankDrivers;
-        Panel _rankDriversPanel; Label _rankDriversHeader;   // sección de ranking de socios (se oculta si no hay empresa)
+        PodiumBoard _rankCompanies, _rankDrivers;   // Ranking → Empresas y Maquinistas (podio + tarjetas)
 
         sealed class EmpMember
         {
@@ -462,7 +480,16 @@ namespace SelectOR
             ("EMPRESA", new[] { 12, 2, 3, 11, 5 }),   // Chat · Socios · Ajustes · Megafonía · Mi perfil
             ("ADMINISTRACIÓN", new[] { 6, 7, 8 }),    // Revisión (carné) · Usuarios · Administración
         };
-        const int RailW = 236;          // ancho del menú lateral de Empresas
+        const int RailW = 250;          // ancho del menú lateral de Empresas
+        static readonly Color RailCardC = Color.FromArgb(38, 46, 41);   // tarjeta de la empresa (verde muy oscuro)
+        AvatarBox _railAvatar;
+        // Color de cada sección en el menú (la pastilla de su icono).
+        static readonly Color[] SubTints =
+        {
+            Color.FromArgb(120, 144, 226), Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191), Color.FromArgb(150, 160, 170),
+            Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(229, 115, 115), Color.FromArgb(45, 212, 191),
+            Color.FromArgb(167, 139, 250), Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(167, 139, 250), Color.FromArgb(120, 144, 226)
+        };
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
         bool _subtabAutoFallback;       // se abrió Ranking automáticamente (sin empresas aún): al cargar, volver a Servicios
         Label _empSectionTitle;         // título de la sección activa (encima de los KPIs)
@@ -484,20 +511,20 @@ namespace SelectOR
             rail.Paint += (s, e) => { using var p = new Pen(Theme.Border); e.Graphics.DrawLine(p, rail.Width - 1, 0, rail.Width - 1, rail.Height); };
 
             // ---------- Tarjeta de EMPRESA: logo + nombre/rol · selector · crear/unirse ----------
-            var card = new Card { Dock = DockStyle.Top, Height = 150, Fill = Theme.Surface, Radius = 10, Padding = new Padding(10) };
-            var cc = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, BackColor = Theme.Surface, Margin = new Padding(0) };
+            var card = new Card { Dock = DockStyle.Top, Height = 150, Fill = RailCardC, BorderColor = Color.FromArgb(70, 76, 120, 84), Radius = 14, Padding = new Padding(12) };
+            var cc = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, BackColor = RailCardC, Margin = new Padding(0) };
             cc.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-            var idRow = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0) };
+            var idRow = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 1, BackColor = RailCardC, Margin = new Padding(0) };
             idRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             idRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            _empLogoPic = new PictureBox { Size = new Size(38, 38), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Surface, Margin = new Padding(0, 1, 10, 0), Anchor = AnchorStyles.Left | AnchorStyles.Top, Cursor = Cursors.Hand };
+            _empLogoPic = new PictureBox { Size = new Size(46, 46), SizeMode = PictureBoxSizeMode.Zoom, BackColor = RailCardC, Margin = new Padding(0, 1, 10, 0), Anchor = AnchorStyles.Left | AnchorStyles.Top, Cursor = Cursors.Hand };
             _empLogoPic.Click += (s, e) => { if (CanManage() || Supa.IsSuperadmin) ChangeLogo(); };   // el maquinista no puede cambiarlo
             _empLogoTip = new ToolTip(); _empLogoTip.SetToolTip(_empLogoPic, Tr("Cambiar logotipo"));
 
-            var txt = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Surface, Margin = new Padding(0), Anchor = AnchorStyles.Left | AnchorStyles.Top };
-            var titleRow = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Surface, Margin = new Padding(0) };
-            _empCoTitle = new Label { AutoSize = true, MaximumSize = new Size(RailW - 118, 0), ForeColor = Theme.Text, Font = Theme.Font(11.5f, FontStyle.Bold), Margin = new Padding(0) };
+            var txt = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = RailCardC, Margin = new Padding(0), Anchor = AnchorStyles.Left | AnchorStyles.Top };
+            var titleRow = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = RailCardC, Margin = new Padding(0) };
+            _empCoTitle = new Label { AutoSize = true, MaximumSize = new Size(RailW - 124, 0), ForeColor = Theme.Text, Font = Theme.Font(11.5f, FontStyle.Bold), Margin = new Padding(0) };
             _empRenameLink = new Label { Text = "✎", AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(10f), Cursor = Cursors.Hand, Margin = new Padding(4, 2, 0, 0), Visible = false };
             _empRenameLink.MouseEnter += (s, e) => _empRenameLink.ForeColor = Theme.Accent;
             _empRenameLink.MouseLeave += (s, e) => _empRenameLink.ForeColor = Theme.Subtle;
@@ -508,7 +535,7 @@ namespace SelectOR
             _empFavLink.Click += (s, e) => ToggleFavoriteCompany();
             _empFavTip = new ToolTip();
             titleRow.Controls.Add(_empCoTitle); titleRow.Controls.Add(_empRenameLink); titleRow.Controls.Add(_empFavLink);
-            _empRoleLbl = new Label { AutoSize = true, MaximumSize = new Size(RailW - 96, 0), ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Margin = new Padding(0, 2, 0, 0) };
+            _empRoleLbl = new Label { AutoSize = true, MaximumSize = new Size(RailW - 100, 0), ForeColor = Color.FromArgb(170, 200, 175), Font = Theme.Font(8.5f), Margin = new Padding(0, 2, 0, 0) };
             _logoLink = EmpLink(Tr("Cambiar logotipo")); _logoLink.Visible = false;   // compatibilidad (el logo ya es clicable)
             _logoLink.Click += (s, e) => ChangeLogo();
             txt.Controls.Add(titleRow); txt.Controls.Add(_empRoleLbl);
@@ -520,7 +547,7 @@ namespace SelectOR
             _empCoCombo.SelectedIndexChanged += (s, e) => OnCompanySelected();
             cc.Controls.Add(_empCoCombo);
 
-            _empCreateHost = new Panel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 30, BackColor = Theme.Surface, Margin = new Padding(0, 8, 0, 0) };
+            _empCreateHost = new Panel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 30, BackColor = RailCardC, Margin = new Padding(0, 10, 0, 0) };
             cc.Controls.Add(_empCreateHost);
             BuildCreateArea();
 
@@ -545,9 +572,9 @@ namespace SelectOR
                 var (title, items) = NavGroupDefs[gi];
                 var h = new Label
                 {
-                    Text = Tr(title), AutoSize = false, Height = gi == 0 ? NavHeaderH0 : NavHeaderH, ForeColor = Color.FromArgb(122, 130, 136),
-                    Font = Theme.Font(7.75f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft,
-                    Padding = new Padding(8, 0, 0, 3), Margin = new Padding(0), BackColor = Theme.BgSidebar
+                    Text = Tr(title), AutoSize = false, Height = gi == 0 ? NavHeaderH0 : NavHeaderH, ForeColor = Theme.Subtle,
+                    Font = Theme.Font(7.5f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft,
+                    Padding = new Padding(10, 0, 0, 4), Margin = new Padding(0), BackColor = Theme.BgSidebar
                 };
                 h.Dock = DockStyle.Fill;
                 nav.RowStyles.Add(new RowStyle(SizeType.Absolute, gi == 0 ? NavHeaderH0 : NavHeaderH));
@@ -558,11 +585,11 @@ namespace SelectOR
                     int k = idx;
                     var b = new RoundButton
                     {
-                        Text = Tr(SubNames[idx]), GlyphKind = SubGlyphs[idx], LeftAlign = true, LeftPad = 10, Radius = 8, Height = NavItemH,
+                        Text = Tr(SubNames[idx]), GlyphKind = SubGlyphs[idx], NavStyle = true, NavTint = SubTints[idx], Radius = 9, Height = NavItemH,
                         Margin = new Padding(0, 1, 0, 1),
                         BaseColor = Theme.BgSidebar, HoverColor = Theme.Surface,
                         ActiveColor = Color.FromArgb(40, 70, 44), ActiveTextColor = Theme.AccentHi,
-                        TextColor = Color.FromArgb(214, 218, 221), FontSize = 9.75f
+                        TextColor = Color.FromArgb(214, 218, 221), FontSize = 9.5f
                     };
                     b.Click += (s, e) => { _subtabAutoFallback = false; ShowSubtab(k); };   // elección manual: se respeta
                     b.Dock = DockStyle.Fill;
@@ -579,35 +606,39 @@ namespace SelectOR
             nav.Resize += (s, e) => AjustarNav();
             AjustarNav();
 
-            // ---------- Usuario (abajo): nombre · ID copiable · editar nombre / cerrar sesión ----------
-            var user = new Panel { Dock = DockStyle.Bottom, Height = 148, BackColor = Theme.BgSidebar, Padding = new Padding(4, 10, 0, 0) };
-            user.Paint += (s, e) => { using var p = new Pen(Theme.Border); e.Graphics.DrawLine(p, 0, 0, user.Width, 0); };
-            // Nombre (+ ★ superadmin) en hasta 2 líneas, sin recortar (el emoji da más alto de línea).
-            _empUserLbl = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 48, ForeColor = Theme.Text, Font = Theme.Font(9.75f, FontStyle.Bold) };
-            _empIdChip = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 20, AutoEllipsis = true, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Cursor = Cursors.Hand };
+            // ---------- Usuario (abajo): tarjeta con foto/iniciales, nombre, ID copiable y dos botones ----------
+            var user = new Panel { Dock = DockStyle.Bottom, Height = 132, BackColor = Theme.BgSidebar, Padding = new Padding(0, 8, 0, 0) };
+            var ucard = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(10, 10, 10, 10) };
+            var uTop = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Surface };
+            _railAvatar = new AvatarBox { Dock = DockStyle.Left, Width = 44 };
+            var uTxt = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(10, 2, 0, 0) };
+            _empUserLbl = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 22, AutoEllipsis = true, ForeColor = Theme.Text, Font = Theme.Font(9.75f, FontStyle.Bold), BackColor = Theme.Surface };
+            _empIdChip = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 18, AutoEllipsis = true, ForeColor = Theme.Subtle, Font = Theme.Font(8.25f), Cursor = Cursors.Hand, BackColor = Theme.Surface };
             _empIdChip.Click += (s, e) => CopyMyId();
             _empIdChip.MouseEnter += (s, e) => _empIdChip.ForeColor = Theme.Accent;
             _empIdChip.MouseLeave += (s, e) => _empIdChip.ForeColor = Theme.Subtle;
             new ToolTip().SetToolTip(_empIdChip, Tr("Clic para copiar tu ID de usuario"));
-            // Botones apilados a todo el ancho (así el texto nunca se recorta).
-            var ub = new TableLayoutPanel { Dock = DockStyle.Top, Height = 72, ColumnCount = 1, RowCount = 2, BackColor = Theme.BgSidebar, Margin = new Padding(0), Padding = new Padding(0, 6, 0, 0) };
-            ub.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            ub.RowStyles.Add(new RowStyle(SizeType.Absolute, 33)); ub.RowStyles.Add(new RowStyle(SizeType.Absolute, 33));
+            uTxt.Controls.Add(_empIdChip); uTxt.Controls.Add(_empUserLbl);
+            uTop.Controls.Add(uTxt); uTop.Controls.Add(_railAvatar);
+            var ub = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 34, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0) };
+            ub.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55)); ub.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            ub.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // «Mi cuenta»: editar el nombre, cambiar la contraseña o eliminar la cuenta.
-            var nameBtn = EmpButton(Tr("⚙  Mi cuenta  ▾")); nameBtn.Dock = DockStyle.Fill; nameBtn.Height = 30; nameBtn.FontSize = 9f; nameBtn.Margin = new Padding(0, 0, 0, 3);
+            var nameBtn = EmpButton(Tr("⚙  Mi cuenta  ▾")); nameBtn.Dock = DockStyle.Fill; nameBtn.Height = 30; nameBtn.FontSize = 8.75f; nameBtn.Margin = new Padding(0, 0, 3, 0); nameBtn.Radius = 15;
             nameBtn.Click += (s, e) => OpenAccountMenu(nameBtn);
-            var outBtn = EmpButton(Tr("Cerrar sesión")); outBtn.Dock = DockStyle.Fill; outBtn.Height = 30; outBtn.FontSize = 9f; outBtn.Margin = new Padding(0, 0, 0, 3);
+            var outBtn = EmpButton(Tr("Salir")); outBtn.Dock = DockStyle.Fill; outBtn.Height = 30; outBtn.FontSize = 8.75f; outBtn.Margin = new Padding(3, 0, 0, 0); outBtn.Radius = 15;
+            outBtn.HoverColor = Color.FromArgb(150, 60, 60);
+            new ToolTip().SetToolTip(outBtn, Tr("Cerrar sesión"));
             outBtn.Click += (s, e) => DoSignOut();
-            ub.Controls.Add(nameBtn, 0, 0); ub.Controls.Add(outBtn, 0, 1);
+            ub.Controls.Add(nameBtn, 0, 0); ub.Controls.Add(outBtn, 1, 0);
+            ucard.Controls.Add(ub); ucard.Controls.Add(uTop);
+            user.Controls.Add(ucard);
             if (!Supa.HasBuiltIn)   // con backend fijo no se puede cambiar de servidor
             {
-                var cfg = EmpLink(Tr("⚙  Servidor")); cfg.Dock = DockStyle.Top; cfg.AutoSize = false; cfg.Height = 20; cfg.Margin = new Padding(0);
+                var cfg = EmpLink(Tr("⚙  Servidor")); cfg.Dock = DockStyle.Bottom; cfg.AutoSize = false; cfg.Height = 20; cfg.Margin = new Padding(0);
                 cfg.Click += (s, e) => { _empForceCfg = true; RefreshEmpresasView(); };
                 user.Controls.Add(cfg); user.Height += 20;
             }
-            user.Controls.Add(ub);            // (Dock=Top: el último añadido queda arriba)
-            user.Controls.Add(_empIdChip);
-            user.Controls.Add(_empUserLbl);
 
             rail.Controls.Add(nav);    // Fill
             rail.Controls.Add(user);   // Bottom
@@ -616,7 +647,7 @@ namespace SelectOR
         }
 
         // Alturas del menú lateral (se encogen si hace falta para que quepa todo sin barras).
-        const int NavItemH = 34, NavItemHMin = 23, NavHeaderH = 30, NavHeaderH0 = 22, NavHeaderHMin = 14;
+        const int NavItemH = 36, NavItemHMin = 24, NavHeaderH = 30, NavHeaderH0 = 20, NavHeaderHMin = 14;
         TableLayoutPanel _empNav;
         List<(Control c, int tipo)> _navRows;   // tipo: 0 sección · 1 primer encabezado · 2 encabezado
 
@@ -707,22 +738,24 @@ namespace SelectOR
             bool su = CanDeleteCompany();
             _createAreaSuper = su;
             // Rejilla a lo ancho de la tarjeta de empresa: [Crear | Unirse] y, si puede, [Eliminar].
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = su ? 2 : 1, BackColor = Theme.Surface, Margin = new Padding(0), Padding = new Padding(0) };
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = su ? 2 : 1, BackColor = RailCardC, Margin = new Padding(0), Padding = new Padding(0) };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             t.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             if (su) t.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
 
             var createBtn = EmpButton(Tr("➕ Crear")); createBtn.Dock = DockStyle.Fill; createBtn.Height = 30; createBtn.Margin = new Padding(0, 0, 3, 0); createBtn.FontSize = 8.75f;
+            createBtn.Radius = 15; createBtn.BaseColor = Color.FromArgb(52, 64, 56); createBtn.HoverColor = Color.FromArgb(64, 80, 68);
             createBtn.Click += (s, e) => CreateCompany();
             t.Controls.Add(createBtn, 0, 0);
             var joinBtn = EmpButton(Tr("🙋 Unirse")); joinBtn.Dock = DockStyle.Fill; joinBtn.Height = 30; joinBtn.Margin = new Padding(3, 0, 0, 0); joinBtn.FontSize = 8.75f;
+            joinBtn.Radius = 15; joinBtn.BaseColor = Color.FromArgb(52, 64, 56); joinBtn.HoverColor = Color.FromArgb(64, 80, 68);
             joinBtn.Click += (s, e) => RequestJoin();
             t.Controls.Add(joinBtn, 1, 0);
 
             if (su)
             {
                 var del = EmpButton(Tr("Eliminar")); del.Dock = DockStyle.Fill; del.Height = 30; del.FontSize = 8.75f; del.Margin = new Padding(0, 6, 0, 0);
-                del.BaseColor = Theme.Surface2; del.HoverColor = Color.FromArgb(150, 60, 60); del.TextColor = Color.FromArgb(229, 115, 115);
+                del.Radius = 15; del.BaseColor = Color.FromArgb(60, 44, 44); del.HoverColor = Color.FromArgb(150, 60, 60); del.TextColor = Color.FromArgb(229, 115, 115);
                 del.Click += (s, e) => DeleteCompany();
                 t.Controls.Add(del, 0, 1); t.SetColumnSpan(del, 2);
             }
@@ -743,9 +776,7 @@ namespace SelectOR
             titleBar.Controls.Add(_liveShareBox);
 
             // KPIs (Tesorería · Socios · Servicios · Km) como 4 tarjetas compactas dibujadas a mano.
-            _empStatsCard = new Panel { Dock = DockStyle.Top, Height = 62, BackColor = Theme.Bg };
-            _empStatsCard.Paint += DrawKpiStrip;
-            _empStatsCard.Resize += (s, e) => _empStatsCard.Invalidate();
+            _empStatsCard = new EmpKpiStrip { Dock = DockStyle.Top, Height = 78 };
             _empStatsGap = new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg };
             var gap = _empStatsGap;
 
@@ -802,50 +833,47 @@ namespace SelectOR
             return bar;
         }
 
-        // BANCA: sub-pestañas «Resumen» (KPIs + gráficas grandes) y «Movimientos» (tabla a todo el alto).
+        // BANCA: «Resumen» (tarjeta de tesorería, indicadores, en qué se va el dinero, meses) y «Extracto»
+        // (por días, con el saldo tras cada movimiento). El periodo (este mes · 6 meses · todo) vale para ambas.
         Panel BuildBankSubpanel()
         {
             var outer = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
 
-            // --- Resumen ---
-            var res = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Bg };
-            res.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            res.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // KPIs
-            res.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // gráficas (rellenan)
-            var kpis = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
-            kpis.Controls.Add(KpiTile(Tr("INGRESOS"), out _finIncome, "💰", Theme.Accent));
-            kpis.Controls.Add(KpiTile(Tr("GASTOS"), out _finExpense, "💸", ColRed));
-            kpis.Controls.Add(KpiTile(Tr("NETO"), out _finNet, "📊", Theme.Accent));
-            res.Controls.Add(kpis);
-            var charts = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = Theme.Bg, Margin = new Padding(0) };
-            charts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            charts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            charts.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            charts.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            charts.Controls.Add(EmpHeader("DESGLOSE DE COSTES"), 0, 0);
-            charts.Controls.Add(EmpHeader("INGRESOS POR MES"), 1, 0);
-            // Desglose: anillo con leyenda (lo que importa es la proporción de cada concepto).
-            _finBreakdown = new DonutChart { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 6, 2), Format = v => v.ToString("N0", EsEs) + " €", EmptyText = Tr("Sin datos"), CenterCaption = Tr("TOTAL") };
-            // Evolución mensual: línea con área y rejilla (se ve la tendencia, no solo el tamaño).
-            _finMonthly = new AreaChart { Dock = DockStyle.Fill, Margin = new Padding(6, 2, 2, 2), Format = v => v.ToString("N0", EsEs) + " €", EmptyText = Tr("Sin datos") };
-            charts.Controls.Add(_finBreakdown, 0, 1);
-            charts.Controls.Add(_finMonthly, 1, 1);
-            res.Controls.Add(charts);
+            _bankSummary = new BankSummary { Dock = DockStyle.Fill, BackColor = Theme.Bg };
+            var sm = _bankSummary;
+            sm.LblTreasury = Tr("TESORERÍA"); sm.LblAvail = Tr("Saldo disponible"); sm.LblHolder = Tr("Titular"); sm.LblMonth = Tr("Movimientos del mes");
+            sm.LblIncome = Tr("INGRESOS"); sm.LblExpense = Tr("GASTOS"); sm.LblResult = Tr("RESULTADO"); sm.LblBest = Tr("MEJOR MES");
+            sm.LblIncomeSub = Tr("servicios y premios"); sm.LblExpenseSub = Tr("flota, vía, energía y salarios"); sm.LblMargin = Tr("margen del {0} %");
+            sm.LblCosts = Tr("EN QUÉ SE VA EL DINERO"); sm.LblMonths = Tr("INGRESOS Y GASTOS POR MES"); sm.LblInc = Tr("Ingresos"); sm.LblExp = Tr("Gastos"); sm.LblNoData = Tr("Sin datos todavía");
+            var res = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 4, 0, 0) };
+            res.Controls.Add(_bankSummary);
 
-            // --- Movimientos ---
+            // --- Extracto ---
             var mov = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Bg, Visible = false };
             mov.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            mov.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // filtro
-            mov.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tabla
+            mov.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // conceptos + búsqueda
+            mov.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // extracto
             mov.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // borrar (superadmin)
-            _bankList = EmpTable();
-            mov.Controls.Add(EmpSearch(_bankList, 340));
-            _bankList.SetColumns(
-                new StyledTable.Col("FECHA", 108),
-                new StyledTable.Col("CONCEPTO", 140),
-                new StyledTable.Col("IMPORTE", 140, false, HorizontalAlignment.Right),
-                new StyledTable.Col("DESCRIPCIÓN", 0, true));
-            mov.Controls.Add(_bankList);
+            var frow = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 40, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
+            frow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            frow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            frow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _bankChips = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
+            string[] chips = { "Todo", "Ingresos", "Cánon AI", "Energía", "Salarios", "Flota", "Otros" };
+            for (int k = 0; k < chips.Length; k++)
+            {
+                int idx = k;
+                var b = BankChip(Tr(chips[k]), k == 0);
+                b.Click += (s, e) => { _bankConcept = idx; SetChipActive(_bankChips, idx); FillStatement(); };
+                _bankChips.Controls.Add(b);
+            }
+            var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 240, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
+            search.Box.TextChanged += (s, e) => { _bankSearch = search.Box.Text.Trim(); FillStatement(); };
+            frow.Controls.Add(_bankChips, 0, 0); frow.Controls.Add(search, 1, 0);
+            mov.Controls.Add(frow);
+            _bankStmt = new BankStatement { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 4), LblBalance = Tr("saldo {0}") };
+            _bankStmt.DayTitle = BankDayTitle;
+            mov.Controls.Add(_bankStmt);
             _ledgerDelBtn = EmpButton(Tr("Eliminar movimiento"));
             _ledgerDelBtn.Width = 220; _ledgerDelBtn.BaseColor = Theme.Surface2; _ledgerDelBtn.HoverColor = Color.FromArgb(150, 60, 60); _ledgerDelBtn.TextColor = RedC; _ledgerDelBtn.Visible = false;
             _ledgerDelBtn.Click += (s, e) => DeleteLedgerRow();
@@ -853,65 +881,84 @@ namespace SelectOR
 
             var pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
             pages.Controls.Add(mov); pages.Controls.Add(res);
-            var tabs = MakeSubTabs(new[] { "Resumen", "Movimientos" }, i => { res.Visible = i == 0; mov.Visible = i == 1; });
-            outer.Controls.Add(pages); outer.Controls.Add(tabs);
+
+            // Pestañas a la izquierda, periodo a la derecha.
+            var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var tabs = MakeSubTabs(new[] { "Resumen", "Extracto" }, i => { res.Visible = i == 0; mov.Visible = i == 1; });
+            tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
+            var period = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(8, 2, 0, 0), Anchor = AnchorStyles.Right };
+            string[] pnames = { "Este mes", "6 meses", "Todo" };
+            for (int k = 0; k < pnames.Length; k++)
+            {
+                int idx = k;
+                var b = BankChip(Tr(pnames[k]), k == _bankPeriod);
+                b.Click += (s, e) => { _bankPeriod = idx; SetChipActive(period, idx); RefreshBank(); };
+                period.Controls.Add(b);
+            }
+            top.Controls.Add(tabs, 0, 0); top.Controls.Add(period, 1, 0);
+            outer.Controls.Add(pages); outer.Controls.Add(top);
 
             _bankMsg = EmpMsg(); // no se muestra por espacio, pero se reutiliza
             return outer;
         }
 
-        // SERVICIOS: sub-pestañas de ESTADO (filtran la tabla) + búsqueda a la derecha; tabla a todo el alto.
+        RoundButton BankChip(string text, bool active)
+        {
+            var b = new RoundButton { Text = text, Height = 30, Radius = 15, FontSize = 9f, FontStyle = FontStyle.Bold, Margin = new Padding(0, 4, 6, 4), Active = active, BaseColor = Theme.Surface, HoverColor = Theme.SurfaceHi, TextColor = Theme.Subtle };
+            using var f = Theme.Font(9f, FontStyle.Bold);
+            b.Width = TextRenderer.MeasureText(text, f).Width + 28;
+            return b;
+        }
+
+        static void SetChipActive(Control bar, int idx)
+        {
+            for (int k = 0; k < bar.Controls.Count; k++) if (bar.Controls[k] is RoundButton b) { b.Active = k == idx; b.Invalidate(); }
+        }
+
+        string BankDayTitle(DateTime d)
+        {
+            var today = DateTime.Today;
+            var ci = System.Globalization.CultureInfo.GetCultureInfo(I18n.English ? "en-GB" : "es-ES");
+            string full = d.ToString(I18n.English ? "dddd d MMMM yyyy" : "dddd, d 'de' MMMM 'de' yyyy", ci);
+            if (d == today) return Tr("HOY") + " · " + full.ToUpper(ci);
+            if (d == today.AddDays(-1)) return Tr("AYER") + " · " + full.ToUpper(ci);
+            return full.ToUpper(ci);
+        }
+
+        // SERVICIOS: sub-pestañas de ESTADO + búsqueda a la derecha; tarjetas a todo el alto.
         Panel BuildSvcSubpanel()
         {
             var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Bg };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // pestañas + búsqueda
-            t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tabla
+            t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tarjetas
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // acciones
 
-            _empSvcList = EmpTable();
+            _svcCards = new ServiceCardList { Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4) };
+            _svcCards.FileLoader = id => ServiceImages.GetAsync(_empSel?.Id, id);
+            _svcCards.ItemActivated += id => OpenServiceDetail(_svcRows.FindIndex(r => r.Id == id));
 
             var top = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 42, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // Los viajes fallidos o no válidos ya no se guardan (el servidor los borra al cerrarlos).
-            var tabs = MakeSubTabs(new[] { "Todos", "En conducción", "Completados" }, i =>
-            {
-                _empSvcList.RowFilter = i switch
-                {
-                    1 => cells => cells.Length > 0 && cells[^1].Contains(Tr("En conducción")),   // el estado es la última columna
-                    2 => cells => cells.Length > 0 && cells[^1].Contains(Tr("completado")),
-                    _ => (Func<string[], bool>)null
-                };
-                _empSvcList.Refilter();
-            });
+            var tabs = MakeSubTabs(new[] { "Todos", "En conducción", "Completados" }, i => _svcCards.StatusFilter = i);
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
-            var search = EmpSearch(_empSvcList, 260); search.Anchor = AnchorStyles.Right; search.Margin = new Padding(10, 3, 0, 3);
+            _svcTabs = tabs;
+            var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 260, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
+            search.Box.TextChanged += (s, e) => _svcCards.Filter(search.Box.Text);
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
-
-            _empSvcList.SetColumns(
-                new StyledTable.Col("", 30),                       // ℹ (abre el detalle)
-                new StyledTable.Col("FECHA", 92),
-                new StyledTable.Col("MAQUINISTA", 128),
-                new StyledTable.Col("RUTA", 0, true),
-                new StyledTable.Col("TREN", 150),
-                new StyledTable.Col("COCHES", 78, false, HorizontalAlignment.Right),   // vehículos del .con y motrices, «8 (2M)»
-                new StyledTable.Col("KM", 54, false, HorizontalAlignment.Right),
-                new StyledTable.Col("TIEMPO", 76, false, HorizontalAlignment.Right),
-                new StyledTable.Col("VIAJEROS", 78, false, HorizontalAlignment.Right),
-                new StyledTable.Col("PLAZAS · CARGA", 104, false, HorizontalAlignment.Right),
-                new StyledTable.Col("INGRESO", 94, false, HorizontalAlignment.Right),
-                new StyledTable.Col("NETO", 100, false, HorizontalAlignment.Right),
-                new StyledTable.Col("ESTADO", 124));
-            _empSvcList.MouseDoubleClick += (s, e) => OpenServiceDetail(_empSvcList.SelectedRow);
-            t.Controls.Add(_empSvcList);
+            t.Controls.Add(_svcCards);
 
             // Acciones: ver detalle (todos) + borrar servicio (solo superadmin).
             var svcBtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
             var detailBtn = EmpButton(Tr("Ver detalle del servicio"), primary: true); detailBtn.Width = 230;
-            detailBtn.Click += (s, e) => OpenServiceDetail(_empSvcList.SelectedRow);
+            detailBtn.Click += (s, e) => OpenServiceDetail(SelectedServiceIndex());
             svcBtns.Controls.Add(detailBtn);
             _svcDelBtn = EmpButton(Tr("Eliminar servicio"));
             _svcDelBtn.Width = 200; _svcDelBtn.Margin = new Padding(8, 10, 2, 2); _svcDelBtn.BaseColor = Theme.Surface2; _svcDelBtn.HoverColor = Color.FromArgb(150, 60, 60); _svcDelBtn.TextColor = RedC; _svcDelBtn.Visible = false;
@@ -919,6 +966,33 @@ namespace SelectOR
             svcBtns.Controls.Add(_svcDelBtn);
             t.Controls.Add(svcBtns);
             return t;
+        }
+
+        // Servicio elegido (índice en _svcRows; −1 = ninguno).
+        int SelectedServiceIndex() => _svcCards == null ? -1 : _svcRows.FindIndex(r => r.Id == _svcCards.SelectedId);
+
+        // Vacía la lista (cerrar sesión, sin empresas).
+        void ClearServices()
+        {
+            _svcRows.Clear(); _svcLastJson = _svcLastTrenJson = null; _svcCardsCompany = null;
+            _svcCards?.SetItems(Array.Empty<ServiceCardList.Item>());
+            UpdateServiceTabCounts();
+        }
+
+        // Pestañas de Servicios con cuántos hay en cada una: «Todos  17», «En conducción  1»…
+        void UpdateServiceTabCounts()
+        {
+            if (_svcTabs == null) return;
+            string[] names = { "Todos", "En conducción", "Completados" };
+            using var f = Theme.Font(9.75f, FontStyle.Bold);
+            for (int k = 0; k < names.Length && k < _svcTabs.Controls.Count; k++)
+            {
+                if (_svcTabs.Controls[k] is not RoundButton b) continue;
+                int n = System.Linq.Enumerable.Count(_svcRows, r => k == 0 || (k == 1 ? r.Status == "open" : r.Status != "open"));
+                b.Text = Tr(names[k]) + (_svcRows.Count > 0 ? "  " + n.ToString("N0", EsEs) : "");
+                b.Width = TextRenderer.MeasureText(b.Text, f).Width + 34;
+                b.Invalidate();
+            }
         }
 
         ComboBox _memberAddRole;   // rol del socio NUEVO (pestaña «Añadir socio»); _memberRole es para cambiar el rol
@@ -935,13 +1009,20 @@ namespace SelectOR
             pMem.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // filtro
             pMem.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // tabla
             pMem.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // acciones
-            _memberList = EmpTable();
-            pMem.Controls.Add(EmpSearch(_memberList, 300));
-            _memberList.SetColumns(
-                new StyledTable.Col("MAQUINISTA", 0, true),
-                new StyledTable.Col("ROL", 160),
-                new StyledTable.Col("PUNTOS", 110, false, HorizontalAlignment.Right));
-            pMem.Controls.Add(_memberList);
+            _memberCards = new MemberCardGrid
+            {
+                Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4),
+                LblLicense = Tr("Carné"), LblServices = Tr("servicios"), LblKm = Tr("en la empresa"), LblNet = Tr("neto"), LblSuspended = Tr("SUSPENDIDO")
+            };
+            _memberCards.SelectionChanged += () =>
+            {
+                int i = MemberSelectedIndex();   // el desplegable de rol se pone en el del socio elegido
+                if (i >= 0 && _memberRole != null) _memberRole.SelectedIndex = _members[i].Role == "owner" ? 2 : _members[i].Role == "manager" ? 1 : 0;
+            };
+            _memberSearch = new RoundedInput(I18n.T("🔎  Filtrar…")) { Anchor = AnchorStyles.Left, Width = 300, Height = 34, Margin = new Padding(2, 2, 8, 4) };
+            _memberSearch.Box.TextChanged += (s, e) => FillMemberCards();
+            pMem.Controls.Add(_memberSearch);
+            pMem.Controls.Add(_memberCards);
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 4, 0, 0) };
             _memberRole = NewCombo(); _memberRole.Dock = DockStyle.None; _memberRole.Width = 170; _memberRole.DropDownStyle = ComboBoxStyle.DropDownList; _memberRole.Margin = new Padding(0, 16, 8, 2);
             _memberRole.Items.AddRange(new object[] { Tr("Maquinista"), Tr("Gestor"), Tr("Gerente") });
@@ -1154,63 +1235,27 @@ namespace SelectOR
             return outer;
         }
 
-        // Reconstruido con DOCKING simple (como Servicios, que sí pinta) en vez de un
-        // TableLayoutPanel de dos filas Percent (con el que el ListView owner-draw no
-        // repintaba sus filas). Arriba: ranking público (Fill). Abajo: ranking de
-        // maquinistas de la empresa (panel Bottom, se oculta si no perteneces a ninguna).
+        // Ranking: Liga del mes · Campeones · Empresas (ranking público por km) · Maquinistas (de esta empresa).
         Panel BuildRankSubpanel()
         {
-            var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-
-            // --- Sección inferior: maquinistas de la empresa ---
-            _rankDriversPanel = new Panel { Dock = DockStyle.Bottom, Height = 300, BackColor = Theme.Bg };
-            _rankDrivers = EmpTable();
-            _rankDrivers.SetColumns(
-                new StyledTable.Col("#", 44),
-                new StyledTable.Col("MAQUINISTA", 0, true),
-                new StyledTable.Col("SERV.", 70, false, HorizontalAlignment.Right),
-                new StyledTable.Col("KM", 100, false, HorizontalAlignment.Right),
-                new StyledTable.Col("NETO", 130, false, HorizontalAlignment.Right));
-            _rankDriversHeader = EmpHeader("RANKING DE MAQUINISTAS DE ESTA EMPRESA"); _rankDriversHeader.Dock = DockStyle.Top;
-            _rankDriversPanel.Controls.Add(_rankDrivers);         // Fill (primero → relleno interior)
-            _rankDriversPanel.Controls.Add(_rankDriversHeader);   // Top (después → franja superior)
-
-            // --- Sección superior: ranking público de empresas (rellena el resto) ---
-            _rankCompanies = EmpTable();
-            _rankCompanies.ImageColumn = 1;   // logotipo junto al nombre de la empresa
-            _rankCompanies.SetColumns(
-                new StyledTable.Col("#", 44),
-                new StyledTable.Col("EMPRESA", 0, true),
-                new StyledTable.Col("KM", 100, false, HorizontalAlignment.Right),
-                new StyledTable.Col("SERV.", 70, false, HorizontalAlignment.Right),
-                new StyledTable.Col("SALDO", 130, false, HorizontalAlignment.Right));
-            var topHeader = EmpHeader("RANKING PÚBLICO DE EMPRESAS (POR KM)"); topHeader.Dock = DockStyle.Top;
-
-            // Orden de docking (WinForms procesa en orden inverso de la colección):
-            //   companies(Fill) → topHeader(Top) → driversPanel(Bottom)
-            host.Controls.Add(_rankCompanies);
-            host.Controls.Add(topHeader);
-            host.Controls.Add(_rankDriversPanel);
-            return WrapRankingTabs(host);   // Liga del mes · Campeones · Ranking general (este)
+            _rankCompanies = new PodiumBoard { Dock = DockStyle.Fill, MineTag = Tr("tu empresa"), EmptyText = Tr("Cargando…") };
+            _rankDrivers = new PodiumBoard { Dock = DockStyle.Fill, MineTag = Tr("tú"), EmptyText = Tr("Cargando…") };
+            return WrapRankingTabs(_rankCompanies, _rankDrivers);
         }
 
         Panel BuildProfileSubpanel()
         {
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, AutoScroll = true };
             Native.UseDarkScrollBars(host);   // barra de scroll oscura acorde al tema
-            var t = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, RowCount = 11, BackColor = Theme.Bg, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            var t = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, RowCount = 7, BackColor = Theme.Bg, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // tarjeta de rango
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // tarjeta del carné por puntos
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // carnet + carné por puntos
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // KPIs
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // header insignias
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // insignias
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // header trenes
-            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 168));  // gráfica trenes
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // header trayectos
-            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 190));  // gráfica trayectos (anillo)
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // trenes y rutas
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // header historial del carné
-            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 230));  // historial del carné
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // historial del carné (línea de tiempo)
 
             // Anchura del contenido = ancho del host (menos margen para la barra de scroll)
             void FitWidth() { t.Width = Math.Max(10, host.ClientSize.Width - 4); }
@@ -1218,7 +1263,18 @@ namespace SelectOR
             host.HandleCreated += (s, e) => FitWidth();
             host.VisibleChanged += (s, e) => { if (host.Visible) FitWidth(); };   // al abrir la pestaña
 
-            // Tarjeta de RANGO
+            // Arriba: el carnet de maquinista (rango) y, al lado, el carné por puntos
+            var heroRow = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, AutoSize = true, Margin = new Padding(0, 0, 0, 10) };
+            heroRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+            heroRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+            _profHero = new ProfileHero { Dock = DockStyle.Top, Margin = new Padding(0, 0, 10, 0), Caption = Tr("CARNÉ DE MAQUINISTA · SELECTOR"),
+                                          LblAddPhoto = "📷 " + Tr("Añadir foto"), LblChangePhoto = "📷 " + Tr("Cambiar foto") };
+            _profHero.PhotoClicked += ShowPhotoMenu;
+            heroRow.Controls.Add(_profHero, 0, 0);
+            var lic = BuildLicenseCard(); lic.Dock = DockStyle.Fill; lic.Margin = new Padding(0); lic.MinimumSize = new Size(0, _profHero.Height);
+            heroRow.Controls.Add(lic, 1, 0);
+            t.Controls.Add(heroRow);
+            // (la antigua tarjeta de rango: sus etiquetas siguen existiendo pero no se enseñan)
             var rankCard = new Card { Dock = DockStyle.Top, Height = 92, Fill = Theme.Surface, Radius = 12, Margin = new Padding(0, 0, 0, 6), Padding = new Padding(16, 10, 16, 12) };
             var rankInner = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Color.Transparent };
             rankInner.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -1242,8 +1298,6 @@ namespace SelectOR
             _rankNext = new Label { Text = "", AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Margin = new Padding(0, 2, 0, 0) };
             rankInner.Controls.Add(rankTop, 0, 0); rankInner.Controls.Add(_rankTrack, 0, 1); rankInner.Controls.Add(_rankNext, 0, 2);
             rankCard.Controls.Add(rankInner);
-            t.Controls.Add(rankCard);
-            t.Controls.Add(BuildLicenseCard());
 
             // KPIs
             var kpis = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
@@ -1254,18 +1308,20 @@ namespace SelectOR
             kpis.Controls.Add(KpiTile(Tr("VIAJEROS"), out _profPaxVal, "🧍", ColTeal));
             t.Controls.Add(kpis);
 
-            t.Controls.Add(EmpHeader("INSIGNIAS"));
-            _badges = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
-            t.Controls.Add(_badges);
+            _badgesHeader = EmpHeader("INSIGNIAS");
+            t.Controls.Add(_badgesHeader);
+            _badgeGrid = new BadgeGrid { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 10) };
+            t.Controls.Add(_badgeGrid);
 
-            t.Controls.Add(EmpHeader("TRENES MÁS UTILIZADOS"));
-            _profTrains = new BarChart { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 6), Format = v => string.Format(Tr("{0} viajes"), v.ToString("0")) };
-            t.Controls.Add(_profTrains);
-
-            t.Controls.Add(EmpHeader("TRAYECTOS MÁS REPETIDOS"));
-            // Los trayectos se ven mejor en anillo: lo interesante es el REPARTO de tus viajes.
-            _profRoutes = new DonutChart { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 6), Format = v => $"{v:0}", CenterCaption = Tr("VIAJES") };
-            t.Controls.Add(_profRoutes);
+            // Trenes (con su vista 2D) y rutas, a dos columnas
+            var tr2 = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, AutoSize = true, Margin = new Padding(0, 0, 0, 10) };
+            tr2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            tr2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            _thumbs ??= new VehicleThumbs(this);
+            _profTrains = new TrainTopList { Dock = DockStyle.Top, Margin = new Padding(0, 0, 7, 0), Title = Tr("TRENES MÁS UTILIZADOS"), Thumbs = _thumbs };
+            _profRoutes = new RouteBars { Dock = DockStyle.Top, Margin = new Padding(7, 0, 0, 0), Title = Tr("RUTAS MÁS RECORRIDAS") };
+            tr2.Controls.Add(_profTrains, 0, 0); tr2.Controls.Add(_profRoutes, 1, 0);
+            t.Controls.Add(tr2);
 
             t.Controls.Add(EmpHeader("HISTORIAL DEL CARNÉ"));
             var hist = BuildLicenseHistory(); hist.Margin = new Padding(2, 2, 2, 8);
@@ -1510,7 +1566,17 @@ namespace SelectOR
             string id = Supa.UserId ?? "";
             string shortId = id.Length >= 8 ? id.Substring(0, 8) : id;
             if (_empIdChip != null) _empIdChip.Text = string.IsNullOrEmpty(shortId) ? "" : "ID " + shortId + "  ⧉";
-            return "👤  " + Supa.DisplayName + (Supa.IsSuperadmin ? "   ★ superadmin" : "");
+            UpdateRailAvatar();
+            return Supa.DisplayName + (Supa.IsSuperadmin ? "  ★" : "");
+        }
+
+        // Foto (o iniciales) del usuario en la tarjeta de abajo del menú lateral.
+        void UpdateRailAvatar()
+        {
+            if (_railAvatar == null) return;
+            _railAvatar.NameText = Supa.DisplayName ?? "";
+            _railAvatar.Photo = !string.IsNullOrEmpty(Supa.UserId) && _memberPhotos.TryGetValue(Supa.UserId, out var p) ? p.img : null;
+            _railAvatar.Invalidate();
         }
 
         // Copia el ID de usuario (UUID completo) al portapapeles.
@@ -1660,7 +1726,9 @@ namespace SelectOR
                 bool taken = err.IndexOf("registered", StringComparison.OrdinalIgnoreCase) >= 0
                           || err.IndexOf("already", StringComparison.OrdinalIgnoreCase) >= 0
                           || err.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0;
-                Msg(_empAuthMsg, taken ? Tr("Ese nombre de usuario ya existe. Elige otro.") : (Tr("No se pudo registrar: ") + err), true);
+                Msg(_empAuthMsg, taken ? Tr("Ese nombre de usuario ya existe. Elige otro.")
+                                 : IsOneAccountPerIpError(err) ? Tr("Ya se ha creado una cuenta desde esta conexión a Internet. Solo se permite una cuenta por conexión.")
+                                 : (Tr("No se pudo registrar: ") + err), true);
                 return;
             }
             SaveRememberedCreds(user, pass);
@@ -1684,9 +1752,9 @@ namespace SelectOR
             _empOnDutyCompany = null; _pendingServiceId = null;
             _members.Clear(); _myRole = null;
             if (_empCoCombo != null) _empCoCombo.Items.Clear();
-            if (_empSvcList != null) _empSvcList.ClearRows();
-            if (_memberList != null) _memberList.ClearRows();
-            if (_bankList != null) _bankList.ClearRows();
+            ClearServices();
+            _memberCards?.SetMembers(new List<MemberCardGrid.Member>());
+            _ledgerAll.Clear(); RefreshBank();
             _svcRows.Clear();
             // Al cerrar sesión ya no perteneces a ninguna empresa → quitar los filtros por empresa
             // de Exploración/Horarios (repuebla vacío y oculta) y actualizar KPIs.
@@ -1732,7 +1800,7 @@ namespace SelectOR
             }
             if (_empCompanies.Count == 0)
             {
-                _empSel = null; _myRole = null; _empSvcList.ClearRows();
+                _empSel = null; _myRole = null; ClearServices();
                 Msg(_empHomeMsg, Tr("Aún no perteneces a ninguna empresa. Crea una o solicita unirte a una desde la izquierda."), false);
                 UpdateCompanyDash();
                 UpdateRoleUi();            // recalcula subpestañas (sin empresa → solo Ranking/Mi perfil)
@@ -1766,78 +1834,105 @@ namespace SelectOR
             if (!_leagueChecked) { _leagueChecked = true; _ = CheckLeagueAwards(); }   // ¿premios de la liga?
         }
 
+        // Servicios de la empresa: la lista (con maquinista y economía) y, a la vez, el tren de cada servicio
+        // (la función de la lista no lo devuelve). Si la respuesta es la misma que la anterior (refrescos en
+        // segundo plano), no se rehace nada; si mientras tanto se ha pedido otra carga, esta se descarta.
         async void LoadServices(EmpCompany c)
         {
             if (c == null) return;
-            _empSvcList.BeginReload(c.Id);
-            _empSvcList.ShowLoading(Tr("Cargando…"));
-            // A la vez: la lista (con maquinista, economía…) y las plazas y toneladas de cada tren, que se
-            // leen aparte de la tabla de servicios (la función de la lista no las devuelve).
+            int seq = ++_svcLoadSeq;
+            if (_svcCardsCompany != c.Id) { _svcCardsCompany = c.Id; _svcLastJson = _svcLastTrenJson = null; _svcCards?.ShowMessage(Tr("Cargando…")); }
             var tLista = Supa.RpcAsync("list_company_services", new { p_company = c.Id });
             string trenQ(string cols) => $"services?select={cols}&company_id=eq.{Uri.EscapeDataString(c.Id)}&order=started_at.desc&limit=200";
-            var tTren = Supa.SelectAsync(trenQ("id,consist,consist_mass,consist_capacity,consist_cars,consist_engines"));
+            // De más a menos columnas según lo que tenga el servidor (servicio-imagen.sql, motrices-servicio.sql);
+            // la que funciona se recuerda para no repetir peticiones fallidas.
+            string[] colSets =
+            {
+                "id,consist,consist_mass,consist_capacity,consist_cars,consist_engines,path,consist_img",
+                "id,consist,consist_mass,consist_capacity,consist_cars,consist_engines,path",
+                "id,consist,consist_mass,consist_capacity,consist_cars,path",
+            };
+            var tTren = Supa.SelectAsync(trenQ(colSets[_svcColsLevel]));
             var (json, err) = await tLista;
-            var tren = new Dictionary<string, (double mass, double cap, string name, int cars, int engines)>(StringComparer.OrdinalIgnoreCase);
+            string tj = null;
             try
             {
-                var (tj, te) = await tTren;
-                // Servidor sin motrices-servicio.sql: sin la columna de motrices.
-                if (te != null && te.IndexOf("consist_engines", StringComparison.OrdinalIgnoreCase) >= 0)
-                    (tj, te) = await Supa.SelectAsync(trenQ("id,consist,consist_mass,consist_capacity,consist_cars"));
-                if (te == null && !string.IsNullOrWhiteSpace(tj))
+                var (j, te) = await tTren;
+                while (te != null && _svcColsLevel < colSets.Length - 1
+                       && (te.IndexOf("consist_img", StringComparison.OrdinalIgnoreCase) >= 0 || te.IndexOf("consist_engines", StringComparison.OrdinalIgnoreCase) >= 0))
                 {
-                    using var td = JsonDocument.Parse(tj);
+                    _svcColsLevel++;
+                    (j, te) = await Supa.SelectAsync(trenQ(colSets[_svcColsLevel]));
+                }
+                if (te == null) tj = j;
+            }
+            catch { }
+            if (seq != _svcLoadSeq || _empSel?.Id != c.Id) return;   // ya se ha pedido otra
+            if (err != null) { _svcRows.Clear(); _svcLastJson = null; _svcCards?.ShowMessage(Tr("Error: ") + err); UpdateServiceTabCounts(); return; }
+            if (json == _svcLastJson && tj == _svcLastTrenJson) return;   // nada ha cambiado
+            _svcLastJson = json; _svcLastTrenJson = tj;
+
+            var rows = await Task.Run(() => ParseServices(json, tj));   // el JSON se lee fuera del hilo de la interfaz
+            if (seq != _svcLoadSeq) return;
+            _svcRows.Clear(); _svcRows.AddRange(rows);
+            var items = new List<ServiceCardList.Item>(rows.Count);
+            foreach (var r in rows)
+                items.Add(new ServiceCardList.Item
+                {
+                    Id = r.Id, Driver = r.Driver, Route = r.Route, Path = r.Path, Train = r.Train == "—" ? "" : r.Train, Status = r.Status,
+                    Start = r.Start, Km = r.Km, DurationS = r.DurationS, Pax = r.Pax, Capacity = r.Capacity, MassT = r.MassT,
+                    Income = r.Income, Net = r.Net, Cars = r.Cars, Engines = r.Engines, Valid = r.Valid, HasImage = r.HasImage
+                });
+            _svcCards?.SetItems(items);
+            UpdateServiceTabCounts();
+            UpdateCompanyKpis();   // nº de servicios y km totales
+        }
+
+        static List<SvcRow> ParseServices(string json, string trenJson)
+        {
+            var tren = new Dictionary<string, (double mass, double cap, string name, int cars, int engines, string path, bool img)>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(trenJson))
+                {
+                    using var td = JsonDocument.Parse(trenJson);
                     foreach (var e in td.RootElement.EnumerateArray())
                     {
                         double NumOrNaN(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : double.NaN;
-                        tren[Str(e, "id")] = (NumOrNaN("consist_mass"), NumOrNaN("consist_capacity"), Str(e, "consist"), (int)Num(e, "consist_cars"), (int)Num(e, "consist_engines"));
+                        bool img = e.TryGetProperty("consist_img", out var ci) && ci.ValueKind == JsonValueKind.True;
+                        tren[Str(e, "id")] = (NumOrNaN("consist_mass"), NumOrNaN("consist_capacity"), Str(e, "consist"), (int)Num(e, "consist_cars"), (int)Num(e, "consist_engines"), Str(e, "path"), img);
                     }
                 }
             }
             catch { }
-            _empSvcList.ClearRows(); _svcIds.Clear(); _svcRows.Clear();
-            if (err != null) { _empSvcList.SetEmpty(Tr("Error: ") + err); return; }
-            int n = 0;
+            var rows = new List<SvcRow>();
             try
             {
                 using var d = JsonDocument.Parse(json);
                 foreach (var e in d.RootElement.EnumerateArray())
                 {
-                    n++;
                     string id = Str(e, "id");
-                    string date = FmtDate(Str(e, "started_at"));
                     string driver = Str(e, "username"); if (driver.Length == 0) driver = "—";
                     string route = Str(e, "route"); if (route.Length == 0) route = "—";
-                    double km = Num(e, "km"), net = Num(e, "net"), dur = Num(e, "duration_s");
-                    double inc = Num(e, "income"), cost = Num(e, "cost_total"), pax = Num(e, "pax");
                     bool valid = !e.TryGetProperty("validated", out var vv) || vv.ValueKind != JsonValueKind.False;
-                    string rawStatus = Str(e, "status");
-                    _svcIds.Add(id);
-                    var (tm, tc, tn, tcars, teng) = tren.TryGetValue(id, out var tt) ? tt : (double.NaN, double.NaN, "", 0, 0);
+                    var (tm, tc, tn, tcars, teng, tpath, timg) = tren.TryGetValue(id, out var tt) ? tt : (double.NaN, double.NaN, "", 0, 0, "", false);
                     if (string.IsNullOrWhiteSpace(tn)) tn = "—";
-                    _svcRows.Add(new SvcRow { Id = id, Date = date, Driver = driver, Route = route, Status = rawStatus,
-                                              Km = km, DurationS = dur, Pax = pax, Income = inc, Cost = cost, Net = net, Valid = valid,
-                                              MassT = tm, Capacity = tc, Train = tn, Cars = tcars, Engines = teng });
-                    // Servicio "En conducción" (open): aún no hay datos del viaje → km, tiempo, viajeros,
-                    // ingreso y neto se muestran en blanco (—) hasta que se registre al terminar.
-                    bool open = rawStatus == "open";
-                    _empSvcList.AddRow(
-                        new[] { "ⓘ", date, driver, route, tn, CarsText(tcars, teng),
-                                open ? "—" : km.ToString("N0", EsEs),
-                                open ? "—" : FmtDurShort(dur),
-                                open || pax <= 0 ? "—" : pax.ToString("N0", EsEs),
-                                TrainLoadText(tc, tm),
-                                open ? "—" : inc.ToString("N0", EsEs) + " €",
-                                open ? "—" : net.ToString("+#,##0.00;-#,##0.00", EsEs) + " €",
-                                StatusLabel(rawStatus, valid) },
-                        new Color?[] { Theme.Accent, null, Theme.Subtle, null, Theme.Subtle, Theme.Subtle, null, null, Theme.Subtle, Theme.Subtle, Theme.Subtle,
-                                       open ? Theme.Subtle : (net < 0 ? RedC : Theme.Accent), StatusColor(rawStatus, valid) }, null, id);
+                    string started = Str(e, "started_at");
+                    var start = DateTime.MinValue;
+                    if (DateTimeOffset.TryParse(started, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var so))
+                        start = so.LocalDateTime;
+                    rows.Add(new SvcRow
+                    {
+                        Id = id, Date = FmtDate(started), Driver = driver, Route = route, Status = Str(e, "status"),
+                        Km = Num(e, "km"), DurationS = Num(e, "duration_s"), Pax = Num(e, "pax"), Income = Num(e, "income"),
+                        Cost = Num(e, "cost_total"), Net = Num(e, "net"), Valid = valid,
+                        MassT = tm, Capacity = tc, Train = tn, Cars = tcars, Engines = teng,
+                        Path = tpath ?? "", Start = start, HasImage = timg
+                    });
                 }
             }
             catch { }
-            if (n == 0) _empSvcList.SetEmpty(Tr("Sin servicios todavía."));
-            _empSvcList.EndReload();
-            UpdateCompanyKpis();   // nº de servicios y km totales
+            return rows;
         }
 
         // Abre la ventana de detalle (solo lectura) del servicio seleccionado, con TODOS sus datos
@@ -1851,12 +1946,17 @@ namespace SelectOR
                 History = true, Company = _empSel?.Name ?? "", Route = s.Route, Driver = s.Driver, DateText = s.Date,
                 Valid = s.Valid, Km = s.Km, DurationS = (int)s.DurationS, Pax = (int)s.Pax,
                 Income = s.Income, Net = s.Net, StatusText = StatusLabel(s.Status, s.Valid),
-                InProgress = s.Status == "open", MassT = s.MassT, Capacity = s.Capacity, Cars = s.Cars, Engines = s.Engines
+                InProgress = s.Status == "open", MassT = s.MassT, Capacity = s.Capacity, Cars = s.Cars, Engines = s.Engines,
+                ServiceId = s.Id, StartLocal = s.Start
             };
             // Datos extra del servicio (tren, recorrido, notas) — máxima info que registró OR/servidor.
             try
             {
-                var (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes&id=eq.{Uri.EscapeDataString(s.Id)}");
+                var (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes,calc,stops&id=eq.{Uri.EscapeDataString(s.Id)}");
+                if (se != null && se.IndexOf("stops", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor sin paradas-servicio.sql
+                    (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes,calc&id=eq.{Uri.EscapeDataString(s.Id)}");
+                if (se != null && se.IndexOf("calc", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor sin calculo-servicio.sql
+                    (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes&id=eq.{Uri.EscapeDataString(s.Id)}");
                 if (se == null && !string.IsNullOrWhiteSpace(sj))
                 {
                     using var sd = JsonDocument.Parse(sj);
@@ -1866,6 +1966,13 @@ namespace SelectOR
                         data.Consist = Str(e, "consist");
                         data.Path = Str(e, "path");
                         data.Notes = Str(e, "notes");
+                        if (e.TryGetProperty("calc", out var ca) && ca.ValueKind == JsonValueKind.Object) data.Calc = ca.Clone();
+                        if (e.TryGetProperty("stops", out var sp) && sp.ValueKind == JsonValueKind.Array)
+                        {
+                            data.Stops = new List<(string, string, int, int)>();
+                            foreach (var x in sp.EnumerateArray())
+                                data.Stops.Add((Str(x, "s"), Str(x, "t"), (int)Num(x, "b"), (int)Num(x, "a")));
+                        }
                     }
                 }
             }
@@ -1886,6 +1993,7 @@ namespace SelectOR
                             case "energy": data.Energy = amt; break;
                             case "salary": data.Salary = amt; break;
                             case "other": data.Rental = amt; break;   // alquiler de la unidad
+                            case "maintenance": data.Maintenance = amt; break;
                         }
                     }
                 }
@@ -1898,12 +2006,12 @@ namespace SelectOR
         // Superadmin: elimina el servicio seleccionado (revierte su efecto en la banca en el servidor).
         async void DeleteServiceRow()
         {
-            if (!Supa.IsSuperadmin || _empSvcList == null) return;
-            int i = _empSvcList.SelectedRow;
-            if (i < 0 || i >= _svcIds.Count) { Msg(_empHomeMsg, Tr("Selecciona un servicio de la lista."), true); return; }
+            if (!Supa.IsSuperadmin || _svcCards == null) return;
+            int i = SelectedServiceIndex();
+            if (i < 0 || i >= _svcRows.Count) { Msg(_empHomeMsg, Tr("Selecciona un servicio de la lista."), true); return; }
             if (MessageBox.Show(this, Tr("¿Eliminar este servicio? Se revertirán también sus apuntes de banca."), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_empHomeMsg, Tr("Eliminando servicio…"), false);
-            var (_, err) = await Supa.RpcAsync("delete_service", new { p_service = _svcIds[i] });
+            var (_, err) = await Supa.RpcAsync("delete_service", new { p_service = _svcRows[i].Id });
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
             Msg(_empHomeMsg, Tr("Servicio eliminado."), false);
             LoadCompanies();
@@ -1913,12 +2021,12 @@ namespace SelectOR
         // Superadmin: elimina el movimiento de banca seleccionado (revierte su importe en el saldo).
         async void DeleteLedgerRow()
         {
-            if (!Supa.IsSuperadmin || _bankList == null) return;
-            int i = _bankList.SelectedRow;
-            if (i < 0 || i >= _ledgerIds.Count) { Msg(_empHomeMsg, Tr("Selecciona un movimiento de la lista."), true); return; }
+            if (!Supa.IsSuperadmin || _bankStmt == null) return;
+            string id = _bankStmt.SelectedId;
+            if (string.IsNullOrEmpty(id)) { Msg(_empHomeMsg, Tr("Selecciona un movimiento de la lista."), true); return; }
             if (MessageBox.Show(this, Tr("¿Eliminar este movimiento de banca? Se ajustará el saldo."), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_empHomeMsg, Tr("Eliminando movimiento…"), false);
-            var (_, err) = await Supa.RpcAsync("delete_ledger_entry", new { p_ledger = _ledgerIds[i] });
+            var (_, err) = await Supa.RpcAsync("delete_ledger_entry", new { p_ledger = id });
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
             Msg(_empHomeMsg, Tr("Movimiento eliminado."), false);
             LoadCompanies();
@@ -1929,55 +2037,129 @@ namespace SelectOR
 
         async void LoadLedger()
         {
-            if (_bankList == null) return;
-            if (_empSel == null) { _bankList.SetEmpty(Tr("Selecciona una empresa.")); return; }
-            _bankList.BeginReload(_empSel.Id);
-            _bankList.ShowLoading(Tr("Cargando…"));
+            if (_bankStmt == null) return;
+            if (_empSel == null) { _ledgerAll.Clear(); _bankStmt.EmptyText = Tr("Selecciona una empresa."); RefreshBank(); return; }
+            string company = _empSel.Id;
+            _bankStmt.EmptyText = Tr("Cargando…"); _bankStmt.SetMoves(new List<BankStatement.Move>());
             var (json, err) = await Supa.SelectAsync(
-                $"ledger?select=id,created_at,concept,amount,description&company_id=eq.{Uri.EscapeDataString(_empSel.Id)}&order=created_at.desc&limit=1000");
-            _bankList.ClearRows(); _ledgerIds.Clear();
-            if (err != null) { _bankList.SetEmpty(Tr("Error: ") + err); return; }
-            int n = 0;
-            double income = 0, expense = 0;
-            var byConcept = new Dictionary<string, double>();     // gastos por concepto (positivo)
-            var byMonth = new Dictionary<string, double>();       // ingresos por mes
+                $"ledger?select=id,created_at,concept,amount,description&company_id=eq.{Uri.EscapeDataString(company)}&order=created_at.desc&limit=1000");
+            if (_empSel == null || _empSel.Id != company) return;     // se cambió de empresa mientras tanto
+            _ledgerAll.Clear(); _ledgerIds.Clear();
+            if (err != null) { _bankStmt.EmptyText = Tr("Error: ") + err; RefreshBank(); return; }
             try
             {
                 using var d = JsonDocument.Parse(json);
                 foreach (var e in d.RootElement.EnumerateArray())
                 {
-                    n++;
-                    _ledgerIds.Add(Str(e, "id"));
-                    string createdAt = Str(e, "created_at");
-                    string date = FmtDate(createdAt);
-                    string rawConcept = Str(e, "concept");
-                    string concept = TrConcept(rawConcept);
-                    double amount = Num(e, "amount");
-                    string desc = Str(e, "description");
-                    _bankList.AddRow(
-                        new[] { date, concept, amount.ToString("+#,##0.00;-#,##0.00", EsEs) + " €", desc },
-                        new Color?[] { null, null, amount < 0 ? RedC : Theme.Accent, null }, null, _ledgerIds[_ledgerIds.Count - 1]);
-                    // Agregados para el panel financiero (un ajuste de saldo no es ingreso ni gasto)
-                    if (rawConcept == "adjustment") continue;
-                    if (amount >= 0) { income += amount; if (rawConcept == "income" && createdAt.Length >= 7) { string m = createdAt.Substring(0, 7); byMonth[m] = byMonth.TryGetValue(m, out var mv) ? mv + amount : amount; } }
-                    else { expense += -amount; byConcept[concept] = byConcept.TryGetValue(concept, out var cv) ? cv - amount : -amount; }
+                    var m = new BankStatement.Move { Id = Str(e, "id"), Concept = Str(e, "concept"), Amount = Num(e, "amount"), Desc = Str(e, "description") };
+                    m.Label = TrConcept(m.Concept);
+                    if (DateTime.TryParse(Str(e, "created_at"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal, out var utc))
+                        m.Local = DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime();
+                    _ledgerAll.Add(m); _ledgerIds.Add(m.Id);
                 }
             }
             catch { }
-            if (n == 0) _bankList.SetEmpty(Tr("Sin movimientos todavía."));
-            _bankList.EndReload();
+            // Saldo tras cada movimiento: del saldo actual hacia atrás.
+            double bal = _empSel.Balance;
+            foreach (var m in _ledgerAll) { m.BalanceAfter = bal; bal -= m.Amount; }
+            _bankStmt.EmptyText = Tr("Sin movimientos todavía.");
+            RefreshBank();
+        }
 
-            // KPIs + gráficas
-            SetKpi(_finIncome, income.ToString("N0", EsEs) + " €");
-            SetKpi(_finExpense, expense.ToString("N0", EsEs) + " €");
-            if (_finNet != null)
+        // Grupo de cada concepto para los filtros del extracto (1 ingresos · 2 cánon · 3 energía · 4 salarios · 5 flota · 6 otros).
+        static int BankGroup(BankStatement.Move m) => m.Concept switch
+        {
+            "income" or "prize" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
+        };
+
+        DateTime BankPeriodStart() => _bankPeriod switch
+        {
+            0 => new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1),
+            1 => new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(-5),
+            _ => DateTime.MinValue
+        };
+
+        // Recalcula el resumen del periodo y el extracto filtrado (sin volver a pedir nada al servidor).
+        void RefreshBank()
+        {
+            if (_bankSummary == null) return;
+            var from = BankPeriodStart();
+            var ci = System.Globalization.CultureInfo.GetCultureInfo(I18n.English ? "en-GB" : "es-ES");
+            double inc = 0, exp = 0;
+            var costs = new Dictionary<string, double>();
+            foreach (var m in _ledgerAll)
             {
-                double net = income - expense;
-                SetKpi(_finNet, net.ToString("N0", EsEs) + " €");
-                _finNet.ForeColor = net < 0 ? RedC : Theme.Accent;
+                if (m.Local < from || m.Concept == "adjustment") continue;
+                if (m.Amount >= 0) inc += m.Amount;
+                else { exp -= m.Amount; costs[m.Concept] = (costs.TryGetValue(m.Concept, out var v) ? v : 0) - m.Amount; }
             }
-            _finBreakdown?.SetData(SortDesc(byConcept, 6));
-            _finMonthly?.SetData(LastMonths(byMonth, 6));
+            // Meses del gráfico: 6 (o hasta 12 con «Todo», desde el primer movimiento).
+            var first = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            int nMonths = 6;
+            if (_bankPeriod == 2 && _ledgerAll.Count > 0)
+            {
+                var oldest = _ledgerAll[_ledgerAll.Count - 1].Local;
+                nMonths = Math.Clamp((first.Year - oldest.Year) * 12 + first.Month - oldest.Month + 1, 6, 12);
+            }
+            var months = new List<(string, double, double)>();
+            var incT = new double[nMonths]; var expT = new double[nMonths];
+            var start = first.AddMonths(-(nMonths - 1));
+            foreach (var m in _ledgerAll)
+            {
+                if (m.Concept == "adjustment" || m.Local < start) continue;
+                int k = (m.Local.Year - start.Year) * 12 + m.Local.Month - start.Month;
+                if (k < 0 || k >= nMonths) continue;
+                if (m.Amount >= 0) incT[k] += m.Amount; else expT[k] -= m.Amount;
+            }
+            int best = -1;
+            for (int k = 0; k < nMonths; k++)
+            {
+                string lbl = start.AddMonths(k).ToString("MMM", ci).TrimEnd('.');
+                months.Add((char.ToUpper(lbl[0]) + lbl.Substring(1), incT[k], expT[k]));
+                if ((incT[k] > 0 || expT[k] > 0) && (best < 0 || incT[k] - expT[k] > incT[best] - expT[best])) best = k;
+            }
+            var sm = _bankSummary;
+            sm.Company = "SelectOR · " + Tr("BANCA FERROVIARIA");
+            sm.Holder = _empSel?.Name ?? "";
+            try { sm.Logo = _empSel != null ? LogoFor(_empSel.Id, _empSel.Logo) : null; } catch { sm.Logo = null; }
+            sm.Balance = _empSel?.Balance ?? 0;
+            string id = (_empSel?.Id ?? "").Replace("-", "").ToUpperInvariant();
+            sm.AccountNo = id.Length >= 8 ? "ES" + (Math.Abs(id.GetHashCode()) % 90 + 10) + " " + id.Substring(0, 4) + " •••• •••• " + id.Substring(id.Length - 4) : "";
+            sm.MonthNet = incT[nMonths - 1] - expT[nMonths - 1];
+            sm.Income = inc; sm.Expense = exp;
+            sm.IncomeTrend = incT; sm.ExpenseTrend = expT; sm.Months = months;
+            if (best >= 0)
+            {
+                string bm = start.AddMonths(best).ToString(I18n.English ? "MMMM yyyy" : "MMMM 'de' yyyy", ci);
+                sm.BestMonth = char.ToUpper(bm[0]) + bm.Substring(1);
+                double bn = incT[best] - expT[best];
+                sm.BestMonthSub = string.Format(Tr("{0} de resultado"), (bn >= 0 ? "+" : "−") + Math.Abs(bn).ToString("N0", EsEs) + " €");
+            }
+            else { sm.BestMonth = "—"; sm.BestMonthSub = ""; }
+            sm.Period = _bankPeriod == 0 ? Tr("últimos 6 meses") : string.Format(Tr("últimos {0} meses"), nMonths);
+            sm.Costs.Clear();
+            foreach (var kv in SortDesc(costs, 6)) { var (ic, col) = BankStatement.IconOf(kv.Key); sm.Costs.Add((ic, TrConcept(kv.Key), kv.Value, col)); }
+            sm.Relayout(true);
+            FillStatement();
+        }
+
+        void FillStatement()
+        {
+            if (_bankStmt == null) return;
+            var from = BankPeriodStart();
+            var list = new List<BankStatement.Move>();
+            foreach (var m in _ledgerAll)
+            {
+                if (m.Local < from) continue;
+                if (_bankConcept > 0 && BankGroup(m) != _bankConcept) continue;
+                if (_bankSearch.Length > 0 && m.Label.IndexOf(_bankSearch, StringComparison.CurrentCultureIgnoreCase) < 0
+                    && (m.Desc ?? "").IndexOf(_bankSearch, StringComparison.CurrentCultureIgnoreCase) < 0) continue;
+                list.Add(m);
+            }
+            _bankStmt.Selectable = Supa.IsSuperadmin;
+            if (list.Count == 0 && _ledgerAll.Count > 0) _bankStmt.EmptyText = Tr("Nada coincide con el filtro.");
+            else if (_ledgerAll.Count > 0) _bankStmt.EmptyText = null;
+            _bankStmt.SetMoves(list);
         }
 
         // Ordena un diccionario por valor descendente y toma los primeros n.
@@ -2155,54 +2337,14 @@ namespace SelectOR
             LoadCompanies();
         }
 
-        // Bloque KPI (título pequeño + valor grande) para la tira de estadísticas.
-        // Pinta la tira de KPIs (Tesorería · Socios · Servicios · Km) a mano: 4 columnas con rótulo
-        // arriba y valor debajo, en coordenadas exactas relativas al alto REAL del panel. Al no depender
-        // de layouts anidados ni de AutoSize, ningún valor puede quedar recortado contra el borde.
-        void DrawKpiStrip(object sender, PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-            int W = _empStatsCard.ClientSize.Width, H = _empStatsCard.ClientSize.Height;
-            using (var bgB = new SolidBrush(Theme.Bg)) g.FillRectangle(bgB, 0, 0, W, H);
-            var cols = new (string cap, string val, Color col)[]
-            {
-                (Tr("TESORERÍA"),  _kpiTreasuryTxt, _kpiTreasuryCol),
-                (Tr("SOCIOS"),     _kpiMembersTxt,  Theme.Text),
-                (Tr("SERVICIOS"),  _kpiServicesTxt, Theme.Text),
-                (Tr("KM TOTALES"), _kpiKmTxt,       Theme.Text),
-            };
-            // 4 TARJETAS compactas; la de Tesorería algo más ancha (importes largos).
-            float[] w = { 1.35f, 1f, 1f, 1f };
-            const int gapX = 10;
-            float unit = (W - gapX * 3 - 2) / (w[0] + w[1] + w[2] + w[3]);
-            using var capF = Theme.Font(8f, FontStyle.Bold);
-            using var valF = Theme.Font(14f, FontStyle.Bold);
-            int capH = TextRenderer.MeasureText(g, "Xg", capF, Size.Empty, TextFormatFlags.NoPadding).Height;
-            int valH = TextRenderer.MeasureText(g, "0€", valF, Size.Empty, TextFormatFlags.NoPadding).Height;
-            int top = Math.Max(4, (H - (capH + 3 + valH)) / 2);
-            var flags = TextFormatFlags.NoPadding | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
-            float x = 0;
-            for (int i = 0; i < 4; i++)
-            {
-                int cw = (int)(unit * w[i]);
-                var rc = new Rectangle((int)x, 0, cw, H - 1);
-                Theme.FillRound(g, rc, 10, Theme.Surface);
-                int tx = rc.X + 14, tw = Math.Max(10, cw - 24);
-                TextRenderer.DrawText(g, cols[i].cap, capF, new Rectangle(tx, top, tw, capH), Theme.Subtle, flags);
-                TextRenderer.DrawText(g, cols[i].val, valF, new Rectangle(tx, top + capH + 3, tw, valH), cols[i].col, flags);
-                x += cw + gapX;
-            }
-        }
+        // Tira de indicadores de cada sección (EmpKpiStrip):
+        //  · Servicios: tesorería, socios, servicios y km, a todo el ancho.
+        //  · Socios: solo los socios, con cuántos hay de cada rol.
+        //  · Flota y Compra: solo la tesorería (es con lo que se compra y se mantiene la flota).
+        //  · El resto (Banca, Ajustes, Ranking, Mi perfil, Revisión, Usuarios, Administración, Megafonía, Chat): nada.
+        static bool SubtabShowsCompanyKpis(int subtab) => subtab == 0 || subtab == 2 || subtab == 9 || subtab == 10;
 
-        // Actualiza la tira de KPIs con los datos ya cargados (socios, servicios, km) y la repinta.
-        // Ranking y Mi perfil son datos DEL MAQUINISTA, no de la empresa: ahí la tira de tesorería,
-        // socios, servicios y km de la empresa no pinta nada y el contenido gana ese espacio.
-        // Ranking (4), Mi perfil (5) y Megafonía (11) no hablan de la marcha de la empresa: sus
-        // datos no tienen nada que ver con tesorería, socios, servicios ni km, así que en ellas la
-        // tira de KPIs solo roba alto a la tabla.
-        static bool SubtabShowsCompanyKpis(int subtab) => subtab != 4 && subtab != 5 && subtab != 6 && subtab != 11 && subtab != ChatSubtab;   // Revisión es de todas las empresas; el chat aprovecha todo el alto
+        static string Plural(int n, string one, string many) => string.Format(Tr(n == 1 ? one : many), n.ToString("N0", EsEs));
 
         void UpdateCompanyKpis()
         {
@@ -2211,11 +2353,44 @@ namespace SelectOR
             _empStatsCard.Visible = show;   // sin empresa (o fuera de la empresa) no hay KPIs que mostrar
             if (_empStatsGap != null) _empStatsGap.Visible = show;
             if (!show) return;
-            _kpiMembersTxt = _members.Count.ToString();
-            _kpiServicesTxt = _svcRows.Count.ToString();
-            double km = 0; foreach (var s in _svcRows) km += s.Km;
-            _kpiKmTxt = km.ToString("N0", EsEs) + " km";
-            _empStatsCard.Invalidate();
+            Color red = Color.FromArgb(229, 115, 115), blue = Color.FromArgb(120, 144, 226), gold = Color.FromArgb(240, 196, 90), teal = Color.FromArgb(45, 212, 191);
+            var treasury = new EmpKpiStrip.Kpi
+            {
+                Icon = "🏦", Caption = Tr("TESORERÍA"), Value = _kpiTreasuryTxt, ValueColor = _kpiTreasuryCol, Tint = _empSel.Balance < 0 ? red : Theme.Accent,
+                Sub = _empSubtab == 9 ? Plural(_fleetIds.Count, "saldo para mantener {0} vehículo", "saldo para mantener {0} vehículos")
+                    : _empSubtab == 10 ? Tr("disponible para comprar trenes") : Tr("saldo de la empresa")
+            };
+            var items = new List<EmpKpiStrip.Kpi>();
+            if (_empSubtab == 0)
+            {
+                int open = 0; double km = 0; int done = 0;
+                foreach (var r in _svcRows) { km += r.Km; if (r.Status == "open") open++; else done++; }
+                int drivers = 0; foreach (var m in _members) if (m.Role == "driver") drivers++;
+                items.Add(treasury);
+                items.Add(new EmpKpiStrip.Kpi { Icon = "👥", Caption = Tr("SOCIOS"), Value = _members.Count.ToString("N0", EsEs), Tint = blue, Sub = Plural(drivers, "{0} maquinista", "{0} maquinistas") });
+                items.Add(new EmpKpiStrip.Kpi { Icon = "🚆", Caption = Tr("SERVICIOS"), Value = _svcRows.Count.ToString("N0", EsEs), Tint = gold,
+                                                Sub = open > 0 ? string.Format(Tr("{0} en conducción · {1} completados"), open, done) : Plural(done, "{0} completado", "{0} completados") });
+                items.Add(new EmpKpiStrip.Kpi { Icon = "🛤", Caption = Tr("KM TOTALES"), Value = km.ToString("N0", EsEs) + " km", Tint = teal,
+                                                Sub = _svcRows.Count > 0 ? string.Format(Tr("media de {0} km por servicio"), (km / _svcRows.Count).ToString("N1", EsEs)) : Tr("sin servicios todavía") });
+                _empStatsCard.SetItems(items, fill: true);
+            }
+            else if (_empSubtab == 2)
+            {
+                int own = 0, man = 0, drv = 0;
+                foreach (var m in _members) { if (m.Role == "owner") own++; else if (m.Role == "manager") man++; else drv++; }
+                var chips = new List<(string, Color)>();
+                if (own > 0) chips.Add(("👑 " + Plural(own, "{0} gerente", "{0} gerentes"), gold));
+                if (man > 0) chips.Add(("🗂 " + Plural(man, "{0} gestor", "{0} gestores"), blue));
+                if (drv > 0) chips.Add(("🚆 " + Plural(drv, "{0} maquinista", "{0} maquinistas"), Theme.AccentHi));
+                items.Add(new EmpKpiStrip.Kpi { Icon = "👥", Caption = Tr("SOCIOS"), Value = Plural(_members.Count, "{0} socio", "{0} socios"), Tint = blue, Chips = chips, Sub = chips.Count == 0 ? Tr("sin socios todavía") : "" });
+                if (chips.Count == 0) items[0].Chips = null;
+                _empStatsCard.SetItems(items, fill: false);
+            }
+            else
+            {
+                items.Add(treasury);
+                _empStatsCard.SetItems(items, fill: false);
+            }
         }
 
         void UpdateCompanyDash()
@@ -2253,6 +2428,115 @@ namespace SelectOR
                     role, _members.Count).Replace("   ·   ", "\n");
             }
             UpdateCompanyKpis();
+        }
+
+        // ============================ Foto de carnet (foto-carnet.sql) ============================
+        // Cada uno pone la suya en Mi perfil; sale en su carnet y en el de Socios. Se recorta a 3:4 (centrada)
+        // y se sube como JPEG de 240 × 320 px.
+        readonly Dictionary<string, (int hash, Image img)> _memberPhotos = new(StringComparer.OrdinalIgnoreCase);
+        const int PhotoW = 240, PhotoH = 320;
+
+        static Image DecodePhoto(string data)
+        {
+            try
+            {
+                int comma = data.IndexOf(',');
+                string b64 = data.StartsWith("data:") && comma > 0 ? data.Substring(comma + 1) : data;
+                if (b64.Length > 200_000) return null;
+                using var ms = new System.IO.MemoryStream(Convert.FromBase64String(b64.Trim()));
+                using var raw = Image.FromStream(ms, false, false);
+                if (raw.Width < 1 || raw.Height < 1 || raw.Width > 1024 || raw.Height > 1024) return null;
+                return new Bitmap(raw);
+            }
+            catch { return null; }
+        }
+
+        // Guarda (o quita, con data vacío) la foto de un socio, sin volver a decodificarla si no ha cambiado.
+        void SetMemberPhoto(string userId, string data)
+        {
+            if (string.IsNullOrEmpty(userId)) return;
+            if (string.IsNullOrEmpty(data)) { _memberPhotos.Remove(userId); return; }   // (las imágenes viejas no se liberan a mano: aún puede estar pintándolas un carnet)
+            int h = data.GetHashCode();
+            if (_memberPhotos.TryGetValue(userId, out var cur) && cur.hash == h) return;
+            var img = DecodePhoto(data);
+            if (img == null) return;
+            _memberPhotos[userId] = (h, img);
+        }
+
+        async void LoadMyPhoto()
+        {
+            if (!Supa.IsLoggedIn || _profHero == null) return;
+            var (json, err) = await Supa.RpcAsync("my_profile_photo", new { });
+            if (err != null) { _profHero.CanEditPhoto = !NoMpOnServer(err); _profHero.Invalidate(); return; }   // sin el SQL: no se ofrece
+            string data = null;
+            try { using var d = JsonDocument.Parse(json); if (d.RootElement.ValueKind == JsonValueKind.String) data = d.RootElement.GetString(); } catch { }
+            SetMemberPhoto(Supa.UserId, data);
+            _profHero.Photo = _memberPhotos.TryGetValue(Supa.UserId ?? "", out var p) ? p.img : null;
+            _profHero.Invalidate();
+            UpdateRailAvatar();
+        }
+
+        void ShowPhotoMenu(Point screen)
+        {
+            var menu = new ContextMenuStrip { ShowImageMargin = false };
+            menu.Items.Add("📷  " + (_profHero.Photo == null ? Tr("Elegir foto…") : Tr("Cambiar foto…")), null, (s, e) => ChoosePhoto());
+            if (_profHero.Photo != null) menu.Items.Add("✕  " + Tr("Quitar foto"), null, (s, e) => SavePhoto(null));
+            menu.Closed += (s, e) => BeginInvoke((Action)menu.Dispose);
+            menu.Show(screen);
+        }
+
+        void ChoosePhoto()
+        {
+            using var dlg = new OpenFileDialog { Title = Tr("Elegir foto de carnet"), Filter = Tr("Imágenes") + "|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.webp" };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            string dataUri;
+            try
+            {
+                using var src = Image.FromFile(dlg.FileName);
+                using var bmp = new Bitmap(PhotoW, PhotoH);
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                    g.Clear(Color.FromArgb(28, 31, 36));
+                    // recorte centrado a 3:4 (un poco hacia arriba: en un retrato la cara suele estar en la parte alta)
+                    float k = Math.Max(PhotoW / (float)src.Width, PhotoH / (float)src.Height);
+                    float w = src.Width * k, h = src.Height * k;
+                    g.DrawImage(src, (PhotoW - w) / 2f, Math.Min(0, (PhotoH - h) * 0.3f), w, h);
+                }
+                var enc = Array.Find(System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders(), c => c.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
+                using var ep = new System.Drawing.Imaging.EncoderParameters(1);
+                long q = 86;
+                byte[] bytes;
+                do
+                {
+                    ep.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, q);
+                    using var ms = new System.IO.MemoryStream();
+                    bmp.Save(ms, enc, ep);
+                    bytes = ms.ToArray();
+                    q -= 10;
+                } while (bytes.Length > 100_000 && q > 30);
+                dataUri = "data:image/jpeg;base64," + Convert.ToBase64String(bytes);
+            }
+            catch (Exception ex) { Msg(_empHomeMsg, Tr("No se pudo leer la imagen: ") + ex.Message, true); return; }
+            SavePhoto(dataUri);
+        }
+
+        async void SavePhoto(string dataUri)
+        {
+            Msg(_empHomeMsg, dataUri == null ? Tr("Quitando la foto…") : Tr("Guardando la foto…"), false);
+            var (_, err) = await Supa.RpcAsync("set_profile_photo", new { p_photo = dataUri });
+            if (err != null)
+            {
+                Msg(_empHomeMsg, NoMpOnServer(err) ? Tr("El servidor aún no admite fotos de carnet (falta foto-carnet.sql).") : Tr("Error: ") + err, true);
+                return;
+            }
+            SetMemberPhoto(Supa.UserId, dataUri);
+            _profHero.Photo = _memberPhotos.TryGetValue(Supa.UserId ?? "", out var p) ? p.img : null;
+            _profHero.Invalidate();
+            FillMemberCards();
+            UpdateRailAvatar();
+            Msg(_empHomeMsg, dataUri == null ? Tr("Foto quitada.") : Tr("Foto de carnet actualizada."), false);
         }
 
         // ============================ Logotipo de la empresa ============================
@@ -3214,6 +3498,9 @@ namespace SelectOR
         double _pPrevLat, _pPrevLon, _pDirX, _pDirY; bool _pHavePrev, _pHaveDir;
         string _paxNextName, _paxNextNorm; int _paxNextWaiting; double _paxNextDist;
         string _paxLastEvent; DateTime _paxLastEventUtc;
+        // Paradas comerciales del viaje (puertas abiertas en un andén): para la ventana del servicio.
+        sealed class StopRec { public string Station, Time; public DateTime Utc; public int Board, Alight; }
+        readonly List<StopRec> _svcStopsLog = new();
         int _paxLastHour = 12; DateTime _paxHourUtc;
 
         // ---------------- Parámetros del modelo (Ajustes → Viajeros / Clasificación) ----------------
@@ -3270,6 +3557,7 @@ namespace SelectOR
         async void StartPaxTracking(TrainItem c)
         {
             _paxActive = false; _paxStations = new(); _paxDone.Clear(); _paxMeta.Clear(); _paxVisits.Clear();
+            _svcStopsLog.Clear();
             _paxPlat.Clear(); _paxPlatKeys.Clear(); _paxTrail.Clear(); _paxTrainLenM = 0; _paxLeadAheadM = 0; _paxDoorNeed = 0; _paxWrongSideSaid = null; _paxPaused = false; _paxPausedNorm = null;
             string paxRouteDir = _curRoute?.Path;
             _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0; _paxBusy = false; _paxWanted = true;
@@ -3670,6 +3958,8 @@ namespace SelectOR
             _paxAnimating = false; _paxPaused = false;
             _paxLastEvent = $"{_paxAnimStation}:  +{_paxAnimBoarded} / −{_paxAnimAlighted}";
             _paxLastEventUtc = DateTime.UtcNow;
+            if (_svcStopsLog.Count > 0 && _svcStopsLog[^1].Station == _paxAnimStation)
+            { _svcStopsLog[^1].Board = _paxAnimBoarded; _svcStopsLog[^1].Alight = _paxAnimAlighted; }
         }
 
         // En cada sondeo: rumbo, reembarque, próxima parada y, si el tren está PARADO con PUERTAS
@@ -3777,6 +4067,8 @@ namespace SelectOR
                 int board = Math.Max(0, Math.Min(PaxDemandAt(bestNorm, hour), _paxCapacity - (_paxOnboard - alight)));
                 _paxDone.Add(bestNorm);
                 _paxVisits[bestNorm] = visit + 1;
+                // Parada comercial: queda anotada (estación y hora del simulador) para la ventana del servicio.
+                _svcStopsLog.Add(new StopRec { Station = m.name ?? bestNorm, Time = await FetchGameClock(), Utc = DateTime.UtcNow });
                 // El intercambio se hace poco a poco (el HUD va mostrando cómo cambian las cifras).
                 StartPaxAnimation(m.name ?? bestNorm, bestNorm, alight, board);
             }
@@ -3888,6 +4180,22 @@ namespace SelectOR
         DateTime? _stoppedSinceUtc;
         bool TrainStoppedByPosition(double minSeconds = 3) =>
             _stoppedSinceUtc != null && (DateTime.UtcNow - _stoppedSinceUtc.Value).TotalSeconds >= minSeconds;
+
+        // Hora del simulador «HH:mm» ("" si no se puede leer).
+        async Task<string> FetchGameClock()
+        {
+            try
+            {
+                string txt = await _kmHttp.GetStringAsync("/API/TIME");
+                if (double.TryParse(txt.Trim().Trim('"'), NumberStyles.Float, CultureInfo.InvariantCulture, out double secs))
+                {
+                    int t = (int)secs % 86400; if (t < 0) t += 86400;
+                    return $"{t / 3600:00}:{t % 3600 / 60:00}";
+                }
+            }
+            catch { }
+            return "";
+        }
 
         async Task<int> FetchGameHour()
         {
@@ -4024,6 +4332,8 @@ namespace SelectOR
 
             var trainCount = new Dictionary<string, double>();
             var routeCount = new Dictionary<string, double>();
+            var trainKm = new Dictionary<string, double>();
+            var routeKm = new Dictionary<string, double>();
             double totalKm = 0, totalS = 0, totalPax = 0; int trips = 0, invalid = 0;
 
             void Tally(string route, string consist, double km, double dur, double pax, bool valid, bool completed)
@@ -4031,11 +4341,12 @@ namespace SelectOR
                 if (completed && !valid) invalid++;
                 if (!valid || !completed) return;
                 trips++; totalKm += km; totalS += dur; totalPax += pax;
-                if (!string.IsNullOrWhiteSpace(consist)) trainCount[consist] = trainCount.TryGetValue(consist, out var a) ? a + 1 : 1;
-                if (!string.IsNullOrWhiteSpace(route)) routeCount[route] = routeCount.TryGetValue(route, out var b) ? b + 1 : 1;
+                if (!string.IsNullOrWhiteSpace(consist)) { trainCount[consist] = trainCount.TryGetValue(consist, out var a) ? a + 1 : 1; trainKm[consist] = (trainKm.TryGetValue(consist, out var ak) ? ak : 0) + km; }
+                if (!string.IsNullOrWhiteSpace(route)) { routeCount[route] = routeCount.TryGetValue(route, out var b) ? b + 1 : 1; routeKm[route] = (routeKm.TryGetValue(route, out var bk) ? bk : 0) + km; }
             }
 
             var tLic = LoadLicense();   // carné por puntos (a la vez que los servicios)
+            LoadMyPhoto();
             // Servicios de empresa donde soy el maquinista
             var (sj, se) = await Supa.SelectAsync(
                 $"services?select=route,consist,km,duration_s,pax,status,validated&driver_id=eq.{Uri.EscapeDataString(Supa.UserId ?? "")}&limit=1000");
@@ -4064,9 +4375,30 @@ namespace SelectOR
             try { await tLic; } catch { }
             UpdateRankAndBadges(totalKm, trips, hours, invalid, routeCount.Count, totalPax, trainCount.Count, avg);
 
-            // Gráficas (top 6)
-            _profTrains?.SetData(TopN(trainCount, 6));
-            _profRoutes?.SetData(TopN(routeCount, 6));
+            // Trenes más usados (con la vista 2D de su máquina, si la tienes) y rutas más recorridas
+            var tops = new List<KeyValuePair<string, double>>(trainCount);
+            tops.Sort((x, y) => y.Value.CompareTo(x.Value));
+            var trains = new List<(string, string, string, string)>();
+            foreach (var kv in tops)
+            {
+                if (trains.Count >= 4) break;
+                string path = null;
+                foreach (var c in _consistsAll ?? new List<TrainItem>())
+                    if (c != null && string.Equals(c.Name, kv.Key, StringComparison.OrdinalIgnoreCase)) { path = c.Locomotive?.FilePath; break; }
+                trains.Add((kv.Key, (trainKm.TryGetValue(kv.Key, out var tk) ? tk : 0).ToString("N0", EsEs) + " km", kv.Value.ToString("N0", EsEs) + "×", path));
+            }
+            _profTrains?.SetItems(trains);
+            var rts = new List<KeyValuePair<string, double>>(routeKm);
+            rts.Sort((x, y) => y.Value.CompareTo(x.Value));
+            double maxKm = rts.Count > 0 ? Math.Max(1, rts[0].Value) : 1;
+            var routes = new List<(string, string, double)>();
+            foreach (var kv in rts)
+            {
+                if (routes.Count >= 5) break;
+                int n = routeCount.TryGetValue(kv.Key, out var rc) ? (int)rc : 0;
+                routes.Add((kv.Key, kv.Value.ToString("N0", EsEs) + " km  ·  " + string.Format(Tr(n == 1 ? "{0} viaje" : "{0} viajes"), n), kv.Value / maxKm));
+            }
+            _profRoutes?.SetItems(routes);
         }
 
         // Escala de rangos por km VÁLIDOS conducidos.
@@ -4110,64 +4442,76 @@ namespace SelectOR
             else { _rankPct = 1; if (_rankNext != null) _rankNext.Text = Tr("¡Rango máximo alcanzado!"); }
             if (frozen && _rankNext != null) _rankNext.Text = "❄ " + Tr("Rango congelado: el carné está por debajo de 6 puntos.") + "  " + _rankNext.Text;
             _rankTrack?.Invalidate();
+            if (_profHero != null)
+            {
+                _profHero.Name_ = string.IsNullOrWhiteSpace(Supa.Username) ? "—" : Supa.Username;
+                var meta = new List<string>();
+                if (_empSel != null) meta.Add((_myRole != null ? TrRole(_myRole) + " · " : "") + _empSel.Name);
+                if (!string.IsNullOrEmpty(Supa.UserId)) meta.Add("ID " + Supa.UserId.Substring(0, Math.Min(8, Supa.UserId.Length)));
+                _profHero.Meta = string.Join("  ·  ", meta);
+                _profHero.Rank = _rankName?.Text ?? "—"; _profHero.Step = _rankStep?.Text ?? ""; _profHero.Next = _rankNext?.Text ?? "";
+                _profHero.Pct = _rankPct; _profHero.Frozen = frozen;
+                _profHero.CanEditPhoto = Supa.IsLoggedIn;
+                _profHero.Invalidate();
+            }
             km = kmBadges;
 
             // Insignias (cada una con su color)
-            if (_badges != null)
+            if (_badgeGrid != null)
             {
                 // Se reúnen primero y solo se rehacen si ha cambiado alguna: rehacerlas en cada recarga
                 // (refresco en vivo) hacía parpadear todo el panel.
-                var lista = new List<(string icon, string text, bool earned, Color color)>();
-                void Badge(string icon, string text, bool earned, Color color) => lista.Add((icon, text, earned, color));
+                var lista = new List<(string icon, string text, bool earned, Color color, double prog)>();
+                void Badge(string icon, string text, bool earned, Color color, double prog = 0) => lista.Add((icon, text, earned, color, earned ? 1 : Math.Max(0, Math.Min(0.99, prog))));
                 // Servicios
-                Badge("🚂", Tr("Primer viaje"), trips >= 1, ColBlue);
-                Badge("🏅", Tr("10 servicios"), trips >= 10, ColGold);
-                Badge("🎖️", Tr("50 servicios"), trips >= 50, ColGold);
-                Badge("🏆", Tr("100 servicios"), trips >= 100, ColOrange);
-                Badge("👑", Tr("250 servicios"), trips >= 250, ColOrange);
-                Badge("💎", Tr("500 servicios"), trips >= 500, ColViolet);
-                Badge("🌟", Tr("1.000 servicios"), trips >= 1000, ColGold);
+                Badge("🚂", Tr("Primer viaje"), trips >= 1, ColBlue, trips / 1.0);
+                Badge("🏅", Tr("10 servicios"), trips >= 10, ColGold, trips / 10.0);
+                Badge("🎖️", Tr("50 servicios"), trips >= 50, ColGold, trips / 50.0);
+                Badge("🏆", Tr("100 servicios"), trips >= 100, ColOrange, trips / 100.0);
+                Badge("👑", Tr("250 servicios"), trips >= 250, ColOrange, trips / 250.0);
+                Badge("💎", Tr("500 servicios"), trips >= 500, ColViolet, trips / 500.0);
+                Badge("🌟", Tr("1.000 servicios"), trips >= 1000, ColGold, trips / 1000.0);
                 // Distancia
-                Badge("📐", Tr("100 km"), km >= 100, Theme.Accent);
-                Badge("📏", Tr("1.000 km"), km >= 1000, Theme.Accent);
-                Badge("🌍", Tr("10.000 km"), km >= 10000, ColTeal);
-                Badge("🛰", Tr("50.000 km"), km >= 50000, ColTeal);
-                Badge("🚀", Tr("100.000 km"), km >= 100000, ColBlue);
+                Badge("📐", Tr("100 km"), km >= 100, Theme.Accent, km / 100.0);
+                Badge("📏", Tr("1.000 km"), km >= 1000, Theme.Accent, km / 1000.0);
+                Badge("🌍", Tr("10.000 km"), km >= 10000, ColTeal, km / 10000.0);
+                Badge("🛰", Tr("50.000 km"), km >= 50000, ColTeal, km / 50000.0);
+                Badge("🚀", Tr("100.000 km"), km >= 100000, ColBlue, km / 100000.0);
                 // Tiempo al mando
-                Badge("⏱", Tr("10 horas"), hours >= 10, ColViolet);
-                Badge("🕰", Tr("100 horas"), hours >= 100, ColViolet);
-                Badge("📅", Tr("500 horas"), hours >= 500, ColViolet);
-                Badge("♾", Tr("1.000 horas"), hours >= 1000, ColGold);
+                Badge("⏱", Tr("10 horas"), hours >= 10, ColViolet, hours / 10.0);
+                Badge("🕰", Tr("100 horas"), hours >= 100, ColViolet, hours / 100.0);
+                Badge("📅", Tr("500 horas"), hours >= 500, ColViolet, hours / 500.0);
+                Badge("♾", Tr("1.000 horas"), hours >= 1000, ColGold, hours / 1000.0);
                 // Rutas y material
-                Badge("🗺", Tr("Explorador (5 rutas)"), distinctRoutes >= 5, ColOrange);
-                Badge("🧭", Tr("Explorador (10 rutas)"), distinctRoutes >= 10, ColOrange);
-                Badge("🌐", Tr("Explorador (25 rutas)"), distinctRoutes >= 25, ColTeal);
-                Badge("🚆", Tr("10 trenes distintos"), distinctTrains >= 10, ColBlue);
-                Badge("🚄", Tr("25 trenes distintos"), distinctTrains >= 25, ColBlue);
+                Badge("🗺", Tr("Explorador (5 rutas)"), distinctRoutes >= 5, ColOrange, distinctRoutes / 5.0);
+                Badge("🧭", Tr("Explorador (10 rutas)"), distinctRoutes >= 10, ColOrange, distinctRoutes / 10.0);
+                Badge("🌐", Tr("Explorador (25 rutas)"), distinctRoutes >= 25, ColTeal, distinctRoutes / 25.0);
+                Badge("🚆", Tr("10 trenes distintos"), distinctTrains >= 10, ColBlue, distinctTrains / 10.0);
+                Badge("🚄", Tr("25 trenes distintos"), distinctTrains >= 25, ColBlue, distinctTrains / 25.0);
                 // Viajeros
-                Badge("🧍", Tr("1.000 viajeros"), pax >= 1000, ColTeal);
-                Badge("👥", Tr("10.000 viajeros"), pax >= 10000, ColTeal);
-                Badge("🏙", Tr("100.000 viajeros"), pax >= 100000, ColGold);
+                Badge("🧍", Tr("1.000 viajeros"), pax >= 1000, ColTeal, pax / 1000.0);
+                Badge("👥", Tr("10.000 viajeros"), pax >= 10000, ColTeal, pax / 10000.0);
+                Badge("🏙", Tr("100.000 viajeros"), pax >= 100000, ColGold, pax / 100000.0);
                 // Estilo de conducción
                 Badge("✅", Tr("Conducción limpia"), trips >= 5 && invalid == 0, Theme.Accent);
                 Badge("🛡", Tr("Impecable (50 servicios)"), trips >= 50 && invalid == 0, Theme.Accent);
                 Badge("⚡", Tr("Alta velocidad (media 100 km/h)"), trips >= 10 && avgKmh >= 100, ColOrange);
                 var firma = new System.Text.StringBuilder();
                 foreach (var x in lista) firma.Append(x.text).Append(x.earned ? '1' : '0').Append('|');
-                if (firma.ToString() != _badgesSig || _badges.Controls.Count != lista.Count)
+                foreach (var x in lista) firma.Append(((int)(x.prog * 20)).ToString());
+                if (firma.ToString() != _badgesSig && _badgeGrid != null)
                 {
                     _badgesSig = firma.ToString();
-                    _badges.SuspendLayout();
-                    var viejas = new List<Control>();
-                    foreach (Control c in _badges.Controls) viejas.Add(c);
-                    _badges.Controls.Clear();
-                    foreach (var c in viejas) c.Dispose();
-                    foreach (var x in lista) _badges.Controls.Add(BadgeChip(x.icon, x.text, x.earned, x.color));
-                    _badges.ResumeLayout(true);
+                    var items = new List<(string, string, bool, Color, double)>();
+                    foreach (var x in lista) items.Add((x.icon, x.text, x.earned, x.color, x.prog));
+                    _badgeGrid.SetItems(items);
+                    int got = lista.FindAll(x => x.earned).Count;
+                    if (_badgesHeader != null) _badgesHeader.Text = Tr("INSIGNIAS") + "  ·  " + string.Format(Tr("{0} de {1}"), got, lista.Count);
                 }
             }
         }
         string _badgesSig;   // insignias que se ven ahora (para no rehacerlas si no cambian)
+        Label _badgesHeader;
 
         // Insignia: pastilla con icono a color (blanco sobre disco del color) + texto.
         // Conseguida = disco a color + fondo teñido + texto claro; bloqueada = disco gris + texto atenuado.
@@ -4416,22 +4760,25 @@ namespace SelectOR
             fmain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
             fmain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
 
-            // --- IZQUIERDA: buscador + tabla ---
+            // --- IZQUIERDA: estados + buscador + tarjetas (una por modelo, con sus unidades) ---
             var fleetGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0, 0, 12, 0) };
             fleetGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            fleetGrid.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // filtro
-            fleetGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tabla
+            fleetGrid.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // estados + filtro
+            fleetGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tarjetas
 
-            _fleetList = EmpTable();
-            _fleetList.SetColumns(
-                new StyledTable.Col("MATRÍCULA", 120),
-                new StyledTable.Col("VEHÍCULO", 150),
-                new StyledTable.Col("MODELO", 0, true),
-                new StyledTable.Col("ESTADO", 230));   // cabe «No operativo · mantenimiento»
-            _fleetList.SelectedIndexChanged += (s, e) => OnFleetVehicleSelected();
-            var fleetSearch = EmpSearch(_fleetList, 360); fleetSearch.Margin = new Padding(0, 0, 0, 8);
-            fleetGrid.Controls.Add(fleetSearch, 0, 0);
-            fleetGrid.Controls.Add(_fleetList, 0, 1);
+            _thumbs ??= new VehicleThumbs(this);
+            _fleetCards = new FleetCardList { Dock = DockStyle.Fill, Thumbs = _thumbs, Margin = new Padding(0) };
+            _fleetCards.SelectionChanged += OnFleetVehicleSelected;
+            var ftop = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0, 0, 0, 6) };
+            ftop.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            ftop.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _fleetTabs = MakeSubTabs(new[] { "Todas", "Disponibles", "En servicio", "En taller" }, i => _fleetCards.StateFilter = i - 1);
+            _fleetTabs.Dock = DockStyle.Fill; _fleetTabs.Margin = new Padding(0); _fleetTabs.BackColor = Theme.Surface;
+            var fleetSearch = new RoundedInput(I18n.T("🔎  Matrícula o modelo…")) { Width = 240, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
+            fleetSearch.Box.TextChanged += (s, e) => _fleetCards.Filter(fleetSearch.Box.Text);
+            ftop.Controls.Add(_fleetTabs, 0, 0); ftop.Controls.Add(fleetSearch, 1, 0);
+            fleetGrid.Controls.Add(ftop, 0, 0);
+            fleetGrid.Controls.Add(_fleetCards, 0, 1);
             fmain.Controls.Add(fleetGrid, 0, 0);
 
             // --- DERECHA: vista 3D + ficha del vehículo + acciones ---
@@ -4450,7 +4797,10 @@ namespace SelectOR
             _fleetOwnRerender = new System.Windows.Forms.Timer { Interval = 140 };
             _fleetOwnRerender.Tick += (s, e) => { _fleetOwnRerender.Stop(); RenderFleetOwnLive(); };
             _fleetOwnPreview.Resize += (s, e) => { if (_fleetOwnGeom != null) { _fleetOwnRerender.Stop(); _fleetOwnRerender.Start(); } };
-            fviewport.Controls.Add(_fleetOwnPreview);
+            // Vista 2D al momento; el 3D, solo con «Ver en 3D»
+            _fleetOwnView = new VehicleViewport(_fleetOwnPreview) { Dock = DockStyle.Fill, Thumbs = _thumbs };
+            _fleetOwnView.ModeChanged += on => { if (on) RenderFleetOwn(_fleetOwnEngPath); };
+            fviewport.Controls.Add(_fleetOwnView);
             fright.Controls.Add(fviewport, 0, 0);
 
             _fleetOwnTitle = new Label { Text = Tr("Elige un vehículo"), AutoSize = true, ForeColor = Theme.Accent, Font = Theme.Font(12.5f, FontStyle.Bold), Margin = new Padding(1, 0, 0, 6) };
@@ -4517,36 +4867,46 @@ namespace SelectOR
             // DOS COLUMNAS (aprovecha todo el espacio): IZQUIERDA = buscador + lista de trenes que
             // rellena la altura · DERECHA = visor 3D + ficha técnica + botones comprar/alquilar.
             var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface };
-            main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-            main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+            main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));   // tarjetas
+            main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));   // visor + ficha
 
             // --- IZQUIERDA: buscador + lista de trenes (rellena toda la altura disponible) ---
-            var pickerHost = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0, 0, 12, 0) };
+            var pickerHost = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Surface, Margin = new Padding(0, 0, 12, 0) };
             pickerHost.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            pickerHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            pickerHost.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            pickerHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // tipos
+            pickerHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // buscador
+            pickerHost.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tarjetas
+            _buyKindTabs = MakeSubTabs(new[] { "Todas", "En tu flota", "Automotores", "Locomotoras" }, i => { _buyKind = i; FilterBuyList(); });
+            _buyKindTabs.Dock = DockStyle.Top; _buyKindTabs.BackColor = Theme.Surface; _buyKindTabs.Margin = new Padding(0, 0, 0, 6);
+            pickerHost.Controls.Add(_buyKindTabs, 0, 0);
             // Una sola lista: las MÁQUINAS (.eng) del contenido. Los trenes (.con) los tiene cada
             // uno distintos; las máquinas suelen ser las mismas, así que la compra va por máquina.
             _fleetConsistSearch = new RoundedInput(I18n.T("🔎  Buscar máquina por nombre o carpeta…")) { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 6) };
             _fleetConsistSearch.Box.TextChanged += (s, e) => FilterBuyList();
-            pickerHost.Controls.Add(_fleetConsistSearch, 0, 0);
+            pickerHost.Controls.Add(_fleetConsistSearch, 0, 1);
 
             // La lista de trenes (.con) ya no se muestra, pero se sigue creando: el desglose de la
             // tasación y el aviso de «ya la tienes» trabajan sobre los consists del contenido.
             _fleetConsistList = MakeListBox(Theme.Surface2, 30);
 
-            // Altura FIJA: todas las filas son máquinas (ya no hay cabeceras por carpeta). Con altura variable,
-            // Windows pedía la altura de cada una de las miles de filas al rellenar la lista.
-            _fleetEngList = MakeListBox(Theme.Surface2, 46);
-            _fleetEngList.DrawItem += DrawBuyMachineItem;
+            // Tarjetas con la vista 2D de cada máquina: datos y precio al aparecer en pantalla.
+            _thumbs ??= new VehicleThumbs(this);
+            _fleetEngList = new BuyCardGrid
+            {
+                Thumbs = _thumbs, BackColor = Theme.Surface,
+                PathOf = o => (o as BuyMachine)?.Path, TitleOf = o => (o as BuyMachine)?.Name,
+                FolderOf = o => (o as BuyMachine)?.Folder, CarsOf = o => (o as BuyMachine)?.UnitCars ?? 1,
+                OwnedOf = o => o is BuyMachine bm ? OwnedUnits(bm.Folder, bm.Name) : 0,
+                InfoOf = o => MachineInfoAsync(o as BuyMachine)
+            };
             _fleetEngList.SelectedIndexChanged += (s, e) =>
             {
                 if (SkipBuyHeader()) return;   // las cabeceras no se seleccionan
                 RenderBuyMachinePreview(); UpdateMachineValuation();
             };
-            var engCard = WrapCard(_fleetEngList); engCard.Dock = DockStyle.Fill;
+            var engCard = WrapCard(_fleetEngList); engCard.Dock = DockStyle.Fill; engCard.Fill = Theme.Surface; engCard.Padding = new Padding(0);
             _buyEngCard = engCard;
-            pickerHost.Controls.Add(engCard, 0, 1);
+            pickerHost.Controls.Add(engCard, 0, 2);
             main.Controls.Add(pickerHost, 0, 0);
 
             // --- DERECHA: visor 3D (arriba) + ficha (rellena) + botones (abajo) ---
@@ -4568,7 +4928,9 @@ namespace SelectOR
             _fleetRerender = new System.Windows.Forms.Timer { Interval = 140 };
             _fleetRerender.Tick += (s, e) => { _fleetRerender.Stop(); RenderFleetLive(); };
             _fleetPreview.Resize += (s, e) => { if (_fleetGeom != null) { _fleetRerender.Stop(); _fleetRerender.Start(); } };
-            viewport.Controls.Add(_fleetPreview);
+            _buyView = new VehicleViewport(_fleetPreview) { Dock = DockStyle.Fill, Thumbs = _thumbs };
+            _buyView.ModeChanged += on => { if (on) { _fleetPrevEngPath = null; RenderBuyMachinePreview(); } };
+            viewport.Controls.Add(_buyView);
             right.Controls.Add(viewport, 0, 0);
 
             // Ficha técnica AutoSize: tipo + chips (fijo) + desglose (fijo) + precios. Alturas deterministas
@@ -4745,21 +5107,23 @@ namespace SelectOR
 
         async void LoadFleet()
         {
-            if (_fleetList == null) return;
+            if (_fleetCards == null) return;
             LoadFleetScale();          // escala de precio para tasar en el cliente
             PopulateFleetConsistList(); // consists comprables del contenido actual
             PopulateBuyMachines();      // máquinas (.eng) comprables del contenido actual
-            _fleetList.BeginReload(_empSel?.Id);   // misma empresa: tras editar una unidad, la lista no vuelve arriba
-            if (_empSel == null) { _fleetList.ClearRows(); _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetPlates.Clear(); _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); OnFleetVehicleSelected(); _fleetList.SetEmpty(Tr("Selecciona una empresa.")); return; }
-            _fleetList.ShowLoading(Tr("Cargando…"));
+            if (_empSel == null) { _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetPlates.Clear(); _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); _fleetCards.EmptyText = Tr("Selecciona una empresa."); _fleetCards.SetModels(new List<FleetModel>()); OnFleetVehicleSelected(); UpdateFleetTabCounts(); return; }
+            if (_fleetIds.Count == 0) { _fleetCards.EmptyText = Tr("Cargando…"); _fleetCards.Invalidate(); }
             const string fleetCols = "id,name,folder,kind,engine_type,km_total,km_since_maint,maint_interval_km,ownership,status,rental_per_service,capacity,comfort";
             string fleetFilter = $"&company_id=eq.{Uri.EscapeDataString(_empSel.Id)}&order=name.asc,created_at.asc";
             var (json, err) = await SelectVehicles(fleetCols + ",plate", fleetFilter);
             if (err != null && err.IndexOf("plate", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor aún sin matrículas
                 (json, err) = await SelectVehicles(fleetCols, fleetFilter);
-            _fleetList.ClearRows(); _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetOwnedCount.Clear(); _fleetPlates.Clear();
+            _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetOwnedCount.Clear(); _fleetPlates.Clear();
             _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear();
-            if (err != null) { _fleetList.SetEmpty(Tr("Error: ") + err); return; }
+            if (err != null) { _fleetCards.EmptyText = Tr("Error: ") + err; _fleetCards.SetModels(new List<FleetModel>()); return; }
+            _fleetCards.EmptyText = null;
+            var models = new List<FleetModel>();
+            var modelOf = new Dictionary<string, FleetModel>(StringComparer.OrdinalIgnoreCase);
             // Modelos (.eng) que el usuario tiene en su contenido local: solo puede CONDUCIR esos.
             // engFolder: .eng → carpeta legible del tren; engPath: .eng → ruta del archivo (para el render 3D).
             var localNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -4811,9 +5175,6 @@ namespace SelectOR
                     Color? nameColor = hasLocal ? (Color?)null : Theme.Subtle;
                     string plate = Str(e, "plate");
                     _fleetPlates.Add(plate);
-                    _fleetList.AddRow(new[] { plate.Length > 0 ? plate : "—", name, model, estado },
-                        new Color?[] { plate.Length > 0 ? (Color?)Theme.AccentHi : Theme.Subtle, nameColor, hasLocal ? (Color?)null : Theme.Subtle, estadoColor },
-                        null, _fleetIds.Count > 0 ? _fleetIds[_fleetIds.Count - 1] : null);
                     // Datos para la ficha lateral (columna derecha).
                     _fleetRowEng.Add(engPath.TryGetValue(name, out var ep) ? ep : "");
                     // TIPO = lo que declara el archivo del vehículo (Motriz / Viajeros / Mercancías…);
@@ -4824,10 +5185,32 @@ namespace SelectOR
                     string plazas = cap > 0 ? cap.ToString("N0", EsEs) : "—";
                     _fleetRowDetail.Add(new[] { plate.Length > 0 ? plate + "  ·  " + name : name, declared, prop, maint, estado, plazas, traction });
                     _fleetRowEstColor.Add(estadoColor);
+                    // Tarjeta del modelo (carpeta + .eng) con esta unidad como chip de color
+                    string mkey = ModelKey(rawFolder, name);
+                    if (!modelOf.TryGetValue(mkey, out var fm))
+                    {
+                        var sub = new List<string>();
+                        if (declared != "—") sub.Add(declared);
+                        if (traction != "—") sub.Add(traction);
+                        if (cap > 0) sub.Add(cap.ToString("N0", EsEs) + " " + Tr("plazas"));
+                        sub.Add(hasLocal ? model : Tr("(no lo tienes en local)"));
+                        fm = new FleetModel { Key = mkey, Title = name, Sub = string.Join("  ·  ", sub), Path = _fleetRowEng[_fleetRowEng.Count - 1] };
+                        modelOf[mkey] = fm; models.Add(fm);
+                    }
+                    bool soon = !due && !inUse && interval > 0 && remaining <= interval * 0.1;   // revisión pronto
+                    fm.Units.Add(new FleetUnit
+                    {
+                        Row = _fleetIds.Count - 1, Id = _fleetIds[_fleetIds.Count - 1],
+                        Label = plate.Length > 0 ? plate : string.Format(Tr("Unidad {0}"), fm.Units.Count + 1),
+                        State = due ? 2 : inUse ? 1 : soon ? 3 : 0
+                    });
                 }
             }
             catch { }
-            if (n == 0) _fleetList.SetEmpty(Tr("Sin vehículos todavía."));
+            _fleetCards.SetModels(models);
+            if (_fleetCards.SelectedId == null && models.Count > 0 && models[0].Units.Count > 0) _fleetCards.Select(models[0].Units[0].Id, false);
+            UpdateFleetTabCounts();
+            UpdateCompanyKpis();
             if (_fleetHeaderLbl != null) _fleetHeaderLbl.Text = Tr("FLOTA DE LA EMPRESA") + (n > 0 ? "  ·  " + n : "");
             EnsureOwnedMachinesListed();   // lo que ya tienes se ve siempre en Compra, con su distintivo
             // La lista solo se rehace si han cambiado las unidades de la empresa (rehacerla cuesta).
@@ -4835,7 +5218,6 @@ namespace SelectOR
             foreach (var kv in _fleetOwnedCount) ownedStamp = ownedStamp * 31 + kv.Key.GetHashCode() + kv.Value;
             if (ownedStamp != _fleetOwnedStamp) { _fleetOwnedStamp = ownedStamp; FilterBuyList(); }
             else _fleetEngList?.Invalidate();
-            _fleetList.EndReload();    // misma fila arriba y la misma unidad elegida que antes de editar
             OnFleetVehicleSelected();  // refresca la ficha/vista del vehículo seleccionado
             UpdateRoleUi();
             UpdateFleetValuation();   // recalcula el desglose del consist elegido (la propiedad puede haber cambiado)
@@ -5035,6 +5417,7 @@ namespace SelectOR
                 }
             }
             catch { }
+            _fleetEngList?.ClearInfo();   // precios de las tarjetas con la escala de ahora
             await LoadPaxModel();   // parámetros del modelo de viajeros y de clasificación
             FillPaxModelInputs(PaxCfg);
         }
@@ -5048,16 +5431,43 @@ namespace SelectOR
             if (_fleetEngsFolder == root && _fleetEngsConsistCount == _consistsAll.Count && _fleetConsists.Count > 0) return;
             _fleetEngsFolder = root;
             _fleetEngsConsistCount = _consistsAll.Count;
-            _fleetEngs = AvailableEngines();   // name → path (para tasar cada unidad del desglose)
-            var hidden = AutomotorMemberEngs();
-            _fleetConsists = new List<TrainItem>();
-            foreach (var c in _consistsAll)
-                if (c?.FilePath != null && PurchasableUnitsInConsist(c, hidden).Count > 0)
-                {
-                    _fleetConsists.Add(c);
-                }
-            _fleetConsists.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+            // Si ya se calculó en segundo plano al cargar el contenido (PrewarmFleetLists), se usa tal cual.
+            var pre = _fleetPre;
+            if (pre.list != null && pre.root == root && pre.count == _consistsAll.Count)
+            {
+                _fleetEngs = pre.engs; _fleetConsists = pre.list;
+                FilterFleetConsistList();
+                return;
+            }
+            var (engs, list) = ComputeFleetLists();
+            _fleetEngs = engs; _fleetConsists = list;
             FilterFleetConsistList();
+        }
+
+        // Máquinas del contenido y trenes con algo comprable: recorre todos los consists (miles), así que se
+        // calcula en segundo plano nada más leer el contenido y abrir Flota o Compra ya no espera.
+        (List<(string name, string folder, string path, string kind)> engs, List<TrainItem> list) ComputeFleetLists()
+        {
+            var engs = AvailableEngines();
+            var hidden = AutomotorMemberEngs();
+            var list = new List<TrainItem>();
+            foreach (var c in _consistsAll.ToArray())
+                if (c?.FilePath != null && PurchasableUnitsInConsist(c, hidden).Count > 0) list.Add(c);
+            list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+            return (engs, list);
+        }
+
+        (string root, int count, List<(string name, string folder, string path, string kind)> engs, List<TrainItem> list) _fleetPre;
+        void PrewarmFleetLists()
+        {
+            string root = _curFolder?.Path ?? ""; int count = _consistsAll.Count;
+            if (count == 0) return;
+            try
+            {
+                var (engs, list) = ComputeFleetLists();
+                if (root == (_curFolder?.Path ?? "") && count == _consistsAll.Count) _fleetPre = (root, count, engs, list);
+            }
+            catch { }
         }
 
         // ---------------- ID ÚNICO de consist (para localizar el tren exacto en Compra) ----------------
@@ -5094,7 +5504,7 @@ namespace SelectOR
         // Compra, y la compra ya no va por tren sino por máquina, así que se ha quitado.
         (Panel hdr, Label status) MakeTrainHeader(Label title)
         {
-            var hdr = new Panel { Dock = DockStyle.Top, Height = Math.Max(24, title.PreferredHeight + 6), BackColor = Theme.Bg };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = Math.Max(24, title.PreferredHeight + 6), BackColor = Theme.Surface };   // va dentro de las tarjetas del tren elegido
             title.Dock = DockStyle.Left; title.AutoSize = true;
             var status = new Label { Dock = DockStyle.Right, AutoSize = false, Width = 320, TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f, FontStyle.Bold) };
             hdr.Controls.Add(title); hdr.Controls.Add(status);
@@ -5167,7 +5577,7 @@ namespace SelectOR
         // Botón «Comprar este tren» (se envuelve para poder ocultarlo; la composición 2D ocupa entonces todo el ancho).
         Panel MakeBuyTrainWrap(Func<TrainItem> getConsist, int height)
         {
-            var wrap = new Panel { Dock = DockStyle.Right, Width = 210, BackColor = Theme.Bg, Padding = new Padding(8, 0, 0, 0), Visible = false };
+            var wrap = new Panel { Dock = DockStyle.Right, Width = 200, BackColor = Theme.Surface, Padding = new Padding(8, 0, 0, 0), Visible = false };   // va en las tarjetas del tren elegido
             var b = new RoundButton
             {
                 Text = Tr("Comprar este tren"), GlyphKind = "bank", Dock = DockStyle.Fill, Height = height, Radius = 9,
@@ -5387,11 +5797,18 @@ namespace SelectOR
             _buyListFilter = filter;
 
             var shown = new List<BuyMachine>();
+            var counts = new int[4];
             foreach (var m in _buyMachines)
-                if (filter.Length == 0
-                    || m.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0
-                    || (m.Folder ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
-                    shown.Add(m);
+            {
+                if (filter.Length > 0
+                    && m.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0
+                    && (m.Folder ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                bool own = OwnedUnits(m.Folder, m.Name) > 0, unit = m.UnitCars > 1;
+                counts[0]++; if (own) counts[1]++; if (unit) counts[2]++; else counts[3]++;
+                if (_buyKind == 1 && !own || _buyKind == 2 && !unit || _buyKind == 3 && unit) continue;
+                shown.Add(m);
+            }
+            UpdateBuyTabCounts(counts);
 
             // Sin cabeceras por carpeta: la lista es de MODELOS y cada fila ya es uno. La carpeta
             // sigue viéndose en la propia fila, como referencia de la librea que se compraría.
@@ -5408,88 +5825,39 @@ namespace SelectOR
             if (_fleetEngList.Items.Count > 0) _fleetEngList.TopIndex = Math.Min(top, _fleetEngList.Items.Count - 1);
         }
 
-        // Fila: nombre de la máquina arriba y, debajo, si es un automotor, los coches que incluye y
-        // la carpeta del contenido. A la derecha, cuántas unidades tiene ya la empresa.
-        void DrawBuyMachineItem(object sender, DrawItemEventArgs e)
+        void UpdateBuyTabCounts(int[] counts)
         {
-            if (e.Index < 0 || e.Index >= _fleetEngList.Items.Count) return;
-            var g = e.Graphics; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-            if (_fleetEngList.Items[e.Index] is BuyGroupHeader h)   // modelo (carpeta del contenido)
+            if (_buyKindTabs == null) return;
+            string[] names = { "Todas", "En tu flota", "Automotores", "Locomotoras" };
+            using var f = Theme.Font(9.75f, FontStyle.Bold);
+            for (int k = 0; k < names.Length && k < _buyKindTabs.Controls.Count; k++)
             {
-                using (var bg = new SolidBrush(Blend(_fleetEngList.BackColor, Theme.Bg, 0.75f))) g.FillRectangle(bg, e.Bounds);
-                using (var stripe = new SolidBrush(Theme.Accent))                       // franja que abre el bloque
-                    g.FillRectangle(stripe, new Rectangle(e.Bounds.X, e.Bounds.Y + 6, 3, e.Bounds.Height - 12));
-                using (var pen = new Pen(Blend(_fleetEngList.BackColor, Theme.Bg, 0.9f)))
-                    g.DrawLine(pen, e.Bounds.X, e.Bounds.Y, e.Bounds.Right, e.Bounds.Y);
+                if (_buyKindTabs.Controls[k] is not RoundButton b) continue;
+                b.Text = Tr(names[k]) + "  " + counts[k].ToString("N0", EsEs);
+                b.Width = TextRenderer.MeasureText(b.Text, f).Width + 34;
+                b.Invalidate();
+            }
+        }
 
-                using var fH = Theme.Font(9f, FontStyle.Bold);
-                using var fC = Theme.Font(8f, FontStyle.Bold);
-                int edge = e.Bounds.Right - 12;
-                if (h.Owned > 0)   // unidades de este modelo ya en la empresa
+        // Datos y precio de una tarjeta de Compra (los mismos cálculos que la ficha de la derecha).
+        Task<MachineInfo> MachineInfoAsync(BuyMachine m)
+        {
+            if (m == null || string.IsNullOrEmpty(m.Path)) return Task.FromResult<MachineInfo>(null);
+            var rep = RepresentativeConsistFor(m);
+            string path = m.Path;
+            return Task.Run(() =>
+            {
+                var (kw, kmh, type) = ReadEngineSpecs(path);
+                var analysis = rep != null ? AnalyzeComposition(rep, kmh) : new CompositionAnalysis { ServiceType = Tr("Mercancías"), Freight = true };
+                var (automotor, cars) = ShapeForService(DetectUnitShape(path), analysis.Freight, path);
+                var (mass, brake) = AnalyzeUnitPhysics(path, automotor);
+                var (price, rent) = FleetPriceLocal(kw, kmh, type, automotor, cars, mass, brake);
+                return new MachineInfo
                 {
-                    string own = "  " + string.Format(I18n.T("en tu flota · {0}"), h.Owned) + "  ";
-                    int ow = TextRenderer.MeasureText(g, own, fC).Width;
-                    var orr = new Rectangle(edge - ow, e.Bounds.Y + 7, ow, e.Bounds.Height - 14);
-                    using (var b = new SolidBrush(Blend(Theme.Surface2, Theme.Accent, 0.55f))) g.FillRectangle(b, orr);
-                    TextRenderer.DrawText(g, own, fC, orr, Color.White, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
-                    edge = orr.X - 8;
-                }
-                string count = h.Count == 1 ? I18n.T("1 máquina") : string.Format(I18n.T("{0} máquinas"), h.Count);
-                int cw = TextRenderer.MeasureText(g, count, fC).Width + 4;
-                TextRenderer.DrawText(g, count, fC, new Rectangle(edge - cw, e.Bounds.Y, cw, e.Bounds.Height),
-                    Color.FromArgb(128, 136, 142), TextFormatFlags.VerticalCenter | TextFormatFlags.Right);
-                TextRenderer.DrawText(g, h.Folder ?? "", fH,
-                    new Rectangle(e.Bounds.X + 12, e.Bounds.Y, Math.Max(20, edge - cw - e.Bounds.X - 20), e.Bounds.Height),
-                    Theme.AccentHi, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
-                return;
-            }
-
-            var m = (BuyMachine)_fleetEngList.Items[e.Index];
-            bool selected = (e.State & DrawItemState.Selected) != 0;
-            DrawRowBackground(g, e.Bounds, _fleetEngList.BackColor, selected);
-
-            int right = e.Bounds.Right - 10;
-            int owned = OwnedUnits(m.Folder, m.Name);
-            if (owned > 0)
-            {
-                // Distintivo de «ya la tienes», con las unidades que hay en la empresa.
-                string badge = "  " + string.Format(I18n.T("en tu flota · {0}"), owned) + "  ";
-                using var fB = Theme.Font(8f, FontStyle.Bold);
-                int bw = TextRenderer.MeasureText(g, badge, fB).Width;
-                var br = new Rectangle(right - bw, e.Bounds.Y + 9, bw, e.Bounds.Height - 18);
-                using (var b = new SolidBrush(Blend(Theme.Surface2, Theme.Accent, 0.55f))) g.FillRectangle(b, br);
-                TextRenderer.DrawText(g, badge, fB, br, Color.White, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
-                right = br.X - 8;
-                using (var dot = new SolidBrush(Theme.Accent))   // marca al margen: se ve de un vistazo
-                    g.FillRectangle(dot, new Rectangle(e.Bounds.X, e.Bounds.Y + 8, 3, e.Bounds.Height - 16));
-            }
-
-            // Las filas de un modelo con varias máquinas van sangradas bajo su cabecera.
-            int x = e.Bounds.X + (_buyGrouped.Contains(m.Folder ?? "") ? 26 : 14), w = Math.Max(20, right - x);
-            var nameRect = new Rectangle(x, e.Bounds.Y + 4, w, 20);
-            TextRenderer.DrawText(g, m.Name, Font, nameRect, Theme.Text, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
-
-            using var fSub = Theme.Font(8f);
-            int subY = e.Bounds.Y + Theme.Px(24), used = 0;
-            // Tipo declarado en el archivo (Motriz, Viajeros, Mercancías…) y, si es una formación
-            // fija, los coches que entran en la compra.
-            var parts = new List<string>();
-            string kind = VehicleTypeShort(DeclaredVehicleType(m.Path));
-            if (kind.Length > 0) parts.Add(kind);
-            if (m.UnitCars > 1) parts.Add(string.Format(I18n.T("{0} coches"), m.UnitCars));
-            if (parts.Count > 0)
-            {
-                string u = string.Join("  ·  ", parts);
-                used = TextRenderer.MeasureText(g, u, fSub).Width;
-                TextRenderer.DrawText(g, u, fSub, new Rectangle(x, subY, Math.Min(used, w), Theme.Px(16)), Theme.Accent,
-                    TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
-                used += Theme.Px(10);
-            }
-            // Bajo una cabecera no se repite la carpeta: ya la dice el modelo que encabeza el bloque.
-            if (w - used > Theme.Px(30) && !_buyGrouped.Contains(m.Folder ?? ""))
-                TextRenderer.DrawText(g, m.Folder ?? "", fSub, new Rectangle(x + used, subY, w - used, Theme.Px(16)),
-                    Color.FromArgb(128, 136, 142), TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+                    Kw = kw, Kmh = kmh, Mass = mass, Capacity = analysis.Capacity, Price = price, Rent = rent,
+                    Freight = analysis.Freight && !analysis.DeclaredPax, Traction = type ?? ""
+                };
+            });
         }
 
         // Si la selección cae en una cabecera de modelo, salta a la máquina siguiente (o a la anterior
@@ -5514,6 +5882,8 @@ namespace SelectOR
             if (!_buyByMachine) return;
             if (_fleetPreview == null || _fleetEngList == null) return;
             var m = _fleetEngList.SelectedItem as BuyMachine;
+            _buyView?.Show(m?.Path, m?.Name, Tr("Elige una máquina"));
+            if (_buyView != null && !_buyView.Is3D) { _fleetPrevEngPath = null; return; }
             _fleetPreview.Image = null; _fleetPreview.Rotatable = false;
             _fleetGeom = null; _fleetYaw = 0; _fleetPitch = 0; _fleetFlip = false;
             string engPath = m?.Path;
@@ -5526,8 +5896,13 @@ namespace SelectOR
             Task.Run(() =>
             {
                 ShapeGeom geom = null;
-                try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
-                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
+                lock (_geomCache) _geomCache.TryGetValue(engPath, out geom);
+                if (geom == null)
+                {
+                    try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                    try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
+                    if (geom != null) lock (_geomCache) _geomCache[engPath] = geom;
+                }
                 if (!IsHandleCreated) { lock (_fleetRenderingShapes) _fleetRenderingShapes.Remove(engPath); return; }
                 try
                 {
@@ -6688,8 +7063,13 @@ namespace SelectOR
             Task.Run(() =>
             {
                 ShapeGeom geom = null;
-                try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
-                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
+                lock (_geomCache) _geomCache.TryGetValue(engPath, out geom);
+                if (geom == null)
+                {
+                    try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                    try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
+                    if (geom != null) lock (_geomCache) _geomCache[engPath] = geom;
+                }
                 if (!IsHandleCreated) { lock (_fleetRenderingShapes) _fleetRenderingShapes.Remove(engPath); return; }
                 BeginInvoke((Action)(() =>
                 {
@@ -6729,17 +7109,43 @@ namespace SelectOR
         void OnFleetPreviewReset() { if (_fleetGeom == null) return; _fleetYaw = 0; _fleetPitch = 0; RenderFleetLive(); }
 
         // ---- Vista 3D + ficha del vehículo propio seleccionado (pestaña Flota, como Compra) ----
+        int FleetSelectedRow() => _fleetCards?.SelectedRow ?? -1;
+
+        // Pestañas de Flota con cuántas unidades hay en cada estado.
+        void UpdateFleetTabCounts()
+        {
+            if (_fleetTabs == null || _fleetCards == null) return;
+            string[] names = { "Todas", "Disponibles", "En servicio", "En taller" };
+            using var f = Theme.Font(9.75f, FontStyle.Bold);
+            for (int k = 0; k < names.Length && k < _fleetTabs.Controls.Count; k++)
+            {
+                if (_fleetTabs.Controls[k] is not RoundButton b) continue;
+                int n = _fleetCards.Count(k - 1);
+                b.Text = Tr(names[k]) + (_fleetIds.Count > 0 ? "  " + n.ToString("N0", EsEs) : "");
+                b.Width = TextRenderer.MeasureText(b.Text, f).Width + 34;
+                b.Invalidate();
+            }
+        }
+
+        // Visor de Flota: la vista 2D al momento; el 3D solo si está abierto.
+        void ShowFleetOwn(string engPath)
+        {
+            _fleetOwnEngPath = engPath;
+            _fleetOwnView?.Show(engPath, _fleetOwnTitle?.Text ?? "", Tr("Elige un vehículo"));
+            if (_fleetOwnView == null || _fleetOwnView.Is3D) RenderFleetOwn(engPath);
+        }
+
         void OnFleetVehicleSelected()
         {
             if (_fleetOwnTitle == null) return;
-            int i = _fleetList?.SelectedRow ?? -1;
+            int i = FleetSelectedRow();
             if (i < 0 || i >= _fleetRowDetail.Count)
             {
                 _fleetOwnTitle.Text = Tr("Elige un vehículo");
                 if (_voKind != null) _voKind.Text = "—"; if (_voProp != null) _voProp.Text = "—";
                 if (_voMaint != null) _voMaint.Text = "—"; if (_voEstado != null) { _voEstado.Text = "—"; _voEstado.ForeColor = Theme.Text; }
                 if (_voCap != null) _voCap.Text = "—"; if (_voTraction != null) _voTraction.Text = "—";
-                RenderFleetOwn(null);
+                ShowFleetOwn(null);
                 return;
             }
             var det = _fleetRowDetail[i];
@@ -6750,7 +7156,7 @@ namespace SelectOR
             if (_voEstado != null) { _voEstado.Text = det[4]; _voEstado.ForeColor = i < _fleetRowEstColor.Count ? _fleetRowEstColor[i] : Theme.Text; }
             if (_voCap != null) _voCap.Text = det.Length > 5 && det[5].Length > 0 ? det[5] : "—";
             if (_voTraction != null) _voTraction.Text = det.Length > 6 && det[6].Length > 0 ? det[6] : "—";
-            RenderFleetOwn(_fleetRowEng[i]);
+            ShowFleetOwn(_fleetRowEng[i]);
         }
 
         void RenderFleetOwn(string engPath)
@@ -6767,8 +7173,13 @@ namespace SelectOR
             Task.Run(() =>
             {
                 ShapeGeom geom = null;
-                try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
-                try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
+                lock (_geomCache) _geomCache.TryGetValue(engPath, out geom);
+                if (geom == null)
+                {
+                    try { geom = ShapeRenderer.BuildGeometry(engPath); } catch { }
+                    try { ShapeRenderer.PrefetchTextures(geom); } catch { }   // texturas listas antes de renderizar (si no, se descodifican en el hilo de la interfaz)
+                    if (geom != null) lock (_geomCache) _geomCache[engPath] = geom;
+                }
                 if (!IsHandleCreated) { lock (_fleetOwnRendering) _fleetOwnRendering.Remove(engPath); return; }
                 BeginInvoke((Action)(() =>
                 {
@@ -6803,7 +7214,7 @@ namespace SelectOR
         // Composición 2D del vehículo de la flota seleccionado (misma ventana que Compra, con leyenda).
         void OpenFleetComposition()
         {
-            int i = _fleetList?.SelectedRow ?? -1;
+            int i = FleetSelectedRow();
             if (i < 0 || i >= _fleetRowEng.Count) { Msg(_fleetMsg, Tr("Elige un vehículo de la lista."), true); return; }
             string eng = _fleetRowEng[i];
             if (string.IsNullOrEmpty(eng)) { Msg(_fleetMsg, Tr("Este vehículo no lo tienes en tu contenido local, no se puede ver."), true); return; }
@@ -7310,7 +7721,7 @@ namespace SelectOR
         async void ServiceVehicleUi()
         {
             if (!CanManage() && !Supa.IsSuperadmin) { Msg(_fleetMsg, Tr("Solo el dueño o un gestor pueden gestionar la flota."), true); return; }
-            int i = _fleetList?.SelectedRow ?? -1;
+            int i = FleetSelectedRow();
             if (i < 0 || i >= _fleetIds.Count) { Msg(_fleetMsg, Tr("Selecciona un vehículo de la lista."), true); return; }
             Msg(_fleetMsg, Tr("Llevando al taller…"), false);
             var (_, err) = await Supa.RpcAsync("service_vehicle", new { p_vehicle = _fleetIds[i] });
@@ -7325,7 +7736,7 @@ namespace SelectOR
         async void AssignPlateUi()
         {
             if (!CanManage() && !Supa.IsSuperadmin) { Msg(_fleetMsg, Tr("Solo el gerente, un gestor o el superadministrador pueden asignar matrículas."), true); return; }
-            int i = _fleetList?.SelectedRow ?? -1;
+            int i = FleetSelectedRow();
             if (i < 0 || i >= _fleetIds.Count) { Msg(_fleetMsg, Tr("Selecciona un vehículo de la lista."), true); return; }
             string current = i < _fleetPlates.Count ? _fleetPlates[i] : "";
             string plate;
@@ -7352,7 +7763,7 @@ namespace SelectOR
         async void RemoveVehicle()
         {
             if (!CanManage() && !Supa.IsSuperadmin) { Msg(_fleetMsg, Tr("Solo el dueño o un gestor pueden gestionar la flota."), true); return; }
-            int i = _fleetList?.SelectedRow ?? -1;
+            int i = FleetSelectedRow();
             if (i < 0 || i >= _fleetIds.Count) { Msg(_fleetMsg, Tr("Selecciona un vehículo de la lista."), true); return; }
             if (MessageBox.Show(this, Tr("¿Dar de baja esta unidad? Si es propia se reembolsa parte de su valor; si es alquilada, se devuelve."),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
@@ -7399,6 +7810,7 @@ namespace SelectOR
             string companyName = _empOnDutyCompany?.Name ?? _empSel?.Name ?? "";
             string route = _curRoute?.Name ?? "";
             var svc = _pendingServiceId;
+            var openedUtc = _svcOpenedUtc;
 
             // Viajes de menos de 3 km o de menos de 5 minutos: no se registran (más abajo).
             int durRule = ServiceSecondsForRule();
@@ -7480,7 +7892,18 @@ namespace SelectOR
             UpdateDutyUi();
 
             // Datos del viaje devueltos por el servidor (economía autoritativa) → ventana de resultado.
-            var r = new ServiceResultDialog.Data { Company = companyName, Route = route };
+            var r = new ServiceResultDialog.Data
+            {
+                Company = companyName, Route = route, ServiceId = svc, Consist = _drivenLabel ?? "", Path = _drivenPath ?? "",
+                Driver = Supa.Username ?? "", DateText = DateTime.Now.ToString(I18n.English ? "d MMM yyyy · HH:mm" : "d 'de' MMMM · HH:mm", I18n.English ? CultureInfo.GetCultureInfo("en-GB") : EsEs)
+            };
+            // Paradas comerciales (solo trenes de viajeros): las de este servicio, desde que se abrió.
+            if (_svcTrainCap > 0)
+            {
+                r.Stops = new List<(string, string, int, int)>();
+                foreach (var st in _svcStopsLog)
+                    if (openedUtc == null || st.Utc >= openedUtc.Value.AddSeconds(-5)) r.Stops.Add((st.Station, st.Time, st.Board, st.Alight));
+            }
             try
             {
                 using var d = JsonDocument.Parse(jr);
@@ -7494,7 +7917,9 @@ namespace SelectOR
                 r.Energy = Num(root, "energy");
                 r.Salary = Num(root, "salary");
                 r.Maintenance = Num(root, "maintenance");
+                r.Rental = Num(root, "rental");
                 r.Net = Num(root, "net");
+                if (root.TryGetProperty("calc", out var ca) && ca.ValueKind == JsonValueKind.Object) r.Calc = ca.Clone();
                 r.Balance = Num(root, "balance");
                 r.Pax = (int)Num(root, "pax");
                 // Plazas o toneladas del tren: las que guardó el servidor (con las que ha calculado) o, si no
@@ -7543,6 +7968,7 @@ namespace SelectOR
             _estimatedKm = 0;
             if (!r.Valid) return ShowNotRegistered(r, showDialog);
             Msg(_empHomeMsg, Tr("Servicio registrado."), false);
+            if (r.Stops != null) SaveServiceStops(svc, r.Stops);
             // Registro publicado → refresca saldo y la subpestaña visible (sin botón "Actualizar").
             LoadCompanies(soft: true);
             RefreshActiveSubtab(skipCompanyLists: true);
@@ -7554,6 +7980,18 @@ namespace SelectOR
             }
             string sum = string.Format(Tr("Servicio registrado · {0} km · neto {1}"), r.Km.ToString("0.0", EsEs), r.Net.ToString("+#,##0.00 €;-#,##0.00 €", EsEs));
             return (true, sum);
+        }
+
+        // Paradas del servicio al servidor (paradas-servicio.sql); si aún no está, se queda solo en la ventana.
+        async void SaveServiceStops(string svc, List<(string station, string time, int board, int alight)> stops)
+        {
+            try
+            {
+                var arr = new List<object>();
+                foreach (var (st, t, b, a) in stops) arr.Add(new { s = st, t, b, a });
+                await Supa.RpcAsync("set_service_stops", new { p_service = svc, p_stops = arr });
+            }
+            catch { }
         }
 
         // Viaje que NO se registra (corto, velocidad imposible o fallido): el servicio ya no existe;
@@ -7639,8 +8077,38 @@ namespace SelectOR
         {
             if (c == null) return;
             var tPts = LoadMemberPoints(c.Id);   // carné por puntos de cada socio (a la vez)
+            var tCards = Supa.RpcAsync("company_member_cards", new { p_company = c.Id });   // rango y servicios de cada socio (socios-carnet.sql)
+            var tPhotos = Supa.RpcAsync("company_member_photos", new { p_company = c.Id }); // fotos de carnet (foto-carnet.sql)
             var (json, err) = await Supa.RpcAsync("list_members", new { p_company = c.Id });
             try { await tPts; } catch { }
+            _memberCardData.Clear(); _memberJoined.Clear();
+            try
+            {
+                var (cj, ce) = await tCards;
+                if (ce == null && !string.IsNullOrWhiteSpace(cj))
+                {
+                    using var cd = JsonDocument.Parse(cj);
+                    foreach (var e in cd.RootElement.EnumerateArray())
+                    {
+                        DateTime.TryParse(Str(e, "joined_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var j);
+                        _memberCardData[Str(e, "user_id")] = (j, Num(e, "rank_km"), Num(e, "services_count"), Num(e, "total_km"), Num(e, "total_net"));
+                    }
+                }
+            }
+            catch { }
+            try
+            {
+                var (pj, pe) = await tPhotos;
+                if (pe == null && !string.IsNullOrWhiteSpace(pj))
+                {
+                    using var pd = JsonDocument.Parse(pj);
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var e in pd.RootElement.EnumerateArray()) { string uid = Str(e, "user_id"); seen.Add(uid); SetMemberPhoto(uid, Str(e, "photo")); }
+                    foreach (var k in new List<string>(_memberPhotos.Keys)) if (!seen.Contains(k) && !string.Equals(k, Supa.UserId, StringComparison.OrdinalIgnoreCase)) _memberPhotos.Remove(k);
+                }
+            }
+            catch { }
+            UpdateRailAvatar();
             _members.Clear();
             if (err == null)
             {
@@ -7648,23 +8116,19 @@ namespace SelectOR
                 {
                     using var d = JsonDocument.Parse(json);
                     foreach (var e in d.RootElement.EnumerateArray())
+                    {
                         _members.Add(new EmpMember { UserId = Str(e, "user_id"), Username = Str(e, "username"), Role = Str(e, "role") });
+                        if (DateTime.TryParse(Str(e, "joined_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var jj))
+                            _memberJoined[Str(e, "user_id")] = jj;
+                    }
                 }
                 catch { }
             }
             _myRole = _members.Find(m => m.UserId == Supa.UserId)?.Role;
-            if (_memberList != null)
+            if (_memberCards != null)
             {
-                _memberList.BeginReload(c.Id);
-                _memberList.ClearRows();
-                foreach (var m in _members)
-                {
-                    var (pt, pc) = MemberPointsCell(m.UserId);
-                    _memberList.AddRow(new[] { m.Username.Length > 0 ? m.Username : "—", TrRole(m.Role), pt },
-                        new Color?[] { null, m.Role == "owner" ? Theme.Accent : (Color?)null, pc }, null, m.UserId);
-                }
-                if (_members.Count == 0) _memberList.SetEmpty(err ?? Tr("Sin socios."));
-                _memberList.EndReload();
+                _memberCards.EmptyText = _members.Count == 0 ? (err != null ? Tr("Error: ") + err : Tr("Sin socios.")) : null;
+                FillMemberCards();
             }
             UpdateRoleUi();
             UpdateCompanyDash();
@@ -7672,6 +8136,56 @@ namespace SelectOR
             LoadPurchaseRequests();   // contador «Compra (n)» para gerente y gestores
             if (_empSubtab != 6) LoadReview(onlyCount: true);   // contador «Revisión (n)»
         }
+
+        // Carnets de los socios (con el filtro de texto aplicado).
+        void FillMemberCards()
+        {
+            if (_memberCards == null) return;
+            string f = (_memberSearch?.Box.Text ?? "").Trim();
+            var list = new List<MemberCardGrid.Member>();
+            foreach (var m in _members)
+            {
+                string name = m.Username.Length > 0 ? m.Username : "—";
+                if (f.Length > 0 && name.IndexOf(f, StringComparison.OrdinalIgnoreCase) < 0 && TrRole(m.Role).IndexOf(f, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                var meta = new List<string>();
+                DateTime joined = _memberJoined.TryGetValue(m.UserId, out var jj) ? jj : DateTime.MinValue;
+                bool has = _memberCardData.TryGetValue(m.UserId, out var cd);
+                if (has && cd.joined != DateTime.MinValue) joined = cd.joined;
+                if (joined != DateTime.MinValue) meta.Add(string.Format(Tr("Desde {0}"), MonthName(joined.ToLocalTime())));
+                if (has) meta.Add(Tr(RankTiers[RankTierIndex(cd.rankKm)].name));
+                var card = new MemberCardGrid.Member
+                {
+                    UserId = m.UserId, Name = name, Role = m.Role, RoleLabel = TrRole(m.Role), Meta = string.Join("  ·  ", meta),
+                    Services = has ? cd.services.ToString("N0", EsEs) : "—",
+                    Km = has ? cd.km.ToString("N0", EsEs) + " km" : "—",
+                    Net = has ? cd.net.ToString("+#,##0;−#,##0", EsEs) + " €" : "—", NetNeg = has && cd.net < 0,
+                    Photo = _memberPhotos.TryGetValue(m.UserId, out var mp) ? mp.img : null
+                };
+                if (_memberPoints.TryGetValue(m.UserId, out var p) && p.points >= 0)
+                {
+                    card.Points = p.points;
+                    if (p.until != null)
+                    {
+                        card.Suspended = true; card.PointsColor = Carne.Red;
+                        card.PointsText = string.Format(Tr("suspendido hasta el {0}"), p.until.Value.ToLocalTime().ToString("d MMM", I18n.English ? CultureInfo.GetCultureInfo("en-GB") : EsEs));
+                    }
+                    else
+                    {
+                        string st = p.points < 6 ? Tr("rango congelado") : p.points < 10 ? Tr("aviso") : Tr("en regla");
+                        card.PointsText = p.points + " / " + Carne.MaxPoints + "  ·  " + st;
+                        card.PointsColor = Carne.PointsColor(p.points);
+                    }
+                }
+                else card.PointsText = "—";
+                list.Add(card);
+            }
+            _memberCards.CompanyName = _empSel?.Name ?? "";
+            try { _memberCards.CompanyLogo = _empSel != null ? LogoFor(_empSel.Id, _empSel.Logo) : null; } catch { _memberCards.CompanyLogo = null; }
+            _memberCards.SetMembers(list);
+        }
+
+        // Socio elegido (índice en _members; −1 = ninguno).
+        int MemberSelectedIndex() => _memberCards == null ? -1 : _members.FindIndex(x => x.UserId == _memberCards.SelectedId);
 
         // Carga las solicitudes de ingreso pendientes (solo dueño/gestor las obtiene del servidor).
         async void LoadJoinRequests(EmpCompany c)
@@ -7913,7 +8427,7 @@ namespace SelectOR
         {
             if (_empSel == null) return;
             if (!IsOwner() && !Supa.IsSuperadmin) { Msg(_memberMsg, Tr("Solo el gerente puede cambiar roles."), true); return; }
-            int i = _memberList.SelectedRow;
+            int i = MemberSelectedIndex();
             if (i < 0 || i >= _members.Count) { Msg(_memberMsg, Tr("Selecciona un socio de la lista."), true); return; }
             var m = _members[i];
             if (m.UserId == Supa.UserId) { Msg(_memberMsg, Tr("No puedes cambiar tu propio rol."), true); return; }
@@ -8242,80 +8756,76 @@ namespace SelectOR
         // ============================ Rankings ============================
         // El ranking de maquinistas es "de esta empresa": si no perteneces a ninguna,
         // se oculta y el ranking público de empresas ocupa todo.
-        void UpdateRankLayout()
-        {
-            // Sin empresa: se oculta toda la sección de "maquinistas de esta empresa"
-            // (panel Bottom) y el ranking público de empresas ocupa todo.
-            if (_rankDriversPanel != null) _rankDriversPanel.Visible = _empSel != null;
-        }
+        void UpdateRankLayout() { }
 
         async void LoadRankings()
         {
             if (!Supa.IsLoggedIn) return;
-            UpdateRankLayout();
-            if (_rankCompanies != null) { _rankCompanies.BeginReload("ranking"); _rankCompanies.ShowLoading(Tr("Cargando…")); }
-            var (json, err) = await Supa.RpcAsync("public_company_ranking", new { });
-            if (_rankCompanies != null)
+            var b = _rankCompanies;
+            if (b != null)
             {
-                _rankCompanies.ClearRows();
-                if (err != null) _rankCompanies.SetEmpty(Tr("Error: ") + err);
-                else
-                {
-                    int pos = 0;
+                if (b.Entries.Count == 0) { b.EmptyText = Tr("Cargando…"); b.Invalidate(); }
+                var (json, err) = await Supa.RpcAsync("public_company_ranking", new { });
+                var mias = new HashSet<string>();
+                foreach (var co in _empCompanies) mias.Add(co.Id);
+                var list = new List<PodiumBoard.Entry>();
+                if (err == null)
                     try
                     {
                         using var d = JsonDocument.Parse(json);
                         foreach (var e in d.RootElement.EnumerateArray())
                         {
-                            // Cada fila es independiente: un logo/celda con problema no debe
-                            // dejar en blanco todo el ranking.
-                            try
+                            string cid = Str(e, "company_id"), name = Str(e, "name");
+                            double km = Num(e, "total_km"), bal = Num(e, "balance"), sv = Num(e, "services_count");
+                            Image logo = null;
+                            try { logo = LogoFor(cid, Str(e, "logo")); } catch { }
+                            list.Add(new PodiumBoard.Entry
                             {
-                                string cid = Str(e, "company_id"); string name = Str(e, "name");
-                                double km = Num(e, "total_km"); double bal = Num(e, "balance"); double sv = Num(e, "services_count");
-                                Image logo = null;
-                                try { logo = LogoFor(cid, Str(e, "logo")) ?? PlaceholderLogo(name); } catch { logo = null; }
-                                int rank = pos + 1;
-                                _rankCompanies.AddRow(new[] { rank + ".", name, km.ToString("N0", EsEs), sv.ToString("N0", EsEs), bal.ToString("N0", EsEs) + " €" },
-                                    new Color?[] { rank <= 3 ? Theme.Accent : (Color?)null, null, null, null, null }, logo);
-                                pos++;
-                            }
-                            catch { }
+                                Id = cid, Name = name, Logo = logo, Pos = list.Count + 1, Mine = mias.Contains(cid),
+                                Value = km.ToString("N0", EsEs) + " km", Detail = string.Format(Tr("{0} servicios"), sv.ToString("N0", EsEs)),
+                                Cols = new (string, string, Color?)[] { (Tr("KM"), km.ToString("N0", EsEs), null), (Tr("SERVICIOS"), sv.ToString("N0", EsEs), null), (Tr("SALDO"), bal.ToString("N0", EsEs) + " €", null) }
+                            });
                         }
                     }
                     catch { }
-                    if (pos == 0) _rankCompanies.SetEmpty(Tr("Sin datos todavía."));
-                }
-                _rankCompanies.EndReload();
+                b.Title = Tr("Ranking público de empresas (por km)");
+                b.Entries = list;
+                b.EmptyText = err != null ? Tr("Error: ") + err : list.Count == 0 ? Tr("Sin datos todavía.") : null;
+                b.Relayout(true);
             }
             if (_empSel != null) await LoadDriverRanking(_empSel);
-            else if (_rankDrivers != null) _rankDrivers.SetEmpty(Tr("Selecciona una empresa para ver su ranking."));
+            else if (_rankDrivers != null) { _rankDrivers.Entries = new List<PodiumBoard.Entry>(); _rankDrivers.EmptyText = Tr("Selecciona una empresa para ver su ranking."); _rankDrivers.Relayout(true); }
         }
 
         async Task LoadDriverRanking(EmpCompany c)
         {
-            if (_rankDrivers == null) return;
-            _rankDrivers.BeginReload(c.Id);   // misma empresa: sin «Cargando…» ni salto al refrescar
-            _rankDrivers.ShowLoading(Tr("Cargando…"));
+            var b = _rankDrivers;
+            if (b == null) return;
+            if (b.Entries.Count == 0) { b.EmptyText = Tr("Cargando…"); b.Invalidate(); }
             var (json, err) = await Supa.RpcAsync("company_driver_ranking", new { p_company = c.Id });
-            _rankDrivers.ClearRows();
-            if (err != null) { _rankDrivers.SetEmpty(Tr("Error: ") + err); return; }
-            int pos = 0;
-            try
-            {
-                using var d = JsonDocument.Parse(json);
-                foreach (var e in d.RootElement.EnumerateArray())
+            var list = new List<PodiumBoard.Entry>();
+            if (err == null)
+                try
                 {
-                    pos++;
-                    string name = Str(e, "username"); if (name.Length == 0) name = "—";
-                    double km = Num(e, "total_km"); double net = Num(e, "total_net"); double sv = Num(e, "services_count");
-                    _rankDrivers.AddRow(new[] { pos + ".", name, sv.ToString("N0", EsEs), km.ToString("N0", EsEs), net.ToString("N0", EsEs) + " €" },
-                        new Color?[] { pos <= 3 ? Theme.Accent : (Color?)null, null, null, null, net < 0 ? RedC : (Color?)null });
+                    using var d = JsonDocument.Parse(json);
+                    foreach (var e in d.RootElement.EnumerateArray())
+                    {
+                        string name = Str(e, "username"); if (name.Length == 0) name = "—";
+                        double km = Num(e, "total_km"), net = Num(e, "total_net"), sv = Num(e, "services_count");
+                        string sign = net.ToString("+#,##0;−#,##0", EsEs) + " €";
+                        list.Add(new PodiumBoard.Entry
+                        {
+                            Id = Str(e, "user_id"), Name = name, Pos = list.Count + 1, Mine = Str(e, "user_id") == Supa.UserId,
+                            Value = km.ToString("N0", EsEs) + " km", Detail = string.Format(Tr("{0} servicios"), sv.ToString("N0", EsEs)) + " · " + sign,
+                            Cols = new (string, string, Color?)[] { (Tr("SERVICIOS"), sv.ToString("N0", EsEs), null), (Tr("KM"), km.ToString("N0", EsEs), null), (Tr("NETO"), sign, net < 0 ? RedC : (Color?)null) }
+                        });
+                    }
                 }
-            }
-            catch { }
-            if (pos == 0) _rankDrivers.SetEmpty(Tr("Sin servicios completados todavía."));
-            _rankDrivers.EndReload();
+                catch { }
+            b.Title = string.Format(Tr("Maquinistas de {0}"), c.Name);
+            b.Entries = list;
+            b.EmptyText = err != null ? Tr("Error: ") + err : list.Count == 0 ? Tr("Sin servicios completados todavía.") : null;
+            b.Relayout(true);
         }
 
         async void AddMember()
@@ -8341,7 +8851,7 @@ namespace SelectOR
         {
             if (_empSel == null) return;
             if (!CanManage() && !Supa.IsSuperadmin) { Msg(_memberMsg, Tr("Solo el gerente o un gestor pueden quitar socios."), true); return; }
-            int i = _memberList.SelectedRow;
+            int i = MemberSelectedIndex();
             if (i < 0 || i >= _members.Count) { Msg(_memberMsg, Tr("Selecciona un socio de la lista."), true); return; }
             var m = _members[i];
             if (m.Role == "owner") { Msg(_memberMsg, Tr("No se puede quitar al gerente."), true); return; }
@@ -8613,7 +9123,8 @@ namespace SelectOR
         // ---- Fábricas de controles con el tema ----
         static Label EmpTitle(string t) => new Label { Text = I18n.T(t), AutoSize = true, ForeColor = Theme.Text, Font = Theme.Font(17f, FontStyle.Bold), Margin = new Padding(2, 4, 2, 2) };
         static Label EmpIntro(string t) => new Label { Text = I18n.T(t), AutoSize = true, MaximumSize = new Size(540, 0), ForeColor = Theme.Subtle, Font = Theme.Font(9.5f), Margin = new Padding(2, 0, 2, 8) };
-        static Label EmpHeader(string t) => new Label { Text = I18n.T(t), AutoSize = true, ForeColor = Theme.Accent, Font = Theme.Font(8.5f, FontStyle.Bold), Margin = new Padding(2, 14, 2, 4), UseCompatibleTextRendering = false };
+        // Rótulo de sección del estilo común: gris, pequeño y en mayúsculas (el verde queda para lo activo).
+        static Label EmpHeader(string t) => new Label { Text = I18n.T(t), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(2, 14, 2, 4), UseCompatibleTextRendering = false };
         static Label EmpFieldLabel(string t) => new Label { Text = I18n.T(t), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(9f), Margin = new Padding(2, 8, 2, 2) };
         static Label EmpMsg() => new Label { Text = "", AutoSize = true, MaximumSize = new Size(540, 0), ForeColor = Theme.Subtle, Font = Theme.Font(9f), Margin = new Padding(2, 10, 2, 2) };
 

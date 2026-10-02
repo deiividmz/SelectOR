@@ -21,7 +21,8 @@ namespace SelectOR
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         }
 
-        public Bitmap Image { get => _image; set { _image = value; Invalidate(); } }
+        public event Action ImageChanged;   // la portada de la ruta pinta esta misma imagen
+        public Bitmap Image { get => _image; set { _image = value; Invalidate(); ImageChanged?.Invoke(); } }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -111,7 +112,9 @@ namespace SelectOR
         public float Zoom { get; private set; } = 1f;
         const float ZoomMin = 0.5f, ZoomMax = 3f;
         /// <summary>Distancia de la cámara (en radios del modelo) para <see cref="ShapeRenderer.Render"/> con el zoom aplicado.</summary>
-        public float CamDistance(float baseDistance = 2.25f) => baseDistance / Zoom;
+        public float BaseDistance = 2.25f;          // más alto = cámara más lejos (todo el tren dentro del marco)
+        public float CamDistance() => BaseDistance / Zoom;
+        public float CamDistance(float baseDistance) => baseDistance / Zoom;
 
         bool _dragging; System.Drawing.Point _last;
 
