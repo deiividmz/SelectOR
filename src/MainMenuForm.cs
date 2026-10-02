@@ -673,6 +673,9 @@ namespace SelectOR
                 ImageOf = o => RouteCardImage((Route)o),
             };
             _lstRoutes.SelectedIndexChanged += (s, e) => OnRouteChanged();
+            // La portada de bienvenida se quita en cuanto el usuario elige una ruta (aunque sea la ya cargada).
+            _lstRoutes.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left && _lstRoutes.SelectedItem != null) DismissRutaWelcome(); };
+            _lstRoutes.KeyDown += (s, e) => { if (_lstRoutes.SelectedItem != null && e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Home or Keys.End or Keys.Enter) DismissRutaWelcome(); };
             _lstRoutes.ItemActivated += o => ToggleRouteFavorite();
             var routeCtx = new ContextMenuStrip();
             var miFav = new ToolStripMenuItem(Tr("Añadir / quitar de favoritas"));
@@ -824,6 +827,16 @@ namespace SelectOR
             return page;
         }
 
+        // Al abrir SelectOR la portada sale primero, aunque la última ruta ya esté cargada detrás.
+        bool _rutaWelcomeHold = true;
+
+        void DismissRutaWelcome()
+        {
+            if (!_rutaWelcomeHold) return;
+            _rutaWelcomeHold = false;
+            UpdateRouteOverview();
+        }
+
         void FitRutaHero()
         {
             if (_rutaHero == null || _rutaHero.Width <= 0) return;
@@ -853,7 +866,7 @@ namespace SelectOR
             FitRutaHero();
             if (_rutaWelcome != null)
             {
-                bool show = r == null;
+                bool show = r == null || _rutaWelcomeHold;
                 if (show)
                 {
                     int favs = 0; foreach (var x in _routesAll) if (_prefs.Favorites.Contains(x.Path)) favs++;
@@ -2232,6 +2245,7 @@ namespace SelectOR
         {
             int previous = _activePage;
             _activePage = i;
+            if (_uiRevealed && i != 0 && _curRoute != null) DismissRutaWelcome();   // ya usa la ruta cargada: al volver, su ficha
             for (int k = 0; k < _pills.Length; k++) { _pills[k].Active = (k == i); _pills[k].Invalidate(); }
             _root?.SuspendLayout();
             _pageHost.SuspendLayout();
