@@ -20,30 +20,47 @@ En `lib/openrails/` están las seis bibliotecas de Open Rails contra las que se 
 dotnet build src/SelectOR.csproj -c Release -p:ORDir="lib\openrails\" -p:OutputPath="out\"
 ```
 
-## Firma de código
+## Firma de código · Code signing policy
 
 Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
 [SignPath Foundation](https://signpath.org).
 
 Las versiones publicadas de SelectOR (`SelectOR.exe` y `SelectOR.dll`) se compilan en GitHub Actions a
 partir de este repositorio ([flujo «Compilar y firmar»](.github/workflows/firmar.yml)) y se firman con
-Authenticode a través de SignPath. Cada firma la aprueba a mano el responsable del proyecto.
+Authenticode a través de SignPath. Solo se firman los binarios propios del proyecto: las bibliotecas de
+Open Rails se distribuyen tal cual. Cada firma la aprueba a mano el responsable del proyecto.
 
-- Autores y revisores del código: [deiividmz](https://github.com/deiividmz)
-- Aprobación de las firmas: [deiividmz](https://github.com/deiividmz)
+*Released builds of SelectOR (`SelectOR.exe` and `SelectOR.dll`) are built by GitHub Actions from this
+repository and signed with Authenticode through SignPath. Only the project's own binaries are signed; the
+Open Rails libraries are shipped unchanged. Every signing request is approved manually.*
 
-### Privacidad
+### Equipo y roles · Team roles
 
-SelectOR no recoge telemetría ni muestra publicidad. Solo se conecta a internet para:
+| Rol · Role | Miembros · Members |
+|---|---|
+| Autores (*Committers*) | [deiividmz](https://github.com/deiividmz) (David MZP) |
+| Revisores (*Reviewers*) | [deiividmz](https://github.com/deiividmz) (David MZP) |
+| Aprobadores (*Approvers*) | [deiividmz](https://github.com/deiividmz) (David MZP) |
 
-- **Comprobar si hay una versión nueva** (al arrancar y cada 3 horas): es una consulta pública al servidor
-  de SelectOR que no envía datos personales. Las actualizaciones solo se instalan si el usuario lo acepta.
-- **Las funciones de Empresas** (cuenta, servicios, flota, liga, megafonía, avisos): usan el servidor de
-  SelectOR únicamente si el usuario crea una cuenta e inicia sesión.
-- **El mapa en vivo**: con la sesión iniciada, mientras se conduce, la posición del tren se comparte con los
-  demás usuarios de SelectOR. Se puede desactivar en *Mi perfil*.
+Todos los miembros usan la verificación en dos pasos en GitHub y en SignPath.
+*All team members use multi-factor authentication on GitHub and SignPath.*
 
-Esos datos se guardan en el servidor de SelectOR (alojado en Supabase) y no se ceden a nadie más.
+### Privacidad · Privacy policy
+
+Política de privacidad completa · Full privacy policy:
+**[www.select-or.app/privacidad](https://www.select-or.app/privacidad)** ([English](https://www.select-or.app/en/privacidad)).
+
+Resumen: SelectOR no recoge telemetría ni muestra publicidad, y no vende ni cede datos. Sin cuenta, solo se
+conecta a internet para **comprobar si hay una versión nueva** (consulta pública, sin datos personales; las
+actualizaciones solo se instalan si el usuario lo acepta). La cuenta es opcional y solo hace falta para
+**Empresas** (servicios, flota, banca, liga, carné, chat, megafonía), el **mapa en vivo** (se puede
+desactivar en *Mi perfil*) y el bloqueo de servidores **multijugador**. Esos datos se guardan en el servidor
+de SelectOR (Supabase) y se borran al eliminar la cuenta desde el propio programa.
+
+*Summary: SelectOR collects no telemetry, shows no adverts and never sells or shares data. Without an
+account it only goes online to check for updates. An optional account is used for Companies, the live map
+and the multiplayer server lock; that data is stored on the SelectOR server (Supabase) and is erased when
+the account is deleted from the program.*
 
 ## Licencia
 
