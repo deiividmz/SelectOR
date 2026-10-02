@@ -55,11 +55,18 @@ namespace SelectOR
                 using var bmp = new System.Drawing.Bitmap(w, h);
                 _pageHost.DrawToBitmap(bmp, new System.Drawing.Rectangle(0, 0, w, h));
             }
+            // Con la ventana oculta, mostrar la pestaña no la maqueta: se le da ya el tamaño del hueco y se maqueta.
+            void Fit(int p)
+            {
+                Control pg = p switch { 0 => _pageRuta, 1 => _pageActividad, 2 => _pageExplora, 3 => _pageHorarios, _ => _pageEditor };
+                pg.Bounds = _pageHost.ClientRectangle;
+                pg.PerformLayout();
+            }
             foreach (int p in new[] { 0, 1, 2, 3, PageEditor })
             {
-                try { if (p != keep) ShowPage(p); Paint(); } catch { }
+                try { if (p != keep) ShowPage(p); Fit(p); Paint(); } catch { }
             }
-            try { ShowPage(keep); Paint(); } catch { }
+            try { ShowPage(keep); Fit(keep); Paint(); } catch { }
             _prefs.LastTab = keepTab;
         }
     }

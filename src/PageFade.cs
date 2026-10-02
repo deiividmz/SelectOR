@@ -80,6 +80,8 @@ namespace SelectOR
             {
                 Stop();
                 if (page == null || !page.IsHandleCreated || page.Width < 8 || page.Height < 8) return;
+                var form = page.FindForm();
+                if (form == null || !form.Visible) return;   // ventana aún oculta: no hay nada que fundir
                 if (!Capture(page)) return;   // sin imagen válida, mejor sin transición que a oscuras
                 MakeGdiCopy();
                 Bounds = new Rectangle(0, 0, page.Width, page.Height);
@@ -172,7 +174,9 @@ namespace SelectOR
         {
             _timer.Stop();
             _clock.Reset();
-            if (Visible) Visible = false;
+            // Siempre se asigna: con la ventana oculta (pestañas preparadas en la pantalla de inicio) Visible
+            // devuelve false aunque la capa esté puesta, y se quedaba tapando la sección al abrir el menú.
+            Visible = false;
             FreeGdiCopy();
             var old = _shot; _shot = null;
             old?.Dispose();
