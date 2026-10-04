@@ -870,23 +870,52 @@ namespace SelectOR
             else LoadEditorConsists(path);   // la lista aún no tenía ese archivo: se rehace con él elegido
         }
 
-        // Exploración → «Eliminar composición…»: a la papelera de Windows, como desde el Editor.
-        void DeleteConsistFromExplore(TrainItem c)
+        // Exploración → «Eliminar composición…»: a la papelera de Windows, como desde el Editor. Con varias
+        // marcadas (Ctrl+clic), todas a la vez. La lista se queda donde estaba, con el tren siguiente elegido.
+        static Action<string> _recycleFile = Native.RecycleFile;   // a la papelera (las pruebas lo sustituyen)
+
+        void DeleteConsistsFromExplore(List<TrainItem> sel, bool confirm = true)
         {
-            if (c?.FilePath == null || !File.Exists(c.FilePath)) return;
-            string file = c.FilePath;
-            if (MessageBox.Show(this, string.Format(Tr("¿Eliminar la composición «{0}»?\n\nSe envía a la papelera de Windows."), Path.GetFileName(file)),
-                    "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-            try
+            var list = sel.Where(c => c?.FilePath != null && File.Exists(c.FilePath)).ToList();
+            if (list.Count == 0) return;
+            string msg = list.Count == 1
+                ? string.Format(Tr("¿Eliminar la composición «{0}»?\n\nSe envía a la papelera de Windows."), Path.GetFileName(list[0].FilePath))
+                : string.Format(Tr("¿Eliminar {0} composiciones?"), list.Count) + "\n\n"
+                  + string.Join("\n", list.Take(12).Select(c => "• " + Path.GetFileName(c.FilePath)))
+                  + (list.Count > 12 ? "\n" + string.Format(Tr("… y {0} más"), list.Count - 12) : "")
+                  + "\n\n" + Tr("Se envían a la papelera de Windows.");
+            if (confirm && MessageBox.Show(this, msg, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+            // El que quedará elegido: el primero que no se borra a partir del primero borrado (o el anterior).
+            var gone = new HashSet<object>(list);
+            int first = list.Select(c => _lstConsists.Items.IndexOf(c)).Where(i => i >= 0).DefaultIfEmpty(-1).Min();
+            TrainItem next = null;
+            if (first >= 0)
             {
-                Native.RecycleFile(file);
-                ClearContentCaches();
-                if (File.Exists(file + ".bak")) Native.RecycleFile(file + ".bak");
+                for (int i = first; i < _lstConsists.Items.Count && next == null; i++) if (!gone.Contains(_lstConsists.Items[i])) next = _lstConsists.Items[i] as TrainItem;
+                for (int i = first - 1; i >= 0 && next == null; i--) if (!gone.Contains(_lstConsists.Items[i])) next = _lstConsists.Items[i] as TrainItem;
             }
-            catch (Exception e) { Warn(Tr("No se pudo eliminar: ") + e.Message); return; }
-            _prefs.FavoriteTrains.Remove(file);
-            if (_edDoc != null && string.Equals(_edDoc.Path, file, StringComparison.OrdinalIgnoreCase)) { _edDoc = null; _edOriginal = null; SetEditorEnabled(false); }
-            ReloadConsistsAfterEdit();   // Exploración, Horarios, Compra… sin ese tren
+            int top = _lstConsists.TopIndex;
+
+            var fallos = new List<string>();
+            foreach (var c in list)
+            {
+                string file = c.FilePath;
+                try
+                {
+                    _recycleFile(file);
+                    if (File.Exists(file + ".bak")) _recycleFile(file + ".bak");
+                }
+                catch (Exception e) { fallos.Add(Path.GetFileName(file) + ": " + e.Message); continue; }
+                _prefs.FavoriteTrains.Remove(file);
+                if (_edDoc != null && string.Equals(_edDoc.Path, file, StringComparison.OrdinalIgnoreCase)) { _edDoc = null; _edOriginal = null; SetEditorEnabled(false); }
+            }
+            ClearContentCaches();
+            _lstConsists.ClearMarks();
+            if (next != null) _prefs.LastConsist = next.FilePath;
+            if (fallos.Count > 0) Warn(Tr("No se pudo eliminar: ") + string.Join("\n", fallos));
+            // Exploración, Horarios, Compra… sin esos trenes; la lista vuelve a la misma altura
+            ReloadConsistsAfterEdit(() => { try { _lstConsists.TopIndex = Math.Min(top, Math.Max(0, _lstConsists.Items.Count - 1)); } catch { } });
             LoadEditorConsists();
         }
 
@@ -1255,7 +1284,7 @@ namespace SelectOR
 
         // Tras crear/editar/borrar: SelectOR vuelve a leer los trenes de la carpeta (Exploración,
         // Horarios, Empresas…), sin recargar rutas ni actividades.
-        void ReloadConsistsAfterEdit()
+        void ReloadConsistsAfterEdit(Action after = null)
         {
             var folder = _curFolder;
             if (folder == null) return;
@@ -1273,6 +1302,7 @@ namespace SelectOR
                     {
                         _consistsAll = consists;
                         RefreshConsistList();
+                        after?.Invoke();
                         RebuildCompanyEngs();
                         UpdateStatus();
                     }));

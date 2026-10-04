@@ -677,7 +677,7 @@ namespace SelectOR
             _lstRoutes.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left && _lstRoutes.SelectedItem != null) DismissRutaWelcome(); };
             _lstRoutes.KeyDown += (s, e) => { if (_lstRoutes.SelectedItem != null && e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Home or Keys.End or Keys.Enter) DismissRutaWelcome(); };
             _lstRoutes.ItemActivated += o => ToggleRouteFavorite();
-            var routeCtx = new ContextMenuStrip();
+            var routeCtx = MenuStyle.Apply(new ContextMenuStrip());
             var miFav = new ToolStripMenuItem(Tr("Añadir / quitar de favoritas"));
             miFav.Click += (s, e) => ToggleRouteFavorite();
             routeCtx.Items.Add(miFav);
@@ -815,6 +815,10 @@ namespace SelectOR
                 Footer = "SelectOR " + Updater.CurrentVersionText,
                 Copyright = Tr("© 2026 David MZP. SelectOR. Todos los derechos reservados.")
             };
+            // Novedades de esta versión, en el idioma de SelectOR
+            var notes = ReleaseNotes.Load(I18n.English);
+            _rutaWelcome.News = notes.Items;
+            _rutaWelcome.NewsTitle = string.Format(Tr("NOVEDADES DE LA VERSIÓN {0}"), notes.Version.Length > 0 ? notes.Version : Updater.CurrentVersionText);
             _lblVersion.TextChanged += (s, e) => { _rutaWelcome.Footer = "SelectOR " + Updater.CurrentVersionText + (_lblVersion.Text.Length > 0 ? "   ·   " + _lblVersion.Text.Replace("  ", " ") : ""); _rutaWelcome.Invalidate(); };
             page.Controls.Add(_rutaWelcome);
             // sin acoplar: cubre la página entera (portada incluida)
@@ -1176,7 +1180,7 @@ namespace SelectOR
             _thumbs ??= new VehicleThumbs(this);
             _lstConsists = new TrainCardGrid
             {
-                Dock = DockStyle.Fill, Thumbs = _thumbs,
+                Dock = DockStyle.Fill, Thumbs = _thumbs, MultiSelect = true,   // Ctrl+clic: varias a la vez (eliminar)
                 PathOf = o => (o as TrainItem)?.Locomotive?.FilePath, KeyOf = o => (o as TrainItem)?.FilePath,
                 SpecOf = o => TrainSpecAsync(o as TrainItem),
                 FavOf = o => o is TrainItem t && _prefs.FavoriteTrains.Contains(t.FilePath),
@@ -1186,17 +1190,28 @@ namespace SelectOR
             };
             _lstConsists.SelectedIndexChanged += (s, e) => OnConsistSelected();
             _lstConsists.ItemActivated += o => ToggleTrainFavorite();
-            var consistCtx = new ContextMenuStrip();
+            var consistCtx = MenuStyle.Apply(new ContextMenuStrip());
             var miTFav = new ToolStripMenuItem(Tr("Añadir / quitar de favoritos")); miTFav.Click += (s, e) => ToggleTrainFavorite();
             consistCtx.Items.Add(miTFav);
             // El tren en el Editor de composiciones, o a la papelera, sin salir de Exploración.
             var miTEdit = new ToolStripMenuItem(Tr("Editar composición")); miTEdit.Click += (s, e) => EditConsistFromExplore(_lstConsists.SelectedItem as TrainItem);
             var miTDel = new ToolStripMenuItem(Tr("Eliminar composición…")) { ForeColor = Color.FromArgb(229, 115, 115) };
-            miTDel.Click += (s, e) => DeleteConsistFromExplore(_lstConsists.SelectedItem as TrainItem);
-            consistCtx.Items.Add(new ToolStripSeparator());
+            miTDel.Click += (s, e) => DeleteConsistsFromExplore(_lstConsists.SelectedItems.OfType<TrainItem>().ToList());
+            var sepT = new ToolStripSeparator();
+            consistCtx.Items.Add(sepT);
             consistCtx.Items.Add(miTEdit);
             consistCtx.Items.Add(miTDel);
-            consistCtx.Opening += (s, e) => { bool has = _lstConsists.SelectedItem is TrainItem t && File.Exists(t.FilePath); miTEdit.Enabled = has; miTDel.Enabled = has; };
+            consistCtx.Opening += (s, e) =>
+            {
+                int n = _lstConsists.SelectedItems.OfType<TrainItem>().Count(t => File.Exists(t.FilePath));
+                // Con varias marcadas (Ctrl+clic), solo se puede eliminarlas: lo demás no se enseña.
+                bool many = _lstConsists.MarkedCount > 1;
+                miTFav.Visible = sepT.Visible = miTEdit.Visible = !many;
+                miTEdit.Enabled = n == 1;
+                miTDel.Enabled = n > 0;
+                miTDel.Text = n > 1 ? string.Format(Tr("Eliminar {0} composiciones…"), n) : Tr("Eliminar composición…");
+                MenuStyle.Measure(consistCtx);   // con las opciones ya puestas: márgenes iguales a los dos lados
+            };
             _lstConsists.ContextMenuStrip = consistCtx;
             var trainsHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 4, 0, 0) };
             trainsHost.Controls.Add(_lstConsists);
@@ -2247,18 +2262,20 @@ namespace SelectOR
             _activePage = i;
             if (_uiRevealed && i != 0 && _curRoute != null) DismissRutaWelcome();   // ya usa la ruta cargada: al volver, su ficha
             for (int k = 0; k < _pills.Length; k++) { _pills[k].Active = (k == i); _pills[k].Invalidate(); }
+            var __lay = Perf.T("ShowPage " + i + " · maquetación");
             _root?.SuspendLayout();
             _pageHost.SuspendLayout();
-            _pageRuta.Visible = i == 0;
-            _pageActividad.Visible = i == 1;
-            _pageExplora.Visible = i == 2;
-            _pageHorarios.Visible = i == 3;
-            _pageMulti.Visible = i == 4;
-            _pageEditor.Visible = i == PageEditor;
-            _pageEmpresas.Visible = i == PageEmpresas;
+            // Se ocultan las demás, se ajusta la columna RUTAS y se enseña la pestaña (sin volver a maquetarla
+            // entera si conserva su tamaño: ShowFast).
+            var pages = new Control[] { _pageRuta, _pageActividad, _pageExplora, _pageHorarios, _pageMulti, _pageEditor, _pageEmpresas };
+            int[] ids = { 0, 1, 2, 3, 4, PageEditor, PageEmpresas };
+            for (int k = 0; k < pages.Length; k++) if (ids[k] != i && pages[k].Visible) pages[k].Visible = false;
             ApplySidebarForPage(i);   // Editor y Empresas: sin columna RUTAS (todo el ancho para el contenido)
+            for (int k = 0; k < pages.Length; k++) if (ids[k] == i) ShowFast(pages[k], true);
             _pageHost.ResumeLayout(false);
             _root?.ResumeLayout(true);    // una sola maquetación con la página y el ancho ya definitivos
+            __lay.Dispose();
+            var __rest = Perf.T("ShowPage " + i + " · datos");
             _btnPlay.Visible = i != 0 && i != 4 && i != PageEditor && i != PageEmpresas;   // estas pestañas no usan CONDUCIR
             _btnConnect.Visible = i == 4;                                                  // Multijugador: CONECTAR
             UpdateDutyHostVisible();   // barra "de servicio" en Empresas (solo si perteneces a alguna empresa)
@@ -2271,10 +2288,11 @@ namespace SelectOR
             RutaLiveTimerUpdate();   // el mapa en vivo de Ruta solo consulta mientras se ve
             UpdateStatus();
             LayoutBottomBar();   // Ruta y el Editor no llevan barra inferior
+            __rest.Dispose();
             if (previous != i && IsHandleCreated)
             {
-                _pageHost.Refresh();          // la sección nueva se pinta ya…
-                _pageFade?.Play(_pageHost);   // …y desde esa imagen se funde
+                using (Perf.T("ShowPage " + i + " · pintado")) _pageHost.Refresh();          // la sección nueva se pinta ya…
+                using (Perf.T("ShowPage " + i + " · fundido")) _pageFade?.Play(_pageHost);   // …y desde esa imagen se funde
             }
         }
 
@@ -3258,6 +3276,7 @@ namespace SelectOR
                     _svcOpenedUtc = svc ? DateTime.UtcNow : (DateTime?)null;
                     if (!svc) _driveStartUtc = DateTime.UtcNow;
                     CaptureDrivenTrain();           // tren conducido (para ponerse de servicio desde la barra superior)
+                    if (svc) SaveServiceJournal(force: true);   // por si se cierra todo de golpe (MainMenuForm.Recuperar.cs)
                     // Horarios: la hoja de ruta sale ya con el recorrido del tren y sus horas de paso.
                     try { _roadTtPlan = args.IndexOf("-timetable", StringComparison.OrdinalIgnoreCase) >= 0 ? BuildTtRoadPlan() : null; } catch { _roadTtPlan = null; }
                     StartKmTracking(withPax: true); // posición para el mapa y viajeros (en servicio o conducción libre)

@@ -219,6 +219,7 @@ namespace SelectOR
             if (_paxActive || _paxWanted) { _paxBoarded = 0; _paxKm = 0; }
             else StartPaxTracking(_drivenConsist);
             UpdateDutyUi();
+            SaveServiceJournal(force: true);   // por si se cierra todo de golpe (MainMenuForm.Recuperar.cs)
 
             bool bigWasOpen = HudAlive && _serviceHud.BigMapOpen;
             bool hudWasHidden = HudAlive && !_serviceHud.Visible;

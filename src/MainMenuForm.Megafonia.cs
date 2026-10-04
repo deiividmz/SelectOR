@@ -20,7 +20,7 @@ namespace SelectOR
     public partial class MainMenuForm
     {
         Panel _paPanel, _paStPanel, _paLinePanel;
-        StyledTable _paStList, _paLineList;
+        CardTable _paStList, _paLineList;
         Label _paMsg, _paHint;
         ComboBox _paRouteBox, _paLineBox;
         CheckBox _paOnChk;
@@ -148,12 +148,11 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            _paStList = EmpTable();
-            _paStList.SetColumns(
-                new StyledTable.Col("ESTACIÓN", 240, true),
-                new StyledTable.Col("AUDIO", 190),
-                new StyledTable.Col("PREAVISO", 110, false, HorizontalAlignment.Right),
-                new StyledTable.Col("ANTELACIÓN", 110, false, HorizontalAlignment.Right));
+            // Una tarjeta por estación: su audio y, a la derecha, el preaviso y la antelación del aviso.
+            _paStList = EmpCards();
+            _paStList.TitleCol = 0; _paStList.SubCols = new[] { 1 }; _paStList.RightCol = 2; _paStList.RightSubCols = new[] { 3 };
+            _paStList.Icon = "🚉"; _paStList.Formats[2] = Tr("preaviso {0}"); _paStList.Formats[3] = Tr("antelación {0}");
+            _paStList.CardHeight = 66; _paStList.MinWidth = 460; _paStList.Columns = 2;
             t.Controls.Add(_paStList);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(2, 4, 2, 2) };
@@ -180,11 +179,11 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            _paLineList = EmpTable();
-            _paLineList.SetColumns(
-                new StyledTable.Col("LÍNEA", 260, true),
-                new StyledTable.Col("PARADAS", 110, false, HorizontalAlignment.Right),
-                new StyledTable.Col("CON VOZ PROPIA", 150, false, HorizontalAlignment.Right));
+            // Una tarjeta por línea: cuántas paradas tiene y cuántas con voz propia.
+            _paLineList = EmpCards();
+            _paLineList.TitleCol = 0; _paLineList.SubCols = new[] { 2 }; _paLineList.RightCol = 1;
+            _paLineList.Icon = "🛤"; _paLineList.Formats[1] = Tr("{0} parada") + "|" + Tr("{0} paradas"); _paLineList.Formats[2] = Tr("{0} con voz propia");
+            _paLineList.CardHeight = 62; _paLineList.MinWidth = 420; _paLineList.Columns = 2;
             t.Controls.Add(_paLineList);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(2, 4, 2, 2) };

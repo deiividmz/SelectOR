@@ -37,6 +37,27 @@ namespace SelectOR
             get { int row = Math.Max(0, ScrollY / Math.Max(1, CardH + Gap)); return Math.Min(Items.Count == 0 ? 0 : Items.Count - 1, row * Cols); }
             set { int row = Math.Max(0, value) / Math.Max(1, Cols); AutoScrollPosition = new Point(0, row * (CardH + Gap)); Invalidate(); }
         }
+        // Selección múltiple (opcional): Ctrl+clic marca o desmarca, Mayús+clic marca un tramo. Sin marcas,
+        // la «selección» es la de siempre (SelectedItem).
+        public bool MultiSelect;
+        readonly HashSet<object> _marked = new HashSet<object>();
+        int _anchor = -1;
+        public int MarkedCount => _marked.Count;
+        public bool IsMarked(object o) => o != null && _marked.Contains(o);
+        // Lo elegido, en el orden de la lista: las marcadas o, si no hay, la seleccionada.
+        public List<object> SelectedItems
+        {
+            get
+            {
+                var l = new List<object>();
+                if (_marked.Count == 0) { if (SelectedItem != null) l.Add(SelectedItem); return l; }
+                foreach (var o in Items) if (_marked.Contains(o)) l.Add(o);
+                return l;
+            }
+        }
+        public event EventHandler MarksChanged;
+        public void ClearMarks() { if (_marked.Count == 0) return; _marked.Clear(); Invalidate(); MarksChanged?.Invoke(this, EventArgs.Empty); }
+
         public void BeginUpdate() { if (_updating++ == 0) _selBefore = SelectedItem; }
         public void EndUpdate()
         {
@@ -46,6 +67,7 @@ namespace SelectOR
             int idx = _selBefore == null ? -1 : Items.IndexOf(_selBefore);
             bool lost = _selBefore != null && idx < 0;
             _sel = idx; _selBefore = null;
+            if (_marked.Count > 0) { var keep = new HashSet<object>(Items); int n = _marked.RemoveWhere(o => !keep.Contains(o)); if (n > 0) MarksChanged?.Invoke(this, EventArgs.Empty); }
             Relayout();
             if (lost) SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -119,7 +141,7 @@ namespace SelectOR
                 return;
             }
             int first = Math.Max(0, (ScrollY / RowH) * Cols), last = Math.Min(Items.Count - 1, ((ScrollY + ClientSize.Height) / RowH + 2) * Cols - 1);
-            for (int i = first; i <= last; i++) PaintCard(g, i, CardRect(i), i == _sel, i == Hover);
+            for (int i = first; i <= last; i++) PaintCard(g, i, CardRect(i), _marked.Count > 0 ? _marked.Contains(Items[i]) : i == _sel, i == Hover);
             AfterPaint(g, first, last);
         }
 
@@ -145,6 +167,33 @@ namespace SelectOR
         {
             Focus();
             int i = IndexAt(e.Location);
+            if (i >= 0 && MultiSelect)
+            {
+                var mk = ModifierKeys;
+                if (e.Button == MouseButtons.Left && (mk & Keys.Control) != 0)
+                {
+                    if (_marked.Count == 0 && _sel >= 0 && _sel != i) _marked.Add(Items[_sel]);
+                    if (!_marked.Remove(Items[i])) _marked.Add(Items[i]);
+                    _anchor = i;
+                    MarksChanged?.Invoke(this, EventArgs.Empty);
+                    if (_marked.Contains(Items[i])) SelectedIndex = i; else Invalidate();
+                    base.OnMouseDown(e);
+                    return;
+                }
+                if (e.Button == MouseButtons.Left && (mk & Keys.Shift) != 0)
+                {
+                    int a = _anchor >= 0 && _anchor < Items.Count ? _anchor : Math.Max(0, _sel);
+                    _marked.Clear();
+                    for (int k = Math.Min(a, i); k <= Math.Max(a, i); k++) _marked.Add(Items[k]);
+                    MarksChanged?.Invoke(this, EventArgs.Empty);
+                    SelectedIndex = i; Invalidate();
+                    base.OnMouseDown(e);
+                    return;
+                }
+                // Botón derecho sobre una marcada: el menú actúa sobre todas las marcadas.
+                if (!(e.Button == MouseButtons.Right && _marked.Contains(Items[i]))) ClearMarks();
+                _anchor = i;
+            }
             if (i >= 0) SelectedIndex = i;      // también con el botón derecho: el menú contextual actúa sobre ella
             base.OnMouseDown(e);
         }
@@ -159,6 +208,12 @@ namespace SelectOR
         {
             base.OnKeyDown(e);
             if (Items.Count == 0) return;
+            if (MultiSelect && e.KeyCode == Keys.Escape && _marked.Count > 0) { ClearMarks(); e.Handled = true; return; }
+            if (MultiSelect && e.Control && e.KeyCode == Keys.A)
+            {
+                _marked.Clear(); foreach (var o in Items) _marked.Add(o);
+                MarksChanged?.Invoke(this, EventArgs.Empty); Invalidate(); e.Handled = true; return;
+            }
             int i = Math.Max(0, _sel);
             switch (e.KeyCode)
             {
@@ -171,7 +226,7 @@ namespace SelectOR
                 case Keys.Enter: if (SelectedItem != null) ItemActivated?.Invoke(SelectedItem); e.Handled = true; return;
                 default: return;
             }
-            e.Handled = true; SelectedIndex = i;
+            e.Handled = true; ClearMarks(); _anchor = i; SelectedIndex = i;
         }
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }

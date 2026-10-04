@@ -1,0 +1,9 @@
+1.2.48
+Servicios|Todo el historial: los últimos 5 días en tarjetas y los anteriores en lista con calendario.
+Préstamos|Pide un préstamo al banco desde Banca, con cuotas mensuales y cuadro de amortización.
+Normas|Cada empresa tiene su reglamento interno, que escriben el gerente y los gestores.
+Estadísticas de socios|Servicios, km, horas y neto de cada maquinista, mes a mes.
+Salario por tiempo|El maquinista cobra un fijo por servicio más las horas de conducción.
+Viajes a salvo|Si se cierra todo de golpe, el viaje se registra al volver con los últimos datos.
+Cuenta y empresas|Clave de recuperación de la contraseña, nombres únicos e ID de empresa.
+Y más|Borra varias composiciones con Ctrl+clic; más secciones en tarjetas y fotos en el Ranking.

@@ -175,11 +175,13 @@ namespace SelectOR
         double Game() { try { return GameNow?.Invoke() ?? double.NaN; } catch { return double.NaN; } }
 
         // Horas de la hoja de ruta: las del simulador o las del PC (se recuerda la elección).
-        bool PcClock => _prefs?.RoadHudPcClock == true;
+        // En Horarios y Actividad no hay elección: siempre las del simulador (se comparan con las del horario).
+        bool ClockToggle => !_rb.FromPlan && _rb.Schedule == null;
+        bool PcClock => ClockToggle && _prefs?.RoadHudPcClock == true;
 
         void ToggleClock()
         {
-            if (_prefs == null) return;
+            if (_prefs == null || !ClockToggle) return;
             _prefs.RoadHudPcClock = !_prefs.RoadHudPcClock;
             try { _prefs.Save(); } catch { }
             Invalidate();
@@ -224,7 +226,7 @@ namespace SelectOR
             _hitClose = new Rectangle(Width - 28, 5, 22, HdrH - 10);
             _hitCollapse = new Rectangle(_hitClose.Left - 24, 5, 22, HdrH - 10);
             _hitMap = new Rectangle(_hitCollapse.Left - 26, 5, 24, HdrH - 10);
-            _hitClock = new Rectangle(_hitMap.Left - 38, 6, 36, HdrH - 12);
+            _hitClock = ClockToggle ? new Rectangle(_hitMap.Left - 38, 6, 36, HdrH - 12) : new Rectangle(_hitMap.Left - 2, 6, 0, 0);
             double now = Game();
             var end = _rb.Stops.Count > 0 ? _rb.Stops[^1] : null;
             string title = I18n.T("Hoja de ruta");
@@ -240,12 +242,15 @@ namespace SelectOR
                 g.DrawLine(pen, m.Left + m.Width / 3, m.Top, m.Left + m.Width / 3, m.Bottom);
                 g.DrawLine(pen, m.Left + 2 * m.Width / 3, m.Top, m.Left + 2 * m.Width / 3, m.Bottom);
             }
-            // Reloj de las horas: SIM (simulador) o PC
+            // Reloj de las horas: SIM (simulador) o PC (solo en Exploración)
+            if (ClockToggle)
+            {
             using (var cb = new SolidBrush(_hoverZone == 5 ? Theme.SurfaceHi : Color.FromArgb(40, 255, 255, 255)))
             using (var cp = Theme.Round(_hitClock, 5)) g.FillPath(cb, cp);
             using (var cf = Theme.Font(7.6f, FontStyle.Bold))
                 TextRenderer.DrawText(g, PcClock ? "PC" : "SIM", cf, _hitClock, PcClock ? Amber : (_hoverZone == 5 ? Theme.Text : Theme.Subtle),
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
             DrawHdrBtn(g, _hitCollapse, _collapsed ? "+" : "–", _hoverZone == 1);
             DrawHdrBtn(g, _hitClose, "×", _hoverZone == 0);
             if (_collapsed) return;

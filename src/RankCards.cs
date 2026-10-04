@@ -111,7 +111,14 @@ namespace SelectOR
                 using var path = new GraphicsPath(); path.AddEllipse(r);
                 var st = g.Save(); g.SetClip(path, CombineMode.Intersect);
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.DrawImage(logo, r);
+                if (logo.Height > logo.Width)
+                {
+                    // Foto de perfil (3:4): recortada para llenar el círculo sin deformarla, un poco hacia
+                    // arriba, donde suele estar la cara.
+                    int h = (int)Math.Ceiling(logo.Height * (r.Width / (double)logo.Width));
+                    g.DrawImage(logo, r.X, r.Y - (h - r.Height) * 3 / 10, r.Width, h);
+                }
+                else g.DrawImage(logo, r);   // logotipo de empresa
                 g.Restore(st);
             }
             else

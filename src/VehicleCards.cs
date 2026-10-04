@@ -288,7 +288,15 @@ namespace SelectOR
         }
 
         public int Count(int state) { int n = 0; foreach (var m in _models) foreach (var u in m.Units) if (state < 0 || u.State == state || (state == 0 && u.State == 3)) n++; return n; }
-        public int StateFilter { get => _state; set { if (_state == value) return; _state = value; AutoScrollPosition = Point.Empty; _layoutW = -1; Relayout(); } }
+        public int StateFilter { get => _state; set { if (_state == value) return; _state = value; AutoScrollPosition = Point.Empty; _layoutW = -1; Relayout(); KeepSelectionShown(); } }
+
+        // La ficha sigue al filtro: si la unidad elegida no está en la pestaña, se elige la primera que sí.
+        void KeepSelectionShown()
+        {
+            FleetUnit first = null;
+            foreach (var c in _cards) foreach (var u in c.Shown) { if (u.Id == SelectedId) return; first ??= u; }
+            Select(first?.Id, false);
+        }
         public void Filter(string text) { var f = (text ?? "").Trim().ToLowerInvariant(); if (f == _filter) return; _filter = f; AutoScrollPosition = Point.Empty; _layoutW = -1; Relayout(); }
 
         bool UnitPass(FleetUnit u) => _state < 0 || u.State == _state || (_state == 0 && u.State == 3);

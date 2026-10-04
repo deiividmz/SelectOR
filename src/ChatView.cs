@@ -229,7 +229,7 @@ namespace SelectOR
                 if (it != null && !it.M.Deleted)
                 {
                     var m = it.M;
-                    var cm = new ContextMenuStrip();
+                    var cm = MenuStyle.Apply(new ContextMenuStrip());
                     cm.Items.Add(I18n.T("Copiar mensaje"), null, (s, a) => { try { Clipboard.SetText(m.Body); } catch { } });
                     if (it.Mine && (EditRequested != null || DeleteRequested != null))
                     {

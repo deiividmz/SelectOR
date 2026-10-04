@@ -17,7 +17,7 @@ namespace SelectOR
 {
     public sealed class PageFade : Control
     {
-        const int DurationMs = 170, StepMs = 15;
+        const int DurationMs = 110, StepMs = 15;   // corto: el contenido llega antes (1.2.48)
 
         [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
         [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);

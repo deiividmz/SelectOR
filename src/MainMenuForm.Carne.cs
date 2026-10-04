@@ -169,7 +169,7 @@ namespace SelectOR
         // ---------------------------------------------------------------- detección durante el servicio
         readonly List<(string code, Dictionary<string, object> detail)> _infrItems = new();
         bool _infrJumpDone, _infrAccelDone;
-        double _infrAccelS, _infrAccelMax;
+        double _infrAccelS, _infrAccelMax, _infrAccelAt = double.NaN;   // _infrAccelAt: segundo del servicio en que empezó a acelerarse
         DateTime? _infrLastFixUtc;
         // Episodio de exceso de velocidad en curso (tiempos en segundos de servicio, sin pausas).
         double _osStart = double.NaN, _osLast, _osGraveStart = double.NaN, _osGraveLast, _osGraveMax;
@@ -233,7 +233,8 @@ namespace SelectOR
         {
             if (!InfrActive || _apTold) return;
             _apTold = true;
-            _apDetail = new Dictionary<string, object> { ["seconds"] = 0, ["km"] = 0.0 };
+            // at_s: en qué segundo del servicio ocurrió (se ve en Revisión)
+            _apDetail = new Dictionary<string, object> { ["seconds"] = 0, ["km"] = 0.0, ["at_s"] = (int)ServiceSecondsExact() };
             _infrItems.Add(("autopilot", _apDetail));
             InfrNotify("autopilot", Tr("Open Rails está conduciendo el tren con el piloto automático."));
         }
@@ -244,7 +245,7 @@ namespace SelectOR
             _apOn = _apTold = false; _apVotes = 0; _apMeters = _apSeconds = 0; _apDetail = null;
             _infrItems.Clear();
             _infrJumpDone = _infrAccelDone = false;
-            _infrAccelS = _infrAccelMax = 0;
+            _infrAccelS = _infrAccelMax = 0; _infrAccelAt = double.NaN;
             _infrLastFixUtc = null;
             _osStart = double.NaN; _osGraveStart = double.NaN; _osGraveMax = 0; _osWorstRatio = 0;
         }
@@ -275,13 +276,14 @@ namespace SelectOR
             if (!InfrActive || _infrAccelDone || realS < 0.3 || realS > 10 || gameS <= 0) return;
             double f = gameS / realS;
             if (f <= AccelFactor || f > 1000) return;
+            if (double.IsNaN(_infrAccelAt)) _infrAccelAt = Math.Max(0, ServiceSecondsExact() - realS);
             _infrAccelS += realS; _infrAccelMax = Math.Max(_infrAccelMax, f);
             if (_infrAccelS >= AccelMinS)
             {
                 _infrAccelDone = true;
                 _infrItems.Add(("time_accel", new Dictionary<string, object>
                 {
-                    ["seconds"] = (int)Math.Round(_infrAccelS), ["factor"] = Math.Round(_infrAccelMax, 1)
+                    ["seconds"] = (int)Math.Round(_infrAccelS), ["factor"] = Math.Round(_infrAccelMax, 1), ["at_s"] = (int)_infrAccelAt
                 }));
                 InfrNotify("time_accel", string.Format(Tr("La hora del simulador ha ido hasta ×{0} más rápida durante {1} s."),
                     _infrAccelMax.ToString("0.#", EsEs), Math.Round(_infrAccelS).ToString("N0", EsEs)));
@@ -561,8 +563,9 @@ namespace SelectOR
         double RankKm(double validKm) => double.IsNaN(_licFrozenKm) ? validKm : Math.Min(validKm, _licFrozenKm);
 
         // ---------------------------------------------------------------- Revisión (gerente / gestores)
-        StyledTable _revList; Label _revMsg;
-        readonly List<(string id, string status, string driver, string code)> _revRows = new();
+        ReviewCardList _revList; Label _revMsg;
+        readonly List<ReviewItem> _revAll = new();
+        int _revTab; string _revQuery = "";
         static bool IsCodeA(string code) => code == "jump" || code == "speed_avg" || code == "time_accel" || code == "autopilot";
 
         Panel BuildReviewSubpanel()
@@ -579,35 +582,18 @@ namespace SelectOR
             intro.MaximumSize = new Size(900, 0);
             t.Controls.Add(intro);
 
-            _revList = EmpTable();
+            _revList = new ReviewCardList { Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4) };
             var top = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 42, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7
-            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7" }, i =>
-            {
-                _revList.RowFilter = i == 1 ? cells => cells.Length > 0 && cells[^1] == Carne.StatusName("pending")
-                                   : i == 2 ? cells => cells.Length > 3 && cells[3].StartsWith("A")
-                                   : i == 3 ? cells => cells.Length > 3 && cells[3].StartsWith("B")
-                                   : (Func<string[], bool>)null;
-                _revList.Refilter();
-            });
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7" }, i => { _revTab = i; FillReviewCards(); });
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
-            _revList.RowFilter = null;   // de entrada, todas
-            var search = EmpSearch(_revList, 260); search.Anchor = AnchorStyles.Right; search.Margin = new Padding(10, 3, 0, 3);
+            var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 260, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
+            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); };
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
-
-            _revList.SetColumns(
-                new StyledTable.Col("FECHA", 92),
-                new StyledTable.Col("EMPRESA", 150),
-                new StyledTable.Col("MAQUINISTA", 128),
-                new StyledTable.Col("INFRACCIÓN", 230),
-                new StyledTable.Col("DETALLE", 0, true),
-                new StyledTable.Col("TREN", 150),
-                new StyledTable.Col("PUNTOS", 80, false, HorizontalAlignment.Right),
-                new StyledTable.Col("ESTADO", 170));
             t.Controls.Add(_revList);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -639,7 +625,7 @@ namespace SelectOR
             try { (json, err) = await Supa.RpcAsync("list_all_infractions", new { p_limit = 2000 }); }
             finally { _revLoading = false; }
             int pending = 0;
-            var rows = new List<(string[] cells, Color?[] colors, string id, string status, string driver, string code)>();
+            var rows = new List<ReviewItem>();
             if (err == null)
             {
                 try
@@ -649,35 +635,58 @@ namespace SelectOR
                     {
                         string code = Str(e, "code"), status = Str(e, "status");
                         if (status == "pending") pending++;
-                        int p = (int)Num(e, "points");
-                        string det = e.TryGetProperty("detail", out var dd) ? Carne.Detail(code, dd) : "";
-                        string route = Str(e, "route");
-                        if (route.Length > 0) det = det.Length > 0 ? route + " · " + det : route;
                         string who = Str(e, "username"); if (who.Length == 0) who = "—";
-                        string st = Carne.StatusName(status);
-                        string rev = Str(e, "reviewer");
-                        if (status != "pending" && rev.Length > 0) det += (det.Length > 0 ? " · " : "") + string.Format(Tr("revisada por {0}"), rev);
-                        string train = Str(e, "consist"); if (train.Length == 0) train = "—";
                         string co = Str(e, "company_name"); if (co.Length == 0) co = "—";
-                        rows.Add((new[] { FmtDate(Str(e, "created_at")), co, who, Carne.Label(code), det, train, Carne.PointsText(p), st },
-                                  new Color?[] { null, Theme.Subtle, null, null, Theme.Subtle, Theme.Subtle, status == "annulled" ? Theme.Subtle : Carne.Red, Carne.StatusColor(status) },
-                                  Str(e, "id"), status, Str(e, "driver_id"), code));
+                        rows.Add(new ReviewItem
+                        {
+                            Id = Str(e, "id"), Status = status, DriverId = Str(e, "driver_id"), Code = code,
+                            Driver = who, Company = co, When = FmtDate(Str(e, "created_at")), Train = Str(e, "consist"),
+                            Route = Str(e, "route"), Detail = e.TryGetProperty("detail", out var dd) ? Carne.Detail(code, dd) : "",
+                            Reviewer = Str(e, "reviewer"), Points = (int)Num(e, "points"),
+                            AtS = e.TryGetProperty("detail", out var dt) && dt.ValueKind == JsonValueKind.Object
+                                  && dt.TryGetProperty("at_s", out var at) && at.ValueKind == JsonValueKind.Number ? at.GetDouble() : double.NaN
+                        });
                     }
                 }
                 catch { }
             }
             SetReviewCount(pending);
             if (onlyCount || _revList == null) return;
-            _revList.BeginReload("todas");
-            _revList.ClearRows(); _revRows.Clear();
-            foreach (var r in rows) { _revRows.Add((r.id, r.status, r.driver, r.code)); _revList.AddRow(r.cells, r.colors, null, r.id); }
-            if (rows.Count == 0)
-                _revList.SetEmpty(err != null
-                    ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no tiene la revisión del superadministrador (falta carne-revision-superadmin.sql).") : Tr("Error: ") + err)
-                    : Tr("No hay infracciones."));
-
-            _revList.EndReload();
+            _revAll.Clear(); _revAll.AddRange(rows);
+            _revList.EmptyText = err != null
+                ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no tiene la revisión del superadministrador (falta carne-revision-superadmin.sql).") : Tr("Error: ") + err)
+                : Tr("No hay infracciones.");
+            FillReviewCards();
         }
+
+        // Tarjetas según la pestaña y el filtro (la elegida se mantiene si sigue a la vista).
+        void FillReviewCards()
+        {
+            if (_revList == null) return;
+            string keep = (_revList.SelectedItem as ReviewItem)?.Id;
+            var words = _revQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            _revList.BeginUpdate();
+            _revList.Items.Clear();
+            foreach (var r in _revAll)
+            {
+                bool tabOk = _revTab switch
+                {
+                    1 => r.Status == "pending",
+                    2 => IsCodeA(r.Code),
+                    3 => !IsCodeA(r.Code),
+                    _ => true
+                };
+                if (!tabOk) continue;
+                bool ok = true;
+                foreach (var w in words) if (r.SearchText.IndexOf(w, StringComparison.Ordinal) < 0) { ok = false; break; }
+                if (ok) _revList.Items.Add(r);
+            }
+            _revList.EndUpdate();
+            if (keep != null && _revList.SelectedItem == null)
+                for (int k = 0; k < _revList.Items.Count; k++) if (((ReviewItem)_revList.Items[k]).Id == keep) { _revList.SelectedIndex = k; break; }
+        }
+
+        ReviewItem SelectedReview() => _revList?.SelectedItem as ReviewItem;
 
         void SetReviewCount(int n)
         {
@@ -691,9 +700,9 @@ namespace SelectOR
         async void AdminInfraction(string action)
         {
             if (_revList == null || !Supa.IsSuperadmin) return;
-            int i = _revList.SelectedRow;
-            if (i < 0 || i >= _revRows.Count) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
-            var (id, status, driver, code) = _revRows[i];
+            var sel = SelectedReview();
+            if (sel == null) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
+            var (id, status, driver, code) = (sel.Id, sel.Status, sel.DriverId, sel.Code);
             if (action == "confirm" && status == "applied") { Msg(_revMsg, Tr("Esta infracción ya está aprobada."), true); return; }
             if (action == "annul" && status == "annulled") { Msg(_revMsg, Tr("Esta infracción ya está anulada."), true); return; }
             string q = action == "confirm" ? Tr("¿Aprobar la infracción? Los puntos quedan restados al maquinista.")
@@ -721,9 +730,9 @@ namespace SelectOR
         async void ReviewInfractionCore(bool confirm, bool ask)
         {
             if (_revList == null) return;
-            int i = _revList.SelectedRow;
-            if (i < 0 || i >= _revRows.Count) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
-            var (id, status, driver, code) = _revRows[i];
+            var sel = SelectedReview();
+            if (sel == null) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
+            var (id, status, driver, code) = (sel.Id, sel.Status, sel.DriverId, sel.Code);
             if (!Supa.IsSuperadmin) return;
             // A1, A2 y A3: no hay nada que confirmar (ya están aplicadas), pero se pueden anular.
             if (IsCodeA(code) && status != "pending")

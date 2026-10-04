@@ -168,17 +168,40 @@ namespace SelectOR
     {
         public string Title = "Elige una ruta para empezar", Sub = "", Arrow = "", Footer = "", Copyright = "";
         public List<string> Chips = new List<string>();
-        readonly Font _fLogo = Theme.Font(30f, FontStyle.Bold), _fT = Theme.Font(17f, FontStyle.Bold), _fS = Theme.Font(10f), _fA = Theme.Font(9.5f, FontStyle.Bold), _fC = Theme.Font(9f, FontStyle.Bold);
+        // Novedades de esta versión (debajo, en su propia tarjeta)
+        public string NewsTitle = "";
+        public List<(string title, string text)> News = new List<(string, string)>();
+        readonly Font _fLogo = Theme.Font(30f, FontStyle.Bold), _fT = Theme.Font(17f, FontStyle.Bold), _fS = Theme.Font(10f), _fA = Theme.Font(9.5f, FontStyle.Bold), _fC = Theme.Font(9f, FontStyle.Bold),
+                      _fNewsCap = Theme.Font(8.5f, FontStyle.Bold), _fNewsT = Theme.Font(9.25f, FontStyle.Bold), _fNews = Theme.Font(9f),
+                      _fFoot = Theme.Font(10f, FontStyle.Bold), _fCopy = Theme.Font(8.25f);
         public RouteWelcome() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); BackColor = Theme.Bg; }
-        protected override void Dispose(bool disposing) { if (disposing) foreach (var f in new[] { _fLogo, _fT, _fS, _fA, _fC }) f.Dispose(); base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) foreach (var f in new[] { _fLogo, _fT, _fS, _fA, _fC, _fNewsCap, _fNewsT, _fNews, _fFoot, _fCopy }) f.Dispose(); base.Dispose(disposing); }
+
+        const TextFormatFlags WrapL = TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.TextBoxControl;
+
+        // Alto de la tarjeta de novedades para un ancho y unas líneas (dos columnas; cada novedad en 2 líneas como mucho).
+        int NewsHeight(Graphics g, int w, int maxH, out int rows, out int colW)
+        {
+            int cols = w > Theme.Px(560) ? 2 : 1, gap = Theme.Px(24);
+            colW = (w - Theme.Px(48) - (cols - 1) * gap) / cols;
+            int itemH = Math.Max(TextRenderer.MeasureText(g, "Ag", _fNews).Height * 2, Theme.Px(34)) + Theme.Px(10);
+            int head = Theme.Px(44), pad = Theme.Px(14);
+            int fitRows = Math.Max(0, (maxH - head - pad) / itemH);
+            rows = Math.Min(fitRows, (News.Count + cols - 1) / cols);
+            return rows == 0 ? 0 : head + rows * itemH + pad;
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             g.Clear(BackColor);
             const TextFormatFlags C = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix;
-            int cw = Math.Min(Width - Theme.Px(40), Theme.Px(640)), ch = Math.Min(Height - Theme.Px(110), Theme.Px(420));
+            int cw = Math.Min(Width - Theme.Px(40), Theme.Px(640)), ch = Math.Min(Height - Theme.Px(120), Theme.Px(420));
             if (cw < 50 || ch < 50) return;
-            var card = new Rectangle((Width - cw) / 2, (Height - Theme.Px(50) - ch) / 2, cw, ch);   // (deja sitio abajo para la versión)
+            // Debajo, las novedades de la versión, en lo que quepa (el conjunto va centrado en vertical).
+            int nw = Math.Min(Width - Theme.Px(40), Theme.Px(820)), nGap = Theme.Px(16);
+            int nh = News.Count == 0 ? 0 : NewsHeight(g, nw, Height - Theme.Px(70) - ch - nGap - Theme.Px(20), out _, out _);
+            int groupH = ch + (nh > 0 ? nGap + nh : 0);
+            var card = new Rectangle((Width - cw) / 2, Math.Max(Theme.Px(10), (Height - Theme.Px(60) - groupH) / 2), cw, ch);   // (deja sitio abajo para la versión)
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(card, Theme.Px(20)))
             {
@@ -207,13 +230,13 @@ namespace SelectOR
                 g.Restore(st);
                 using (var p = new Pen(Color.FromArgb(70, 102, 197, 106))) g.DrawPath(p, path);
             }
-            // abajo del todo: versión y copyright
-            using (var ff = Theme.Font(8.25f))
+            // abajo del todo: versión de SelectOR y de Open Rails (más grande y en negrita) y copyright
             {
-                int fy = Height - Theme.Px(44);
-                TextRenderer.DrawText(g, Footer, ff, new Rectangle(0, fy, Width, Theme.Px(18)), Color.FromArgb(150, 156, 162), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-                TextRenderer.DrawText(g, Copyright, ff, new Rectangle(0, fy + Theme.Px(18), Width, Theme.Px(18)), Color.FromArgb(120, 126, 132), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                int fy = Height - Theme.Px(50);
+                TextRenderer.DrawText(g, Footer, _fFoot, new Rectangle(0, fy, Width, Theme.Px(22)), Color.FromArgb(196, 202, 207), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                TextRenderer.DrawText(g, Copyright, _fCopy, new Rectangle(0, fy + Theme.Px(24), Width, Theme.Px(18)), Color.FromArgb(120, 126, 132), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
             }
+            if (nh > 0) PaintNews(g, new Rectangle((Width - nw) / 2, card.Bottom + nGap, nw, nh));
             // logotipo grande
             int ring = Theme.Px(64);
             int tw1 = TextRenderer.MeasureText(g, "Select", _fLogo, Size.Empty, TextFormatFlags.NoPadding).Width, tw2 = TextRenderer.MeasureText(g, "OR", _fLogo, Size.Empty, TextFormatFlags.NoPadding).Width;
@@ -252,6 +275,61 @@ namespace SelectOR
                     ColorText.Draw(g, Chips[k], _fC, new Rectangle(r.X + Theme.Px(11), r.Y + (chH - h) / 2, r.Width, h + 2), Theme.Text);
                     cx += ws[k] + Theme.Px(8);
                 }
+            }
+        }
+
+        // Tarjeta de novedades: título con la versión y las novedades en dos columnas (título en negrita y texto).
+        void PaintNews(Graphics g, Rectangle r)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(r, Theme.Px(16)))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(40, 44, 47))) g.FillPath(b, path);
+                using (var p = new Pen(Color.FromArgb(50, 255, 255, 255))) g.DrawPath(p, path);
+            }
+            g.SmoothingMode = SmoothingMode.None;
+            NewsHeight(g, r.Width, r.Height + 1, out int rows, out int colW);
+            int cols = r.Width > Theme.Px(560) ? 2 : 1, gap = Theme.Px(24);
+            // cabecera: «✨ NOVEDADES DE LA VERSIÓN 1.2.48»
+            var hr = new Rectangle(r.X + Theme.Px(24), r.Y + Theme.Px(14), r.Width - Theme.Px(48), Theme.Px(20));
+            TextRenderer.DrawText(g, "✨  " + NewsTitle, _fNewsCap, hr, Theme.AccentHi, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            int itemH = Math.Max(TextRenderer.MeasureText(g, "Ag", _fNews).Height * 2, Theme.Px(34)) + Theme.Px(10);
+            int y0 = r.Y + Theme.Px(44);
+            int shown = Math.Min(News.Count, rows * cols);
+            for (int k = 0; k < shown; k++)
+            {
+                int c = k % cols, row = k / cols;
+                int x = r.X + Theme.Px(24) + c * (colW + gap), y = y0 + row * itemH;
+                // punto verde
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var b = new SolidBrush(Theme.Accent)) g.FillEllipse(b, x, y + Theme.Px(6), Theme.Px(6), Theme.Px(6));
+                g.SmoothingMode = SmoothingMode.None;
+                int tx = x + Theme.Px(14), tw = colW - Theme.Px(14);
+                var (title, text) = News[k];
+                string t = title.Length > 0 ? title + ". " : "";
+                int titW = t.Length > 0 ? TextRenderer.MeasureText(g, t, _fNewsT, Size.Empty, TextFormatFlags.NoPadding).Width : 0;
+                // título en negrita y, a continuación, el texto (que sigue en la línea de abajo si no cabe)
+                TextRenderer.DrawText(g, t, _fNewsT, new Point(tx, y), Theme.Text, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                string first = text, rest = "";
+                int avail = tw - titW;
+                if (TextRenderer.MeasureText(g, text, _fNews, Size.Empty, TextFormatFlags.NoPadding).Width > avail)
+                {
+                    // corta por palabras lo que cabe en la primera línea
+                    var words = text.Split(' ');
+                    int n = 0; string acc = "";
+                    for (; n < words.Length; n++)
+                    {
+                        string next = acc.Length == 0 ? words[n] : acc + " " + words[n];
+                        if (TextRenderer.MeasureText(g, next, _fNews, Size.Empty, TextFormatFlags.NoPadding).Width > avail) break;
+                        acc = next;
+                    }
+                    first = acc; rest = string.Join(" ", words, n, words.Length - n);
+                }
+                var col = Color.FromArgb(200, 206, 211);
+                if (first.Length > 0) TextRenderer.DrawText(g, first, _fNews, new Point(tx + titW, y + 1), col, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                if (rest.Length > 0)
+                    TextRenderer.DrawText(g, rest, _fNews, new Rectangle(tx, y + _fNews.Height + Theme.Px(3), tw, _fNews.Height + 2), col,
+                        TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             }
         }
     }

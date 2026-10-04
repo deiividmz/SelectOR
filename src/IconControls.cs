@@ -162,6 +162,7 @@ namespace SelectOR
                 case "chat": ChatHudOverlay.DrawBubble(g, new Rectangle(cx - (int)(b.Width * 0.38f), cy - (int)(b.Height * 0.36f), (int)(b.Width * 0.76f), (int)(b.Height * 0.72f)), Color.FromArgb(94, 190, 155)); break;
                 case "bank": DrawBank(g, b, cx, cy); break;
                 case "speaker": DrawSpeaker(g, b, cx, cy); break;
+                case "rules": DrawRules(g, b, cx, cy); break;
             }
         }
 
@@ -369,6 +370,24 @@ namespace SelectOR
             {
                 int x = left + (n == 1 ? span / 2 : i * span / (n - 1));
                 g.FillRectangle(col, x, roofY + 2, cw, baseY - roofY - 3);
+            }
+        }
+
+        // Hoja con renglones y la esquina doblada (normas de la empresa).
+        static void DrawRules(Graphics g, Rectangle b, int cx, int cy)
+        {
+            int w = (int)(b.Width * 0.56f), h = (int)(b.Height * 0.70f), x = cx - w / 2, y = cy - h / 2, fold = Math.Max(3, w / 3);
+            using var col = new SolidBrush(Color.FromArgb(214, 218, 222));
+            using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+            {
+                path.AddPolygon(new[] { new Point(x, y), new Point(x + w - fold, y), new Point(x + w, y + fold), new Point(x + w, y + h), new Point(x, y + h) });
+                g.FillPath(col, path);
+            }
+            using var line = new Pen(Color.FromArgb(90, 96, 104), Math.Max(1f, b.Width / 18f));
+            for (int k = 0; k < 3; k++)
+            {
+                int ly = y + fold + 2 + k * (h - fold - 4) / 3;
+                g.DrawLine(line, x + w / 5, ly, x + w - w / 5, ly);
             }
         }
 

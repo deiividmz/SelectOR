@@ -1,6 +1,9 @@
 // Lista de SERVICIOS en tarjetas: una por servicio, agrupadas por día (con el total de cada día). Cada
 // tarjeta lleva el maquinista, la ruta, la composición 2D del tren (la imagen que subió su SelectOR al
 // ponerse de servicio), los datos del viaje y el neto.
+// Solo los 5 días más recientes van en tarjetas; los anteriores, en filas finas sin la composición
+// («ANTERIORES»), y el calendario de al lado (ServiceCalendar) salta a cualquier día.
+// Los servicios anulados por el superadmin llevan el sello «ANULADO».
 //
 // Rendimiento:
 //  · Se dibuja solo lo visible (búsqueda binaria de la primera fila) y en doble búfer.
@@ -29,10 +32,11 @@ namespace SelectOR
             public DateTime Start;               // hora local de salida (MinValue = no se sabe)
             public double Km, DurationS, Pax, Capacity = double.NaN, MassT = double.NaN, Income, Net;
             public int Cars, Engines;
-            public bool Valid = true, HasImage;
+            public bool Valid = true, HasImage, Annulled;
+            public string AnnulReason = "";
             public bool Open => Status == "open";
             // Preparado una vez (SetItems): textos y anchos medidos
-            internal string Search, Initials, Meta, NetText, IncomeText, StatusText;
+            internal string Search, Initials, Meta, NetText, IncomeText, StatusText, TimeText, Line2, KmText, DurText;
             internal (string text, bool bold)[] Facts;
             internal int DriverW = -1;
             internal int[] FactW;
@@ -40,7 +44,8 @@ namespace SelectOR
 
         sealed class Row
         {
-            public bool Header;
+            public bool Header, Compact, Sep;   // Sep: la línea «ANTERIORES»
+            public DateTime Day;
             public string Title, Sub, Totals, TotalsNet;
             public bool TotalsNeg;
             public Item Item;
@@ -66,6 +71,12 @@ namespace SelectOR
         string _message;                               // «Cargando…», «Error…»
         Item _hover;
         public string SelectedId { get; private set; }
+        public int RecentDays = 5;                     // días en tarjetas; los demás, en filas finas
+        // Servicios y neto de cada día (con el filtro y la pestaña de estado aplicados): para el calendario.
+        public readonly Dictionary<DateTime, (int n, double net)> DayTotals = new Dictionary<DateTime, (int, double)>();
+        public event Action DaysChanged;
+        public event Action<DateTime> TopDayChanged;   // el día que queda arriba al desplazarse
+        DateTime _topDay = DateTime.MinValue;
 
         // Archivo local de la composición de un servicio (lo descarga si hace falta); null = no hay.
         public Func<string, Task<string>> FileLoader;
@@ -79,7 +90,8 @@ namespace SelectOR
         public event Action<string> ItemActivated;     // doble clic o Intro: abre el detalle
         public event Action SelectionChanged;
 
-        Font _fName, _fMeta, _fFact, _fFactB, _fNet, _fSmall, _fHead, _fHeadSub, _fAvatar, _fMsg;
+        Font _fName, _fMeta, _fFact, _fFactB, _fNet, _fSmall, _fHead, _fHeadSub, _fAvatar, _fMsg, _fStamp, _fRowNet;
+        public string LblAnnulled = "ANULADO";
         readonly SolidBrush _bSurface = new SolidBrush(Theme.Surface), _bHover = new SolidBrush(HoverFill), _bRail = new SolidBrush(Rail),
                             _bAvatar = new SolidBrush(Theme.Surface2), _bBlue = new SolidBrush(Blue), _bRed = new SolidBrush(Red), _bGreen = new SolidBrush(Theme.Accent);
         readonly Pen _pSel = new Pen(Theme.Accent, 1.5f), _pHover = new Pen(Theme.Border), _pSep = new Pen(Theme.Surface2);
@@ -96,6 +108,7 @@ namespace SelectOR
             _fName = Theme.Font(10f, FontStyle.Bold); _fMeta = Theme.Font(9f); _fFact = Theme.Font(9f); _fFactB = Theme.Font(9f, FontStyle.Bold);
             _fNet = Theme.Font(14f, FontStyle.Bold); _fSmall = Theme.Font(8.25f); _fHead = Theme.Font(9.75f, FontStyle.Bold);
             _fHeadSub = Theme.Font(9f); _fAvatar = Theme.Font(7.5f, FontStyle.Bold); _fMsg = Theme.Font(10f);
+            _fStamp = Theme.Font(10f, FontStyle.Bold); _fRowNet = Theme.Font(9.5f, FontStyle.Bold);
             _clock.Tick += (s, e) => { foreach (var it in _items) if (it.Open) { InvalidateItem(it); } };
         }
 
@@ -110,7 +123,7 @@ namespace SelectOR
                 foreach (var im in _img.Values) im.Dispose();
                 foreach (var f in _fit.Values) f.bmp.Dispose();
                 _img.Clear(); _fit.Clear();
-                foreach (var f in new[] { _fName, _fMeta, _fFact, _fFactB, _fNet, _fSmall, _fHead, _fHeadSub, _fAvatar, _fMsg }) f?.Dispose();
+                foreach (var f in new[] { _fName, _fMeta, _fFact, _fFactB, _fNet, _fSmall, _fHead, _fHeadSub, _fAvatar, _fMsg, _fStamp, _fRowNet }) f?.Dispose();
                 foreach (var b in new[] { _bSurface, _bHover, _bRail, _bAvatar, _bBlue, _bRed, _bGreen }) b.Dispose();
                 _pSel.Dispose(); _pHover.Dispose(); _pSep.Dispose();
                 _cardPath?.Dispose(); _railPath?.Dispose();
@@ -149,7 +162,8 @@ namespace SelectOR
         static void Prepare(Item it)
         {
             it.Search = string.Join(" ", it.Driver, it.Route, it.Path, it.Train,
-                                    it.Start == DateTime.MinValue ? "" : it.Start.ToString("dd-MM-yyyy", Es)).ToLowerInvariant();
+                                    it.Start == DateTime.MinValue ? "" : it.Start.ToString("dd-MM-yyyy", Es),
+                                    it.Annulled ? I18n.T("anulado") + " " + it.AnnulReason : "").ToLowerInvariant();
             it.Initials = Initials(it.Driver);
             var meta = new List<string>(3);
             if (it.Route.Length > 0 && it.Route != "—") meta.Add(it.Route);
@@ -158,7 +172,17 @@ namespace SelectOR
             it.Meta = string.Join("  ·  ", meta);
             it.NetText = it.Net.ToString("+#,##0.00;−#,##0.00", Es) + " €";
             it.IncomeText = I18n.T("ingreso") + " " + it.Income.ToString("N0", Es) + " €";
-            it.StatusText = it.Valid ? "✓ " + I18n.T("completado") : I18n.T("no validado");
+            it.StatusText = it.Annulled ? I18n.T("Anulado") : it.Valid ? "✓ " + I18n.T("completado") : I18n.T("no validado");
+            // Fila fina (servicios anteriores)
+            it.TimeText = it.Start == DateTime.MinValue ? "" : it.Start.ToString("HH:mm", Es);
+            var l2 = new List<string>(3);
+            if (it.Train.Length > 0) l2.Add(it.Train);
+            if (it.Route.Length > 0 && it.Route != "—") l2.Add(it.Route);
+            if (it.Path.Length > 0) l2.Add(it.Path);
+            it.Line2 = string.Join("  ·  ", l2);
+            it.KmText = it.Open ? "" : it.Km.ToString("N0", Es) + " km";
+            int ts = (int)Math.Max(0, it.DurationS);
+            it.DurText = it.Open ? "" : $"{ts / 3600}h {(ts % 3600) / 60:00}m";
             var segs = new List<(string, bool)>(10) { (it.Train.Length > 0 ? it.Train : "—", true) };
             if (it.Cars > 0) segs.Add(("  ·  " + it.Cars.ToString("N0", Es) + " " + I18n.T(it.Cars == 1 ? "coche" : "coches") + (it.Engines > 0 ? " (" + it.Engines + "M)" : ""), false));
             if (!it.Open)
@@ -193,9 +217,22 @@ namespace SelectOR
         // Filas: cabecera de día + sus tarjetas (en el orden en que llegan: el más reciente primero).
         void Rebuild()
         {
-            _rows.Clear(); _rowById.Clear();
+            _rows.Clear(); _rowById.Clear(); DayTotals.Clear();
             int y = Theme.Px(2), cardH = Theme.Px(116), headH = Theme.Px(34), gap = Theme.Px(8);
-            int i = 0;
+            int rowH = Theme.Px(30), rowGap = Theme.Px(3), headSmallH = Theme.Px(30), sepH = Theme.Px(44);
+            int i = 0, days = 0;
+            // Cuántos servicios quedan en filas finas (para la línea «ANTERIORES»)
+            int olderCount = 0;
+            {
+                int dd = 0; DateTime last = DateTime.MaxValue; bool any = false;
+                foreach (var it in _items)
+                {
+                    if (!Pass(it)) continue;
+                    var d = DayOf(it);
+                    if (!any || d != last) { dd++; last = d; any = true; }
+                    if (dd > RecentDays) olderCount++;
+                }
+            }
             while (i < _items.Count)
             {
                 var day = DayOf(_items[i]);
@@ -205,31 +242,58 @@ namespace SelectOR
                     var it = _items[j];
                     if (!Pass(it)) continue;
                     n++;
-                    if (!it.Open) { done++; net += it.Net; km += it.Km; }
+                    if (!it.Open && !it.Annulled) { done++; net += it.Net; km += it.Km; }
                 }
                 if (n > 0)
                 {
+                    days++;
+                    bool compact = days > RecentDays;
+                    if (day != DateTime.MinValue) DayTotals[day] = (n, net);
+                    if (compact && days == RecentDays + 1)
+                    {
+                        _rows.Add(new Row { Sep = true, Title = I18n.T("ANTERIORES"),
+                                            Totals = string.Format(I18n.T(olderCount == 1 ? "{0} servicio" : "{0} servicios"), olderCount.ToString("N0", Es)),
+                                            Y = y, H = sepH });
+                        y += sepH;
+                    }
                     _rows.Add(new Row
                     {
-                        Header = true, Title = DayTitle(day, out string sub), Sub = sub,
+                        Header = true, Compact = compact, Day = day, Title = DayTitle(day, out string sub), Sub = sub,
                         Totals = string.Format(I18n.T(n == 1 ? "{0} servicio" : "{0} servicios"), n) + (done > 0 ? "  ·  " + km.ToString("N0", Es) + " km  ·  " : ""),
                         TotalsNet = done > 0 ? net.ToString("+#,##0.00;−#,##0.00", Es) + " €" : "", TotalsNeg = net < 0,
-                        Y = y, H = headH
+                        Y = y, H = compact ? headSmallH : headH
                     });
-                    y += headH;
+                    y += compact ? headSmallH : headH;
                     for (int k = i; k < j; k++)
                     {
                         if (!Pass(_items[k])) continue;
-                        var r = new Row { Item = _items[k], Y = y, H = cardH };
+                        var r = new Row { Item = _items[k], Compact = compact, Day = day, Y = y, H = compact ? rowH : cardH };
                         _rows.Add(r); _rowById[_items[k].Id] = r;
-                        y += cardH + gap;
+                        y += compact ? rowH + rowGap : cardH + gap;
                     }
                 }
                 i = j;
             }
             _total = y + Theme.Px(6);
             AutoScrollMinSize = new Size(0, _rows.Count == 0 ? 0 : _total);
+            _topDay = DateTime.MinValue;
             Invalidate();
+            DaysChanged?.Invoke();
+        }
+
+        // Lleva la lista a un día (su cabecera arriba). false si ese día no tiene servicios a la vista.
+        public bool ScrollToDay(DateTime day)
+        {
+            day = day.Date;
+            foreach (var r in _rows)
+            {
+                if (!r.Header || r.Day != day) continue;
+                int max = Math.Max(0, _total - ClientSize.Height);
+                AutoScrollPosition = new Point(0, Math.Min(max, Math.Max(0, r.Y - Theme.Px(2))));
+                Invalidate();
+                return true;
+            }
+            return false;
         }
 
         static DateTime DayOf(Item i) => i.Start == DateTime.MinValue ? DateTime.MinValue : i.Start.Date;
@@ -298,9 +362,17 @@ namespace SelectOR
             {
                 var r = _rows[k];
                 var rc = new Rectangle(Theme.Px(2), r.Y - top, w - Theme.Px(2), r.H);
-                if (r.Header) PaintHeader(g, r, rc); else PaintCard(g, r.Item, rc);
+                if (r.Sep) PaintSep(g, r, rc);
+                else if (r.Header) PaintHeader(g, r, rc);
+                else if (r.Compact) PaintRow(g, r.Item, rc);
+                else PaintCard(g, r.Item, rc);
             }
             QueueImages();
+            // Día que queda arriba (para el calendario)
+            int fk = FirstRowAt(top + Theme.Px(4));
+            var td = fk < _rows.Count ? _rows[fk].Day : DateTime.MinValue;
+            if (fk < _rows.Count && _rows[fk].Sep && fk + 1 < _rows.Count) td = _rows[fk + 1].Day;
+            if (td != _topDay) { _topDay = td; if (td != DateTime.MinValue) TopDayChanged?.Invoke(td); }
         }
 
         void PaintHeader(Graphics g, Row r, Rectangle rc)
@@ -344,7 +416,7 @@ namespace SelectOR
             FillAt(g, ref _cardPath, ref _cardPathSize, rc, Theme.Px(10), sel || hov ? _bHover : _bSurface, sel ? _pSel : hov ? _pHover : null);
             g.SmoothingMode = SmoothingMode.None;
             // Franja de estado: azul en conducción, rojo con pérdidas, verde con ganancias
-            g.FillRectangle(it.Open ? _bBlue : (it.Net < 0 ? _bRed : _bGreen), rc.X, rc.Y + Theme.Px(12), Theme.Px(3), rc.Height - Theme.Px(24));
+            g.FillRectangle(it.Open ? _bBlue : (it.Annulled || it.Net < 0 ? _bRed : _bGreen), rc.X, rc.Y + Theme.Px(12), Theme.Px(3), rc.Height - Theme.Px(24));
 
             int pad = Theme.Px(14), moneyW = Theme.Px(170);
             int x0 = rc.X + pad + Theme.Px(2), right = rc.Right - moneyW;
@@ -411,12 +483,89 @@ namespace SelectOR
                     TextRenderer.DrawText(g, Ago(DateTime.Now - it.Start), _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
                 TextRenderer.DrawText(g, "●  " + I18n.T("en directo"), _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), Blue, LineR);
             }
+            else if (it.Annulled)
+            {
+                TextRenderer.DrawText(g, it.NetText, _fNet, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), Theme.Subtle, LineR);
+                TextRenderer.DrawText(g, it.IncomeText, _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
+                Stamp(g, LblAnnulled, mr.X + mr.Width / 2 - Theme.Px(6), my + Theme.Px(42));
+            }
             else
             {
                 TextRenderer.DrawText(g, it.NetText, _fNet, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), it.Net < 0 ? Red : Theme.AccentHi, LineR);
                 TextRenderer.DrawText(g, it.IncomeText, _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
                 TextRenderer.DrawText(g, it.StatusText, _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), it.Valid ? Theme.AccentHi : Red, LineR);
             }
+        }
+
+        // Sello girado, como el «SUSPENDIDO» de Socios.
+        void Stamp(Graphics g, string text, int cx, int cy)
+        {
+            var sz = TextRenderer.MeasureText(g, text, _fStamp, Size.Empty, Measure);
+            var box = new Rectangle(-sz.Width / 2 - Theme.Px(9), -sz.Height / 2 - Theme.Px(4), sz.Width + Theme.Px(18), sz.Height + Theme.Px(8));
+            var st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TranslateTransform(cx, cy); g.RotateTransform(-10);
+            using (var pen = new Pen(Color.FromArgb(220, Red), 2f))
+            using (var path = Theme.Round(box, Theme.Px(5))) g.DrawPath(pen, path);
+            using (var br = new SolidBrush(Color.FromArgb(230, Red)))
+            using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString(text, _fStamp, br, new RectangleF(box.X, box.Y, box.Width, box.Height), sf);
+            g.Restore(st);
+        }
+
+        // Línea «ANTERIORES · N servicios»
+        void PaintSep(Graphics g, Row r, Rectangle rc)
+        {
+            int y = rc.Bottom - Theme.Px(14);
+            if (r.TitleW < 0)
+            {
+                r.TitleW = TextRenderer.MeasureText(g, r.Title, _fSmall, Size.Empty, Measure).Width;
+                r.TotalsW = TextRenderer.MeasureText(g, r.Totals, _fSmall, Size.Empty, Measure).Width;
+            }
+            int x = rc.X + Theme.Px(2);
+            TextRenderer.DrawText(g, r.Title, _fSmall, new Rectangle(x, y - Theme.Px(10), r.TitleW + 2, Theme.Px(20)), Theme.AccentHi, Line);
+            x += r.TitleW + Theme.Px(8);
+            TextRenderer.DrawText(g, "·  " + r.Totals, _fSmall, new Rectangle(x, y - Theme.Px(10), r.TotalsW + Theme.Px(30), Theme.Px(20)), Theme.Subtle, Line);
+            x += r.TotalsW + Theme.Px(36);
+            using var pen = new Pen(Theme.Surface2) { DashStyle = DashStyle.Dash };
+            if (x < rc.Right) g.DrawLine(pen, x, y, rc.Right - Theme.Px(4), y);
+        }
+
+        // Fila fina de un servicio anterior: hora · maquinista · tren, ruta y recorrido · km · duración · neto
+        void PaintRow(Graphics g, Item it, Rectangle rc)
+        {
+            bool sel = it.Id == SelectedId, hov = it == _hover;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(rc, Theme.Px(6)))
+            {
+                g.FillPath(sel || hov ? _bHover : _bSurface, path);
+                if (sel) g.DrawPath(_pSel, path);
+            }
+            g.SmoothingMode = SmoothingMode.None;
+            g.FillRectangle(it.Open ? _bBlue : (it.Annulled || it.Net < 0 ? _bRed : _bGreen), rc.X, rc.Y + Theme.Px(7), Theme.Px(3), rc.Height - Theme.Px(14));
+            int x = rc.X + Theme.Px(12), h = rc.Height, y = rc.Y;
+            int netW = Theme.Px(128), durW = Theme.Px(62), kmW = Theme.Px(70);
+            int right = rc.Right - Theme.Px(10);
+            // derecha: neto (o estado)
+            var nr = new Rectangle(right - netW, y, netW, h);
+            if (it.Open) TextRenderer.DrawText(g, I18n.T("En conducción"), _fFactB, nr, Blue, LineR);
+            else if (it.Annulled) TextRenderer.DrawText(g, LblAnnulled, _fRowNet, nr, Red, LineR);
+            else TextRenderer.DrawText(g, it.NetText, _fRowNet, nr, it.Net < 0 ? Red : Theme.AccentHi, LineR);
+            right -= netW + Theme.Px(8);
+            if (right - x > Theme.Px(420))
+            {
+                TextRenderer.DrawText(g, it.DurText, _fFact, new Rectangle(right - durW, y, durW, h), Theme.Subtle, LineR);
+                right -= durW + Theme.Px(6);
+                TextRenderer.DrawText(g, it.KmText, _fFactB, new Rectangle(right - kmW, y, kmW, h), it.Annulled ? Theme.Subtle : Theme.Text, LineR);
+                right -= kmW + Theme.Px(12);
+            }
+            TextRenderer.DrawText(g, it.TimeText, _fFact, new Rectangle(x, y, Theme.Px(44), h), Theme.Subtle, Line);
+            x += Theme.Px(48);
+            int dw = Math.Min(Theme.Px(150), Math.Max(0, right - x));
+            TextRenderer.DrawText(g, it.Driver, _fFactB, new Rectangle(x, y, dw, h), it.Annulled ? Theme.Subtle : Theme.Text, Line);
+            x += dw + Theme.Px(10);
+            if (x < right - Theme.Px(20))
+                TextRenderer.DrawText(g, it.Line2, _fFact, new Rectangle(x, y, right - x, h), Theme.Subtle, Line);
         }
 
         static string Initials(string name)
@@ -464,7 +613,7 @@ namespace SelectOR
                 for (int k = FirstRowAt(Math.Max(0, from)); k < _rows.Count && _rows[k].Y <= to; k++)
                 {
                     var it = _rows[k].Item;
-                    if (it == null || !it.HasImage || _img.ContainsKey(it.Id) || _imgPending.Contains(it.Id) || _imgFailed.Contains(it.Id)) continue;
+                    if (it == null || _rows[k].Compact || !it.HasImage || _img.ContainsKey(it.Id) || _imgPending.Contains(it.Id) || _imgFailed.Contains(it.Id)) continue;
                     LoadImage(it.Id);
                     if (_loads >= MaxLoads) return;
                 }
@@ -545,7 +694,7 @@ namespace SelectOR
         {
             int y = p.Y + ScrollY;
             int k = FirstRowAt(y);
-            if (k < _rows.Count && !_rows[k].Header && y >= _rows[k].Y && y < _rows[k].Y + _rows[k].H) return _rows[k];
+            if (k < _rows.Count && !_rows[k].Header && !_rows[k].Sep && y >= _rows[k].Y && y < _rows[k].Y + _rows[k].H) return _rows[k];
             return null;
         }
 
@@ -581,7 +730,7 @@ namespace SelectOR
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            var cards = _rows.FindAll(r => !r.Header);
+            var cards = _rows.FindAll(r => r.Item != null);
             if (cards.Count == 0) return;
             int i = cards.FindIndex(r => r.Item.Id == SelectedId);
             switch (e.KeyCode)

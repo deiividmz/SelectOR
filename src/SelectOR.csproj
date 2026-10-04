@@ -13,9 +13,9 @@
     <AssemblyTitle>SelectOR</AssemblyTitle>
     <Company>David MZP</Company>
     <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
-    <Version>1.2.47</Version>
-    <AssemblyVersion>1.2.47.0</AssemblyVersion>
-    <FileVersion>1.2.47.0</FileVersion>
+    <Version>1.2.48</Version>
+    <AssemblyVersion>1.2.48.0</AssemblyVersion>
+    <FileVersion>1.2.48.0</FileVersion>
 
     <!-- Carpeta de una instalación de Open Rails (la que contiene OpenRails.exe). Por defecto,
          «OR Desplegado» junto a esta carpeta; se cambia al compilar con
@@ -46,6 +46,7 @@
   <!-- Pictogramas del pupitre (pantógrafo, disyuntor, faros…): van dentro del .exe. -->
   <ItemGroup>
     <EmbeddedResource Include="Pictogramas\*.png" LogicalName="pict.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Novedades\*.txt" LogicalName="novedades.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- Referencias a las DLLs ya compiladas de Open Rails (no se copian, Private=false) -->

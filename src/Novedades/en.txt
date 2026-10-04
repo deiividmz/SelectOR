@@ -1,0 +1,9 @@
+1.2.48
+Services|Your full history: the last 5 days as cards and the earlier ones in a list with a calendar.
+Loans|Ask the bank for a loan from Bank, with monthly instalments and a repayment schedule.
+Rules|Every company has its own internal rules, written by the manager and the supervisors.
+Member statistics|Services, km, hours and net for each driver, month by month.
+Salary by time|Drivers earn a fixed amount per service plus their hours of driving.
+Trips kept safe|If everything closes suddenly, the trip is recorded when you return, with the last data.
+Account and companies|A password recovery key, unique names and a company ID.
+And more|Delete several consists with Ctrl+click; more sections as cards and photos in the Ranking.

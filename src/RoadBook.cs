@@ -387,6 +387,7 @@ namespace SelectOR
         // Horario del tren (modo Horarios): estación → llegada y salida programadas. Con horario, las estaciones
         // que figuran en él son paradas y el resto se pasan sin parar (el maquinista puede cambiarlo).
         public List<(string name, double arr, double dep)> Schedule;
+        public bool FromPlan;   // itinerario de un horario o una actividad: horas siempre del simulador (sin SIM/PC)
 
         public static string NormName(string s)
         {

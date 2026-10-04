@@ -14,7 +14,7 @@ namespace SelectOR
         // Paradas elegidas, con el nombre normalizado (el que se guarda).
         public List<string> Stops { get; private set; } = new List<string>();
 
-        readonly StyledTable _list;
+        readonly CardTable _list;
         readonly Label _count;
         readonly RoundedInput _filter;
         readonly List<(string norm, string disp)> _all;
@@ -70,9 +70,9 @@ namespace SelectOR
             _filter.Box.TextChanged += (s, e) => Fill();
             body.Controls.Add(_filter);
 
-            _list = new StyledTable { Dock = DockStyle.Fill, Margin = new Padding(0) };
-            Native.UseDarkScrollBars(_list);
-            _list.SetColumns(new StyledTable.Col("", 36), new StyledTable.Col(I18n.T("ESTACIÓN"), 240, true));
+            // Tarjetas finas con su casilla: un clic (o la barra espaciadora) marca o desmarca la parada.
+            _list = new CardTable { Dock = DockStyle.Fill, Margin = new Padding(0), CheckCol = 0, TitleCol = 1, ShowAvatar = false,
+                                    CardHeight = 40, MinWidth = 230, Columns = 3, BackColor = Theme.Bg };
             _list.MouseClick += (s, e) => Toggle(_list.SelectedRow);
             _list.KeyDown += (s, e) => { if (e.KeyCode == Keys.Space) { Toggle(_list.SelectedRow); e.Handled = true; } };
             _list.Cursor = Cursors.Hand;

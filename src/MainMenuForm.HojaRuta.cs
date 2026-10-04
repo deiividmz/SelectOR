@@ -84,6 +84,7 @@ namespace SelectOR
             if (!_scenarioReady) { _roadPlanWaiting = plan; EnsureRoadGraph(); return; }
             _roadPlanWaiting = null;
             _road.Schedule = plan.Schedule;
+            _road.FromPlan = true;
             if (plan.Schedule != null) _road.ClearHaltChoices();
             _roadPatPending = plan.PatFile;
             if (_roadPatPending != null) { if (_road.Graph != null) LoadPatIntoRoad(); else EnsureRoadGraph(); }
@@ -146,7 +147,7 @@ namespace SelectOR
             RoadDriveStop();
             var plan = _roadTtPlan; _roadTtPlan = null;
             _road.Reset(_curRoute?.Path ?? "");
-            _road.Schedule = null;
+            _road.Schedule = null; _road.FromPlan = false;
             _roadPatPending = null; _roadPlanWaiting = null; _roadHudWaiting = false;
             _roadVmax = 0; _roadLimit = double.NaN; _roadGameS = double.NaN;
             try { _roadVmax = TrainMaxKmh(_drivenConsist ?? CurrentDrivenConsist()); } catch { }

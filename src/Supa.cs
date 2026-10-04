@@ -234,6 +234,37 @@ namespace SelectOR
             catch (Exception e) { return (null, e.Message); }
         }
 
+        // ---- RPC COMPLETA (por páginas) ----
+        // Igual que SelectAllAsync, para una función que recibe desde qué fila (p_offset) y cuántas (p_limit).
+        public static async Task<(string json, string err)> RpcAllAsync(string fn, Func<int, int, object> args, int page = 1000, int maxRows = 50000)
+        {
+            var sb = new StringBuilder("[");
+            int offset = 0; bool primero = true;
+            while (true)
+            {
+                var (json, err) = await RpcAsync(fn, args(page, offset));
+                if (err != null) return (null, err);
+                int n = 0;
+                try
+                {
+                    using var d = JsonDocument.Parse(json);
+                    if (d.RootElement.ValueKind != JsonValueKind.Array) return (json, null);
+                    foreach (var e in d.RootElement.EnumerateArray())
+                    {
+                        if (!primero) sb.Append(',');
+                        sb.Append(e.GetRawText());
+                        primero = false; n++;
+                    }
+                }
+                catch { return (json, null); }
+                if (n < page) break;
+                offset += page;
+                if (offset >= maxRows) break;
+            }
+            sb.Append(']');
+            return (sb.ToString(), null);
+        }
+
         // ---- SELECT COMPLETO (por páginas) ----
         // La API de Supabase devuelve como mucho 1.000 filas por respuesta (límite de PostgREST), así
         // que una flota de miles de unidades llegaba recortada. Aquí se piden páginas sucesivas hasta

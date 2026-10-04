@@ -40,6 +40,9 @@ namespace SelectOR
             public string StatusText = "";  // estado (completado / en curso / …)
             public bool InProgress;         // true = servicio "En conducción": aún no hay km/tiempo/economía
             public string Notes = "";       // notas del servicio, si las hay
+            public string AnnulText = "";   // servicio anulado por el superadmin: quién, cuándo y por qué
+            public string RecoveredNote = "";   // registrado al volver a abrir SelectOR (se cerró todo durante el viaje)
+            public bool Annulled => !string.IsNullOrEmpty(AnnulText);
             // Datos con los que el servidor calculó la economía (services.calc); null = servicio anterior
             public System.Text.Json.JsonElement? Calc;
             // Paradas comerciales: estación, hora del simulador, suben, bajan (null = no se sabe)
@@ -70,7 +73,7 @@ namespace SelectOR
 
         public ServiceResultDialog(Data d)
         {
-            Text = I18n.T(d.InProgress ? "Servicio en conducción" : (d.Valid ? "Servicio registrado" : "Servicio no registrado"));
+            Text = I18n.T(d.InProgress ? "Servicio en conducción" : d.Annulled ? "Servicio anulado" : (d.Valid ? "Servicio registrado" : "Servicio no registrado"));
             BackColor = Theme.Bg; ForeColor = Theme.Text;
             Font = Theme.Font(9.5f);
             StartPosition = FormStartPosition.CenterParent;
@@ -93,6 +96,7 @@ namespace SelectOR
             meta.Add((I18n.T("COCHES"), d.Cars > 0 ? d.Cars.ToString("N0", Es) + (d.Engines > 0 ? "  (" + d.Engines + " " + I18n.T(d.Engines == 1 ? "motriz" : "motrices") + ")" : "") : "—", Theme.Text));
             meta.Add((I18n.T("RUTA"), string.IsNullOrWhiteSpace(d.Route) ? "—" : d.Route, Theme.Text));
             body.Controls.Add(new Tiles(meta, small: true) { Width = W, Margin = new Padding(0, 0, 0, 8) });
+            if (!string.IsNullOrEmpty(d.RecoveredNote)) body.Controls.Add(NoteCard(d.RecoveredNote, Theme.Surface, Gold));
 
             if (d.InProgress)
             {
@@ -139,7 +143,7 @@ namespace SelectOR
                             TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(2, 0, 2, 8)
                         });
                 }
-                else
+                else if (!d.Annulled)   // anulado: lo explica su propia tarjeta (AnnulText)
                 {
                     // Por qué no se registra el viaje: una línea por motivo y, debajo, qué supone.
                     var motivos = d.Reasons.Count > 0 ? d.Reasons : new List<string> { I18n.T("Velocidad media imposible (más de 350 km/h).") };
@@ -150,6 +154,7 @@ namespace SelectOR
                 }
             }
 
+            if (!string.IsNullOrWhiteSpace(d.AnnulText)) body.Controls.Add(NoteCard(d.AnnulText, Color.FromArgb(64, 44, 44), Red, bold: true));
             if (!string.IsNullOrWhiteSpace(d.Notes)) body.Controls.Add(NoteCard("📝  " + d.Notes, Theme.Surface, Theme.Text));
 
             // Carné por puntos: lo que ha pasado en este servicio y cómo queda el carné.
@@ -310,6 +315,7 @@ namespace SelectOR
                 var g = e.Graphics; var r = ClientRectangle;
                 Color a, b, st; string status;
                 if (_d.InProgress) { a = Color.FromArgb(40, 52, 86); b = Color.FromArgb(32, 36, 48); st = Blue; status = "●  " + I18n.T("EN CONDUCCIÓN · EN DIRECTO"); }
+                else if (_d.Annulled) { a = Color.FromArgb(84, 44, 44); b = Color.FromArgb(44, 32, 32); st = Red; status = "⛔  " + I18n.T("SERVICIO ANULADO"); }
                 else if (_d.Valid) { a = Color.FromArgb(40, 70, 48); b = Color.FromArgb(32, 42, 36); st = Green; status = "✓  " + I18n.T("SERVICIO REGISTRADO"); }
                 else { a = Color.FromArgb(84, 44, 44); b = Color.FromArgb(44, 32, 32); st = Red; status = "✕  " + I18n.T("SERVICIO NO REGISTRADO"); }
                 using (var br = new LinearGradientBrush(r, a, b, LinearGradientMode.ForwardDiagonal)) g.FillRectangle(br, r);

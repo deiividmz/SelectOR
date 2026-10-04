@@ -32,7 +32,7 @@ namespace SelectOR
         RoundButton _chatSendBtn;
         Label _chatNote, _chatPermMsg;
         FlowLayoutPanel _chatTabs;
-        StyledTable _chatPermList;
+        CardTable _chatPermList;
         readonly List<string> _chatPermIds = new();
         int _chatTab;
 
@@ -284,11 +284,10 @@ namespace SelectOR
             var intro = EmpIntro("Quién puede escribir en el chat de la empresa. A quien le retires el permiso podrá seguir leyendo, pero no escribir. Solo el gerente y el superadministrador pueden cambiarlo.");
             intro.MaximumSize = new Size(900, 0);
             perm.Controls.Add(intro);
-            _chatPermList = EmpTable();
-            _chatPermList.SetColumns(
-                new StyledTable.Col("MAQUINISTA", 0, true),
-                new StyledTable.Col("ROL", 160),
-                new StyledTable.Col("CHAT", 220));
+            // Una tarjeta por socio: su rol y si puede escribir (verde) o no (rojo).
+            _chatPermList = EmpCards();
+            _chatPermList.TitleCol = 0; _chatPermList.SubCols = new[] { 1 }; _chatPermList.PillCol = 2;
+            _chatPermList.CardHeight = 64; _chatPermList.MinWidth = 380; _chatPermList.Columns = 3;
             perm.Controls.Add(_chatPermList);
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
             var mute = EmpButton(Tr("Retirar permiso para escribir")); mute.Width = 270;

@@ -34,7 +34,11 @@ namespace SelectOR
                 // tipo, masa y longitud de todos los trenes (filtros y fichas listos al abrir): de la caché, casi al
                 // momento; la primera vez, unos segundos
                 var classify = Task.Run(async () => { while (_classTotal > 0 && _classDone < _classTotal) await Task.Delay(100); });
+                _ = trains.ContinueWith(_ => LoadLog("vistas 2D: trenes listos"));
+                _ = machines.ContinueWith(_ => LoadLog("vistas 2D: máquinas de Compra listas"));
+                _ = classify.ContinueWith(_ => LoadLog($"vistas 2D: clasificación lista ({_classDone}/{_classTotal})"));
                 await Task.WhenAny(Task.WhenAll(trains, machines, classify), Task.Delay(Prewarm2DMaxMs));
+                LoadLog($"vistas 2D: fin de la espera · trenes {trains.IsCompleted} · máquinas {machines.IsCompleted} · clasificación {classify.IsCompleted} ({_classDone}/{_classTotal})");
             }
             catch { }
             finally { LoadStep("vistas2d"); }

@@ -21,7 +21,7 @@ namespace SelectOR
 
         public int Elegida { get; private set; } = -1;
 
-        readonly StyledTable _list;
+        readonly CardTable _list;
         readonly List<Opcion> _ops;
 
         public ConsistPriceDialog(string motriz, List<Opcion> opciones, int porDefecto)
@@ -61,14 +61,10 @@ namespace SelectOR
                 Font = Theme.Font(8.5f), Margin = new Padding(0, 0, 0, 10), BackColor = Theme.Bg
             });
 
-            _list = new StyledTable { Dock = DockStyle.Fill, Margin = new Padding(0) };
-            Native.UseDarkScrollBars(_list);
-            _list.SetColumns(
-                new StyledTable.Col(I18n.T("COMPOSICIÓN"), 260, true),
-                new StyledTable.Col(I18n.T("VEHÍCULOS"), 100, false, HorizontalAlignment.Right),
-                new StyledTable.Col(I18n.T("PLAZAS"), 90, false, HorizontalAlignment.Right),
-                new StyledTable.Col(I18n.T("MASA"), 100, false, HorizontalAlignment.Right),
-                new StyledTable.Col(I18n.T("PRECIO"), 130, false, HorizontalAlignment.Right));
+            // Una tarjeta por composición: vehículos, plazas o masa y, a la derecha, el precio. La más barata, marcada.
+            _list = new CardTable { Dock = DockStyle.Fill, Margin = new Padding(0), TitleCol = 0, SubCols = new[] { 1, 2, 3 }, RightCol = 4,
+                                    Icon = "🚆", CardHeight = 64, MinWidth = 300, Columns = 1, BackColor = Theme.Bg };
+            _list.Formats[1] = I18n.T("{0} vehículo") + "|" + I18n.T("{0} vehículos"); _list.Formats[2] = I18n.T("{0} plazas");
             _list.DoubleClick += (s, e) => Aceptar();
             body.Controls.Add(_list);
 
@@ -103,6 +99,12 @@ namespace SelectOR
                     o.Precio.ToString("N0", es) + " €"
                 },
                 new Color?[] { null, null, null, null, Theme.Accent });
+            if (_ops.Count > 1)
+            {
+                int cheap = 0;
+                for (int k = 1; k < _ops.Count; k++) if (_ops[k].Precio < _ops[cheap].Precio) cheap = k;
+                _list.Badges[cheap] = I18n.T("Más barata");
+            }
             if (_ops.Count == 0) _list.SetEmpty(I18n.T("No se ha encontrado ninguna composición con esta máquina."));
             if (sel >= 0) _list.SelectRow(sel);
         }

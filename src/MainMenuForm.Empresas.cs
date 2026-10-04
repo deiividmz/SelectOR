@@ -28,6 +28,7 @@ namespace SelectOR
         // --- Home ---
         Label _empUserLbl, _empCoTitle, _empHomeMsg;
         Label _empIdChip;   // chip pequeño con el ID de usuario, copiable con un clic
+        Label _empCoIdLbl;  // ID de la empresa («EMP-XXXXXX»), copiable con un clic
         ComboBox _empCoCombo;                       // selector de empresa (arriba del menú lateral)
         bool _suppressCoSel;                        // ignora SelectedIndexChanged del selector durante la recarga
         EmpKpiStrip _empStatsCard; Panel _empStatsGap;           // KPIs de la empresa (se ocultan sin empresa y en Ranking / Mi perfil)
@@ -165,7 +166,7 @@ namespace SelectOR
         Label _memberMsg;
         RoundButton _memberAddBtn, _memberDelBtn;
         // Solicitudes de ingreso (un maquinista pide unirse a la empresa)
-        StyledTable _joinList; readonly List<string> _joinIds = new();
+        CardTable _joinList; readonly List<string> _joinIds = new();
         // --- Banca (historial de movimientos) ---
         Label _bankMsg; Panel _bankPanel;
         // --- Cabecera profesional ---
@@ -177,10 +178,11 @@ namespace SelectOR
         int _empSubtab;
         // Revisión de servicios sospechosos (superadmin)
         // Gestión de usuarios (solo superadmin)
-        StyledTable _usersList; Label _usersMsg;
-        readonly List<string> _userIds = new(); readonly List<bool> _userIsSelf = new();
+        UserCardList _usersList; Label _usersMsg;
+        readonly List<UserItem> _usersAll = new(); string _usersQuery = "";
+        readonly List<string> _userIds = new(); readonly List<bool> _userIsSelf = new(); readonly List<string> _userKeys = new();
         // Administración de TODAS las empresas (solo superadmin)
-        Panel _allCompPanel; StyledTable _allCompList; Label _allCompMsg;
+        Panel _allCompPanel; CardTable _allCompList; Label _allCompMsg;
         readonly List<string> _allCompIds = new();
         // Flota de la empresa (vehículos por .eng) — tabla + preview 3D
         Panel _fleetPanel; FleetCardList _fleetCards; Label _fleetMsg;
@@ -280,7 +282,9 @@ namespace SelectOR
             public int Cars;
         }
         // Borrado por el superadmin (servicios y movimientos de banca)
-        RoundButton _svcDelBtn, _ledgerDelBtn;
+        RoundButton _svcDelBtn, _ledgerDelBtn, _svcAnnulBtn;
+        ServiceCalendar _svcCal;
+        (long total, long open, long done, long annulled, double km)? _svcStats;   // totales del servidor (sin límite)
         readonly List<string> _ledgerIds = new();
         readonly List<SvcRow> _svcRows = new();   // datos por servicio (para la ventana de detalle)
 
@@ -295,6 +299,8 @@ namespace SelectOR
             public string Path = "";                                    // recorrido (.pat)
             public DateTime Start = DateTime.MinValue;                  // salida, hora local
             public bool HasImage;                                       // tiene composición 2D guardada
+            public bool Annulled;                                       // anulado por el superadmin
+            public string AnnulReason = "", AnnulledBy = "", AnnulledAt = "";
         }
 
         // «300 plazas» si el tren lleva viajeros; «1.250 t» si es de mercancías (el ingreso se calcula con esa
@@ -306,7 +312,7 @@ namespace SelectOR
             return "—";
         }
         // --- Ajustes (tarifas + saldo superadmin) ---
-        RoundedInput _tarIncome, _tarCanon, _tarEnergy, _tarSalary, _tarBalance, _defBalance;
+        RoundedInput _tarIncome, _tarCanon, _tarEnergy, _tarSalary, _tarSalaryHour, _tarSalaryMaxH, _tarBalance, _defBalance;
         RoundButton _tarSaveBtn, _tarBalanceBtn, _defBalanceBtn;
         Label _tariffMsg;
         Panel _tarBalanceRow, _defBalanceRow;
@@ -326,7 +332,7 @@ namespace SelectOR
 
         sealed class EmpCompany
         {
-            public string Id, Name, Logo; public double Balance;
+            public string Id, Name, Logo, Code = ""; public double Balance;   // Code: ID propio («EMP-XXXXXX»)
             public double IncomePerKm = 8, CanonPerKm = 3, EnergyPerKm = 1.5, SalaryPerService = 40;
             public bool PaEnabled;   // megafonías habilitadas por el superadmin
             public override string ToString() => Name;
@@ -443,6 +449,9 @@ namespace SelectOR
             var reg = EmpButton(Tr("Registrarse"));
             reg.Click += (s, e) => DoSignUp();   // el nombre de usuario es el propio campo de arriba
             form.Controls.Add(reg);
+            var forgot = EmpLink(Tr("¿Has olvidado la contraseña?"));
+            forgot.Click += (s, e) => ForgotPassword();   // con la clave de recuperación
+            form.Controls.Add(forgot);
 
             var back = EmpLink(Tr("⚙  Cambiar servidor"));
             back.Click += (s, e) => { _empForceCfg = true; RefreshEmpresasView(); };
@@ -470,15 +479,15 @@ namespace SelectOR
         }
 
         // Secciones de Empresas (el índice es el que usan ShowSubtab / UpdateSubtabVisibility).
-        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía", "Chat" };
-        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "shield", "connect", "globe", "train", "train", "speaker", "chat" };
+        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía", "Chat", "Normas", "Préstamos" };
+        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "shield", "connect", "globe", "train", "train", "speaker", "chat", "rules", "bank" };
         // Agrupación del menú lateral.
         static readonly (string title, int[] items)[] NavGroupDefs =
         {
             ("OPERACIÓN", new[] { 0, 9, 10 }),        // Servicios · Flota · Compra
             ("FINANZAS", new[] { 1, 4 }),             // Banca · Ranking
-            ("EMPRESA", new[] { 12, 2, 3, 11, 5 }),   // Chat · Socios · Ajustes · Megafonía · Mi perfil
-            ("ADMINISTRACIÓN", new[] { 6, 7, 8 }),    // Revisión (carné) · Usuarios · Administración
+            ("EMPRESA", new[] { 12, 2, 13, 3, 11, 5 }),   // Chat · Socios · Normas · Ajustes · Megafonía · Mi perfil
+            ("ADMINISTRACIÓN", new[] { 6, 14, 7, 8 }),    // Revisión (carné) · Préstamos · Usuarios · Administración
         };
         const int RailW = 250;          // ancho del menú lateral de Empresas
         static readonly Color RailCardC = Color.FromArgb(38, 46, 41);   // tarjeta de la empresa (verde muy oscuro)
@@ -488,7 +497,8 @@ namespace SelectOR
         {
             Color.FromArgb(120, 144, 226), Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191), Color.FromArgb(150, 160, 170),
             Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(229, 115, 115), Color.FromArgb(45, 212, 191),
-            Color.FromArgb(167, 139, 250), Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(167, 139, 250), Color.FromArgb(120, 144, 226)
+            Color.FromArgb(167, 139, 250), Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(167, 139, 250), Color.FromArgb(120, 144, 226),
+            Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191)
         };
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
         bool _subtabAutoFallback;       // se abrió Ranking automáticamente (sin empresas aún): al cargar, volver a Servicios
@@ -538,7 +548,13 @@ namespace SelectOR
             _empRoleLbl = new Label { AutoSize = true, MaximumSize = new Size(RailW - 100, 0), ForeColor = Color.FromArgb(170, 200, 175), Font = Theme.Font(8.5f), Margin = new Padding(0, 2, 0, 0) };
             _logoLink = EmpLink(Tr("Cambiar logotipo")); _logoLink.Visible = false;   // compatibilidad (el logo ya es clicable)
             _logoLink.Click += (s, e) => ChangeLogo();
-            txt.Controls.Add(titleRow); txt.Controls.Add(_empRoleLbl);
+            // ID propio de la empresa, copiable con un clic.
+            _empCoIdLbl = new Label { AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8.25f), Cursor = Cursors.Hand, Margin = new Padding(0, 3, 0, 0), BackColor = RailCardC };
+            _empCoIdLbl.Click += (s, e) => { if (!string.IsNullOrEmpty(_empSel?.Code)) { try { Clipboard.SetText(_empSel.Code); Msg(_empHomeMsg, string.Format(Tr("ID de la empresa copiado: {0}"), _empSel.Code), false); } catch { } } };
+            _empCoIdLbl.MouseEnter += (s, e) => _empCoIdLbl.ForeColor = Theme.Accent;
+            _empCoIdLbl.MouseLeave += (s, e) => _empCoIdLbl.ForeColor = Theme.Subtle;
+            new ToolTip().SetToolTip(_empCoIdLbl, Tr("Clic para copiar el ID de la empresa"));
+            txt.Controls.Add(titleRow); txt.Controls.Add(_empRoleLbl); txt.Controls.Add(_empCoIdLbl);
             idRow.Controls.Add(_empLogoPic, 0, 0); idRow.Controls.Add(txt, 1, 0);
             cc.Controls.Add(idRow);
 
@@ -794,7 +810,9 @@ namespace SelectOR
             _fleetPanel = BuildFleetSubpanel();
             _buyPanel = BuildBuySubpanel();
             _paPanel = BuildPaSubpanel();
-            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel, _chatPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
+            _rulesPanel = BuildRulesSubpanel();           // normas internas de la empresa
+            BuildLoansAdminSubpanel();                    // préstamos de todas las empresas (superadmin)
+            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel, _chatPanel, _rulesPanel, _loansAdminPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
 
             _empHomeMsg = EmpMsg(); _empHomeMsg.Dock = DockStyle.Bottom;
 
@@ -859,7 +877,7 @@ namespace SelectOR
             frow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             frow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             _bankChips = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
-            string[] chips = { "Todo", "Ingresos", "Cánon AI", "Energía", "Salarios", "Flota", "Otros" };
+            string[] chips = { "Todo", "Ingresos", "Cánon AI", "Energía", "Salarios", "Flota", "Otros", "Préstamos" };
             for (int k = 0; k < chips.Length; k++)
             {
                 int idx = k;
@@ -880,14 +898,21 @@ namespace SelectOR
             mov.Controls.Add(_ledgerDelBtn);
 
             var pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-            pages.Controls.Add(mov); pages.Controls.Add(res);
+            var loans = BuildLoansPage();
+            pages.Controls.Add(loans); pages.Controls.Add(mov); pages.Controls.Add(res);
 
             // Pestañas a la izquierda, periodo a la derecha.
             var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 40, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var tabs = MakeSubTabs(new[] { "Resumen", "Extracto" }, i => { res.Visible = i == 0; mov.Visible = i == 1; });
+            FlowLayoutPanel periodBar = null;
+            var tabs = MakeSubTabs(new[] { "Resumen", "Extracto", "Préstamos" }, i =>
+            {
+                res.Visible = i == 0; mov.Visible = i == 1; loans.Visible = i == 2;
+                if (periodBar != null) periodBar.Visible = i != 2;
+                if (i == 2) { UpdateLoanButtons(); LoadLoans(); }
+            });
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             var period = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(8, 2, 0, 0), Anchor = AnchorStyles.Right };
             string[] pnames = { "Este mes", "6 meses", "Todo" };
@@ -898,6 +923,7 @@ namespace SelectOR
                 b.Click += (s, e) => { _bankPeriod = idx; SetChipActive(period, idx); RefreshBank(); };
                 period.Controls.Add(b);
             }
+            periodBar = period;
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(period, 1, 0);
             outer.Controls.Add(pages); outer.Controls.Add(top);
 
@@ -953,7 +979,19 @@ namespace SelectOR
             search.Box.TextChanged += (s, e) => _svcCards.Filter(search.Box.Text);
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
-            t.Controls.Add(_svcCards);
+            // Lista y, a la derecha, el calendario (un clic en un día lleva la lista a ese día).
+            var mid = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
+            var calHost = new Panel { Dock = DockStyle.Right, Width = Theme.Px(250), BackColor = Theme.Bg, Padding = new Padding(Theme.Px(10), Theme.Px(4), 0, 0) };
+            _svcCal = new ServiceCalendar { Dock = DockStyle.Top };
+            calHost.Controls.Add(_svcCal);
+            calHost.Resize += (s, e) => _svcCal.Height = _svcCal.NeededHeight(Math.Max(100, calHost.ClientSize.Width - calHost.Padding.Horizontal));
+            _svcCal.DayClicked += d => _svcCards.ScrollToDay(d);
+            _svcCards.DaysChanged += () => _svcCal.SetDays(_svcCards.DayTotals);
+            _svcCards.TopDayChanged += d => _svcCal.SetCurrent(d);
+            _svcCards.LblAnnulled = Tr("ANULADO");
+            mid.Controls.Add(_svcCards);
+            mid.Controls.Add(calHost);
+            t.Controls.Add(mid);
 
             // Acciones: ver detalle (todos) + borrar servicio (solo superadmin).
             var svcBtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -963,6 +1001,11 @@ namespace SelectOR
             _svcDelBtn = EmpButton(Tr("Eliminar servicio"));
             _svcDelBtn.Width = 200; _svcDelBtn.Margin = new Padding(8, 10, 2, 2); _svcDelBtn.BaseColor = Theme.Surface2; _svcDelBtn.HoverColor = Color.FromArgb(150, 60, 60); _svcDelBtn.TextColor = RedC; _svcDelBtn.Visible = false;
             _svcDelBtn.Click += (s, e) => DeleteServiceRow();
+            // Superadmin: anular un servicio registrado (se queda en el historial con el motivo).
+            _svcAnnulBtn = EmpButton(Tr("Anular servicio…"));
+            _svcAnnulBtn.Width = 200; _svcAnnulBtn.Margin = new Padding(8, 10, 2, 2); _svcAnnulBtn.BaseColor = Theme.Surface2; _svcAnnulBtn.HoverColor = Color.FromArgb(150, 60, 60); _svcAnnulBtn.TextColor = RedC; _svcAnnulBtn.Visible = false;
+            _svcAnnulBtn.Click += (s, e) => AnnulServiceRow();
+            svcBtns.Controls.Add(_svcAnnulBtn);
             svcBtns.Controls.Add(_svcDelBtn);
             t.Controls.Add(svcBtns);
             return t;
@@ -974,7 +1017,7 @@ namespace SelectOR
         // Vacía la lista (cerrar sesión, sin empresas).
         void ClearServices()
         {
-            _svcRows.Clear(); _svcLastJson = _svcLastTrenJson = null; _svcCardsCompany = null;
+            _svcRows.Clear(); _svcLastJson = _svcLastTrenJson = null; _svcCardsCompany = null; _svcStats = null;
             _svcCards?.SetItems(Array.Empty<ServiceCardList.Item>());
             UpdateServiceTabCounts();
         }
@@ -988,8 +1031,9 @@ namespace SelectOR
             for (int k = 0; k < names.Length && k < _svcTabs.Controls.Count; k++)
             {
                 if (_svcTabs.Controls[k] is not RoundButton b) continue;
-                int n = System.Linq.Enumerable.Count(_svcRows, r => k == 0 || (k == 1 ? r.Status == "open" : r.Status != "open"));
-                b.Text = Tr(names[k]) + (_svcRows.Count > 0 ? "  " + n.ToString("N0", EsEs) : "");
+                long n = System.Linq.Enumerable.Count(_svcRows, r => k == 0 || (k == 1 ? r.Status == "open" : r.Status != "open"));
+                if (_svcStats is { } st) n = k == 0 ? st.total : k == 1 ? st.open : st.total - st.open;   // los del servidor, sin límite
+                b.Text = Tr(names[k]) + (_svcRows.Count > 0 || n > 0 ? "  " + n.ToString("N0", EsEs) : "");
                 b.Width = TextRenderer.MeasureText(b.Text, f).Width + 34;
                 b.Invalidate();
             }
@@ -1053,11 +1097,11 @@ namespace SelectOR
             pJoin.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             pJoin.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // lista
             pJoin.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // aceptar / rechazar
-            _joinList = EmpTable(); _joinList.Dock = DockStyle.Fill; _joinList.Margin = new Padding(2);
-            _joinList.SetColumns(
-                new StyledTable.Col("MAQUINISTA", 150),
-                new StyledTable.Col("MENSAJE", 0, true),
-                new StyledTable.Col("FECHA", 92));
+            // Una tarjeta por solicitud: quién, cuándo y su mensaje.
+            _joinList = EmpCards(); _joinList.Margin = new Padding(2);
+            _joinList.TitleCol = 0; _joinList.SubCols = new[] { 2 }; _joinList.QuoteCol = 1;
+            _joinList.Formats[2] = Tr("Solicitud del {0}");
+            _joinList.CardHeight = 80; _joinList.MinWidth = 420; _joinList.Columns = 3;
             pJoin.Controls.Add(_joinList);
             var jbtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(2, 0, 2, 0) };
             var jAcc = EmpButton(Tr("Aceptar"), primary: true); jAcc.Width = 150; jAcc.Margin = new Padding(0, 10, 8, 2); jAcc.Click += (s, e) => ApproveJoin();
@@ -1066,9 +1110,10 @@ namespace SelectOR
             pJoin.Controls.Add(jbtns);
 
             var pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-            pages.Controls.Add(pJoin); pages.Controls.Add(pAdd); pages.Controls.Add(pMem);
-            var tabs = MakeSubTabs(new[] { "Socios", "Añadir socio", "Solicitudes de ingreso" },
-                i => { pMem.Visible = i == 0; pAdd.Visible = i == 1; pJoin.Visible = i == 2; });
+            var pStats = BuildStatsPage();   // estadísticas por maquinista
+            pages.Controls.Add(pStats); pages.Controls.Add(pJoin); pages.Controls.Add(pAdd); pages.Controls.Add(pMem);
+            var tabs = MakeSubTabs(new[] { "Socios", "Estadísticas", "Añadir socio", "Solicitudes de ingreso" },
+                i => { pMem.Visible = i == 0; pStats.Visible = i == 1; pAdd.Visible = i == 2; pJoin.Visible = i == 3; if (i == 1) LoadStats(); });
             _memberMsg = EmpMsg(); _memberMsg.Dock = DockStyle.Bottom;
             outer.Controls.Add(pages); outer.Controls.Add(tabs); outer.Controls.Add(_memberMsg);
             return outer;
@@ -1098,8 +1143,13 @@ namespace SelectOR
             _tarCanon = EmpInput("3"); _tarCanon.Width = 240; pTar.Controls.Add(_tarCanon);
             pTar.Controls.Add(EmpFieldLabel(Tr("Energía / combustible por km (tren de 500 t; escala con la masa)")));
             _tarEnergy = EmpInput("1.5"); _tarEnergy.Width = 240; pTar.Controls.Add(_tarEnergy);
-            pTar.Controls.Add(EmpFieldLabel(Tr("Salario del maquinista por servicio")));
-            _tarSalary = EmpInput("40"); _tarSalary.Width = 240; pTar.Controls.Add(_tarSalary);
+            // Salario = fijo por servicio + horas de conducción × precio por hora (con tope; salario-por-tiempo.sql).
+            pTar.Controls.Add(EmpFieldLabel(Tr("Salario del maquinista: fijo por servicio")));
+            _tarSalary = EmpInput("30"); _tarSalary.Width = 240; pTar.Controls.Add(_tarSalary);
+            pTar.Controls.Add(EmpFieldLabel(Tr("Salario del maquinista: por hora de conducción")));
+            _tarSalaryHour = EmpInput("25"); _tarSalaryHour.Width = 240; pTar.Controls.Add(_tarSalaryHour);
+            pTar.Controls.Add(EmpFieldLabel(Tr("Horas de conducción pagadas como máximo por servicio")));
+            _tarSalaryMaxH = EmpInput("6"); _tarSalaryMaxH.Width = 240; pTar.Controls.Add(_tarSalaryMaxH);
             _tarSaveBtn = EmpButton(Tr("Guardar tarifas"), primary: true); _tarSaveBtn.Width = 200;
             _tarSaveBtn.Click += (s, e) => SaveTariffs();
             pTar.Controls.Add(_tarSaveBtn);
@@ -1396,26 +1446,48 @@ namespace SelectOR
 
         void ShowSubtab(int i)
         {
+            var __vis = Perf.T("ShowSubtab " + i + " · paneles");
             _empSubtab = i;
             for (int k = 0; k < _empSubtabs.Length; k++) { if (_empSubtabs[k] == null) continue; _empSubtabs[k].Active = k == i; _empSubtabs[k].Invalidate(); }
             if (_empSectionTitle != null && i >= 0 && i < SubNames.Length) _empSectionTitle.Text = Tr(SubNames[i]);
-            _svcPanel.Visible = i == 0;
-            _bankPanel.Visible = i == 1;
-            _memberPanel.Visible = i == 2;
-            _tariffPanel.Visible = i == 3;
-            _rankPanel.Visible = i == 4;
-            _soloPanel.Visible = i == 5;
-            if (_liveShareBox != null) _liveShareBox.Visible = i == 5;
-            _reviewPanel.Visible = i == 6;
-            _usersPanel.Visible = i == 7;
-            _allCompPanel.Visible = i == 8;
-            _fleetPanel.Visible = i == 9;
-            _buyPanel.Visible = i == 10;
-            if (_paPanel != null) _paPanel.Visible = i == 11;
-            if (_chatPanel != null) _chatPanel.Visible = i == ChatSubtab;
+            // Primero se ocultan las demás y después se enseña la elegida (sin volver a maquetarla si no hace falta).
+            if (_svcPanel != null && !(i == 0)) _svcPanel.Visible = false;
+            if (_bankPanel != null && !(i == 1)) _bankPanel.Visible = false;
+            if (_memberPanel != null && !(i == 2)) _memberPanel.Visible = false;
+            if (_tariffPanel != null && !(i == 3)) _tariffPanel.Visible = false;
+            if (_rankPanel != null && !(i == 4)) _rankPanel.Visible = false;
+            if (_soloPanel != null && !(i == 5)) _soloPanel.Visible = false;
+            if (_liveShareBox != null && !(i == 5)) _liveShareBox.Visible = false;
+            if (_reviewPanel != null && !(i == 6)) _reviewPanel.Visible = false;
+            if (_usersPanel != null && !(i == 7)) _usersPanel.Visible = false;
+            if (_allCompPanel != null && !(i == 8)) _allCompPanel.Visible = false;
+            if (_fleetPanel != null && !(i == 9)) _fleetPanel.Visible = false;
+            if (_buyPanel != null && !(i == 10)) _buyPanel.Visible = false;
+            if (_paPanel != null && !(i == 11)) _paPanel.Visible = false;
+            if (_chatPanel != null && !(i == ChatSubtab)) _chatPanel.Visible = false;
+            if (_rulesPanel != null && !(i == NormasSubtab)) _rulesPanel.Visible = false;
+            if (_loansAdminPanel != null && !(i == PrestamosSubtab)) _loansAdminPanel.Visible = false;
+            if (i == 0) ShowFast(_svcPanel, true);
+            if (i == 1) ShowFast(_bankPanel, true);
+            if (i == 2) ShowFast(_memberPanel, true);
+            if (i == 3) ShowFast(_tariffPanel, true);
+            if (i == 4) ShowFast(_rankPanel, true);
+            if (i == 5) ShowFast(_soloPanel, true);
+            if (i == 5) ShowFast(_liveShareBox, true);
+            if (i == 6) ShowFast(_reviewPanel, true);
+            if (i == 7) ShowFast(_usersPanel, true);
+            if (i == 8) ShowFast(_allCompPanel, true);
+            if (i == 9) ShowFast(_fleetPanel, true);
+            if (i == 10) ShowFast(_buyPanel, true);
+            if (i == 11) ShowFast(_paPanel, true);
+            if (i == ChatSubtab) ShowFast(_chatPanel, true);
+            if (i == NormasSubtab) ShowFast(_rulesPanel, true);
+            if (i == PrestamosSubtab) ShowFast(_loansAdminPanel, true);
+            __vis.Dispose();
+            var __load = Perf.T("ShowSubtab " + i + " · carga");
             // Cada subpestaña recarga sus datos al abrirse (ya no hay botón "Actualizar").
             if (i == 0 && _empSel != null) LoadServices(_empSel);
-            if (i == 1) LoadLedger();
+            if (i == 1) OnBankShown();
             if (i == 2 && _empSel != null) LoadMembers(_empSel);
             if (i == 3) { FillTariffFields(); LoadDefaultBalance(); LoadFleetSettings(); LoadFarePerKm(); }
             if (i == 4) LoadRankTab();
@@ -1427,6 +1499,10 @@ namespace SelectOR
             if (i == 10) LoadPurchaseRequests();
             if (i == 11) OnMegafoniaShown();
             if (i == ChatSubtab) OnChatShown();
+            if (i == NormasSubtab) { UpdateRuleButtons(); LoadRules(); }
+            if (i == PrestamosSubtab) LoadLoansAdmin();
+            __load.Dispose();
+            using (Perf.T("ShowSubtab " + i + " · kpis"))
             UpdateCompanyKpis();                  // la tira de la empresa se muestra u oculta según la sección
         }
 
@@ -1435,7 +1511,7 @@ namespace SelectOR
         {
             RefreshEmpresasView();
             AjustarNav();   // al hacerse visible ya se conoce el alto real del menú lateral
-            if (Supa.IsSuperadmin) LoadReview(onlyCount: true);   // «Revisión (n)»: infracciones pendientes de todas las empresas
+            if (Supa.IsSuperadmin) { LoadReview(onlyCount: true); LoadLoansAdmin(onlyCount: true); }   // «Revisión (n)» y «Préstamos (n)»
             if (Supa.IsLoggedIn && !_empLoaded) LoadCompanies();
             else if (!Supa.IsLoggedIn) TryAutoLogin();
         }
@@ -1632,9 +1708,10 @@ namespace SelectOR
         void OpenAccountMenu(Control anchor)
         {
             if (!Supa.IsLoggedIn) return;
-            var cm = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = true };
+            var cm = MenuStyle.Apply(new ContextMenuStrip() { ShowImageMargin = false, ShowCheckMargin = true });
             cm.Items.Add(Tr("✎  Editar nombre"), null, (s, e) => EditMaquinistaName());
             cm.Items.Add(Tr("🔑  Cambiar contraseña"), null, (s, e) => ChangeMyPassword());
+            cm.Items.Add(Tr("🗝  Clave de recuperación"), null, (s, e) => ShowMyRecoveryKey());
             var snd = new ToolStripMenuItem(Tr("🔔  Sonido de avisos y del chat")) { Checked = _prefs?.NotifySound != false, CheckOnClick = true };
             snd.CheckedChanged += (s, e) =>
             {
@@ -1778,7 +1855,9 @@ namespace SelectOR
             _empLoaded = true;
             bool first = _empCompanies.Count == 0;
             if (!soft || first) Msg(_empHomeMsg, Tr("Cargando empresas…"), false);
-            var (json, err) = await Supa.SelectAsync("companies?select=id,name,logo,balance,income_per_km,canon_per_km,energy_per_km,salary_per_service,pa_enabled&order=name.asc");
+            var (json, err) = await Supa.SelectAsync("companies?select=id,name,logo,balance,income_per_km,canon_per_km,energy_per_km,salary_per_service,pa_enabled,code&order=name.asc");
+            if (err != null)   // servidor sin nombres-unicos.sql (sin el ID de empresa)
+                (json, err) = await Supa.SelectAsync("companies?select=id,name,logo,balance,income_per_km,canon_per_km,energy_per_km,salary_per_service,pa_enabled&order=name.asc");
             if (err != null)   // por si aún no están las columnas logo/pa_enabled (esquema sin re-ejecutar): reintenta sin ellas
                 (json, err) = await Supa.SelectAsync("companies?select=id,name,balance,income_per_km,canon_per_km,energy_per_km,salary_per_service&order=name.asc");
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
@@ -1832,6 +1911,7 @@ namespace SelectOR
             UpdateDutyHostVisible();
             LoadCompanyVehNames();          // .eng de mis empresas → etiqueta en Exploración/Horarios
             if (!_leagueChecked) { _leagueChecked = true; _ = CheckLeagueAwards(); }   // ¿premios de la liga?
+            if (first) _ = RecoverInterruptedServiceAsync();   // ¿quedó un servicio a medias?
         }
 
         // Servicios de la empresa: la lista (con maquinista y economía) y, a la vez, el tren de cada servicio
@@ -1842,8 +1922,18 @@ namespace SelectOR
             if (c == null) return;
             int seq = ++_svcLoadSeq;
             if (_svcCardsCompany != c.Id) { _svcCardsCompany = c.Id; _svcLastJson = _svcLastTrenJson = null; _svcCards?.ShowMessage(Tr("Cargando…")); }
-            var tLista = Supa.RpcAsync("list_company_services", new { p_company = c.Id });
-            string trenQ(string cols) => $"services?select={cols}&company_id=eq.{Uri.EscapeDataString(c.Id)}&order=started_at.desc&limit=200";
+            // Todo el historial, por páginas de 1000 (servicios-anulados.sql); un servidor sin ese archivo
+            // devuelve los 200 últimos con la función de antes.
+            async Task<(string, string)> lista()
+            {
+                var r = await Supa.RpcAllAsync("list_company_services", (lim, off) => new { p_company = c.Id, p_limit = lim, p_offset = off });
+                if (r.err != null && (r.err.Contains("PGRST202") || r.err.Contains("Could not find the function")))
+                    r = await Supa.RpcAsync("list_company_services", new { p_company = c.Id });
+                return r;
+            }
+            var tLista = lista();
+            var tStats = Supa.RpcAsync("company_service_stats", new { p_company = c.Id });
+            string trenQ(string cols) => $"services?select={cols}&company_id=eq.{Uri.EscapeDataString(c.Id)}&order=started_at.desc,id.asc";
             // De más a menos columnas según lo que tenga el servidor (servicio-imagen.sql, motrices-servicio.sql);
             // la que funciona se recuerda para no repetir peticiones fallidas.
             string[] colSets =
@@ -1852,8 +1942,21 @@ namespace SelectOR
                 "id,consist,consist_mass,consist_capacity,consist_cars,consist_engines,path",
                 "id,consist,consist_mass,consist_capacity,consist_cars,path",
             };
-            var tTren = Supa.SelectAsync(trenQ(colSets[_svcColsLevel]));
+            var tTren = Supa.SelectAllAsync(trenQ(colSets[_svcColsLevel]));
             var (json, err) = await tLista;
+            try
+            {
+                var (sj, se) = await tStats;
+                _svcStats = null;
+                if (se == null && !string.IsNullOrWhiteSpace(sj))
+                {
+                    using var sd = JsonDocument.Parse(sj);
+                    var e0 = sd.RootElement.ValueKind == JsonValueKind.Array && sd.RootElement.GetArrayLength() > 0 ? sd.RootElement[0] : sd.RootElement;
+                    if (e0.ValueKind == JsonValueKind.Object)
+                        _svcStats = ((long)Num(e0, "total"), (long)Num(e0, "open"), (long)Num(e0, "completed"), (long)Num(e0, "annulled"), Num(e0, "km"));
+                }
+            }
+            catch { _svcStats = null; }
             string tj = null;
             try
             {
@@ -1862,7 +1965,7 @@ namespace SelectOR
                        && (te.IndexOf("consist_img", StringComparison.OrdinalIgnoreCase) >= 0 || te.IndexOf("consist_engines", StringComparison.OrdinalIgnoreCase) >= 0))
                 {
                     _svcColsLevel++;
-                    (j, te) = await Supa.SelectAsync(trenQ(colSets[_svcColsLevel]));
+                    (j, te) = await Supa.SelectAllAsync(trenQ(colSets[_svcColsLevel]));
                 }
                 if (te == null) tj = j;
             }
@@ -1881,7 +1984,8 @@ namespace SelectOR
                 {
                     Id = r.Id, Driver = r.Driver, Route = r.Route, Path = r.Path, Train = r.Train == "—" ? "" : r.Train, Status = r.Status,
                     Start = r.Start, Km = r.Km, DurationS = r.DurationS, Pax = r.Pax, Capacity = r.Capacity, MassT = r.MassT,
-                    Income = r.Income, Net = r.Net, Cars = r.Cars, Engines = r.Engines, Valid = r.Valid, HasImage = r.HasImage
+                    Income = r.Income, Net = r.Net, Cars = r.Cars, Engines = r.Engines, Valid = r.Valid, HasImage = r.HasImage,
+                    Annulled = r.Annulled, AnnulReason = r.AnnulReason
                 });
             _svcCards?.SetItems(items);
             UpdateServiceTabCounts();
@@ -1927,7 +2031,9 @@ namespace SelectOR
                         Km = Num(e, "km"), DurationS = Num(e, "duration_s"), Pax = Num(e, "pax"), Income = Num(e, "income"),
                         Cost = Num(e, "cost_total"), Net = Num(e, "net"), Valid = valid,
                         MassT = tm, Capacity = tc, Train = tn, Cars = tcars, Engines = teng,
-                        Path = tpath ?? "", Start = start, HasImage = timg
+                        Path = tpath ?? "", Start = start, HasImage = timg,
+                        Annulled = Str(e, "annulled_at").Length > 0, AnnulReason = Str(e, "annul_reason"),
+                        AnnulledBy = Str(e, "annulled_by_name"), AnnulledAt = FmtDate(Str(e, "annulled_at"))
                     });
                 }
             }
@@ -1949,6 +2055,14 @@ namespace SelectOR
                 InProgress = s.Status == "open", MassT = s.MassT, Capacity = s.Capacity, Cars = s.Cars, Engines = s.Engines,
                 ServiceId = s.Id, StartLocal = s.Start
             };
+            if (s.Annulled)
+            {
+                data.StatusText = Tr("Anulado");
+                data.AnnulText = "⛔  " + Tr("SERVICIO ANULADO") + (s.AnnulledAt.Length > 0 ? " · " + s.AnnulledAt : "")
+                                 + (s.AnnulledBy.Length > 0 ? " · " + s.AnnulledBy : "") + Environment.NewLine
+                                 + Tr("Motivo: ") + (s.AnnulReason.Length > 0 ? s.AnnulReason : "—") + Environment.NewLine + Environment.NewLine
+                                 + Tr("No cuenta para el ingreso, la liga, el ranking ni el rango.");
+            }
             // Datos extra del servicio (tren, recorrido, notas) — máxima info que registró OR/servidor.
             try
             {
@@ -2001,6 +2115,33 @@ namespace SelectOR
             catch { }
             using var dlg = new ServiceResultDialog(data);
             dlg.ShowDialog(this);
+        }
+
+        // Superadmin: anula el servicio seleccionado con un motivo. Se queda en el historial («Anulado»),
+        // deja de contar y su dinero sale de la tesorería; al maquinista le llega un aviso.
+        async void AnnulServiceRow()
+        {
+            if (!Supa.IsSuperadmin || _svcCards == null) return;
+            int i = SelectedServiceIndex();
+            if (i < 0 || i >= _svcRows.Count) { Msg(_empHomeMsg, Tr("Selecciona un servicio de la lista."), true); return; }
+            var s = _svcRows[i];
+            if (s.Annulled) { Msg(_empHomeMsg, Tr("Ese servicio ya está anulado."), true); return; }
+            if (s.Status == "open") { Msg(_empHomeMsg, Tr("Solo se pueden anular servicios ya registrados."), true); return; }
+            string reason;
+            using (var dlg = new TextPromptDialog(Tr("Anular servicio"),
+                       string.Format(Tr("Servicio de {0} · {1} · {2}. Motivo de la anulación (lo verá el maquinista):"), s.Driver, s.Route, s.Date),
+                       "", Tr("Por ejemplo: recorrido hecho con el tiempo acelerado"), Tr("Anular")))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                reason = (dlg.Value ?? "").Trim();
+            }
+            if (reason.Length < 3) { Msg(_empHomeMsg, Tr("Escribe el motivo de la anulación."), true); return; }
+            Msg(_empHomeMsg, Tr("Anulando servicio…"), false);
+            var (_, err) = await Supa.RpcAsync("annul_service", new { p_service = s.Id, p_reason = reason });
+            if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
+            Msg(_empHomeMsg, Tr("Servicio anulado. El maquinista ha recibido un aviso."), false);
+            LoadCompanies();
+            if (_empSel != null) LoadServices(_empSel);
         }
 
         // Superadmin: elimina el servicio seleccionado (revierte su efecto en la banca en el servidor).
@@ -2069,7 +2210,7 @@ namespace SelectOR
         // Grupo de cada concepto para los filtros del extracto (1 ingresos · 2 cánon · 3 energía · 4 salarios · 5 flota · 6 otros).
         static int BankGroup(BankStatement.Move m) => m.Concept switch
         {
-            "income" or "prize" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
+            "income" or "prize" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
         };
 
         DateTime BankPeriodStart() => _bankPeriod switch
@@ -2090,6 +2231,7 @@ namespace SelectOR
             foreach (var m in _ledgerAll)
             {
                 if (m.Local < from || m.Concept == "adjustment") continue;
+                if (m.Concept == "loan" && m.Amount > 0) continue;   // el capital prestado no es un ingreso
                 if (m.Amount >= 0) inc += m.Amount;
                 else { exp -= m.Amount; costs[m.Concept] = (costs.TryGetValue(m.Concept, out var v) ? v : 0) - m.Amount; }
             }
@@ -2106,7 +2248,7 @@ namespace SelectOR
             var start = first.AddMonths(-(nMonths - 1));
             foreach (var m in _ledgerAll)
             {
-                if (m.Concept == "adjustment" || m.Local < start) continue;
+                if (m.Concept == "adjustment" || m.Local < start || (m.Concept == "loan" && m.Amount > 0)) continue;
                 int k = (m.Local.Year - start.Year) * 12 + m.Local.Month - start.Month;
                 if (k < 0 || k >= nMonths) continue;
                 if (m.Amount >= 0) incT[k] += m.Amount; else expT[k] -= m.Amount;
@@ -2209,6 +2351,7 @@ namespace SelectOR
                 name = (dlg.Value ?? "").Trim();
             }
             if (name.Length < 2) { Msg(_empHomeMsg, Tr("Escribe un nombre de empresa."), true); return; }
+            if (!await CompanyNameFree(name, null)) return;
             // El saldo inicial es el global (lo fija el superadmin en Ajustes); no se envía aquí.
             Msg(_empHomeMsg, Tr("Creando empresa…"), false);
             var (_, err) = await Supa.RpcAsync("create_company", new { p_name = name });
@@ -2282,6 +2425,7 @@ namespace SelectOR
             var name = dlg.Value.Trim();
             if (name.Length < 2) { Msg(_empHomeMsg, Tr("El nombre debe tener al menos 2 caracteres."), true); return; }
             if (name == c.Name) return;
+            if (!await CompanyNameFree(name, c.Id)) return;
             Msg(_empHomeMsg, Tr("Cambiando nombre…"), false);
             var (_, err) = await Supa.RpcAsync("rename_company", new { p_company = c.Id, p_name = name });
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
@@ -2371,15 +2515,16 @@ namespace SelectOR
             var items = new List<EmpKpiStrip.Kpi>();
             if (_empSubtab == 0)
             {
-                int open = 0; double km = 0; int done = 0;
-                foreach (var r in _svcRows) { km += r.Km; if (r.Status == "open") open++; else done++; }
+                long open = 0; double km = 0; long done = 0; long total = _svcRows.Count;
+                foreach (var r in _svcRows) { if (!r.Annulled) km += r.Km; if (r.Status == "open") open++; else if (!r.Annulled) done++; }
+                if (_svcStats is { } st) { total = st.total; open = st.open; done = st.done; km = st.km; }   // sin límite
                 int drivers = 0; foreach (var m in _members) if (m.Role == "driver") drivers++;
                 items.Add(treasury);
                 items.Add(new EmpKpiStrip.Kpi { Icon = "👥", Caption = Tr("SOCIOS"), Value = _members.Count.ToString("N0", EsEs), Tint = blue, Sub = Plural(drivers, "{0} maquinista", "{0} maquinistas") });
-                items.Add(new EmpKpiStrip.Kpi { Icon = "🚆", Caption = Tr("SERVICIOS"), Value = _svcRows.Count.ToString("N0", EsEs), Tint = gold,
-                                                Sub = open > 0 ? string.Format(Tr("{0} en conducción · {1} completados"), open, done) : Plural(done, "{0} completado", "{0} completados") });
+                items.Add(new EmpKpiStrip.Kpi { Icon = "🚆", Caption = Tr("SERVICIOS"), Value = total.ToString("N0", EsEs), Tint = gold,
+                                                Sub = open > 0 ? string.Format(Tr("{0} en conducción · {1} completados"), open.ToString("N0", EsEs), done.ToString("N0", EsEs)) : Plural((int)Math.Min(int.MaxValue, done), "{0} completado", "{0} completados") });
                 items.Add(new EmpKpiStrip.Kpi { Icon = "🛤", Caption = Tr("KM TOTALES"), Value = km.ToString("N0", EsEs) + " km", Tint = teal,
-                                                Sub = _svcRows.Count > 0 ? string.Format(Tr("media de {0} km por servicio"), (km / _svcRows.Count).ToString("N1", EsEs)) : Tr("sin servicios todavía") });
+                                                Sub = done > 0 ? string.Format(Tr("media de {0} km por servicio"), (km / done).ToString("N1", EsEs)) : Tr("sin servicios todavía") });
                 _empStatsCard.SetItems(items, fill: true);
             }
             else if (_empSubtab == 2)
@@ -2407,6 +2552,7 @@ namespace SelectOR
             {
                 _empCoTitle.Text = Tr("Selecciona o crea una empresa");
                 if (_empRoleLbl != null) _empRoleLbl.Text = "";
+                if (_empCoIdLbl != null) _empCoIdLbl.Text = "";
                 _kpiTreasuryTxt = "—";
                 _kpiTreasuryCol = Theme.Subtle;
                 if (_empLogoPic != null && _empLogoPic.Image != null) _empLogoPic.Image = null;
@@ -2435,6 +2581,7 @@ namespace SelectOR
                 _empRoleLbl.Text = string.Format(Tr("Tu rol: {0}   ·   {1} socios"),
                     role, _members.Count).Replace("   ·   ", "\n");
             }
+            if (_empCoIdLbl != null) _empCoIdLbl.Text = string.IsNullOrEmpty(_empSel.Code) ? "" : "ID " + _empSel.Code + "  ⧉";
             UpdateCompanyKpis();
         }
 
@@ -2486,7 +2633,7 @@ namespace SelectOR
 
         void ShowPhotoMenu(Point screen)
         {
-            var menu = new ContextMenuStrip { ShowImageMargin = false };
+            var menu = MenuStyle.Apply(new ContextMenuStrip() { ShowImageMargin = false });
             menu.Items.Add("📷  " + (_profHero.Photo == null ? Tr("Elegir foto…") : Tr("Cambiar foto…")), null, (s, e) => ChoosePhoto());
             if (_profHero.Photo != null) menu.Items.Add("✕  " + Tr("Quitar foto"), null, (s, e) => SavePhoto(null));
             menu.Closed += (s, e) => BeginInvoke((Action)menu.Dispose);
@@ -3045,6 +3192,7 @@ namespace SelectOR
 
         async Task<string> EmpStartService()
         {
+            await RecoverInterruptedServiceAsync();   // el servidor borra los servicios que queden abiertos
             _estPatKm = EstimateKm();          // longitud de la ruta (respaldo)
             _estimatedKm = _estPatKm;
             _driveStartUtc = DateTime.UtcNow;  // para localizar el .save de esta sesión
@@ -3268,6 +3416,32 @@ namespace SelectOR
         static string PgInItem(string v) =>
             Uri.EscapeDataString("\"" + (v ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"");
 
+        // Unidades de la empresa con un servicio abierto ahora mismo (null si no se pudo saber).
+        async Task<HashSet<string>> OpenServiceUnits(string companyId)
+        {
+            try
+            {
+                var (json, err) = await Supa.SelectAsync($"services?select=vehicle_id&company_id=eq.{Uri.EscapeDataString(companyId)}&status=eq.open&vehicle_id=not.is.null");
+                if (err != null || string.IsNullOrWhiteSpace(json)) return null;
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using var d = JsonDocument.Parse(json);
+                foreach (var e in d.RootElement.EnumerateArray()) { var id = Str(e, "vehicle_id"); if (id.Length > 0) set.Add(id); }
+                return set;
+            }
+            catch { return null; }
+        }
+
+        // Estado real de una unidad. La marca «in_use» del servidor se queda puesta si alguien cierra el
+        // simulador sin terminar el servicio (el servidor la libera cuando otro se pone de servicio): solo está
+        // en servicio si tiene un servicio abierto. Y va al taller en cuanto cumple sus km, aunque aún no la
+        // haya marcado el servidor.
+        static string RealUnitStatus(string status, string id, HashSet<string> open, double kmSinceMaint, double maintInterval)
+        {
+            if (open != null ? open.Contains(id ?? "") : status == "in_use") return "in_use";
+            if (status == "maintenance_due" || (maintInterval > 0 && kmSinceMaint >= maintInterval)) return "maintenance_due";
+            return "available";
+        }
+
         async Task<(string id, string reason)> ResolveCompanyUnitReason(string companyId, List<(string name, string folder)> engs)
         {
             _lastUnitReasonCode = "error";
@@ -3278,9 +3452,11 @@ namespace SelectOR
             string inList = string.Join(",", esc);
             _lastUnitPlate = "";
             string vq = $"&company_id=eq.{Uri.EscapeDataString(companyId)}&name=in.({inList})&order=created_at.asc";
-            var (json, err) = await SelectVehicles("id,status,plate,name,folder", vq);
+            var tOpen = OpenServiceUnits(companyId);
+            var (json, err) = await SelectVehicles("id,status,plate,name,folder,km_since_maint,maint_interval_km", vq);
             if (err != null && err.IndexOf("plate", StringComparison.OrdinalIgnoreCase) >= 0)   // aún sin columna de matrícula
-                (json, err) = await SelectVehicles("id,status,name,folder", vq);
+                (json, err) = await SelectVehicles("id,status,name,folder,km_since_maint,maint_interval_km", vq);
+            var openUnits = await tOpen;
             if (err != null) return (null, Tr("No se pudo comprobar la flota: ") + err);
             // Reparto de unidades teniendo en cuenta la LIBREA con la que sale este tren:
             //  · Si la empresa tiene unidades de esa misma librea, hay que usar una de ellas; si
@@ -3299,7 +3475,8 @@ namespace SelectOR
                 using var d = JsonDocument.Parse(json);
                 foreach (var e in d.RootElement.EnumerateArray())
                 {
-                    string rowName = Str(e, "name"), rowFolder = Str(e, "folder"), st = Str(e, "status"), id = Str(e, "id");
+                    string rowName = Str(e, "name"), rowFolder = Str(e, "folder"), id = Str(e, "id");
+                    string st = RealUnitStatus(Str(e, "status"), id, openUnits, Num(e, "km_since_maint"), Num(e, "maint_interval_km"));
                     folderOf.TryGetValue(rowName, out var want);
                     bool misma = string.Equals((rowFolder ?? "").Trim(), (want ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
                     if (misma) hayDeMiLibrea = true;
@@ -4077,6 +4254,7 @@ namespace SelectOR
                 _paxVisits[bestNorm] = visit + 1;
                 // Parada comercial: queda anotada (estación y hora del simulador) para la ventana del servicio.
                 _svcStopsLog.Add(new StopRec { Station = m.name ?? bestNorm, Time = await FetchGameClock(), Utc = DateTime.UtcNow });
+                SaveServiceJournal(force: true);
                 // El intercambio se hace poco a poco (el HUD va mostrando cómo cambian las cifras).
                 StartPaxAnimation(m.name ?? bestNorm, bestNorm, alight, board);
             }
@@ -4256,6 +4434,7 @@ namespace SelectOR
                 if (_paxActive && _paxStations.Count > 0) await PollPax(lat, lon);   // embarque de viajeros
                 if (InfrActive) _ = InfrSpeedPoll();   // carné (B6/B7): velocidad frente al límite
                 if (_pendingServiceId != null) _ = AutopilotPoll();   // carné (A4): ¿conduce Open Rails?
+                if (_pendingServiceId != null) SaveServiceJournal();   // por si se cierra todo de golpe
             }
             catch { }   // servidor aún no listo, pausa, etc.
         }
@@ -4575,29 +4754,25 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // botón
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // msg
 
-            _usersList = EmpTable();
-            t.Controls.Add(EmpSearch(_usersList, 300));
-            _usersList.SetColumns(
-                new StyledTable.Col("USUARIO", 200),
-                new StyledTable.Col("ID", 0, true),
-                new StyledTable.Col("EMPRESAS", 110, false, HorizontalAlignment.Right));
-            // Clic en la celda del ID → copia el ID al portapapeles.
-            _usersList.MouseClick += (s, e) =>
-            {
-                var hit = _usersList.HitTest(e.Location);
-                if (hit.Item == null || hit.SubItem == null) return;
-                if (hit.Item.SubItems.IndexOf(hit.SubItem) == 1) CopyIdToClipboard(hit.SubItem.Text);
-            };
-            _usersList.Cursor = Cursors.Hand;
+            // Usuarios en tarjetas (nombre, ID, clave de recuperación, empresas y alta). Doble clic: copia la clave.
+            _usersList = new UserCardList { Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4) };
+            var usearch = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 300, Height = 34, Anchor = AnchorStyles.Left, Margin = new Padding(2, 2, 2, 4) };
+            usearch.Box.TextChanged += (s, e) => { _usersQuery = usearch.Box.Text.Trim().ToLowerInvariant(); FillUserCards(); };
+            t.Controls.Add(usearch);
+            _usersList.ItemActivated += o => AdminCopyRecoveryKey();
             t.Controls.Add(_usersList);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(2, 4, 2, 2) };
             var copyBtn = EmpButton(Tr("⧉  Copiar ID")); copyBtn.Width = 160; copyBtn.Margin = new Padding(0, 0, 8, 0);
-            copyBtn.Click += (s, e) => { int i = _usersList.SelectedRow; if (i >= 0 && i < _userIds.Count) CopyIdToClipboard(_userIds[i]); else Msg(_usersMsg, Tr("Selecciona un usuario de la lista."), true); };
+            copyBtn.Click += (s, e) => { int i = SelectedUserIndex(); if (i >= 0 && i < _userIds.Count) CopyIdToClipboard(_userIds[i]); else Msg(_usersMsg, Tr("Selecciona un usuario de la lista."), true); };
             var delBtn = EmpButton(Tr("Eliminar acceso")); delBtn.Width = 200; delBtn.Margin = new Padding(0);   // alineado con «Copiar ID»
             delBtn.BaseColor = Theme.Surface2; delBtn.HoverColor = Color.FromArgb(150, 60, 60); delBtn.TextColor = RedC;
             delBtn.Click += (s, e) => DeleteUserAccess();
-            btns.Controls.Add(copyBtn); btns.Controls.Add(delBtn);
+            var keyBtn = EmpButton(Tr("🗝  Copiar clave")); keyBtn.Width = 170; keyBtn.Margin = new Padding(0, 0, 8, 0);
+            keyBtn.Click += (s, e) => AdminCopyRecoveryKey();
+            var newKeyBtn = EmpButton(Tr("Nueva clave")); newKeyBtn.Width = 150; newKeyBtn.Margin = new Padding(0, 0, 8, 0);
+            newKeyBtn.Click += (s, e) => AdminNewRecoveryKey();
+            btns.Controls.Add(copyBtn); btns.Controls.Add(keyBtn); btns.Controls.Add(newKeyBtn); btns.Controls.Add(delBtn);
             t.Controls.Add(btns);
 
             _usersMsg = EmpMsg(); t.Controls.Add(_usersMsg);
@@ -4607,10 +4782,10 @@ namespace SelectOR
         async void LoadUsers()
         {
             if (_usersList == null || !Supa.IsSuperadmin) return;
-            _usersList.ShowLoading(Tr("Cargando…"));
+            if (_usersAll.Count == 0) { _usersList.EmptyText = Tr("Cargando…"); _usersList.Invalidate(); }
             var (json, err) = await Supa.RpcAsync("list_all_users", new { });
-            _usersList.ClearRows(); _userIds.Clear(); _userIsSelf.Clear();
-            if (err != null) { _usersList.SetEmpty(Tr("Error: ") + err); return; }
+            _userIds.Clear(); _userIsSelf.Clear(); _userKeys.Clear(); _usersAll.Clear();
+            if (err != null) { _usersList.EmptyText = Tr("Error: ") + err; FillUserCards(); return; }
             int n = 0;
             try
             {
@@ -4623,20 +4798,40 @@ namespace SelectOR
                     bool self = e.TryGetProperty("is_self", out var sv) && sv.ValueKind == JsonValueKind.True;
                     _userIsSelf.Add(self);
                     string user = Str(e, "username"); if (user.Length == 0) user = "—";
-                    if (self) user += "  ★";
-                    double nco = Num(e, "company_count");
-                    _usersList.AddRow(new[] { user, uid, nco.ToString("N0", EsEs) },
-                        new Color?[] { self ? Theme.Accent : (Color?)null, Theme.Subtle, null });
+                    string key = Str(e, "recovery_key");
+                    _userKeys.Add(key);
+                    _usersAll.Add(new UserItem
+                    {
+                        Index = _userIds.Count - 1, Id = uid, Name = user, Email = Str(e, "email"), Key = key, Self = self,
+                        Companies = (int)Num(e, "company_count"),
+                        Created = DateTimeOffset.TryParse(Str(e, "created_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var ca) ? ca.LocalDateTime : DateTime.MinValue
+                    });
                 }
             }
             catch { }
-            if (n == 0) _usersList.SetEmpty(Tr("No hay usuarios."));
+            _usersList.EmptyText = Tr("No hay usuarios.");
+            FillUserCards();
         }
+
+        // Tarjetas de usuarios según el filtro (la elegida se mantiene si sigue a la vista).
+        void FillUserCards()
+        {
+            if (_usersList == null) return;
+            var words = _usersQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            _usersList.BeginUpdate();
+            _usersList.Items.Clear();
+            foreach (var u in _usersAll)
+                if (System.Linq.Enumerable.All(words, w => u.SearchText.Contains(w))) _usersList.Items.Add(u);
+            _usersList.EndUpdate();
+        }
+
+        // Usuario elegido: su posición en _userIds / _userIsSelf / _userKeys (−1 = ninguno).
+        int SelectedUserIndex() => (_usersList?.SelectedItem as UserItem)?.Index ?? -1;
 
         async void DeleteUserAccess()
         {
             if (!Supa.IsSuperadmin || _usersList == null) return;
-            int i = _usersList.SelectedRow;
+            int i = SelectedUserIndex();
             if (i < 0 || i >= _userIds.Count) { Msg(_usersMsg, Tr("Selecciona un usuario de la lista."), true); return; }
             if (i < _userIsSelf.Count && _userIsSelf[i]) { Msg(_usersMsg, Tr("No puedes eliminar tu propio acceso."), true); return; }
             if (MessageBox.Show(this,
@@ -4663,14 +4858,12 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // msg
 
             t.Controls.Add(EmpHeader("TODAS LAS EMPRESAS (ADMINISTRACIÓN)"));
-            _allCompList = EmpTable();
+            // Una tarjeta por empresa: logotipo, nombre, ID, gerente, socios, servicios y saldo.
+            _allCompList = EmpCards();
             t.Controls.Add(EmpSearch(_allCompList, 300));
-            _allCompList.SetColumns(
-                new StyledTable.Col("EMPRESA", 220),
-                new StyledTable.Col("GERENTE", 0, true),
-                new StyledTable.Col("SOCIOS", 90, false, HorizontalAlignment.Right),
-                new StyledTable.Col("SERVICIOS", 100, false, HorizontalAlignment.Right),
-                new StyledTable.Col("SALDO", 130, false, HorizontalAlignment.Right));
+            _allCompList.TitleCol = 0; _allCompList.PillCol = 1; _allCompList.SubCols = new[] { 2, 3, 4 }; _allCompList.RightCol = 5;
+            _allCompList.Formats[2] = Tr("Gerente: {0}"); _allCompList.Formats[3] = Tr("{0} socio") + "|" + Tr("{0} socios"); _allCompList.Formats[4] = Tr("{0} servicio") + "|" + Tr("{0} servicios");
+            _allCompList.CardHeight = 74; _allCompList.MinWidth = 520; _allCompList.Columns = 2;
             t.Controls.Add(_allCompList);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -4705,8 +4898,9 @@ namespace SelectOR
                     string owner = Str(e, "owner_username"); if (owner.Length == 0) owner = "—";
                     double mem = Num(e, "member_count"), svc = Num(e, "service_count"), bal = Num(e, "balance");
                     _allCompList.AddRow(
-                        new[] { name, owner, mem.ToString("N0", EsEs), svc.ToString("N0", EsEs), bal.ToString("N2", EsEs) + " €" },
-                        new Color?[] { null, Theme.Subtle, null, null, bal < 0 ? RedC : Theme.Accent });
+                        new[] { name, Str(e, "code").Length > 0 ? Str(e, "code") : "—", owner, mem.ToString("N0", EsEs), svc.ToString("N0", EsEs), bal.ToString("N2", EsEs) + " €" },
+                        new Color?[] { null, Theme.AccentHi, Theme.Subtle, null, null, bal < 0 ? RedC : Theme.Accent },
+                        LogoFor(Str(e, "id"), Str(e, "logo")) ?? PlaceholderLogo(name));
                 }
             }
             catch { }
@@ -5125,9 +5319,11 @@ namespace SelectOR
             if (_fleetIds.Count == 0) { _fleetCards.EmptyText = Tr("Cargando…"); _fleetCards.Invalidate(); }
             const string fleetCols = "id,name,folder,kind,engine_type,km_total,km_since_maint,maint_interval_km,ownership,status,rental_per_service,capacity,comfort";
             string fleetFilter = $"&company_id=eq.{Uri.EscapeDataString(_empSel.Id)}&order=name.asc,created_at.asc";
+            var tOpen = OpenServiceUnits(_empSel.Id);   // a la vez que las unidades
             var (json, err) = await SelectVehicles(fleetCols + ",plate", fleetFilter);
             if (err != null && err.IndexOf("plate", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor aún sin matrículas
                 (json, err) = await SelectVehicles(fleetCols, fleetFilter);
+            var openUnits = await tOpen;
             _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetOwnedCount.Clear(); _fleetPlates.Clear();
             _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear();
             if (err != null) { _fleetCards.EmptyText = Tr("Error: ") + err; _fleetCards.SetModels(new List<FleetModel>()); return; }
@@ -5171,10 +5367,13 @@ namespace SelectOR
                     double since = Num(e, "km_since_maint"), interval = Num(e, "maint_interval_km");
                     double remaining = Math.Max(0, interval - since);
                     string maint = interval > 0 ? remaining.ToString("N0", EsEs) + " km" : "—";
-                    bool due = status == "maintenance_due";
-                    bool inUse = status == "in_use";
-                    string estado = due ? Tr("No operativo · mantenimiento") : inUse ? Tr("No operativo · en servicio") : Tr("Disponible");
-                    Color estadoColor = due ? RedC : inUse ? ColOrange : Theme.Accent;
+                    string real = RealUnitStatus(status, Str(e, "id"), openUnits, since, interval);
+                    bool inUse = real == "in_use", due = real == "maintenance_due";
+                    bool soon = !due && !inUse && interval > 0 && remaining <= interval * 0.1;   // revisión pronto
+                    int state = due ? 2 : inUse ? 1 : soon ? 3 : 0;
+                    // Los mismos nombres cortos que las pestañas: caben en la celda ESTADO sin encogerse ni cortarse.
+                    string estado = due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
+                    Color estadoColor = FleetCardList.StateColors[state];   // el mismo color que su chip
                     // Vista de disponibilidad para el maquinista: gris si NO tiene el modelo en local (no la puede conducir).
                     // El MODELO es la carpeta con la que se compró la unidad; si no la guardó (backend
                     // sin actualizar), se enseña la que haya en el contenido local.
@@ -5207,12 +5406,11 @@ namespace SelectOR
                         fm = new FleetModel { Key = mkey, Title = name, Sub = string.Join("  ·  ", sub), Path = _fleetRowEng[_fleetRowEng.Count - 1] };
                         modelOf[mkey] = fm; models.Add(fm);
                     }
-                    bool soon = !due && !inUse && interval > 0 && remaining <= interval * 0.1;   // revisión pronto
                     fm.Units.Add(new FleetUnit
                     {
                         Row = _fleetIds.Count - 1, Id = _fleetIds[_fleetIds.Count - 1],
                         Label = plate.Length > 0 ? plate : string.Format(Tr("Unidad {0}"), fm.Units.Count + 1),
-                        State = due ? 2 : inUse ? 1 : soon ? 3 : 0
+                        State = state
                     });
                 }
             }
@@ -5545,8 +5743,10 @@ namespace SelectOR
                 var esc = new List<string>();
                 var folderOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var en in names) { esc.Add(PgInItem(en.name)); folderOf[en.name] = en.folder ?? ""; }
-                var (json, err) = await SelectVehicles("status,name,folder",
+                var tOpen = OpenServiceUnits(co.Id);
+                var (json, err) = await SelectVehicles("id,status,name,folder,km_since_maint,maint_interval_km",
                     $"&company_id=eq.{Uri.EscapeDataString(co.Id)}&name=in.({string.Join(",", esc)})");
+                var openUnits = await tOpen;
                 if (err != null) { if (lbl.Tag as string == key) lbl.Text = ""; return; }
                 bool ok = false, inUse = false, maint = false, any = false;
                 try
@@ -5557,7 +5757,7 @@ namespace SelectOR
                         string rowName = Str(e, "name");
                         if (rowName.Length > 0 && folderOf.TryGetValue(rowName, out var want) && !ModelMatches(Str(e, "folder"), want)) continue;
                         any = true;
-                        string st = Str(e, "status");
+                        string st = RealUnitStatus(Str(e, "status"), Str(e, "id"), openUnits, Num(e, "km_since_maint"), Num(e, "maint_interval_km"));
                         if (st == "available") ok = true;
                         else if (st == "in_use") inUse = true;
                         else if (st == "maintenance_due") maint = true;
@@ -7818,7 +8018,7 @@ namespace SelectOR
         {
             if (_pendingServiceId == null) return (false, null);
             string companyName = _empOnDutyCompany?.Name ?? _empSel?.Name ?? "";
-            string route = _curRoute?.Name ?? "";
+            string route = _svcRouteOverride ?? _curRoute?.Name ?? "";
             var svc = _pendingServiceId;
             var openedUtc = _svcOpenedUtc;
 
@@ -7833,7 +8033,7 @@ namespace SelectOR
             if (infr.Err != null) { Msg(_empHomeMsg, Tr("No se pudo registrar el servicio: ") + infr.Err, true); return (false, Tr("No se pudo registrar el servicio: ") + infr.Err); }
             if (infr.Voided)
             {
-                _pendingServiceId = null; _svcOpenedUtc = null;
+                _pendingServiceId = null; _svcOpenedUtc = null; DeleteServiceJournal();
                 UpdateDutyUi();
                 var nv = new ServiceResultDialog.Data
                 {
@@ -7860,7 +8060,7 @@ namespace SelectOR
                 { Msg(_empHomeMsg, Tr("No se pudo descartar el viaje corto: ") + derr, true); return (false, Tr("No se pudo descartar el viaje corto: ") + derr); }
                 if (derr == null)
                 {
-                    _pendingServiceId = null; _svcOpenedUtc = null;
+                    _pendingServiceId = null; _svcOpenedUtc = null; DeleteServiceJournal();
                     UpdateDutyUi();
                     var motivos = new List<string>();
                     if (cortoKm) motivos.Add(string.Format(Tr("Recorrido de {0} km: los viajes de menos de 3 km no se registran."), _estimatedKm.ToString("0.0", EsEs)));
@@ -7898,7 +8098,7 @@ namespace SelectOR
                 });
             // Si falla, dejamos el servicio pendiente para poder reintentar con "Registrar servicio".
             if (err != null) { Msg(_empHomeMsg, Tr("No se pudo registrar el servicio: ") + err, true); return (false, Tr("No se pudo registrar el servicio: ") + err); }
-            _pendingServiceId = null; _svcOpenedUtc = null;
+            _pendingServiceId = null; _svcOpenedUtc = null; DeleteServiceJournal();
             UpdateDutyUi();
 
             // Datos del viaje devueltos por el servidor (economía autoritativa) → ventana de resultado.
@@ -7985,6 +8185,7 @@ namespace SelectOR
 
             if (showDialog)
             {
+                r.RecoveredNote = _svcRecoveredNote ?? "";
                 using var dlg = new ServiceResultDialog(r);
                 dlg.ShowDialog(this);
             }
@@ -8014,6 +8215,7 @@ namespace SelectOR
             RefreshActiveSubtab(skipCompanyLists: true);
             if (showDialog)
             {
+                r.RecoveredNote = _svcRecoveredNote ?? "";
                 using var dlg = new ServiceResultDialog(r);
                 dlg.ShowDialog(this);
             }
@@ -8352,12 +8554,13 @@ namespace SelectOR
             }
             if (_tarSaveBtn != null) _tarSaveBtn.Visible = Supa.IsSuperadmin;          // tarifas: solo superadmin
             bool tarRo = !Supa.IsSuperadmin;
-            foreach (var ip in new[] { _tarIncome, _tarCanon, _tarEnergy, _tarSalary })
+            foreach (var ip in new[] { _tarIncome, _tarCanon, _tarEnergy, _tarSalary, _tarSalaryHour, _tarSalaryMaxH })
                 if (ip != null) ip.Box.ReadOnly = tarRo;
             if (_tarBalanceRow != null) _tarBalanceRow.Visible = Supa.IsSuperadmin;   // saldo: solo superadmin
             if (_defBalanceRow != null) _defBalanceRow.Visible = Supa.IsSuperadmin;   // saldo inicial global: solo superadmin
             if (_fleetSettingsRow != null) _fleetSettingsRow.Visible = Supa.IsSuperadmin; // economía de flota: solo superadmin
             if (_svcDelBtn != null) _svcDelBtn.Visible = Supa.IsSuperadmin;           // borrar servicio: solo superadmin
+            if (_svcAnnulBtn != null) _svcAnnulBtn.Visible = Supa.IsSuperadmin;       // anular servicio: solo superadmin
             if (_ledgerDelBtn != null) _ledgerDelBtn.Visible = Supa.IsSuperadmin;     // borrar movimiento: solo superadmin
             bool fleetManage = CanManage() || Supa.IsSuperadmin;                      // flota: dueño/gestor/superadmin
             if (_fleetBuyBtn != null) _fleetBuyBtn.Visible = fleetManage;
@@ -8390,8 +8593,8 @@ namespace SelectOR
             // gestiona solo la ve si está habilitada; el superadmin la ve siempre (para habilitarla).
             bool pa = su || (PaEnabledHere() && CanManage());
             bool[] show = hasCompany
-                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true }   // Compra: solo gestión · Revisión: superadmin
-                : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false };
+                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true, true, su }   // Compra: solo gestión · Revisión y Préstamos: superadmin
+                : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false, false, su };
             for (int k = 0; k < _empSubtabs.Length && k < show.Length; k++)
                 if (_empSubtabs[k] != null) _empSubtabs[k].Visible = show[k];
             UpdateNavGroupHeaders();   // oculta el encabezado de un grupo si ninguna de sus secciones se ve
@@ -8479,6 +8682,16 @@ namespace SelectOR
                 _tarSalary.Box.Text = Num(root, "salary_per_service").ToString("0.##", EsEs);
             }
             catch { }
+            // Precio por hora y tope (salario-por-tiempo.sql); sin ese SQL, los campos se quedan vacíos.
+            var (sj, se) = await Supa.RpcAsync("get_salary_rates", new { });
+            if (_tarSalaryHour == null) return;
+            try
+            {
+                using var sd = JsonDocument.Parse(se == null ? sj : "{}");
+                _tarSalaryHour.Box.Text = se == null ? Num(sd.RootElement, "per_hour").ToString("0.##", EsEs) : "";
+                _tarSalaryMaxH.Box.Text = se == null ? Num(sd.RootElement, "max_hours").ToString("0.##", EsEs) : "";
+            }
+            catch { }
         }
 
         async void SaveTariffs()
@@ -8493,6 +8706,11 @@ namespace SelectOR
                 p_salary = ParseNum(_tarSalary.Box.Text)
             });
             if (err != null) { Msg(_tariffMsg, Tr("Error: ") + err, true); return; }
+            if (_tarSalaryHour != null && _tarSalaryHour.Box.Text.Trim().Length > 0)
+            {
+                var (_, serr) = await Supa.RpcAsync("set_salary_rates", new { p_per_hour = ParseNum(_tarSalaryHour.Box.Text), p_max_hours = ParseNum(_tarSalaryMaxH.Box.Text) });
+                if (serr != null) { Msg(_tariffMsg, Tr("Error: ") + serr, true); return; }
+            }
             Msg(_tariffMsg, Tr("Tarifas globales guardadas."), false);
         }
 
@@ -8812,7 +9030,18 @@ namespace SelectOR
             var b = _rankDrivers;
             if (b == null) return;
             if (b.Entries.Count == 0) { b.EmptyText = Tr("Cargando…"); b.Invalidate(); }
+            var tPhotos = Supa.RpcAsync("company_member_photos", new { p_company = c.Id });   // la foto de perfil de cada uno
             var (json, err) = await Supa.RpcAsync("company_driver_ranking", new { p_company = c.Id });
+            try
+            {
+                var (pj, pe) = await tPhotos;
+                if (pe == null && !string.IsNullOrWhiteSpace(pj))
+                {
+                    using var pd = JsonDocument.Parse(pj);
+                    foreach (var e in pd.RootElement.EnumerateArray()) SetMemberPhoto(Str(e, "user_id"), Str(e, "photo"));
+                }
+            }
+            catch { }
             var list = new List<PodiumBoard.Entry>();
             if (err == null)
                 try
@@ -8826,6 +9055,7 @@ namespace SelectOR
                         list.Add(new PodiumBoard.Entry
                         {
                             Id = Str(e, "user_id"), Name = name, Pos = list.Count + 1, Mine = Str(e, "user_id") == Supa.UserId,
+                            Logo = _memberPhotos.TryGetValue(Str(e, "user_id"), out var ph) ? ph.img : null,   // sin foto: sus iniciales
                             Value = km.ToString("N0", EsEs) + " km", Detail = string.Format(Tr("{0} servicios"), sv.ToString("N0", EsEs)) + " · " + sign,
                             Cols = new (string, string, Color?)[] { (Tr("SERVICIOS"), sv.ToString("N0", EsEs), null), (Tr("KM"), km.ToString("N0", EsEs), null), (Tr("NETO"), sign, net < 0 ? RedC : (Color?)null) }
                         });
@@ -9062,7 +9292,7 @@ namespace SelectOR
                         Id = Str(e, "id"), Name = Str(e, "name"), Logo = Str(e, "logo"), Balance = Num(e, "balance"),
                         IncomePerKm = Num(e, "income_per_km"), CanonPerKm = Num(e, "canon_per_km"),
                         EnergyPerKm = Num(e, "energy_per_km"), SalaryPerService = Num(e, "salary_per_service"),
-                        PaEnabled = Flag(e, "pa_enabled")
+                        PaEnabled = Flag(e, "pa_enabled"), Code = Str(e, "code")
                     });
             }
             catch { }
@@ -9198,6 +9428,16 @@ namespace SelectOR
         }
 
         // Caja de filtro (🔎) enlazada a una tabla: escribe para filtrar por texto en cualquier columna.
+        // Lista en tarjetas que sustituye a una tabla (CardTable): mismas operaciones, otra presentación.
+        static CardTable EmpCards() => new CardTable { Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4) };
+
+        static RoundedInput EmpSearch(CardTable table, int width = 300)
+        {
+            var box = new RoundedInput(I18n.T("🔎  Filtrar…")) { Anchor = AnchorStyles.Left, Width = width, Height = 34, Margin = new Padding(2, 2, 8, 4) };
+            box.Box.TextChanged += (s, e) => table.Filter(box.Box.Text);
+            return box;
+        }
+
         static RoundedInput EmpSearch(StyledTable table, int width = 300)
         {
             var box = new RoundedInput(I18n.T("🔎  Filtrar…"))

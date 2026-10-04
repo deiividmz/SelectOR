@@ -15,7 +15,7 @@ namespace SelectOR
 {
     public partial class MainMenuForm
     {
-        StyledTable _reqList;
+        CardTable _reqList;
         Label _reqMsg;
         FlowLayoutPanel _buyTabs;                 // [Comprar | Solicitudes (n)] en Compra
         Control _buyShopView, _buyReqView;        // las dos vistas de Compra
@@ -139,15 +139,11 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             t.Controls.Add(EmpHeader("SOLICITUDES DE COMPRA DE LOS MAQUINISTAS"));
             t.Controls.Add(EmpIntro("Máquinas que los socios piden que la empresa compre o alquile. «Comprar» y «Alquilar» abren la compra de esa máquina (con su tasación); «Rechazar» la descarta."));
-            _reqList = EmpTable();
-            _reqList.SetColumns(
-                new StyledTable.Col("FECHA", 92),
-                new StyledTable.Col("MAQUINISTA", 150),
-                new StyledTable.Col("MÁQUINA", 220),
-                new StyledTable.Col("EN TU EQUIPO", 150),
-                new StyledTable.Col("TREN", 200),
-                new StyledTable.Col("MENSAJE", 200, true));
-            _reqList.Dock = DockStyle.Fill;
+            // Una tarjeta por solicitud: la máquina, si ya la tienes, quién la pide, el tren y su mensaje.
+            _reqList = EmpCards();
+            _reqList.TitleCol = 2; _reqList.PillCol = 3; _reqList.SubCols = new[] { 1, 4, 0 }; _reqList.QuoteCol = 5;
+            _reqList.Icon = "🚆"; _reqList.Formats[1] = Tr("Pide {0}"); _reqList.Formats[4] = Tr("Tren: {0}");
+            _reqList.CardHeight = 88; _reqList.MinWidth = 560; _reqList.Columns = 2;
             _reqList.DoubleClick += (s, e) => ResolveSelectedRequest("bought");
             t.Controls.Add(_reqList);
             var row = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 6, 0, 0) };

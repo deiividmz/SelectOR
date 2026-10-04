@@ -195,6 +195,30 @@ namespace SelectOR
                 case "service_deleted":
                     icon = "🗑"; c = bad; title = Tr("Servicio eliminado");
                     body = string.Format(Tr("Un administrador ha eliminado tu servicio {0} en {1}."), routeTxt, co); sub = 0; break;
+                case "service_annulled":
+                    icon = "⛔"; c = bad; title = Tr("Servicio anulado");
+                    body = string.Format(Tr("El superadministrador ha anulado tu servicio {0} en {1}."), routeTxt, co)
+                         + (DataStr(r, "reason").Length > 0 ? "\n" + Tr("Motivo: ") + DataStr(r, "reason") : ""); sub = 0; break;
+                // Préstamos
+                case "loan_approved":
+                    icon = "🏦"; c = ok; title = Tr("Préstamo concedido");
+                    body = string.Format(Tr("El banco ha concedido a {0} un préstamo de {1} € a {2} meses. Cuota: {3} €."), co,
+                               Money(r, "amount"), DataStr(r, "months"), Money(r, "payment")); sub = 1; break;
+                case "loan_rejected":
+                    icon = "🏦"; c = bad; title = Tr("Préstamo denegado");
+                    body = string.Format(Tr("El banco ha denegado el préstamo de {0} € que pidió {1}."), Money(r, "amount"), co)
+                         + (DataStr(r, "note").Length > 0 ? "\n«" + DataStr(r, "note") + "»" : ""); sub = 1; break;
+                case "loan_late":
+                    icon = "⚠"; c = bad; title = Tr("Cuota del préstamo impagada");
+                    body = string.Format(Tr("{0} no tiene saldo para la cuota {1}/{2} ({3} €). Se cobrará, con un recargo de {4} €, en cuanto haya saldo."), co,
+                               DataStr(r, "n"), DataStr(r, "months"), Money(r, "payment"), Money(r, "fee")); sub = 1; break;
+                case "loan_paid":
+                    icon = "🎉"; c = ok; title = Tr("Préstamo devuelto");
+                    body = string.Format(Tr("{0} ha terminado de devolver un préstamo."), co); sub = 1; break;
+                // Normas de la empresa
+                case "rule_new":
+                    icon = "📜"; c = info; title = Tr("Norma nueva en la empresa");
+                    body = string.Format(Tr("{0} ha publicado una norma en {1}: «{2}»."), who, co, DataStr(r, "title")); sub = NormasSubtab; break;
                 // Chat de empresa
                 case "chat_muted":
                     icon = "💬"; c = bad; title = Tr("Sin permiso para escribir en el chat");
@@ -230,6 +254,16 @@ namespace SelectOR
         }
 
         static string DataOr(NotifRow r, string k, string def) { var v = DataStr(r, k); return string.IsNullOrWhiteSpace(v) ? def : v; }
+
+        // Importe del aviso (viene como número en texto) con separador de miles.
+        static string Money(NotifRow r, string k)
+        {
+            if (r.Data.ValueKind != JsonValueKind.Object || !r.Data.TryGetProperty(k, out var v)) return "";
+            double d;
+            if (v.ValueKind == JsonValueKind.Number) d = v.GetDouble();
+            else if (!double.TryParse(v.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out d)) return v.ToString();
+            return d.ToString(Math.Abs(d % 1) < 0.005 ? "N0" : "N2", I18n.English ? CultureInfo.GetCultureInfo("en-GB") : CultureInfo.GetCultureInfo("es-ES"));
+        }
 
         // ---- Pila de avisos: abajo a la derecha, el más nuevo encima; como mucho 4 a la vez ----
         void EnqueueToast(NotificationToast t)
@@ -274,9 +308,12 @@ namespace SelectOR
                 if (WindowState == FormWindowState.Minimized) WindowState = _preLaunchState == FormWindowState.Minimized ? FormWindowState.Normal : _preLaunchState;
                 Activate();
                 ShowPage(PageEmpresas);
+                // El desplegable tiene los nombres; la empresa se busca en la lista, en el mismo orden.
                 if (!string.IsNullOrEmpty(companyId) && _empCoCombo != null && _empSel?.Id != companyId)
-                    foreach (var o in _empCoCombo.Items)
-                        if (o is EmpCompany ec && ec.Id == companyId) { _empCoCombo.SelectedItem = o; break; }
+                {
+                    int ix = _empCompanies.FindIndex(ec => ec.Id == companyId);
+                    if (ix >= 0 && ix < _empCoCombo.Items.Count) _empCoCombo.SelectedIndex = ix;
+                }
                 if (subtab >= 0 && _empSubtabs != null && subtab < _empSubtabs.Length && _empSubtabs[subtab] != null && _empSubtabs[subtab].Visible)
                 {
                     ShowSubtab(subtab);

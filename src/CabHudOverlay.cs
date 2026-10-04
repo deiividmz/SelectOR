@@ -383,7 +383,7 @@ namespace SelectOR
             var dict = air ? _prefs?.CabAirScaleBar : _prefs?.CabBcScaleBar;
             double cur = 0; if (_machineKey != null) dict?.TryGetValue(_machineKey, out cur);
             string Num(double v) => v.ToString(v % 1 == 0 ? "0" : "0.#", System.Globalization.CultureInfo.InvariantCulture);
-            var cm = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = true };
+            var cm = MenuStyle.Apply(new ContextMenuStrip() { ShowImageMargin = false, ShowCheckMargin = true });
             cm.Items.Add(new ToolStripMenuItem(air ? I18n.T("Escala del manómetro TDP/TFA") : I18n.T("Escala del cilindro de freno")) { Enabled = false });
             var it = new ToolStripMenuItem(string.Format(I18n.T("Automática: 0-{0} {1}"), Num(auto), unit)) { Checked = cur <= 0 };
             it.Click += (s, e) => SetGauge(air, 0);

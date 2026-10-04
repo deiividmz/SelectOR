@@ -126,7 +126,15 @@ namespace SelectOR
                 }
                 else
                     ene.Steps.Add(string.Format(T("{0} × {1}/km = {2}"), kmT, Rate(D(c, "energy_per_km")), Eur(energy)));
-                sal.Steps.Add(T("Fijo por servicio."));
+                if (c.TryGetProperty("salary_per_hour", out _))   // salario por tiempo (salario-por-tiempo.sql)
+                {
+                    double h = D(c, "salary_hours"), maxH = D(c, "salary_max_hours"), dur = D(c, "duration_s");
+                    sal.Steps.Add(string.Format(T("{0} fijos + {1} h de conducción × {2}/h = {3}"),
+                        Eur(D(c, "salary_base")), h.ToString("0.##", Es), Rate(D(c, "salary_per_hour")), Eur(salary)));
+                    if (maxH > 0 && dur > maxH * 3600 + 1)
+                        sal.Steps.Add("   " + string.Format(T("Se pagan como máximo {0} h de conducción por servicio."), maxH.ToString("0.##", Es)));
+                }
+                else sal.Steps.Add(T("Fijo por servicio."));
                 ren.Steps.Add(T("Lo que cuesta la unidad alquilada en cada servicio."));
             }
             lines.Add(inc); lines.Add(can); lines.Add(ene); lines.Add(sal);
