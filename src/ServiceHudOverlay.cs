@@ -10,6 +10,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
@@ -126,6 +127,12 @@ namespace SelectOR
         // Hoja de ruta (itinerario marcado en el mapa grande; lo lleva la ventana principal).
         public RoadBook Book;
         public Action BookEnsureGraph, BookChanged;
+        // Itinerarios guardados (MainMenuForm.Itinerarios.cs): lista de la ruta, guardar, cargar y borrar.
+        public Func<IReadOnlyList<SavedItinerary>> SavedList;
+        public Func<IWin32Window, string> SaveBook;
+        public Func<SavedItinerary, string> LoadSaved;
+        public Action<SavedItinerary> DeleteSaved;
+        public void MapNotice(string msg) { try { if (_bigMap != null && !_bigMap.IsDisposed) _bigMap.Notice(msg); } catch { } }
 
         static readonly Color Rec = Color.FromArgb(224, 86, 86);
         static readonly Color Teal = Color.FromArgb(94, 190, 155);
@@ -774,7 +781,8 @@ namespace SelectOR
             double anchoM = MapWorldWidthM(area);
             var mates = CurMates();
             HudMapRender.Draw(g, area, _segLat, _segLon, _trkLat, _trkLon, _stLat, _stLon, _stName, _crumb,
-                _hasPos, _curLat, _curLon, _hasHeading, _heading, anchoM, 7.5f, 1f, I18n.T("Cargando mapa…"), mates: mates, book: Book);
+                _hasPos, _curLat, _curLon, _hasHeading, _heading, anchoM, 7.5f, 1f, I18n.T("Cargando mapa…"), mates: mates, book: Book,
+                detail: _detail);   // el mismo detalle del .tdb que el mapa grande
             // Cuántos usuarios hay en la ruta (arriba a la derecha; mientras se enseña el zoom, no).
             if (mates != null && mates.Count > 0 && DateTime.UtcNow >= _zoomShownUntil) LiveMapDraw.Chip(g, area, mates.Count);
 
@@ -817,8 +825,14 @@ namespace SelectOR
             SegLat = _segLat, SegLon = _segLon, TrkLat = _trkLat, TrkLon = _trkLon,
             StLat = _stLat, StLon = _stLon, StName = _stName, Crumb = _crumb,
             HasPos = _hasPos, CurLat = _curLat, CurLon = _curLon, HasHeading = _hasHeading, Heading = _heading,
-            Route = _route, Mates = CurMates(), Me = MeInfo()
+            Route = _route, Mates = CurMates(), Me = MeInfo(), Detail = _detail
         };
+
+        // Detalle del .tdb para el mapa grande (lo calcula MainMenuForm una vez por ruta)
+        HudMapDetail _detail;
+        public void SetDetail(HudMapDetail d) { _detail = d; }
+        public HudMapDetail Detail => _detail;
+        // Próxima señal: su color y a cuántos metros (lo lee MainMenuForm del Track Monitor con el mapa grande abierto)
 
         (string name, string company) MeInfo() { try { return Me?.Invoke() ?? default; } catch { return default; } }
 
@@ -936,6 +950,7 @@ namespace SelectOR
         public bool HasPos, HasHeading;
         public double CurLat, CurLon, Heading;
         public string Route;
+        public HudMapDetail Detail;                     // detalle del .tdb (solo lo dibuja el mapa grande)
         public List<LiveMarker> Mates;                  // los demás usuarios de la ruta (o null)
         public (string name, string company) Me;        // para la leyenda del mapa grande
     }
@@ -944,6 +959,7 @@ namespace SelectOR
     static class HudMapRender
     {
         static readonly Color Teal = Color.FromArgb(94, 190, 155);
+        public static readonly Color ItineraryCol = Color.FromArgb(240, 180, 70);   // itinerario de la hoja de ruta (el ámbar de siempre)
 
         public const double BaseScale = 216.0 / 1200.0;   // px por metro del mini-mapa (para zoom coherente)
 
@@ -955,7 +971,8 @@ namespace SelectOR
             bool hasPos, double curLat, double curLon, bool hasHeading, double heading,
             double worldWidthM, float labelPt, float arrowScale, string loadingText,
             double viewCenterLat = double.NaN, double viewCenterLon = double.NaN, double viewPxPerM = 0,
-            IReadOnlyList<LiveMarker> mates = null, bool mateDetail = false, RoadBook book = null)
+            IReadOnlyList<LiveMarker> mates = null, bool mateDetail = false, RoadBook book = null,
+            HudMapDetail detail = null)
         {
             segLat ??= Array.Empty<double[]>(); segLon ??= Array.Empty<double[]>();
             trkLat ??= Array.Empty<double>(); trkLon ??= Array.Empty<double>();
@@ -966,7 +983,7 @@ namespace SelectOR
             if (!haveSeg && !haveTrk && !haveCrumb && !hasPos && (mates == null || mates.Count == 0))
             {
                 using var f0 = Theme.Font(Math.Max(9f, labelPt));
-                TextRenderer.DrawText(g, loadingText, f0, area, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(g, loadingText, f0, area, Theme.Subtle, TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return null;
             }
 
@@ -1009,7 +1026,8 @@ namespace SelectOR
 
             var oldClip = g.Clip; g.SetClip(area);
 
-            if (haveSeg)
+            // Con el detalle del .tdb, la vía la dibuja MapDetailDraw, más gruesa: el trazado fino solo hasta que llega.
+            if (haveSeg && detail == null)
             {
                 using var pen = new Pen(Color.FromArgb(120, 130, 138), Math.Max(1.4f, arrowScale)) { LineJoin = LineJoin.Round };
                 EnsureBoxes(segLat, segLon);
@@ -1025,7 +1043,7 @@ namespace SelectOR
                     try { g.DrawLines(pen, sp); } catch { }
                 }
             }
-            else if (haveTrk)
+            else if (haveTrk && detail == null)
                 // Respaldo (sin archivo de vías o sin estaciones que casen): puntos de vía de la API de OR,
                 // del mismo color que las líneas y con tamaño suficiente para que se lea el trazado.
                 using (var b = new SolidBrush(Color.FromArgb(120, 130, 138)))
@@ -1037,25 +1055,44 @@ namespace SelectOR
                         g.FillEllipse(b, p.X - d, p.Y - d, 2 * d, 2 * d);
                     }
 
-            // Itinerario de la hoja de ruta: lo que falta en ámbar, lo recorrido más apagado, y los puntos marcados.
+            // Detalle del .tdb (mini-mapa y mapa grande): vía, andenes, apartaderos, desvíos, cruces, PK…
+            double pxPerM = 0;
+            if (detail != null)
+            {
+                var c0 = Inv(new PointF(area.X + area.Width / 2f, area.Y + area.Height / 2f));
+                var q0 = Proj(c0.lat, c0.lon); var q1 = Proj(c0.lat + 0.001, c0.lon);
+                pxPerM = Math.Abs(q1.Y - q0.Y) / 111.32;
+                MapDetailDraw.Under(g, area, Proj, detail, pxPerM, arrowScale);
+            }
+
+            // Itinerario de la hoja de ruta, encima del detalle: lo que falta en ámbar, lo recorrido más apagado, y los
+            // puntos marcados (el formato de siempre; se corta justo bajo la flecha del tren).
             if (book != null && book.PathLat.Length >= 2)
             {
                 var pts = new PointF[book.PathLat.Length];
                 for (int i = 0; i < pts.Length; i++) pts[i] = Proj(book.PathLat[i], book.PathLon[i]);
-                int done = Math.Min(pts.Length - 1, book.PassedIdx);
-                using (var halo = new Pen(Color.FromArgb(70, 0, 0, 0), 6f * Math.Max(1f, arrowScale * 0.7f)) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    try { g.DrawLines(halo, pts); } catch { }
-                using (var pen = new Pen(Color.FromArgb(235, 240, 180, 70), 3.2f * Math.Max(1f, arrowScale * 0.7f)) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    try { g.DrawLines(pen, pts[done..]); } catch { }
-                if (done >= 1)
-                    using (var pen = new Pen(Color.FromArgb(150, 150, 130, 90), 3.2f * Math.Max(1f, arrowScale * 0.7f)) { LineJoin = LineJoin.Round })
-                        try { g.DrawLines(pen, pts[..(done + 1)]); } catch { }
+                // corte exacto bajo la flecha del tren (la misma posición que se dibuja), no en el vértice anterior
+                double dp = book.DrawProgress(hasPos, curLat, curLon);
+                int i0 = book.VertexAfter(dp);
+                var (cutLa, cutLo) = book.LatLonAt(dp); var cut = Proj(cutLa, cutLo);
+                var rest = new List<PointF>(pts.Length - i0 + 1) { cut }; for (int i = i0; i < pts.Length; i++) rest.Add(pts[i]);
+                var past = new List<PointF>(i0 + 1); for (int i = 0; i < i0; i++) past.Add(pts[i]); past.Add(cut);
+                float kb = Math.Max(1f, arrowScale * 0.7f);   // (el formato de siempre: halo suave y trazo de 3,2)
+                if (rest.Count >= 2)
+                    using (var halo = new Pen(Color.FromArgb(70, 0, 0, 0), 6f * kb) { LineJoin = LineJoin.Round, StartCap = LineCap.Flat, EndCap = LineCap.Round })
+                        try { g.DrawLines(halo, rest.ToArray()); } catch { }
+                if (past.Count >= 2)
+                    using (var pen = new Pen(Color.FromArgb(150, 150, 130, 90), 3.2f * kb) { LineJoin = LineJoin.Round })
+                        try { g.DrawLines(pen, past.ToArray()); } catch { }
+                if (rest.Count >= 2)
+                    using (var pen = new Pen(Color.FromArgb(235, ItineraryCol), 3.2f * kb) { LineJoin = LineJoin.Round, StartCap = LineCap.Flat, EndCap = LineCap.Round })
+                        try { g.DrawLines(pen, rest.ToArray()); } catch { }
             }
             if (book != null && book.HasPlan)
             {
                 float rs = 5f * Math.Max(1f, arrowScale * 0.6f);
                 using var fill = new SolidBrush(Color.FromArgb(255, 245, 225));
-                using var ring = new Pen(Color.FromArgb(240, 180, 70), 2.4f * Math.Max(1f, arrowScale * 0.5f));
+                using var ring = new Pen(ItineraryCol, 2.4f * Math.Max(1f, arrowScale * 0.5f));
                 foreach (var st in book.Stops)
                 {
                     if (st.IsEnd || st.Passed || !(st.Halt || st.IsReverse)) continue;
@@ -1074,10 +1111,10 @@ namespace SelectOR
                         var p = Proj(book.Points[i].Lat, book.Points[i].Lon);
                         float r = 7f * Math.Max(1f, arrowScale * 0.6f);
                         bool hecho = i < book.ReachedPoints;
-                        using (var b = new SolidBrush(hecho ? Color.FromArgb(150, 130, 110) : Color.FromArgb(240, 180, 70))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
+                        using (var b = new SolidBrush(hecho ? Color.FromArgb(150, 130, 110) : ItineraryCol)) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
                         using (var pen = new Pen(Color.FromArgb(40, 30, 10), 1.4f)) g.DrawEllipse(pen, p.X - r, p.Y - r, 2 * r, 2 * r);
                         TextRenderer.DrawText(g, num.ToString(), fN, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.FromArgb(30, 22, 8),
-                            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                            TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     }
 
             if (haveCrumb)
@@ -1089,22 +1126,31 @@ namespace SelectOR
             }
 
             using (var fSt = Theme.Font(labelPt, FontStyle.Bold))
-            using (var bDot = new SolidBrush(Blend(Teal, Theme.Text, 0.2f)))
+            using (var bDot = new SolidBrush(detail != null ? MapDetailDraw.PlatformEdge : Blend(Teal, Theme.Text, 0.2f)))
+            using (var ringDot = new Pen(MapDetailDraw.PlatformCol, 1.4f))
                 for (int i = 0; i < stLat.Length; i++)
                 {
                     var p = Proj(stLat[i], stLon[i]);
                     if (p.X < area.Left - 30 || p.X > area.Right + 30 || p.Y < area.Top - 10 || p.Y > area.Bottom + 10) continue;
                     float r = 2.6f * arrowScale;
                     g.FillEllipse(bDot, p.X - r, p.Y - r, 2 * r, 2 * r);
+                    if (detail != null) g.DrawEllipse(ringDot, p.X - r, p.Y - r, 2 * r, 2 * r);
                     string nm = i < stName.Length ? stName[i] : null;
+                    // Con el detalle del .tdb: el nombre en una etiqueta oscura con borde azul (el de los andenes), legible
+                    // sobre la vía; sin él, como siempre (texto con sombra).
+                    if (detail != null && !string.IsNullOrWhiteSpace(nm))
+                    {
+                        MapDetailDraw.Label(g, fSt, new PointF(p.X + r - 3, p.Y - fSt.Height / 2f - 6), nm, Color.FromArgb(236, 240, 244), MapDetailDraw.PlatformCol, null);
+                        continue;
+                    }
                     if (!string.IsNullOrWhiteSpace(nm))
                     {
                         int lw = (int)(labelPt * 22);
                         var lblRect = new Rectangle((int)p.X + (int)(r + 3), (int)p.Y - (int)labelPt, lw, (int)(labelPt * 2));
                         TextRenderer.DrawText(g, nm, fSt, new Rectangle(lblRect.X + 1, lblRect.Y + 1, lblRect.Width, lblRect.Height),
-                            Color.FromArgb(190, 0, 0, 0), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
+                            Color.FromArgb(190, 0, 0, 0), TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
                         TextRenderer.DrawText(g, nm, fSt, lblRect, Blend(Theme.Text, Teal, 0.25f),
-                            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
+                            TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
                     }
                 }
 
@@ -1164,11 +1210,18 @@ namespace SelectOR
         bool _winDrag, _moved; Point _downScreen; Point _formAtDown;   // arrastre de la VENTANA (por la cabecera)
         bool _panning; Point _lastPan;                                 // desplazamiento del MAPA
         bool _resizing; Size _sizeAtDown; Rectangle _hitGrip;          // tamaño de la VENTANA (por la esquina inferior derecha)
+        Rectangle _hitKey; bool _keyDown;                              // leyenda del detalle (clic: plegar / desplegar)
         const int MinW = 420, MinH = 300;
         bool _free; double _pxPerM = HudMapRender.BaseScale; double _cLat, _cLon; bool _haveCenter;   // zoom/pan
         Rectangle _hitClose;
         // Hoja de ruta: botones de la cabecera y clic en la vía para marcar el itinerario.
-        Rectangle _hitRoute, _hitUndo, _hitClearRoute; int _hoverHdr = -1;
+        Rectangle _hitRoute, _hitUndo, _hitClearRoute, _hitSave, _hitSaved; int _hoverHdr = -1;
+        // Pestaña «Guardados»: lista de itinerarios guardados de la ruta (clic: cargar; ✕ dos veces: borrar).
+        bool _savedOpen, _savedDown; int _savedScroll;
+        Rectangle _savedPanel; List<(Rectangle row, Rectangle del, SavedItinerary it)> _savedHits = new();
+        string _confirmDelId; DateTime _confirmDelUntil;
+        string _notice; DateTime _noticeUntil;   // aviso breve sobre el mapa (guardado, cargado…)
+        public void Notice(string msg) { if (string.IsNullOrWhiteSpace(msg)) return; _notice = msg; _noticeUntil = DateTime.UtcNow.AddSeconds(5); Invalidate(); }
         Func<PointF, (double lat, double lon)> _inv;   // píxel → lat/lon del último dibujo
         bool _panMoved; Point _panDown;
         RoadBook Book => _hud?.Book;
@@ -1274,6 +1327,8 @@ namespace SelectOR
         {
             if (e.Button != MouseButtons.Left) { base.OnMouseDown(e); return; }
             if (_hitGrip.Contains(e.Location)) { _resizing = true; _downScreen = Cursor.Position; _sizeAtDown = Size; }   // esquina → tamaño
+            else if (_hitKey.Contains(e.Location)) _keyDown = true;                                                          // leyenda → plegar
+            else if (_savedOpen && _savedPanel.Contains(e.Location)) _savedDown = true;                                      // pestaña «Guardados»
             else if (e.Y < HdrH) { _winDrag = true; _moved = false; _downScreen = Cursor.Position; _formAtDown = Location; }   // cabecera → mueve la ventana
             else if (_legendBox.Contains(e.Location)) _legendDown = true;                                                // leyenda → clic en un nombre
             else { _panning = true; _lastPan = e.Location; _panDown = e.Location; _panMoved = false; }                    // mapa → desplaza el contenido
@@ -1312,7 +1367,7 @@ namespace SelectOR
                 foreach (var (hit, _) in _legendHits) if (hit.Contains(e.Location)) { sobre = true; break; }
                 int hh = HdrZone(e.Location);
                 if (hh != _hoverHdr) { _hoverHdr = hh; Invalidate(new Rectangle(0, 0, Width, HdrH)); }
-                Cursor = _hitGrip.Contains(e.Location) ? Cursors.SizeNWSE
+                Cursor = _hitGrip.Contains(e.Location) ? Cursors.SizeNWSE : _hitKey.Contains(e.Location) ? Cursors.Hand
                        : sobre || hh >= 0 ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
             }
             base.OnMouseMove(e);
@@ -1322,6 +1377,19 @@ namespace SelectOR
         {
             bool wasWinDrag = _winDrag, moved = _moved, legend = _legendDown, wasPan = _panning, panMoved = _panMoved;
             if (_resizing) { _resizing = false; SavePlace(); Invalidate(); base.OnMouseUp(e); return; }
+            if (_keyDown)
+            {
+                _keyDown = false;
+                var pr = _hud?.Prefs;
+                if (pr != null && _hitKey.Contains(e.Location)) { pr.BigMapKey = !pr.BigMapKey; try { pr.Save(); } catch { } Invalidate(); }
+                base.OnMouseUp(e); return;
+            }
+            if (_savedDown)
+            {
+                _savedDown = false;
+                SavedClick(e.Location);
+                base.OnMouseUp(e); return;
+            }
             if (wasWinDrag && moved) SavePlace();
             _winDrag = false; _panning = false; _moved = false; _legendDown = false; _panMoved = false;
             if (wasWinDrag && !moved && _hitClose.Contains(e.Location)) { Close(); return; }
@@ -1353,13 +1421,14 @@ namespace SelectOR
 
         protected override void OnMouseWheel(MouseEventArgs e)
         {
+            if (_savedOpen && _savedPanel.Contains(e.Location)) { _savedScroll = Math.Max(0, _savedScroll - Math.Sign(e.Delta)); Invalidate(); base.OnMouseWheel(e); return; }
             ZoomAt(e.Location, e.Delta > 0 ? 1.2 : 1 / 1.2);
             base.OnMouseWheel(e);
         }
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
-            if (e.Y >= HdrH && !_legendBox.Contains(e.Location)) { _free = false; _pxPerM = HudMapRender.BaseScale; UpdateFollow(); Invalidate(); }   // volver a centrar en el tren
+            if (e.Y >= HdrH && !_legendBox.Contains(e.Location) && !(_savedOpen && _savedPanel.Contains(e.Location))) { _free = false; _pxPerM = HudMapRender.BaseScale; UpdateFollow(); Invalidate(); }   // volver a centrar en el tren
             base.OnMouseDoubleClick(e);
         }
 
@@ -1369,6 +1438,8 @@ namespace SelectOR
             if (_hitRoute.Contains(p)) return 0;
             if (_hitUndo.Contains(p)) return 1;
             if (_hitClearRoute.Contains(p)) return 2;
+            if (_hitSave.Contains(p)) return 3;
+            if (_hitSaved.Contains(p)) return 4;
             return -1;
         }
 
@@ -1378,6 +1449,8 @@ namespace SelectOR
             if (z == 0) { rb.Editing = !rb.Editing; if (rb.Editing) _hud?.BookEnsureGraph?.Invoke(); }
             else if (z == 1) { rb.Undo(); try { _hud?.BookChanged?.Invoke(); } catch { } }
             else if (z == 2) { rb.ClearAll(); try { _hud?.BookChanged?.Invoke(); } catch { } }
+            else if (z == 3) { string m = null; try { m = _hud?.SaveBook?.Invoke(this); } catch { } Notice(m); }
+            else if (z == 4) { _savedOpen = !_savedOpen; _savedScroll = 0; _confirmDelId = null; }
             Invalidate();
         }
 
@@ -1436,7 +1509,7 @@ namespace SelectOR
             _hitClose = new Rectangle(Width - 30, 7, 16, 16);
             var rb = Book;
             int bx = _hitClose.Left - 10;
-            _hitRoute = _hitUndo = _hitClearRoute = Rectangle.Empty;
+            _hitRoute = _hitUndo = _hitClearRoute = _hitSave = _hitSaved = Rectangle.Empty;
             if (rb != null)
             {
                 using var fb = Theme.Font(8.8f, FontStyle.Bold);
@@ -1450,7 +1523,14 @@ namespace SelectOR
                     _hitUndo = new Rectangle(bx - W(tUndo), 4, W(tUndo), HdrH - 8); bx = _hitUndo.Left - 6;
                     DrawHdrButton(g, _hitClearRoute, tClr, false, _hoverHdr == 2);
                     DrawHdrButton(g, _hitUndo, tUndo, false, _hoverHdr == 1);
+                    string tSave = I18n.T("Guardar");
+                    _hitSave = new Rectangle(bx - W(tSave), 4, W(tSave), HdrH - 8); bx = _hitSave.Left - 6;
+                    DrawHdrButton(g, _hitSave, tSave, false, _hoverHdr == 3);
                 }
+                int nSaved = 0; try { nSaved = _hud?.SavedList?.Invoke()?.Count ?? 0; } catch { }
+                string tSaved = "\u2605 " + I18n.T("Guardados") + (nSaved > 0 ? "  " + nSaved : "");
+                _hitSaved = new Rectangle(bx - W(tSaved), 4, W(tSaved), HdrH - 8); bx = _hitSaved.Left - 6;
+                DrawHdrButton(g, _hitSaved, tSaved, _savedOpen, _hoverHdr == 4);
                 DrawHdrButton(g, _hitRoute, tRoute, rb.Editing, _hoverHdr == 0);
             }
             string hdr = rb != null && rb.Editing
@@ -1477,9 +1557,176 @@ namespace SelectOR
             double vPx = _haveCenter ? _pxPerM : 0;
             _inv = HudMapRender.Draw(g, area, snap.SegLat, snap.SegLon, snap.TrkLat, snap.TrkLon, snap.StLat, snap.StLon, snap.StName,
                 snap.Crumb, snap.HasPos, snap.CurLat, snap.CurLon, snap.HasHeading, snap.Heading,
-                worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true, book: Book);
+                worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true, book: Book,
+                detail: snap.Detail);
+            DrawKey(g, area, snap.Detail);
             _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox);
+            DrawSaved(g, area);
+            DrawNotice(g, area);
             DrawGrip(g);
+        }
+
+        // Pestaña «Guardados»: a la derecha del mapa, los itinerarios guardados de esta ruta.
+        void DrawSaved(Graphics g, Rectangle area)
+        {
+            _savedHits.Clear(); _savedPanel = Rectangle.Empty;
+            if (!_savedOpen) return;
+            IReadOnlyList<SavedItinerary> list = null;
+            try { list = _hud?.SavedList?.Invoke(); } catch { }
+            list ??= Array.Empty<SavedItinerary>();
+            using var fT = Theme.Font(9.5f, FontStyle.Bold); using var fN = Theme.Font(9f, FontStyle.Bold); using var fS = Theme.Font(8.2f);
+            const int RowH = 46, Pad = 10;
+            int w = Math.Min(330, area.Width - 40);
+            int headH = fT.Height + 16;
+            int maxRows = Math.Max(1, (area.Height - 16 - headH - 8) / RowH);
+            int rows = Math.Max(1, Math.Min(list.Count, maxRows));
+            _savedScroll = Math.Max(0, Math.Min(_savedScroll, Math.Max(0, list.Count - maxRows)));
+            int h = headH + rows * RowH + 8 + (list.Count == 0 ? 20 : 0);
+            _savedPanel = new Rectangle(area.Right - w - 8, area.Top + 8, w, h);
+            using (var path = Theme.Round(_savedPanel, 10))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(242, 30, 33, 36))) g.FillPath(b, path);
+                using (var pen = new Pen(Color.FromArgb(120, HudMapRender.ItineraryCol), 1.2f)) g.DrawPath(pen, path);
+            }
+            TextRenderer.DrawText(g, "★ " + I18n.T("Itinerarios guardados"), fT, new Rectangle(_savedPanel.X + Pad, _savedPanel.Y + 8, w - 2 * Pad, fT.Height + 2),
+                HudMapRender.ItineraryCol, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+            int y = _savedPanel.Y + headH;
+            if (list.Count == 0)
+            {
+                TextRenderer.DrawText(g, I18n.T("Aún no hay itinerarios guardados en esta ruta. Márcalo con «+ Itinerario» y pulsa «Guardar»."), fS,
+                    new Rectangle(_savedPanel.X + Pad, y, w - 2 * Pad, RowH + 16), Theme.Subtle, TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+                return;
+            }
+            var ci = I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : System.Globalization.CultureInfo.GetCultureInfo("es-ES");
+            var mouse = PointToClient(Cursor.Position);
+            for (int i = _savedScroll; i < list.Count && i < _savedScroll + maxRows; i++)
+            {
+                var it = list[i];
+                var row = new Rectangle(_savedPanel.X + 4, y, w - 8, RowH - 4);
+                var del = new Rectangle(row.Right - 30, row.Y + (row.Height - 24) / 2, 24, 24);
+                bool hov = row.Contains(mouse);
+                if (hov) using (var b = new SolidBrush(Theme.SurfaceHi)) using (var p = Theme.Round(row, 7)) g.FillPath(b, p);
+                TextRenderer.DrawText(g, it.Name ?? "", fN, new Rectangle(row.X + 8, row.Y + 4, row.Width - 46, fN.Height + 2), Theme.Text,
+                    TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                int pts = it.Points?.Count(p => !p.Guide) ?? 0;
+                string sub = string.Format(I18n.T("{0} km · {1} puntos · {2}"), it.Km.ToString("0.#", ci), pts,
+                    it.Created.ToString(I18n.English ? "d MMM yyyy" : "d 'de' MMM yyyy", ci));
+                TextRenderer.DrawText(g, sub, fS, new Rectangle(row.X + 8, row.Y + 6 + fN.Height, row.Width - 46, fS.Height + 2), Theme.Subtle,
+                    TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                bool confirm = _confirmDelId == it.Id && DateTime.UtcNow < _confirmDelUntil;
+                var delCol = confirm ? Color.FromArgb(235, 110, 110) : del.Contains(mouse) ? Theme.Text : Theme.Subtle;
+                if (confirm) using (var b = new SolidBrush(Color.FromArgb(90, 176, 64, 64))) using (var p = Theme.Round(del, 6)) g.FillPath(b, p);
+                using (var pen = new Pen(delCol, 1.6f))
+                {
+                    g.DrawLine(pen, del.Left + 8, del.Top + 8, del.Right - 8, del.Bottom - 8);
+                    g.DrawLine(pen, del.Right - 8, del.Top + 8, del.Left + 8, del.Bottom - 8);
+                }
+                _savedHits.Add((row, del, it));
+                y += RowH;
+            }
+            if (list.Count > maxRows)
+                TextRenderer.DrawText(g, $"{_savedScroll + 1}-{Math.Min(list.Count, _savedScroll + maxRows)} / {list.Count}", fS,
+                    new Rectangle(_savedPanel.X, _savedPanel.Bottom - 14, w - Pad, 12), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.NoPadding);
+        }
+
+        void SavedClick(Point pt)
+        {
+            foreach (var (row, del, it) in _savedHits)
+            {
+                if (del.Contains(pt))
+                {
+                    // borrar pide una segunda pulsación
+                    if (_confirmDelId == it.Id && DateTime.UtcNow < _confirmDelUntil)
+                    {
+                        _confirmDelId = null;
+                        try { _hud?.DeleteSaved?.Invoke(it); } catch { }
+                        Notice(string.Format(I18n.T("Itinerario borrado: {0}"), it.Name));
+                    }
+                    else { _confirmDelId = it.Id; _confirmDelUntil = DateTime.UtcNow.AddSeconds(4); Notice(I18n.T("Pulsa otra vez la ✕ para borrarlo.")); }
+                    Invalidate(); return;
+                }
+                if (row.Contains(pt))
+                {
+                    string m = null;
+                    try { m = _hud?.LoadSaved?.Invoke(it); } catch { }
+                    _savedOpen = false;
+                    Notice(m);
+                    Invalidate(); return;
+                }
+            }
+        }
+
+        // Aviso breve abajo, en el centro del mapa.
+        void DrawNotice(Graphics g, Rectangle area)
+        {
+            if (string.IsNullOrEmpty(_notice) || DateTime.UtcNow >= _noticeUntil) return;
+            using var f = Theme.Font(9.5f, FontStyle.Bold);
+            var sz = TextRenderer.MeasureText(_notice, f, new Size(area.Width - 80, 200), TextFormatFlags.WordBreak);
+            var r = new Rectangle(area.X + (area.Width - sz.Width - 28) / 2, area.Bottom - sz.Height - 34, sz.Width + 28, sz.Height + 14);
+            using (var path = Theme.Round(r, 9))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(240, 30, 33, 36))) g.FillPath(b, path);
+                using (var pen = new Pen(HudMapRender.ItineraryCol, 1.3f)) g.DrawPath(pen, path);
+            }
+            TextRenderer.DrawText(g, _notice, f, r, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+        }
+
+        // Leyenda del detalle del .tdb (arriba a la izquierda): plegada, solo su título.
+        void DrawKey(Graphics g, Rectangle area, HudMapDetail d)
+        {
+            _hitKey = Rectangle.Empty;
+            if (d == null) return;
+            bool open = _hud?.Prefs?.BigMapKey != false;
+            using var fT = Theme.Font(8.5f, FontStyle.Bold); using var f = Theme.Font(8.5f);
+            string title = I18n.T("Leyenda") + (open ? "  ▾" : "  ▸");
+            var rows = new (string text, int kind, Color c)[]
+            {
+                (I18n.T("itinerario"), 9, Color.Empty), (I18n.T("andén"), 3, Color.Empty), (I18n.T("apartadero"), 4, Color.Empty),
+                (I18n.T("cruce de vías"), 6, Color.Empty), (I18n.T("punto de carga"), 7, Color.Empty), (I18n.T("topera"), 8, Color.Empty),
+            };
+            int rowH = f.Height + 6, padX = 10;
+            int w = TextRenderer.MeasureText(title, fT).Width + 2 * padX;
+            foreach (var r in rows) w = Math.Max(w, 34 + TextRenderer.MeasureText(r.text, f).Width + padX);
+            int h = 8 + fT.Height + 6 + (open ? rows.Length * rowH + 4 : 0);
+            var box = new Rectangle(area.X + 8, area.Y + 8, w, h);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(box, 9)) { using var b = new SolidBrush(Color.FromArgb(235, 30, 33, 36)); g.FillPath(b, path); }
+            TextRenderer.DrawText(g, title, fT, new Point(box.X + padX, box.Y + 7), Color.FromArgb(185, 190, 195), TextFormatFlags.NoPadding);
+            _hitKey = new Rectangle(box.X, box.Y, box.Width, 8 + fT.Height + 6);
+            if (!open) return;
+            int y = box.Y + 8 + fT.Height + 8;
+            foreach (var (text, kind, c) in rows)
+            {
+                int cy = y + rowH / 2 - 2;
+                switch (kind)
+                {
+                    case 0: using (var b = new SolidBrush(c)) g.FillRectangle(b, box.X + padX, cy - 2, 18, 5); break;
+                    case 3:
+                        using (var pen = new Pen(MapDetailDraw.PlatformEdge, 10f) { StartCap = LineCap.Square, EndCap = LineCap.Square }) g.DrawLine(pen, box.X + padX + 4, cy, box.X + padX + 14, cy);
+                        using (var pen = new Pen(MapDetailDraw.PlatformCol, 7f) { StartCap = LineCap.Square, EndCap = LineCap.Square }) g.DrawLine(pen, box.X + padX + 4, cy, box.X + padX + 14, cy);
+                        using (var pen = new Pen(MapDetailDraw.TrackCol, 2.6f)) g.DrawLine(pen, box.X + padX, cy, box.X + padX + 18, cy);
+                        break;
+                    case 4:
+                        using (var pen = new Pen(MapDetailDraw.SidingCol, 8f) { DashPattern = new[] { 0.7f, 0.45f } }) g.DrawLine(pen, box.X + padX + 1, cy, box.X + padX + 17, cy);
+                        using (var pen = new Pen(MapDetailDraw.TrackCol, 2.6f)) g.DrawLine(pen, box.X + padX, cy, box.X + padX + 18, cy);
+                        break;
+                    case 9:
+                        using (var pen = new Pen(Color.FromArgb(70, 0, 0, 0), 6f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, box.X + padX + 2, cy, box.X + padX + 16, cy);
+                        using (var pen = new Pen(Color.FromArgb(235, HudMapRender.ItineraryCol), 3.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, box.X + padX + 2, cy, box.X + padX + 16, cy);
+                        break;
+                    case 6:
+                        using (var pen = new Pen(MapDetailDraw.TrackCol, 2.2f)) { g.DrawLine(pen, box.X + padX, cy - 5, box.X + padX + 18, cy + 5); g.DrawLine(pen, box.X + padX, cy + 5, box.X + padX + 18, cy - 5); }
+                        using (var b = new SolidBrush(MapDetailDraw.DiamondCol)) using (var pen = new Pen(Color.FromArgb(40, 44, 48), 1.2f)) MapDetailDraw.Diamond(g, b, pen, new PointF(box.X + padX + 9, cy), 4.6f);
+                        break;
+                    case 7: MapDetailDraw.Pickup(g, new PointF(box.X + padX + 9, cy), 1f, true); break;
+                    case 8:
+                        using (var pen = new Pen(MapDetailDraw.TrackCol, 2.6f)) g.DrawLine(pen, box.X + padX, cy, box.X + padX + 12, cy);
+                        using (var b = new SolidBrush(MapDetailDraw.EndCol)) using (var pen = new Pen(Color.FromArgb(40, 44, 48), 1f)) { g.FillRectangle(b, box.X + padX + 10, cy - 3, 6, 6); g.DrawRectangle(pen, box.X + padX + 10, cy - 3, 6, 6); }
+                        break;
+                }
+                TextRenderer.DrawText(g, text, f, new Point(box.X + 34, y + 1), Color.FromArgb(230, 232, 234), TextFormatFlags.NoPadding);
+                y += rowH;
+            }
         }
 
         // Tirador de la esquina inferior derecha (como el mini-mapa, la hoja de ruta y el chat).

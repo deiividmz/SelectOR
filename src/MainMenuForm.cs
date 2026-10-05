@@ -628,6 +628,7 @@ namespace SelectOR
             };
             _empCloseOpenBtn.Click += (s, e) => FinalizeService();
             dutyFlow.Controls.Add(_empDutyBtn); dutyFlow.Controls.Add(_empCloseOpenBtn);
+            BuildCancelPendingButton(dutyFlow);   // el maquinista cancela el servicio pendiente (MainMenuForm.CancelarServicio.cs)
             _empDutyHost.Controls.Add(dutyFlow);
 
             _lblStatus = new StatusPills { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Padding = new Padding(18, 0, 0, 0), Font = Theme.Font(10f) };
@@ -1278,10 +1279,13 @@ namespace SelectOR
         static string ClassKey(string conPath) { try { return conPath.ToLowerInvariant() + "|" + File.GetLastWriteTimeUtc(conPath).Ticks; } catch { return conPath.ToLowerInvariant(); } }
         static string SpecToLine(TrainSpec s) => string.Join("\t", s.Freight ? "1" : "0", s.Automotor ? "1" : "0", s.Kw.ToString(System.Globalization.CultureInfo.InvariantCulture),
             s.Kmh.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Capacity.ToString(System.Globalization.CultureInfo.InvariantCulture), s.Cars, s.Engines, (s.Traction ?? "").Replace("\t", " "), (s.Service ?? "").Replace("\t", " "),
-            s.MassT.ToString(System.Globalization.CultureInfo.InvariantCulture), s.LengthM.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            s.MassT.ToString(System.Globalization.CultureInfo.InvariantCulture), s.LengthM.ToString(System.Globalization.CultureInfo.InvariantCulture), ClassFormat);
+        // Formato de la línea: «t2» desde la 1.2.50 (la tracción sale del Type del .eng). Las líneas de antes se
+        // recalculan una vez: guardaban la tracción del método antiguo.
+        const string ClassFormat = "t2";
         static TrainSpec SpecFromLine(string l)
         {
-            var p = l.Split('\t'); if (p.Length < 11) return null;   // líneas antiguas (sin masa ni longitud): se recalculan
+            var p = l.Split('\t'); if (p.Length < 12 || p[11] != ClassFormat) return null;   // líneas antiguas: se recalculan
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             return new TrainSpec { Freight = p[0] == "1", Automotor = p[1] == "1", Kw = double.Parse(p[2], ci), Kmh = double.Parse(p[3], ci), Capacity = double.Parse(p[4], ci),
                                    Cars = int.Parse(p[5]), Engines = int.Parse(p[6]), Traction = p[7], Service = p[8],

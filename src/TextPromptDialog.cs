@@ -46,6 +46,12 @@ namespace SelectOR
             var spacer = new Panel { Width = 10, Dock = DockStyle.Right };
             ok.Click += (s, e) => { Value = (_input.Box.Text ?? "").Trim(); DialogResult = DialogResult.OK; Close(); };
             cancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+            // Intro acepta y Esc cancela (como un diálogo normal)
+            _input.Box.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Value = (_input.Box.Text ?? "").Trim(); DialogResult = DialogResult.OK; Close(); }
+                else if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; DialogResult = DialogResult.Cancel; Close(); }
+            };
             buttons.Controls.Add(ok); buttons.Controls.Add(spacer); buttons.Controls.Add(cancel);
 
             Controls.Add(body);

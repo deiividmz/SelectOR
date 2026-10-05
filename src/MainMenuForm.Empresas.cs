@@ -671,6 +671,8 @@ namespace SelectOR
             new ToolTip().SetToolTip(_empIdChip, Tr("Clic para copiar tu ID de usuario"));
             uTxt.Controls.Add(_empIdChip); uTxt.Controls.Add(_empUserLbl);
             uTop.Controls.Add(uTxt); uTop.Controls.Add(_railAvatar);
+            uTop.Controls.Add(MakeBell());   // campanita de notificaciones, a la derecha del nombre
+            RefreshBellCount();
             var ub = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 34, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0) };
             ub.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55)); ub.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
             ub.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -2851,6 +2853,8 @@ namespace SelectOR
             _empDutyBtn.TextColor = on ? Theme.Text : Color.White;
             _empDutyBtn.Invalidate();
             if (_empCloseOpenBtn != null) _empCloseOpenBtn.Visible = _pendingServiceId != null;
+            if (_empCancelOpenBtn != null) _empCancelOpenBtn.Visible = _pendingServiceId != null;
+            if (_empDutyHost != null) _empDutyHost.Width = _pendingServiceId != null ? 768 : 584;   // sitio para «Cancelar servicio»
             UpdateDutyHostVisible();
         }
 
@@ -2911,6 +2915,7 @@ namespace SelectOR
                 var _ = _serviceHud.Handle;   // la ventana existe ya (el trazado del mapa se le pasa aunque esté oculta)
                 if (_scenarioReady || force) _serviceHud.Show(); else _hudWaiting = true;
                 PushHudMap();   // descarga el trazado de la ruta y lo pasa al HUD
+                PushHudDetail();   // mapa grande: vía, andenes, PK, pasos a nivel… (del .tdb)
             }
             catch { }
         }
@@ -9345,6 +9350,54 @@ namespace SelectOR
         // Los .con y los .eng/.wag no cambian mientras se usa el programa (y cuando el editor toca
         // alguno se vacían a mano), así que cada archivo se lee y se analiza UNA sola vez. Antes, una
         // tasación releía la composición entera y todos sus vehículos en cada clic.
+        // Tracción del .eng, como la entiende Open Rails: el Type ( Electric | Diesel | Steam ) del bloque Engine
+        // (el Type del bloque Wagon dice «Engine» y no sirve). Antes se buscaba la palabra «diesel» o «steam» en
+        // todo el texto, y muchas eléctricas salían diésel (llevan el parámetro genérico de MSTS
+        // DieselEngineSpeedOfMaxTractiveEffort o comentarios) o vapor (calefacción de vapor, SteamHeat).
+        static readonly System.Text.RegularExpressions.Regex EngBlockRx = new(@"(?<![\w.])Engine\s*\(", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        static readonly System.Text.RegularExpressions.Regex EngTypeRx = new(@"(?<![\w.])Type\s*\(\s*""?([A-Za-z]+)""?\s*\)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        static readonly System.Text.RegularExpressions.Regex IncludeRx = new(@"(?<![\w.])Include\s*\(\s*""?([^"")]+?)""?\s*\)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        static string EngineTypeOf(string t, string path)
+        {
+            string v = DeclaredEngineType(t, path, 0);
+            if (v != null) return v;
+            // Sin Type (o en un archivo incluido que no está): las palabras, sin los parámetros que confundían.
+            string low = t.ToLowerInvariant().Replace("dieselenginespeedofmaxtractiveeffort", "").Replace("steamheat", "");
+            return low.Contains("diesel") ? "diesel" : low.Contains("steam") ? "steam" : "electric";
+        }
+
+        // El Type del bloque Engine; los .eng de las carpetas OpenRails suelen empezar con Include ( ../original.eng )
+        // y no repetirlo: entonces se busca en el incluido (hasta 3 niveles). null si nadie lo declara.
+        static string DeclaredEngineType(string t, string path, int depth)
+        {
+            if (string.IsNullOrEmpty(t)) return null;
+            var m = EngBlockRx.Match(t);
+            if (m.Success)
+            {
+                var k = EngTypeRx.Match(t, m.Index + m.Length);
+                if (k.Success)
+                {
+                    string v = k.Groups[1].Value.ToLowerInvariant();
+                    if (v == "electric" || v == "diesel" || v == "steam") return v;
+                }
+            }
+            if (depth >= 3 || string.IsNullOrEmpty(path)) return null;
+            foreach (System.Text.RegularExpressions.Match i in IncludeRx.Matches(t))
+            {
+                try
+                {
+                    string rel = i.Groups[1].Value.Trim().Replace(@"\\", @"\").Replace('/', System.IO.Path.DirectorySeparatorChar);
+                    string q = System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path) ?? "", rel));
+                    if (!System.IO.File.Exists(q)) continue;
+                    string v = DeclaredEngineType(ReadHead(q, 200000), q, depth + 1);
+                    if (v != null) return v;
+                }
+                catch { }
+            }
+            return null;
+        }
+
         sealed class VehStats
         {
             public double Capacity, MassT, BrakeKn, Width, Length, PowerKw, SpeedKmh;
@@ -9375,8 +9428,7 @@ namespace SelectOR
                     v.Tilting = IsTilting(t);
                     v.PowerKw = ExtractPowerKw(t);
                     v.SpeedKmh = ExtractSpeedKmh(t);
-                    string low = t.ToLowerInvariant();
-                    v.EngineType = low.Contains("diesel") ? "diesel" : low.Contains("steam") ? "steam" : "electric";
+                    v.EngineType = EngineTypeOf(t, path);
                 }
             }
             catch { }

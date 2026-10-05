@@ -1,9 +1,9 @@
-1.2.49
-Open Rails estable|Ya no se cierra al usar F9 con SelectOR, y F2 guarda siempre la partida.
-Hoja de ruta exacta|Paradas y horas iguales a las de la actividad o el horario de tu tren.
-Destino final|En la última estación del viaje solo bajan viajeros.
-Composición 2D|Los vehículos se ven acoplados, topes con topes, en todas las vistas.
-Exploración al día|Los cambios del Editor de composiciones se ven al momento, sin reiniciar.
-Mapa grande|Ahora se puede cambiar de tamaño y recuerda dónde lo dejaste.
-Carné más justo|Con el tren parado ya no se suman km: se acabaron las A2 injustas.
-Y más|Acceso directo por versión de Open Rails, arranque más ágil y pupitre más fluido.
+1.2.50
+Mapa con detalle|Vías, andenes a su lado, apartaderos, cruces, puntos de carga y PK, también en el mini-mapa.
+Itinerarios guardados|Guárdalos en el mapa grande y cárgalos otro día; si el tren va a mitad, sigue desde ahí.
+Itinerario limpio|El trazo se borra justo bajo el tren, y los rótulos ya no se salen del mini-mapa.
+Campanita de avisos|Junto a tu perfil: los avisos sin leer y todo su historial.
+Cancelar servicio|El maquinista puede cancelar su servicio en curso en vez de registrarlo.
+Tracción correcta|Eléctrica, diésel o vapor según el .eng, como en Open Rails (también en el precio).
+Mapa más claro|Cada elemento con su color y una leyenda en el mapa grande.
+Y más|En los cuadros de texto, Intro acepta y Esc cancela.

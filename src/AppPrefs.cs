@@ -9,6 +9,27 @@ using System.Text.Json.Serialization;
 
 namespace SelectOR
 {
+    // Un itinerario guardado: sus puntos (en lat/lon y en el tramo del .tdb), dónde para y dónde no.
+    public class SavedItinerary
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public string Name { get; set; }
+        public string Route { get; set; }            // carpeta de la ruta (ROUTES\<esta>)
+        public DateTime Created { get; set; } = DateTime.Now;
+        public double Km { get; set; }
+        public List<SavedItineraryPoint> Points { get; set; } = new List<SavedItineraryPoint>();
+        public Dictionary<string, bool> Halts { get; set; } = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+    }
+    public class SavedItineraryPoint
+    {
+        public double Lat { get; set; }
+        public double Lon { get; set; }
+        public int Edge { get; set; }
+        public double Off { get; set; }
+        public bool Guide { get; set; }              // punto de paso de un recorrido (.pat): no se dibuja
+        public bool Reverse { get; set; }            // ahí invierte la marcha
+    }
+
     public class AppPrefs
     {
         public string LastFolder { get; set; }
@@ -62,6 +83,7 @@ namespace SelectOR
         public int BigMapY { get; set; } = -1;
         public int BigMapW { get; set; } = -1;
         public int BigMapH { get; set; } = -1;
+        public bool BigMapKey { get; set; } = true;   // leyenda del mapa grande desplegada (vía por límites, PK…)
         public bool RoadHudPcClock { get; set; }     // horas de la hoja de ruta: false = del simulador, true = del PC
         public int RoadDwellS { get; set; } = 30;    // segundos de parada en cada estación (para la hora estimada)
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
@@ -85,6 +107,8 @@ namespace SelectOR
         // minúsculas), en bar. Sin entrada = la escala de la cabina (.cvf).
         public Dictionary<string, double> CabAirScaleBar { get; set; } = new Dictionary<string, double>();
         public Dictionary<string, double> CabBcScaleBar { get; set; } = new Dictionary<string, double>();
+        // Itinerarios guardados desde el mapa grande (pestaña «Guardados»), de todas las rutas.
+        public List<SavedItinerary> SavedItineraries { get; set; } = new List<SavedItinerary>();
 
         static string Dir => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Open Rails");
@@ -115,6 +139,7 @@ namespace SelectOR
                         p.TrainImages ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         p.CabAirScaleBar ??= new Dictionary<string, double>();
                         p.CabBcScaleBar ??= new Dictionary<string, double>();
+                        p.SavedItineraries ??= new List<SavedItinerary>();
                         return p;
                     }
                 }

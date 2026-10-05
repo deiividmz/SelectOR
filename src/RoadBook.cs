@@ -25,6 +25,12 @@ namespace SelectOR
             public double Len;
             public readonly List<(double off, double kmh)> Limits = new();      // señales de límite de velocidad
             public readonly List<(double off, string name)> Platforms = new();  // andenes (nombre de estación)
+            // Marcas de andén con su id del .tdb (para emparejar inicio y fin y saber a qué lado de la vía está)
+            public readonly List<(double off, uint id, uint linked, bool start)> PlatformMarks = new();
+            // Para el mapa del HUD: hitos kilométricos (valor del PK), cruces sin desvío, puntos de carga y apartaderos con nombre
+            public readonly List<(double off, float value)> MilePosts = new();
+            public readonly List<double> Diamonds = new(), Pickups = new();
+            public readonly List<(double off, string name)> Sidings = new();
         }
         sealed class Node { public readonly List<int> In = new(), Out = new(); }
 
@@ -36,6 +42,10 @@ namespace SelectOR
         readonly Dictionary<long, List<int>> _nodeAt = new();
         readonly Dictionary<int, List<int>> _edgesAt = new();
         public Func<string, string> CleanName;
+        // Lado del andén (objeto «Platform» del mundo, .w): id de la marca del .tdb → PlatformData (0x2 izquierda,
+        // 0x4 derecha). Sin entrada o 0: no se sabe (se dibuja centrado en la vía).
+        public Dictionary<uint, uint> PlatformSides = new();
+        public readonly List<(double x, double y)> Ends = new();   // finales de vía (toperas), en la proyección local
         public double Lat0, Lon0, Kx, Ky;
         const float Cell = 200f;
         Dictionary<long, List<(int e, int i)>> _grid;
@@ -98,6 +108,15 @@ namespace SelectOR
                                   : (r >= 0 && byId.TryGetValue((uint)r, out var x) ? x : null);
                         if (it == null) continue;
                         double off = Math.Max(0, Math.Min(e.Len, it.SData1 + pre));
+                        if (it is SpeedPostItem mp && mp.IsMilePost) { e.MilePosts.Add((off, mp.SpeedInd)); continue; }
+                        if (it is CrossoverItem) { e.Diamonds.Add(off); continue; }   // cruce de vías sin desvío (una marca por vía)
+                        if (it is PickupItem) { e.Pickups.Add(off); continue; }
+                        if (it is SidingItem sd)
+                        {
+                            string sn = (sd.ItemName ?? "").Trim();
+                            if (sn.Length > 0) e.Sidings.Add((off, sn));
+                            continue;
+                        }
                         if (it is SpeedPostItem sp)
                         {
                             if (!sp.IsLimit || sp.IsMilePost || sp.IsWarning || sp.IsResume) continue;
@@ -109,6 +128,7 @@ namespace SelectOR
                         {
                             string name = cleanName?.Invoke(pl.Station.Trim()) ?? pl.Station.Trim();
                             if (!string.IsNullOrWhiteSpace(name)) e.Platforms.Add((off, name));
+                            e.PlatformMarks.Add((off, pl.TrItemId, pl.LinkedPlatformItemId, !(pl.Flags1 ?? "").StartsWith("ffff", StringComparison.OrdinalIgnoreCase)));
                         }
                     }
                 e.Limits.Sort((u, v) => u.off.CompareTo(v.off));
@@ -181,6 +201,14 @@ namespace SelectOR
                 g._nodes[ni] = node;
             }
             g.BuildGrid();
+            // lado de cada andén: solo las teselas del mundo donde hay andenes y solo sus objetos «Platform»
+            var platTiles = new HashSet<(int x, int z)>();
+            foreach (var it in items) if (it is PlatformItem) platTiles.Add((it.TileX, it.TileZ));
+            g.PlatformSides = ReadPlatformSides(routeDir, platTiles);
+            // finales de vía (toperas)
+            for (int ni = 0; ni < tn.Length; ni++)
+                if (tn[ni] != null && tn[ni].TrEndNode && nodePos.TryGetValue(ni, out var ep) && OrGeo.TryLatLon(ep.x, ep.z, out double ela, out double elo))
+                    g.Ends.Add(g.Proj(ela, elo));
             g.CleanName = cleanName;
             g._nodeWorld = nodePos;
             foreach (var kv in nodePos)
@@ -320,6 +348,42 @@ namespace SelectOR
             if (edge < 0) return false;
             distM = Math.Sqrt(best);
             return true;
+        }
+
+        // PlatformData de los objetos «Platform» de esas teselas del mundo, por id de marca del .tdb. El lector de Open
+        // Rails solo analiza ese tipo de objeto (lista de «tokens» permitidos); el tipo TokenID se busca POR NOMBRE
+        // (cada versión de Open Rails numera distinto sus enumeraciones).
+        static Dictionary<uint, uint> ReadPlatformSides(string routeDir, IEnumerable<(int x, int z)> tiles)
+        {
+            var res = new Dictionary<uint, uint>();
+            try
+            {
+                var tokT = AppDomain.CurrentDomain.GetAssemblies().Select(a => { try { return a.GetType("Orts.Parsers.Msts.TokenID"); } catch { return null; } })
+                                    .FirstOrDefault(t => t != null && t.IsEnum)
+                        ?? Type.GetType("Orts.Parsers.Msts.TokenID, Orts.Parsers.Msts");
+                if (tokT == null) return res;
+                var allowed = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(tokT));
+                allowed.Add(Enum.Parse(tokT, "platform", true));
+                var ctor = typeof(WorldFile).GetConstructor(new[] { typeof(string), allowed.GetType() });
+                if (ctor == null) return res;
+                string wdir = Path.Combine(routeDir, "WORLD");
+                foreach (var (tx, tz) in tiles)
+                {
+                    string fn = Path.Combine(wdir, $"w{tx:+000000;-000000}{tz:+000000;-000000}.w");
+                    if (!File.Exists(fn)) continue;
+                    try
+                    {
+                        var wf = (WorldFile)ctor.Invoke(new object[] { fn, allowed });
+                        if (wf?.Tr_Worldfile == null) continue;
+                        foreach (var o in wf.Tr_Worldfile)
+                            if (o is PlatformObj po && po.trItemIDList != null)
+                                foreach (var id in po.trItemIDList) if (id != null && id.dbID >= 0) res[(uint)id.dbID] = po.PlatformData;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return res;
         }
 
         // Punto (proyección local) a una distancia del inicio del tramo.
@@ -558,8 +622,6 @@ namespace SelectOR
         public DateTime OffSinceUtc = DateTime.MaxValue;
 
         public bool HasPlan => _px.Length >= 2;
-        // Vértice del trazado hasta el que ya ha llegado el tren (para pintar lo recorrido más apagado).
-        public int PassedIdx { get { if (_pc.Length == 0) return 0; int i = Array.BinarySearch(_pc, Progress); return Math.Max(0, i < 0 ? ~i - 1 : i); } }
 
         public void Reset(string routeDir)
         {
@@ -602,6 +664,68 @@ namespace SelectOR
         }
 
         public void ClearHaltChoices() => _haltChoice.Clear();   // tren nuevo con horario: mandan sus paradas
+
+        // Itinerarios guardados: dónde para (lo elegido a mano y lo que dice cada fila de la hoja de ruta).
+        public Dictionary<string, bool> HaltsForSave()
+        {
+            var d = new Dictionary<string, bool>(_haltChoice, StringComparer.OrdinalIgnoreCase);
+            foreach (var s in Stops) if (!s.Synthetic && !string.IsNullOrWhiteSpace(s.Name)) d[s.Name] = s.Halt;
+            return d;
+        }
+        public void SetHaltChoices(IDictionary<string, bool> halts)
+        {
+            _haltChoice.Clear();
+            if (halts != null) foreach (var kv in halts) _haltChoice[kv.Key] = kv.Value;
+        }
+
+        // Punto de un itinerario guardado: el mismo tramo si sigue ahí (mismo .tdb); si no, el más cercano.
+        public bool AddSavedPoint(double lat, double lon, int edge, double off, bool guide, bool reverse)
+        {
+            if (Graph == null) return false;
+            int e = edge; double o = off;
+            bool ok = e >= 0 && e < Graph.Edges.Length && o >= 0 && o <= Graph.Edges[e].Len + 0.5;
+            if (ok)
+            {
+                var (x, y) = Graph.PointAt(e, o); var (la, lo) = Graph.Unproj(x, y);
+                ok = HudMapDetail.Meters(la, lo, lat, lon) < 15;
+            }
+            if (!ok && !Graph.Nearest(lat, lon, 60, out e, out o, out _)) return false;
+            var (px, py) = Graph.PointAt(e, o); var (pla, plo) = Graph.Unproj(px, py);
+            Points.Add(new Waypoint { Lat = pla, Lon = plo, Edge = e, Off = o, Guide = guide, Reverse = reverse });
+            return true;
+        }
+
+        // Itinerario cargado con el tren ya en mitad de él (de A a F y el tren en C): se traza entero desde su primer
+        // punto, se busca dónde cae el tren y los puntos que quedan atrás se dan por alcanzados. Así la hoja de ruta
+        // se calcula desde donde está el tren hasta el final, sin volver al principio. Devuelve los puntos saltados.
+        public int SkipReachedFrom(bool hasPos, double lat, double lon)
+        {
+            ReachedPoints = 0;
+            if (!hasPos || Graph == null || Points.Count < 2) return 0;
+            Replan(false, 0, 0, false, 0);   // sin posición: desde el primer punto
+            int reached = 0;
+            if (HasPlan)
+            {
+                var (x, y) = Graph.Proj(lat, lon);
+                double best = double.MaxValue, bestD = 0;
+                for (int i = 0; i + 1 < _px.Length; i++)
+                {
+                    double ax = _px[i], ay = _py[i], dx = _px[i + 1] - ax, dy = _py[i + 1] - ay, l2 = dx * dx + dy * dy;
+                    double t = l2 > 0 ? Math.Max(0, Math.Min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+                    double ex = ax + t * dx - x, ey = ay + t * dy - y, d2 = ex * ex + ey * ey;
+                    if (d2 < best - 1) { best = d2; bestD = _pc[i] + t * (_pc[i + 1] - _pc[i]); }   // (a igualdad, la primera pasada)
+                }
+                if (Math.Sqrt(best) <= 60)
+                {
+                    reached = 1;   // el primer punto queda atrás
+                    for (int i = 0; i < PointDist.Length; i++) if (PointDist[i] <= bestD + 1) reached = _firstPlanned + i + 1;
+                    reached = Math.Min(reached, Points.Count - 1);   // al menos el último (el destino) queda por delante
+                }
+            }
+            ClearPlan(); Problem = null;
+            ReachedPoints = reached;
+            return reached;
+        }
         public void Undo()
         {
             if (Points.Count > ReachedPoints) Points.RemoveAt(Points.Count - 1);
@@ -839,6 +963,33 @@ namespace SelectOR
                 if (Progress > PointDist[i] - 30 && ReachedPoints < _firstPlanned + i + 1) ReachedPoints = _firstPlanned + i + 1;
         }
         int _firstPlanned;   // índice (en Points) del punto al que corresponde PointDist[0]
+
+        // Para DIBUJAR: hasta dónde ha llegado el tren que se ve en el mapa (la posición suavizada de cada fotograma),
+        // no solo la del último seguimiento (una vez por segundo). Así el trazo del itinerario se borra justo bajo la
+        // flecha y no se queda detrás. Solo se busca cerca de lo ya recorrido y nunca hacia atrás.
+        public double DrawProgress(bool hasPos, double lat, double lon)
+        {
+            if (!HasPlan || !hasPos || Graph == null) return Progress;
+            var (x, y) = Graph.Proj(lat, lon);
+            double lo = Progress - 100, hi = Progress + 1500, best = double.MaxValue, bestD = Progress;
+            for (int i = 0; i + 1 < _px.Length; i++)
+            {
+                if (_pc[i + 1] < lo || _pc[i] > hi) continue;
+                double ax = _px[i], ay = _py[i], dx = _px[i + 1] - ax, dy = _py[i + 1] - ay, l2 = dx * dx + dy * dy;
+                double t = l2 > 0 ? Math.Max(0, Math.Min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+                double ex = ax + t * dx - x, ey = ay + t * dy - y, d2 = ex * ex + ey * ey;
+                if (d2 < best) { best = d2; bestD = _pc[i] + t * (_pc[i + 1] - _pc[i]); }
+            }
+            return Math.Sqrt(best) <= 60 ? Math.Max(Progress, bestD) : Progress;
+        }
+
+        // Primer vértice del trazado que queda por delante de esa distancia.
+        public int VertexAfter(double d)
+        {
+            if (_pc.Length == 0) return 0;
+            int i = Array.BinarySearch(_pc, d);
+            return Math.Min(_pc.Length, i < 0 ? ~i : i + 1);
+        }
 
         // Diferencia de horas del día en (−12 h, +12 h] (un horario que pasa de medianoche).
         public static double Wrap(double secs) { secs %= 86400; if (secs > 43200) secs -= 86400; if (secs <= -43200) secs += 86400; return secs; }

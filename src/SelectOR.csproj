@@ -13,9 +13,9 @@
     <AssemblyTitle>SelectOR</AssemblyTitle>
     <Company>David MZP</Company>
     <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
-    <Version>1.2.49</Version>
-    <AssemblyVersion>1.2.49.0</AssemblyVersion>
-    <FileVersion>1.2.49.0</FileVersion>
+    <Version>1.2.50</Version>
+    <AssemblyVersion>1.2.50.0</AssemblyVersion>
+    <FileVersion>1.2.50.0</FileVersion>
 
     <!-- Carpeta de una instalación de Open Rails (la que contiene OpenRails.exe). Por defecto,
          «OR Desplegado» junto a esta carpeta; se cambia al compilar con

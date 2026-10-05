@@ -155,7 +155,8 @@ namespace SelectOR
     // Dibujo de los demás usuarios (lo usan el minimapa y el mapa grande).
     static class LiveMapDraw
     {
-        const TextFormatFlags TF = TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+        const TextFormatFlags TF = TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine
+                                   | TextFormatFlags.PreserveGraphicsClipping;   // el texto respeta el marco del mapa (TextRenderer no lo hace si no)
 
         // Flechas y etiquetas. detail=false (minimapa): solo el nombre corto; detail=true (mapa grande):
         // nombre, tren con velocidad (o «parado en …») y empresa de servicio o «Conducción libre».

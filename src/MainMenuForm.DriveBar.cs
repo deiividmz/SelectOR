@@ -73,7 +73,7 @@ namespace SelectOR
             try
             {
                 _driveBar = new DriveTopBar(DriveBarStateNow, ToggleHudFromBar, ToggleBigMapFromBar, ServiceFromBar, CheckDrivenFleet,
-                                            ToggleCabHudFromBar, ToggleChatHudFromBar, ToggleRoadHudFromBar);
+                                            ToggleCabHudFromBar, ToggleChatHudFromBar, ToggleRoadHudFromBar, CancelServiceMidRun);
             }
             catch { _driveBar = null; }
         }

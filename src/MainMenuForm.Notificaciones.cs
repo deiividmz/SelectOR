@@ -20,6 +20,7 @@ namespace SelectOR
             public string Id, Kind, CompanyId, Company, Actor;
             public JsonElement Data;
             public DateTime At;
+            public bool IsRead, Resolved;   // historial de la campanita (notification_history)
         }
 
         Timer _notifTimer;
@@ -35,6 +36,7 @@ namespace SelectOR
             _notifTimer.Tick += (s, e) => NotifyCheck();
             _notifTimer.Start();
             NotifySoon(2500);   // al entrar: los que llegaron mientras no estabas
+            _bellOff = false;
             StartSessionCheck();   // una sesión por conexión: avisa si el servidor cierra esta
         }
 
@@ -46,6 +48,8 @@ namespace SelectOR
             _toastQueue.Clear();
             foreach (var t in _toasts.ToArray()) { try { t.Close(); } catch { } }
             _toasts.Clear();
+            try { _bellPanel?.Close(); } catch { }
+            if (_bell != null && !_bell.IsDisposed) _bell.Count = 0;
         }
 
         void NotifySoon(int ms = 800)
@@ -91,7 +95,7 @@ namespace SelectOR
                 if (membership && _empLoaded) LoadCompanies();
             }
             catch { }
-            finally { _notifBusy = false; }
+            finally { _notifBusy = false; RefreshBellCount(); }
         }
 
         static List<NotifRow> ParseNotifs(string json)
@@ -105,6 +109,8 @@ namespace SelectOR
                 var r = new NotifRow { Id = Str(e, "id"), Kind = Str(e, "kind"), CompanyId = Str(e, "company_id"), Company = Str(e, "company_name"), Actor = Str(e, "actor") };
                 r.Data = e.TryGetProperty("data", out var dd) && dd.ValueKind == JsonValueKind.Object ? dd.Clone() : default;
                 DateTime.TryParse(Str(e, "created_at"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out r.At);
+                r.IsRead = e.TryGetProperty("is_read", out var ir) && ir.ValueKind == JsonValueKind.True;
+                r.Resolved = e.TryGetProperty("resolved", out var rs) && rs.ValueKind == JsonValueKind.True;
                 if (!string.IsNullOrEmpty(r.Id)) list.Add(r);
             }
             return list;
@@ -132,8 +138,20 @@ namespace SelectOR
             return utc.ToLocalTime().ToString(I18n.English ? "dd/MM/yyyy HH:mm" : "dd-MM-yyyy HH:mm");
         }
 
-        // Icono, color, título, texto y adónde lleva el clic, según el tipo de aviso.
+        // Cómo se enseña un aviso (ventana emergente y lista de la campanita): icono, color, título, texto y
+        // adónde lleva el clic.
+        sealed class NotifView { public string Icon, Title, Body, Cid; public Color Color; public int Sub = -1, BuyTab = -1; }
+
         NotificationToast BuildToast(NotifRow r)
+        {
+            var v = DescribeNotif(r);
+            var t = new NotificationToast(v.Icon, v.Title, v.Body, "SelectOR · " + Tr("Empresas") + " · " + AgoText(r.At), v.Color);
+            string id = r.Id;
+            t.Opened = () => { MarkNotifRead(id); OpenEmpresasAt(v.Cid, v.Sub, v.BuyTab); };
+            return t;
+        }
+
+        NotifView DescribeNotif(NotifRow r)
         {
             Color ok = Color.FromArgb(76, 175, 80), bad = Color.FromArgb(229, 115, 115), info = Color.FromArgb(96, 165, 250),
                   buy = Color.FromArgb(251, 146, 60), role = Color.FromArgb(167, 139, 250);
@@ -248,9 +266,7 @@ namespace SelectOR
                     title = Tr("Aviso"); body = co; break;
             }
             body = body.Replace("  ", " ");
-            var t = new NotificationToast(icon, title, body, "SelectOR · " + Tr("Empresas") + " · " + AgoText(r.At), c);
-            t.Opened = () => OpenEmpresasAt(cid, sub, buyTab);
-            return t;
+            return new NotifView { Icon = icon, Title = title, Body = body, Color = c, Cid = cid, Sub = sub, BuyTab = buyTab };
         }
 
         static string DataOr(NotifRow r, string k, string def) { var v = DataStr(r, k); return string.IsNullOrWhiteSpace(v) ? def : v; }

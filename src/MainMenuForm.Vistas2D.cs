@@ -14,7 +14,7 @@ namespace SelectOR
     public partial class MainMenuForm
     {
         const int Prewarm2DTrains = 48, Prewarm2DMachines = 30;
-        const int Prewarm2DMaxMs = 8000;      // nunca retrasa la apertura más de esto
+        const int Prewarm2DMaxMs = 15000;     // nunca retrasa la apertura más de esto (la clasificación desde cero de ~10 000 trenes tarda unos 10 s)
 
         async void Prewarm2D()
         {

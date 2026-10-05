@@ -227,11 +227,7 @@ namespace SelectOR
             Task.Run(() =>
             {
                 RouteGraph g = null;
-                try
-                {
-                    var good = TdbNames(dir);
-                    g = RouteGraph.Build(dir, n => CleanMapStation(FixTdbName(n, good)));
-                }
+                try { g = RouteGraphFor(dir).GetAwaiter().GetResult(); }   // el mismo grafo que el mapa grande
                 catch { g = null; }
                 try
                 {
@@ -240,6 +236,12 @@ namespace SelectOR
                         if (!string.Equals(dir, _road.RouteDir, StringComparison.OrdinalIgnoreCase)) return;
                         _road.Building = false; _road.Graph = g;
                         if (g == null) _road.Problem = Tr("Esta ruta no trae el esquema de vías (.tdb): no se puede trazar el itinerario.");
+                        if (g != null && _roadSavedPending != null)   // un guardado pedido mientras se montaba el grafo
+                        {
+                            string m = ApplySavedItinerary(_roadSavedPending);
+                            if (HudAlive) _serviceHud.MapNotice(m);
+                            return;
+                        }
                         if (g != null && _roadPatPending != null) { LoadPatIntoRoad(); return; }   // (ya replanifica)
                         RoadReplan();
                     }));
@@ -351,6 +353,10 @@ namespace SelectOR
             _serviceHud.Book = _road;
             _serviceHud.BookEnsureGraph = EnsureRoadGraph;
             _serviceHud.BookChanged = RoadReplan;
+            _serviceHud.SavedList = SavedItinerariesHere;          // itinerarios guardados (MainMenuForm.Itinerarios.cs)
+            _serviceHud.SaveBook = SaveCurrentItinerary;
+            _serviceHud.LoadSaved = LoadSavedItinerary;
+            _serviceHud.DeleteSaved = DeleteSavedItinerary;
         }
     }
 }

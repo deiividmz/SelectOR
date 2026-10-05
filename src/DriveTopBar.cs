@@ -1,7 +1,7 @@
 // Barra de acceso rápido en la parte CENTRAL SUPERIOR de la pantalla mientras se conduce.
 // Está oculta: aparece solo al llevar el ratón al borde superior, en el centro, y se esconde
 // al apartarlo. Da acceso a: HUD (mini-mapa), mapa grande y servicio de empresa (ponerse de
-// servicio con el tren que se conduce si es de la flota, o registrar el servicio en curso).
+// servicio con el tren que se conduce si es de la flota, o registrar o cancelar el servicio en curso).
 // Como el HUD, no roba el foco al simulador (WS_EX_NOACTIVATE) y se dibuja a mano.
 
 using System;
@@ -24,24 +24,26 @@ namespace SelectOR
     {
         readonly Func<DriveBarState> _state;
         readonly Action _toggleHud, _toggleMap, _toggleCab, _toggleChat, _toggleRoad;
-        readonly Func<Task<(bool ok, string msg)>> _service;
+        readonly Func<Task<(bool ok, string msg)>> _service, _cancel;
         readonly Action _onShowing;   // p. ej. comprobar si el tren es de la flota al desplegarse
         readonly System.Windows.Forms.Timer _poll;
 
         DriveBarState _st = new DriveBarState();
-        Rectangle _hitHud, _hitMap, _hitCab, _hitChat, _hitRoad, _hitSvc;
+        Rectangle _hitHud, _hitMap, _hitCab, _hitChat, _hitRoad, _hitSvc, _hitCancel;
         int _hoverBtn = -1;
-        bool _busy, _confirm;
+        bool _busy, _confirm, _confirmCancel;
         DateTime _confirmUntil, _msgUntil, _lastInside;
         string _msg; bool _msgErr;
 
-        const int BarW = 1072, BarH = 58, MsgH = 24, HotW = 420, HotH = 6;
+        const int BarW = 1190, BarH = 58, MsgH = 24, HotW = 420, HotH = 6;
         static readonly Color Teal = Color.FromArgb(94, 190, 155);
         static readonly Color Rec = Color.FromArgb(224, 86, 86);
 
         public DriveTopBar(Func<DriveBarState> state, Action toggleHud, Action toggleMap,
-                           Func<Task<(bool ok, string msg)>> service, Action onShowing = null, Action toggleCab = null, Action toggleChat = null, Action toggleRoad = null)
+                           Func<Task<(bool ok, string msg)>> service, Action onShowing = null, Action toggleCab = null, Action toggleChat = null, Action toggleRoad = null,
+                           Func<Task<(bool ok, string msg)>> cancel = null)
         {
+            _cancel = cancel;
             _state = state; _toggleHud = toggleHud; _toggleMap = toggleMap; _service = service; _onShowing = onShowing;
             _toggleCab = toggleCab; _toggleChat = toggleChat; _toggleRoad = toggleRoad;
             FormBorderStyle = FormBorderStyle.None;
@@ -104,11 +106,11 @@ namespace SelectOR
             var inside = Bounds; inside.Inflate(28, 0); inside.Height += 28;   // margen para no cerrarse al rozar el borde
             if (inside.Contains(cur) || hot.Contains(cur)) _lastInside = DateTime.UtcNow;
 
-            if (_confirm && DateTime.UtcNow > _confirmUntil) { _confirm = false; Invalidate(); }
+            if ((_confirm || _confirmCancel) && DateTime.UtcNow > _confirmUntil) { _confirm = _confirmCancel = false; Invalidate(); }
 
             // Se esconde tras apartar el ratón (salvo mientras trabaja o muestra un resultado).
             bool keep = _busy || HasMsg;
-            if (!keep && (DateTime.UtcNow - _lastInside).TotalMilliseconds > 650) { Hide(); _confirm = false; return; }
+            if (!keep && (DateTime.UtcNow - _lastInside).TotalMilliseconds > 650) { Hide(); _confirm = _confirmCancel = false; return; }
 
             PlaceOn(Screen.FromPoint(new Point(Left + Width / 2, Top + 1)).Bounds);
             int hb = HitIndex(PointToClient(cur));
@@ -130,6 +132,7 @@ namespace SelectOR
             if (_hitCab.Contains(p)) return 3;
             if (_hitChat.Contains(p)) return 4;
             if (_hitRoad.Contains(p)) return 5;
+            if (_hitCancel.Contains(p)) return 6;
             return -1;
         }
 
@@ -143,17 +146,18 @@ namespace SelectOR
             else if (i == 3) { _toggleCab?.Invoke(); Refresh_(); }
             else if (i == 4) { _toggleChat?.Invoke(); Refresh_(); }
             else if (i == 5) { _toggleRoad?.Invoke(); Refresh_(); }
-            else if (i == 2 && _st.ServiceEnabled && _service != null)
+            else if ((i == 2 && _st.ServiceEnabled && _service != null) || (i == 6 && _st.InService && _cancel != null))
             {
-                // Registrar pide una segunda pulsación (no hay diálogos: quedarían tras el simulador).
-                if (_st.InService && !_confirm)
+                // Registrar y cancelar piden una segunda pulsación (no hay diálogos: quedarían tras el simulador).
+                bool cancel = i == 6;
+                if (_st.InService && !(cancel ? _confirmCancel : _confirm))
                 {
-                    _confirm = true; _confirmUntil = DateTime.UtcNow.AddSeconds(4);
+                    _confirm = !cancel; _confirmCancel = cancel; _confirmUntil = DateTime.UtcNow.AddSeconds(4);
                     Invalidate(); return;
                 }
-                _confirm = false; _busy = true; Invalidate();
+                _confirm = _confirmCancel = false; _busy = true; Invalidate();
                 (bool ok, string msg) r;
-                try { r = await _service(); }
+                try { r = await (cancel ? _cancel() : _service()); }
                 catch (Exception ex) { r = (false, ex.Message); }
                 _busy = false;
                 ShowMessage(r.msg, !r.ok);
@@ -197,6 +201,12 @@ namespace SelectOR
             _hitChat = new Rectangle(_hitCab.Right + 6, y, 94, h);
             _hitRoad = new Rectangle(_hitChat.Right + 6, y, 136, h);
             _hitSvc = new Rectangle(_hitRoad.Right + 6, y, Width - _hitRoad.Right - 6 - 10, h);
+            _hitCancel = Rectangle.Empty;
+            if (_st.InService && _cancel != null)
+            {
+                _hitCancel = new Rectangle(_hitSvc.Right - 150, y, 150, h);
+                _hitSvc.Width -= 150 + 6;
+            }
 
             DrawBtn(g, _hitHud, "HUD", _st.HudVisible, true, _hoverBtn == 0, Glyph.Hud);
             DrawBtn(g, _hitMap, I18n.T("Mapa"), _st.BigMapOpen, true, _hoverBtn == 1, Glyph.Map);
@@ -209,6 +219,8 @@ namespace SelectOR
                 : (_st.ServiceText ?? "");
             bool primary = _st.ServiceEnabled && !_st.InService;
             DrawSvcBtn(g, _hitSvc, svcText, _st.ServiceEnabled && !_busy, primary, _st.InService || _confirm, _hoverBtn == 2);
+            if (!_hitCancel.IsEmpty)
+                DrawCancelBtn(g, _hitCancel, _confirmCancel ? I18n.T("Pulsa otra vez para cancelar") : I18n.T("Cancelar servicio"), !_busy, _confirmCancel, _hoverBtn == 6);
 
             if (HasMsg)
             {
@@ -283,6 +295,18 @@ namespace SelectOR
             var fg = !enabled ? Theme.Subtle : ((primary || danger) ? Color.White : Theme.Text);
             TextRenderer.DrawText(g, text, Theme.Font(enabled ? 9.5f : 8.6f, FontStyle.Bold),
                 new Rectangle(r.Left + 8, r.Top, r.Width - 16, r.Height), fg,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+        }
+
+        // «Cancelar servicio»: discreto (borde rojo) hasta que se pide confirmar.
+        void DrawCancelBtn(Graphics g, Rectangle r, string text, bool enabled, bool confirm, bool hover)
+        {
+            var fill = confirm ? Color.FromArgb(176, 64, 64) : (hover && enabled ? Theme.SurfaceHi : Theme.Surface2);
+            using (var b = new SolidBrush(fill)) FillRound(g, r, 9, b);
+            if (!confirm) using (var p = new Pen(Color.FromArgb(150, 224, 86, 86), 1.2f)) DrawRound(g, r, 9, p);
+            var fg = !enabled ? Theme.Subtle : confirm ? Color.White : Color.FromArgb(235, 130, 130);
+            TextRenderer.DrawText(g, text, Theme.Font(9f, FontStyle.Bold),
+                new Rectangle(r.Left + 6, r.Top, r.Width - 12, r.Height), fg,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }
 
