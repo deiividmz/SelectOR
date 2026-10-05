@@ -1465,7 +1465,9 @@ namespace SelectOR
             string k = ClassKey(conPath);
             using var sha = System.Security.Cryptography.SHA1.Create();
             var h = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(k));
-            return SysPath.Combine(AppDataTidy.CacheRoot, "composiciones", BitConverter.ToString(h, 0, 10).Replace("-", "").ToLowerInvariant() + ".png");
+            // «composiciones-acopladas»: desde la 1.2.49 los vehículos se dibujan acoplados (topes con topes); las de la
+            // carpeta antigua («composiciones», con huecos) las borra AppDataTidy.
+            return SysPath.Combine(AppDataTidy.CacheRoot, "composiciones-acopladas", BitConverter.ToString(h, 0, 10).Replace("-", "").ToLowerInvariant() + ".png");
         }
 
         void ShowExploreStrip(TrainItem c)
@@ -1806,9 +1808,10 @@ namespace SelectOR
             string sub;
             if (stops.Count >= 2)
             {
-                int mins = TtStops.Minutes(stops[^1].Arr) - TtStops.Minutes(stops[0].Dep); if (mins < 0) mins += 1440;
+                int m1 = TtStops.Minutes(stops[^1].Arr), m0 = TtStops.Minutes(stops[0].Dep);
+                int mins = m1 - m0; if (mins < 0) mins += 1440;
                 sub = string.Format(Tr("Sale {0} de {1}  ·  llega {2}  ·  {3}"), stops[0].Dep, stops[0].Station, stops[^1].Arr,
-                                    mins >= 60 ? $"{mins / 60} h {mins % 60:00} min" : $"{mins} min");
+                                    m0 < 0 || m1 < 0 ? TtStops.NoTime : mins >= 60 ? $"{mins / 60} h {mins % 60:00} min" : $"{mins} min");
             }
             else sub = string.Format(Tr("Sale a las {0}  ·  recorrido {1}"), FirstHm(tr.StartTime), tr.Path ?? "—");
             var brief = new List<string>();
@@ -2324,6 +2327,8 @@ namespace SelectOR
 
             // Versión de Open Rails que se está leyendo
             try { _lblVersion.Text = "Open Rails  " + ORTS.Common.VersionInfo.VersionOrBuild; } catch { }
+            // Acceso directo «SelectOR (Open Rails <versión>)» en el escritorio, una vez por versión de OR.
+            try { DesktopShortcut.Ensure(ORTS.Common.VersionInfo.VersionOrBuild, _prefs); } catch { }
 
             _cboFolder.Items.Clear();
             foreach (var f in _folders) _cboFolder.Items.Add(f.Name);
@@ -3170,9 +3175,12 @@ namespace SelectOR
                 return;
             }
 
-            // Guardar ajustes MP en el registro (RunActivity los lee de ahí)
+            // Guardar ajustes MP en el registro (RunActivity los lee de ahí). Se releen antes las opciones
+            // ACTUALES de OR: con las cargadas al abrir SelectOR, se volvían a escribir valores viejos de todas
+            // las demás opciones (por ejemplo, si se cambiaron después en «Opciones OR»).
             try
             {
+                try { _settings = new UserSettings(new string[0]); } catch { }
                 _settings.Multiplayer_User = _txtMPUser.Text.Trim();
                 if (_rbClient.Checked) _settings.Multiplayer_Host = host;
                 _settings.Multiplayer_Port = port;
@@ -3239,6 +3247,7 @@ namespace SelectOR
             var exe = SysPath.Combine(AppContext.BaseDirectory, "RunActivity.exe");
             if (!File.Exists(exe)) { Warn(Tr("No se encuentra RunActivity.exe junto al selector.")); return; }
             _prefs.Save();
+            EnsureOrWebServer();   // el HUD, el pupitre, los viajeros y el carné lo necesitan desde el arranque
             // Teleindicador: el destino elegido para este tren se pone en su carpeta antes de que OR lo cargue.
             if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase))
                 TeleApplyForLaunch(CurrentDrivenConsist());
@@ -3272,6 +3281,7 @@ namespace SelectOR
                 if (p != null)
                 {
                     bool svc = serviceId != null;   // servicio de empresa (con tiempo/viajeros) o conducción normal
+                    _mpClientRun = args.IndexOf("-multiplayerclient", StringComparison.OrdinalIgnoreCase) >= 0;
                     _pendingServiceId = serviceId;
                     _svcOpenedUtc = svc ? DateTime.UtcNow : (DateTime?)null;
                     if (!svc) _driveStartUtc = DateTime.UtcNow;

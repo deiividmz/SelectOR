@@ -1,9 +1,9 @@
-1.2.48
-Services|Your full history: the last 5 days as cards and the earlier ones in a list with a calendar.
-Loans|Ask the bank for a loan from Bank, with monthly instalments and a repayment schedule.
-Rules|Every company has its own internal rules, written by the manager and the supervisors.
-Member statistics|Services, km, hours and net for each driver, month by month.
-Salary by time|Drivers earn a fixed amount per service plus their hours of driving.
-Trips kept safe|If everything closes suddenly, the trip is recorded when you return, with the last data.
-Account and companies|A password recovery key, unique names and a company ID.
-And more|Delete several consists with Ctrl+click; more sections as cards and photos in the Ranking.
+1.2.49
+Stable Open Rails|It no longer closes when you press F9 with SelectOR, and F2 always saves the game.
+Accurate route sheet|Stops and times match your train's activity or timetable.
+Final destination|At the last station of the trip, passengers only get off.
+2D consist|Vehicles are shown coupled, buffer to buffer, in every view.
+Explore up to date|Changes made in the Consist editor show at once, without restarting.
+Big map|It can now be resized and remembers where you left it.
+Fairer points licence|No more km counted with the train stopped: no more unfair A2s.
+And more|A desktop shortcut per Open Rails version, faster start-up and a smoother cab panel.

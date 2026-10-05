@@ -30,6 +30,13 @@ namespace SelectOR
 
         public static IntPtr Foreground() { try { return GetForegroundWindow(); } catch { return IntPtr.Zero; } }
 
+        // Devuelve el primer plano a una ventana sin tocar su estado (para volver al simulador).
+        public static void GiveForeground(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return;
+            try { SetForegroundWindow(hWnd); } catch { }
+        }
+
         public static void ForceForeground(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;

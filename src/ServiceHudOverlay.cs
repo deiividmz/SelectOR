@@ -842,6 +842,7 @@ namespace SelectOR
         }
 
         public bool BigMapOpen => _bigMap != null && !_bigMap.IsDisposed;
+        internal AppPrefs Prefs => _prefs;
         public bool Service => _service;
 
         public void ToggleBigMap()
@@ -1066,14 +1067,16 @@ namespace SelectOR
             }
             if (book != null && book.Points.Count > 0)
                 using (var fN = Theme.Font(Math.Max(7f, labelPt * 0.85f), FontStyle.Bold))
-                    for (int i = 0; i < book.Points.Count; i++)
+                    for (int i = 0, num = 0; i < book.Points.Count; i++)
                     {
+                        if (book.Points[i].Guide) continue;   // puntos de paso del recorrido (.pat): no se dibujan
+                        num++;
                         var p = Proj(book.Points[i].Lat, book.Points[i].Lon);
                         float r = 7f * Math.Max(1f, arrowScale * 0.6f);
                         bool hecho = i < book.ReachedPoints;
                         using (var b = new SolidBrush(hecho ? Color.FromArgb(150, 130, 110) : Color.FromArgb(240, 180, 70))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
                         using (var pen = new Pen(Color.FromArgb(40, 30, 10), 1.4f)) g.DrawEllipse(pen, p.X - r, p.Y - r, 2 * r, 2 * r);
-                        TextRenderer.DrawText(g, (i + 1).ToString(), fN, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.FromArgb(30, 22, 8),
+                        TextRenderer.DrawText(g, num.ToString(), fN, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.FromArgb(30, 22, 8),
                             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     }
 
@@ -1160,6 +1163,8 @@ namespace SelectOR
         readonly System.Windows.Forms.Timer _tick;
         bool _winDrag, _moved; Point _downScreen; Point _formAtDown;   // arrastre de la VENTANA (por la cabecera)
         bool _panning; Point _lastPan;                                 // desplazamiento del MAPA
+        bool _resizing; Size _sizeAtDown; Rectangle _hitGrip;          // tamaño de la VENTANA (por la esquina inferior derecha)
+        const int MinW = 420, MinH = 300;
         bool _free; double _pxPerM = HudMapRender.BaseScale; double _cLat, _cLon; bool _haveCenter;   // zoom/pan
         Rectangle _hitClose;
         // Hoja de ruta: botones de la cabecera y clic en la vía para marcar el itinerario.
@@ -1183,10 +1188,16 @@ namespace SelectOR
             DoubleBuffered = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             Opacity = 0.82;
+            // Tamaño y sitio en que lo dejaste (dentro de la pantalla); la primera vez, centrado.
             var wa = Screen.PrimaryScreen.WorkingArea;
+            var pr = hud?.Prefs;
             int w = Math.Max(560, (int)(wa.Width * 0.55)), h = Math.Max(400, (int)(wa.Height * 0.6));
+            if (pr != null && pr.BigMapW > 0 && pr.BigMapH > 0) { w = pr.BigMapW; h = pr.BigMapH; }
+            w = Math.Max(MinW, Math.Min(w, wa.Width)); h = Math.Max(MinH, Math.Min(h, wa.Height));
             Size = new Size(w, h);
-            Location = new Point(wa.Left + (wa.Width - w) / 2, wa.Top + (wa.Height - h) / 2);
+            Location = pr != null && pr.BigMapX >= 0 && pr.BigMapY >= 0
+                ? new Point(Math.Min(Math.Max(pr.BigMapX, wa.Left), wa.Right - w), Math.Min(Math.Max(pr.BigMapY, wa.Top), wa.Bottom - h))
+                : new Point(wa.Left + (wa.Width - w) / 2, wa.Top + (wa.Height - h) / 2);
             ApplyRegion();
             // ~25 fps: sigue a la marca del tren (ya suavizada por el HUD) y redibuja solo si se ha
             // movido; además, un repintado cada medio segundo para lo demás (viajeros, estaciones).
@@ -1229,13 +1240,41 @@ namespace SelectOR
             Region = new Region(p);
         }
 
+        protected override void OnResize(EventArgs e) { base.OnResize(e); ApplyRegion(); Invalidate(); }
+
+        void SavePlace()
+        {
+            var pr = _hud?.Prefs; if (pr == null) return;
+            pr.BigMapX = Left; pr.BigMapY = Top; pr.BigMapW = Width; pr.BigMapH = Height;
+            try { pr.Save(); } catch { }
+        }
+
         protected override void OnMouseEnter(EventArgs e) { Opacity = 0.95; base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { if (!_winDrag && !_panning) Opacity = 0.82; base.OnMouseLeave(e); }
+        // Al sacar el ratón, el teclado vuelve al simulador: si se quedaba aquí, F2 (guardar), F9 o los
+        // mandos del tren no le llegaban a Open Rails.
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (!_winDrag && !_panning && !_resizing) { Opacity = 0.82; OrControl.ReturnFocusIfOurs(); }
+            base.OnMouseLeave(e);
+        }
+
+        // Una tecla pulsada con el mapa delante es para el simulador: se le reenvía (y se queda con el teclado).
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            var k = keyData & Keys.KeyCode;
+            if (k != Keys.ShiftKey && k != Keys.ControlKey && k != Keys.Menu && k != Keys.None)
+            {
+                OrControl.ForwardKey((int)k, (keyData & Keys.Shift) != 0, (keyData & Keys.Control) != 0, (keyData & Keys.Alt) != 0);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) { base.OnMouseDown(e); return; }
-            if (e.Y < HdrH) { _winDrag = true; _moved = false; _downScreen = Cursor.Position; _formAtDown = Location; }   // cabecera → mueve la ventana
+            if (_hitGrip.Contains(e.Location)) { _resizing = true; _downScreen = Cursor.Position; _sizeAtDown = Size; }   // esquina → tamaño
+            else if (e.Y < HdrH) { _winDrag = true; _moved = false; _downScreen = Cursor.Position; _formAtDown = Location; }   // cabecera → mueve la ventana
             else if (_legendBox.Contains(e.Location)) _legendDown = true;                                                // leyenda → clic en un nombre
             else { _panning = true; _lastPan = e.Location; _panDown = e.Location; _panMoved = false; }                    // mapa → desplaza el contenido
             base.OnMouseDown(e);
@@ -1243,7 +1282,20 @@ namespace SelectOR
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            if (_winDrag)
+            if (_resizing)
+            {
+                var now = Cursor.Position;
+                int w = _sizeAtDown.Width + now.X - _downScreen.X, h = _sizeAtDown.Height + now.Y - _downScreen.Y;
+                try
+                {
+                    var wa = Screen.FromControl(this).WorkingArea;   // nunca más allá de la pantalla
+                    w = Math.Min(w, wa.Right - Left); h = Math.Min(h, wa.Bottom - Top);
+                }
+                catch { }
+                w = Math.Max(MinW, w); h = Math.Max(MinH, h);
+                if (w != Width || h != Height) Size = new Size(w, h);
+            }
+            else if (_winDrag)
             {
                 var now = Cursor.Position; int dx = now.X - _downScreen.X, dy = now.Y - _downScreen.Y;
                 if (Math.Abs(dx) > 3 || Math.Abs(dy) > 3) _moved = true;
@@ -1260,7 +1312,8 @@ namespace SelectOR
                 foreach (var (hit, _) in _legendHits) if (hit.Contains(e.Location)) { sobre = true; break; }
                 int hh = HdrZone(e.Location);
                 if (hh != _hoverHdr) { _hoverHdr = hh; Invalidate(new Rectangle(0, 0, Width, HdrH)); }
-                Cursor = sobre || hh >= 0 ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
+                Cursor = _hitGrip.Contains(e.Location) ? Cursors.SizeNWSE
+                       : sobre || hh >= 0 ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
             }
             base.OnMouseMove(e);
         }
@@ -1268,6 +1321,8 @@ namespace SelectOR
         protected override void OnMouseUp(MouseEventArgs e)
         {
             bool wasWinDrag = _winDrag, moved = _moved, legend = _legendDown, wasPan = _panning, panMoved = _panMoved;
+            if (_resizing) { _resizing = false; SavePlace(); Invalidate(); base.OnMouseUp(e); return; }
+            if (wasWinDrag && moved) SavePlace();
             _winDrag = false; _panning = false; _moved = false; _legendDown = false; _panMoved = false;
             if (wasWinDrag && !moved && _hitClose.Contains(e.Location)) { Close(); return; }
             if (wasWinDrag && !moved && HdrZone(e.Location) is int z && z >= 0) { HdrClick(z); return; }
@@ -1414,7 +1469,7 @@ namespace SelectOR
             using (var pen = new Pen(Blend(Theme.Surface, Color.Black, 0.3f))) g.DrawLine(pen, 8, HdrH, Width - 8, HdrH);
 
             var area = MapArea();
-            if (snap == null) return;
+            if (snap == null) { DrawGrip(g); return; }
             double availW = area.Width - 16;
             double worldWidthM = availW * (1200.0 / 216.0);
             // Vista MANUAL (zoom/pan) si el usuario interactuó; si no, sigue al tren con escala base.
@@ -1424,6 +1479,16 @@ namespace SelectOR
                 snap.Crumb, snap.HasPos, snap.CurLat, snap.CurLon, snap.HasHeading, snap.Heading,
                 worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true, book: Book);
             _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox);
+            DrawGrip(g);
+        }
+
+        // Tirador de la esquina inferior derecha (como el mini-mapa, la hoja de ruta y el chat).
+        void DrawGrip(Graphics g)
+        {
+            _hitGrip = new Rectangle(Width - 20, Height - 20, 20, 20);
+            var col = _resizing ? Theme.Accent : Color.FromArgb(150, 255, 255, 255);
+            using var pen = new Pen(col, 1.6f);
+            for (int k = 4; k <= 12; k += 4) g.DrawLine(pen, Width - 4 - k, Height - 4, Width - 4, Height - 4 - k);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e) { try { _tick?.Stop(); _tick?.Dispose(); } catch { } base.OnFormClosing(e); }

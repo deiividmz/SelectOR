@@ -48,6 +48,8 @@ namespace SelectOR
         protected override int Gap => _list ? Theme.Px(4) : base.Gap;
 
         public TrainSpec CachedSpec(object it) { string k = KeyOf?.Invoke(it); return k != null && _spec.TryGetValue(k, out var s) ? s : null; }
+        // Estos trenes han cambiado (Editor): sus tarjetas vuelven a pedir los datos.
+        public void ForgetSpecs(IEnumerable<string> keys) { bool any = false; foreach (var k in keys) any |= _spec.Remove(k); if (any) Invalidate(); }
 
         protected override void PaintCard(Graphics g, int i, Rectangle rc, bool sel, bool hov)
         {
@@ -337,6 +339,11 @@ namespace SelectOR
             return orColumn > 0 && orColumn < t.Head.Length ? orColumn : -1;
         }
 
+        // Paradas de un tren, con las mismas reglas que Open Rails (ProcessTimetable.cs, StopInfo):
+        //  · «hh:mm» (llegada = salida) o «hh:mm-hh:mm» (llegada-salida); lo que va tras «$» son órdenes;
+        //  · «P…» («P10:30», «10P30»): pasa SIN parar → no es parada;
+        //  · «*» o «x» solos: para, sin hora («—»); «10*30» o «10x30»: para a esa hora.
+        public const string NoTime = "—";
         public static List<Stop> StopsOf(Table t, int col)
         {
             var list = new List<Stop>();
@@ -347,14 +354,46 @@ namespace SelectOR
                 string st = row[0];
                 if (string.IsNullOrEmpty(st) || st.StartsWith("#")) continue;
                 int dollar = st.IndexOf('$'); if (dollar >= 0) st = st.Substring(0, dollar).Trim();
-                var m = TimeRx.Match(row[col] ?? "");
-                if (!m.Success || st.Length == 0) continue;
+                if (st.Length == 0) continue;
+                string cell = row[col] ?? "";
+                int cmd = cell.IndexOf('$'); if (cmd >= 0) cell = cell.Substring(0, cmd);
+                cell = cell.Trim();
+                if (cell.Length == 0) continue;
+                string first = cell.Split('-')[0].Trim();
+                if (first.Contains('P')) continue;                                      // pasa sin parar
+                if (first == "*" || first == "x") { list.Add(new Stop { Station = st, Arr = NoTime, Dep = NoTime }); continue; }
+                var m = TimeRx.Match(cell.Replace('*', ':').Replace('x', ':'));
+                if (!m.Success) continue;
                 string a = m.Groups[1].Value, d = m.Groups[2].Success ? m.Groups[2].Value : a;
                 list.Add(new Stop { Station = st, Arr = Norm(a), Dep = Norm(d) });
             }
-            // Los horarios listan las estaciones en un solo sentido: los trenes del otro van de abajo arriba.
-            if (list.Count > 1 && Minutes(list[0].Dep) > Minutes(list[^1].Arr)) list.Reverse();
-            return list;
+            return InTravelOrder(list);
+        }
+
+        // Las filas del horario no tienen por qué ir en el orden de marcha (los trenes del otro sentido van de abajo
+        // arriba, y hay horarios con las estaciones en cualquier orden): se ordenan por la hora. El tren empieza
+        // después del mayor hueco del día, así 23:50 → 00:10 sigue en orden. Una parada sin hora («*», «x») va
+        // detrás de la fila con hora que tenía encima.
+        static List<Stop> InTravelOrder(List<Stop> list)
+        {
+            if (list.Count < 2) return list;
+            var key = new double[list.Count];
+            double last = double.NaN;
+            for (int i = 0; i < list.Count; i++)
+            {
+                int m = Minutes(list[i].Arr); if (m < 0) m = Minutes(list[i].Dep);
+                key[i] = m >= 0 ? m : (double.IsNaN(last) ? -1 : last + 0.001 * i);
+                if (m >= 0) last = m;
+            }
+            var timed = key.Where(k => k >= 0).OrderBy(k => k).ToList();
+            double start = timed.Count > 0 ? timed[0] : 0;
+            if (timed.Count > 1)
+            {
+                double gap = timed[0] + 1440 - timed[^1];   // el hueco que cruza la medianoche
+                for (int i = 1; i < timed.Count; i++) if (timed[i] - timed[i - 1] > gap) { gap = timed[i] - timed[i - 1]; start = timed[i]; }
+            }
+            return list.Select((s, i) => (s, k: key[i] < 0 ? -1 : (key[i] - start + 1440) % 1440, i))
+                       .OrderBy(x => x.k).ThenBy(x => x.i).Select(x => x.s).ToList();
         }
         static string Norm(string hm) { var p = hm.Split(':'); return p.Length == 2 ? int.Parse(p[0]).ToString("00") + ":" + p[1] : hm; }
         public static int Minutes(string hm) { var p = (hm ?? "").Split(':'); return p.Length >= 2 && int.TryParse(p[0], out var h) && int.TryParse(p[1], out var m) ? h * 60 + m : -1; }

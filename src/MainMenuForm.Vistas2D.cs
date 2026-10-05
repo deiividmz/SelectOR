@@ -34,11 +34,22 @@ namespace SelectOR
                 // tipo, masa y longitud de todos los trenes (filtros y fichas listos al abrir): de la caché, casi al
                 // momento; la primera vez, unos segundos
                 var classify = Task.Run(async () => { while (_classTotal > 0 && _classDone < _classTotal) await Task.Delay(100); });
+                // la vista 3D y la composición 2D del tren que Exploración tiene elegido (el último usado)
+                var selected = Task.Run(async () =>
+                {
+                    while (true)
+                    {
+                        bool busy; lock (_renderingShapes) busy = _renderingShapes.Count > 0;
+                        if (!busy && _exStrip?.Loading != true) break;
+                        await Task.Delay(100);
+                    }
+                });
                 _ = trains.ContinueWith(_ => LoadLog("vistas 2D: trenes listos"));
                 _ = machines.ContinueWith(_ => LoadLog("vistas 2D: máquinas de Compra listas"));
                 _ = classify.ContinueWith(_ => LoadLog($"vistas 2D: clasificación lista ({_classDone}/{_classTotal})"));
-                await Task.WhenAny(Task.WhenAll(trains, machines, classify), Task.Delay(Prewarm2DMaxMs));
-                LoadLog($"vistas 2D: fin de la espera · trenes {trains.IsCompleted} · máquinas {machines.IsCompleted} · clasificación {classify.IsCompleted} ({_classDone}/{_classTotal})");
+                _ = selected.ContinueWith(_ => LoadLog("vistas 2D: tren elegido de Exploración listo (3D y 2D)"));
+                await Task.WhenAny(Task.WhenAll(trains, machines, classify, selected), Task.Delay(Prewarm2DMaxMs));
+                LoadLog($"vistas 2D: fin de la espera · trenes {trains.IsCompleted} · máquinas {machines.IsCompleted} · clasificación {classify.IsCompleted} ({_classDone}/{_classTotal}) · tren elegido {selected.IsCompleted}");
             }
             catch { }
             finally { LoadStep("vistas2d"); }

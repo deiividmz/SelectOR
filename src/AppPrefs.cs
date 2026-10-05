@@ -56,10 +56,17 @@ namespace SelectOR
         public int RoadHudW { get; set; } = 330;
         public int RoadHudH { get; set; } = 360;
         public bool RoadHudCollapsed { get; set; }
+        // Mapa grande del HUD: dónde y de qué tamaño lo dejaste (se cambia arrastrando su esquina inferior derecha).
+        // -1 = centrado en la pantalla, con el tamaño de siempre.
+        public int BigMapX { get; set; } = -1;
+        public int BigMapY { get; set; } = -1;
+        public int BigMapW { get; set; } = -1;
+        public int BigMapH { get; set; } = -1;
         public bool RoadHudPcClock { get; set; }     // horas de la hoja de ruta: false = del simulador, true = del PC
         public int RoadDwellS { get; set; } = 30;    // segundos de parada en cada estación (para la hora estimada)
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
         public string FavoriteCompany { get; set; }
+        public List<string> DesktopShortcuts { get; set; } = new List<string>();   // versiones de OR con acceso directo ya creado (DesktopShortcut)
         public string LeagueSeenMonth { get; set; }   // último mes de la liga cuyos premios ya se avisaron (aaaa-MM)
         // Mapa en vivo: enviar mi posición mientras conduzco y ver a los demás usuarios de la misma ruta.
         public bool ShareLivePosition { get; set; } = true;

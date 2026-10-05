@@ -3,7 +3,8 @@
 // podan solas). Al arrancar, en segundo plano, se borra lo que sobra:
 //   · diagnósticos del pupitre y de la megafonía (solo se escriben si se piden con SELECTOR_CABLOG /
 //     SELECTOR_PALOG = 1);
-//   · restos de versiones antiguas (MenuParalelo.json y las carpetas de vistas previas que ya no se usan);
+//   · restos de versiones antiguas (MenuParalelo.json, las carpetas de vistas previas que ya no se usan y las
+//     composiciones 2D sin acoplar);
 //   · índices de contenido que llevan 60 días sin usarse (se vuelven a crear si hacen falta);
 //   · audios de megafonía que llevan 45 días sin sonar (se vuelven a bajar si hacen falta);
 //   · copias de teleindicadores de trenes que ya no existen.
@@ -51,6 +52,7 @@ namespace SelectOR
                 // Versiones antiguas: preferencias con el nombre de antes (ya migradas) y vistas previas en disco.
                 if (File.Exists(Path.Combine(root, "SelectOR.json"))) Del(Path.Combine(root, "MenuParalelo.json"));
                 foreach (var d in new[] { "MenuParalelo_previews", "SelectOR_previews" }) DelPngDir(Path.Combine(root, d));
+                DelPngDir(Path.Combine(sel, "composiciones"));   // composiciones 2D sin acoplar (hasta la 1.2.48)
 
                 var now = DateTime.UtcNow;
                 if (Directory.Exists(sel))

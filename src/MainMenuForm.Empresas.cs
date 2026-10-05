@@ -122,7 +122,7 @@ namespace SelectOR
         {
             try
             {
-                string txt = await _kmHttp.GetStringAsync("/API/TIME");
+                string txt = await OrApi.GetStringAsync(_kmHttp, "/API/TIME");
                 if (double.TryParse(txt.Trim().Trim('"'), NumberStyles.Float, CultureInfo.InvariantCulture, out double secs)) return secs;
             }
             catch { }
@@ -132,6 +132,41 @@ namespace SelectOR
         // Seguimiento de km reales por la API web de OR (posición del tren en vivo)
         Timer _kmTimer; System.Net.Http.HttpClient _kmHttp;
         double _trackedMeters, _tLat, _tLon; bool _tHave;
+        // Km creíbles: hora de la lectura anterior y lo que se ha descartado por imposible (diagnóstico).
+        readonly System.Diagnostics.Stopwatch _kmClock = System.Diagnostics.Stopwatch.StartNew();
+        double _kmLastFixS = double.NaN, _kmRejectedM; int _kmRejected;
+
+        // Lo que el tren puede haber recorrido de verdad en dt segundos: a su velocidad máxima × 1,5 (nunca menos
+        // de 200 ni más de 450 km/h, por si el .eng la declara mal) más 60 m de tolerancia (redondeos y lecturas
+        // que llegan un poco tarde). Lo que pase de ahí es un salto (cambio de tren o de cámara en Open Rails, una
+        // lectura atrasada mientras guarda…) y NO se suma: antes se sumaba cualquier salto de menos de 3 km, los
+        // km se inflaban y el servidor veía una velocidad media imposible (A2) que no era real.
+        double PlausibleMeters(double dt)
+        {
+            double vmax = _roadVmax > 0 ? Math.Max(200, Math.Min(450, _roadVmax * 1.5)) : 450;
+            double m = vmax / 3.6 * dt + 60;
+            // Mejor aún: la velocidad que da el propio Open Rails (Track Monitor, leída en cada sondeo durante un
+            // servicio). La posición es la de la LOCOMOTORA del jugador: con el tren parado salta si OR cambia de
+            // cabina o de extremo del tren, o de tren desde el despachador, y eso sumaba km sin moverse un metro.
+            // Con el tren parado según OR, como mucho 8 m (redondeos), que además se descartan como ruido.
+            double now = _kmClock.Elapsed.TotalSeconds;
+            if (!double.IsNaN(_orKmhAtS) && now - _orKmhAtS < 5)
+            {
+                double v = Math.Max(_orKmhLast, double.IsNaN(_orKmhMax) ? 0 : _orKmhMax);
+                m = Math.Min(m, v / 3.6 * dt * 1.3 + 8);
+            }
+            _orKmhMax = double.NaN;   // la próxima lectura de posición mira las velocidades leídas desde ahora
+            return m;
+        }
+
+        // Velocidad del tren según Open Rails (km/h), leída del Track Monitor.
+        double _orKmhLast, _orKmhMax = double.NaN, _orKmhAtS = double.NaN;
+        void KmSpeedSample(double kmh)
+        {
+            if (double.IsNaN(kmh)) return;
+            _orKmhLast = kmh; _orKmhMax = double.IsNaN(_orKmhMax) ? kmh : Math.Max(_orKmhMax, kmh);
+            _orKmhAtS = _kmClock.Elapsed.TotalSeconds;
+        }
         readonly DriveTrail _driveTrail = new();   // rastro del tren en el mapa desde el origen (toda la conducción)
         // Modelo de viajeros (PseudoPAX): embarque en andenes reales de la ruta
         List<(string station, double lat, double lon)> _paxStations = new();
@@ -2895,6 +2930,37 @@ namespace SelectOR
         static readonly Dictionary<string, HudMapData> _hudMapCache = new(StringComparer.OrdinalIgnoreCase);
         int _hudMapGen;   // cada llamada invalida las anteriores (no dos bucles a la vez)
 
+        // /API/MAP/INIT/ (las vías y andenes de la ruta): UNA sola consulta por conducción, compartida por el
+        // mini-mapa y los viajeros (antes la hacían los dos a la vez, cada pocos segundos, desde la pantalla de
+        // carga). Solo con el escenario ya abierto. Son datos fijos de la ruta, así que no pasa por el turno
+        // de OrApi (que la tendría parada mientras OR la genera, en rutas grandes varios segundos).
+        readonly object _mapInitLock = new object();
+        System.Threading.Tasks.Task<string> _mapInitTask;
+        int _mapInitRun = -1, _driveRun;
+
+        string MapInitJson()
+        {
+            if (!_scenarioReady) return null;   // aún cargando: se reintenta
+            System.Threading.Tasks.Task<string> t;
+            lock (_mapInitLock)
+            {
+                bool usable = _mapInitTask != null && _mapInitRun == _driveRun
+                              && !(_mapInitTask.IsCompleted && (_mapInitTask.IsFaulted || _mapInitTask.IsCanceled || string.IsNullOrWhiteSpace(_mapInitTask.Result)));
+                if (!usable)
+                {
+                    _mapInitRun = _driveRun;
+                    int port = OrWebPort();
+                    _mapInitTask = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        using var http = new System.Net.Http.HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(120) };
+                        return await http.GetStringAsync("/API/MAP/INIT/");
+                    });
+                }
+                t = _mapInitTask;
+            }
+            return t.GetAwaiter().GetResult();
+        }
+
         async void PushHudMap()
         {
             string routeDir = _curRoute?.Path ?? "";
@@ -2936,8 +3002,7 @@ namespace SelectOR
             try
             {
                 // Rutas grandes: la respuesta tiene miles de puntos y OR la genera despacio → margen amplio.
-                using var http = new System.Net.Http.HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{OrWebPort()}"), Timeout = TimeSpan.FromSeconds(120) };
-                string txt = http.GetStringAsync("/API/MAP/INIT/").GetAwaiter().GetResult();
+                string txt = MapInitJson();
                 if (string.IsNullOrWhiteSpace(txt)) return null;
                 using var d = JsonDocument.Parse(txt);
                 if (!d.RootElement.TryGetProperty("PointOnApiMapList", out var pts)) return null;
@@ -3623,13 +3688,49 @@ namespace SelectOR
             return 2150;   // puerto por defecto del servidor web de OR
         }
 
+        // Servidor web de OR activado ANTES de lanzarlo (antes se activaba después, y la primera vez OR ya
+        // había leído sus opciones sin él). Se usa la opción de OR por su nombre (vale para el registro y para
+        // OpenRails.ini) y, por si acaso, el valor del registro.
+        void EnsureOrWebServer()
+        {
+            try
+            {
+                var s = new ORTS.Settings.UserSettings(new string[0]);
+                var pi = s.GetType().GetProperty("WebServer");
+                if (pi != null && pi.PropertyType == typeof(bool) && pi.CanWrite && !(bool)pi.GetValue(s)) { pi.SetValue(s, true); s.Save(); }
+            }
+            catch { }
+            try { Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\Software\OpenRails\ORTS", "WebServer", 1); } catch { }
+        }
+
+        // F2 en una partida multijugador como cliente: Open Rails no guarda (y no avisa). SelectOR lo dice.
+        bool _mpClientRun;
+        DateTime _mpSaveToldUtc = DateTime.MinValue;
+        void OnSimulatorKey(int vk)
+        {
+            if (vk != 0x71 /*F2*/ || !_mpClientRun || (DateTime.UtcNow - _mpSaveToldUtc).TotalSeconds < 30) return;
+            _mpSaveToldUtc = DateTime.UtcNow;
+            try
+            {
+                EnqueueToast(new NotificationToast("💾", Tr("Partida no guardada"),
+                    Tr("Open Rails no guarda las partidas multijugador cuando te unes a un servidor (solo el que la aloja puede guardarlas)."),
+                    "SelectOR · " + Tr("Multijugador"), Carne.Gold));
+            }
+            catch { }
+        }
+
         void StartKmTracking(bool withPax = true)
         {
+            OrControl.SimulatorKey -= OnSimulatorKey;
+            OrControl.SimulatorKey += OnSimulatorKey;
             _trackedMeters = 0; _tHave = false; _tLat = _tLon = 0;
+            _kmLastFixS = double.NaN; _kmRejected = 0; _kmRejectedM = 0;
+            _orKmhLast = 0; _orKmhMax = double.NaN; _orKmhAtS = double.NaN;
             _driveTrail.Clear();   // conducción nueva: rastro nuevo
             RoadDriveStart();      // y hoja de ruta vacía
             StartSvcClock(null);   // el cronómetro espera a que el escenario esté abierto
             _scenarioReady = false;   // y los HUD también (ver OnScenarioReady)
+            _driveRun++;              // conducción nueva: el mapa de la ruta se vuelve a pedir
             _stoppedSinceUtc = null;
             _paxActive = false; _paxWanted = false; _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0;
             try { Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\Software\OpenRails\ORTS", "WebServer", 1); } catch { }
@@ -3641,6 +3742,11 @@ namespace SelectOR
                 _kmTimer = new Timer { Interval = 1500 };
                 _kmTimer.Tick += async (s, e) => await PollKm();
                 _kmTimer.Start();
+                // Lo que hace el usuario en el simulador (F2, F9, clics): mientras, no se le pregunta nada (OrControl).
+                _inputWatch?.Dispose();
+                _inputWatch = new Timer { Interval = 40 };
+                _inputWatch.Tick += (s, e) => OrControl.WatchUserInput();
+                _inputWatch.Start();
                 if (withPax) StartPaxTracking(_drivenConsist ?? CurrentDrivenConsist());   // viajeros (servicio o conducción libre)
                 PaDriveStart(RouteIds.IdOf(_curRoute?.Path, _curRoute?.Name), _curRoute?.Name);   // megafonía: se descarga lo de esta ruta y queda lista
                 StartLiveMap();                  // mapa en vivo: mi posición y la de los demás en la ruta
@@ -3877,8 +3983,7 @@ namespace SelectOR
             var res = new List<(string, double, double)>();
             try
             {
-                using var http = new System.Net.Http.HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{OrWebPort()}"), Timeout = TimeSpan.FromSeconds(120) };
-                string txt = http.GetStringAsync("/API/MAP/INIT/").GetAwaiter().GetResult();
+                string txt = MapInitJson();
                 if (string.IsNullOrWhiteSpace(txt)) return null;
                 using var d = JsonDocument.Parse(txt);
                 if (!d.RootElement.TryGetProperty("PointOnApiMapList", out var pts)) return null;
@@ -4250,6 +4355,9 @@ namespace SelectOR
                 // Suben: los que esperan, hasta el aforo. El aforo es el PassengerCapacity sumado de
                 // toda la composición: no se admiten más viajeros a bordo que plazas declara el tren.
                 int board = Math.Max(0, Math.Min(PaxDemandAt(bestNorm, hour), _paxCapacity - (_paxOnboard - alight)));
+                // Estación de destino final de la Hoja de Ruta (actividad, horario o itinerario del usuario): el tren
+                // termina aquí, así que bajan todos y no sube nadie.
+                if (IsFinalStation(m.name ?? bestNorm)) { alight = _paxOnboard; board = 0; }
                 _paxDone.Add(bestNorm);
                 _paxVisits[bestNorm] = visit + 1;
                 // Parada comercial: queda anotada (estación y hora del simulador) para la ventana del servicio.
@@ -4262,11 +4370,20 @@ namespace SelectOR
             finally { _paxBusy = false; }
         }
 
+        bool IsFinalStation(string station)
+        {
+            string fin = _road.FinalStation();
+            if (string.IsNullOrEmpty(fin) || string.IsNullOrEmpty(station)) return false;
+            string a = RoadBook.NormName(CleanStation(fin)), b = RoadBook.NormName(CleanStation(station));
+            if (a.Length < 3 || b.Length < 3) return a == b && a.Length > 0;
+            return a == b || a.Contains(b) || b.Contains(a);
+        }
+
         async Task<double> FetchSpeedKmh()
         {
             try
             {
-                string txt = await _kmHttp.GetStringAsync("/API/HUD/0");
+                string txt = await OrApi.GetStringAsync(_kmHttp, "/API/HUD/0");
                 using var d = JsonDocument.Parse(txt);
                 var vals = d.RootElement.GetProperty("commonTable").GetProperty("values");
                 for (int k = 0; k + 2 < vals.GetArrayLength(); k += 3)
@@ -4290,7 +4407,7 @@ namespace SelectOR
             bool has = false;
             try
             {
-                string txt = await _kmHttp.GetStringAsync("/API/CABCONTROLS");
+                string txt = await OrApi.GetStringAsync(_kmHttp, "/API/CABCONTROLS");
                 using var d = JsonDocument.Parse(txt);
                 foreach (var c in d.RootElement.EnumerateArray())
                 {
@@ -4325,7 +4442,7 @@ namespace SelectOR
             bool hasL = false, hasR = false; int open = 0;
             try
             {
-                string txt = await _kmHttp.GetStringAsync("/API/CABCONTROLS");
+                string txt = await OrApi.GetStringAsync(_kmHttp, "/API/CABCONTROLS");
                 using var d = JsonDocument.Parse(txt);
                 foreach (var c in d.RootElement.EnumerateArray())
                 {
@@ -4340,7 +4457,7 @@ namespace SelectOR
             bool understood = false;
             try
             {
-                string txt = await _kmHttp.GetStringAsync("/API/HUD/0");
+                string txt = await OrApi.GetStringAsync(_kmHttp, "/API/HUD/0");
                 using var d = JsonDocument.Parse(txt);
                 var vals = d.RootElement.GetProperty("commonTable").GetProperty("values");
                 for (int k = 0; k + 2 < vals.GetArrayLength(); k += 3)
@@ -4372,7 +4489,7 @@ namespace SelectOR
         {
             try
             {
-                string txt = await _kmHttp.GetStringAsync("/API/TIME");
+                string txt = await OrApi.GetStringAsync(_kmHttp, "/API/TIME");
                 if (double.TryParse(txt.Trim().Trim('"'), NumberStyles.Float, CultureInfo.InvariantCulture, out double secs))
                 {
                     int t = (int)secs % 86400; if (t < 0) t += 86400;
@@ -4387,7 +4504,7 @@ namespace SelectOR
         {
             try
             {
-                string txt = await _kmHttp.GetStringAsync("/API/TIME");
+                string txt = await OrApi.GetStringAsync(_kmHttp, "/API/TIME");
                 if (double.TryParse(txt.Trim().Trim('"'), NumberStyles.Float, CultureInfo.InvariantCulture, out double secs))
                     return ((int)(secs / 3600.0)) % 24;
             }
@@ -4395,12 +4512,29 @@ namespace SelectOR
             return 12;
         }
 
+        bool _kmPolling;   // una lectura de posición en marcha: el temporizador no lanza otra encima
+        bool _paxPolling;  // un barrido de viajeros/megafonía en marcha
+        async Task PollPaxGuarded(double lat, double lon)
+        {
+            _paxPolling = true;
+            try { await PollPax(lat, lon); } catch { }
+            finally { _paxPolling = false; }
+        }
+        Timer _inputWatch; // vigila F2/F9/clics en el simulador (OrControl.WatchUserInput)
+
         async Task PollKm()
         {
-            if (OrControl.Quiet) return;   // hay una orden del pupitre en marcha: no molestar al simulador
+            if (OrControl.Quiet || _kmPolling) return;   // el usuario opera en el simulador, o la anterior aún no ha acabado
+            _kmPolling = true;
+            try { await PollKmCore(); }
+            finally { _kmPolling = false; }
+        }
+
+        async Task PollKmCore()
+        {
             try
             {
-                var txt = await _kmHttp.GetStringAsync("/API/MAP/");
+                var txt = await OrApi.GetStringAsync(_kmHttp, "/API/MAP/");
                 if (string.IsNullOrWhiteSpace(txt) || txt == "null") return;
                 using var d = JsonDocument.Parse(txt);
                 if (!d.RootElement.TryGetProperty("LatLon", out var ll)) return;
@@ -4412,11 +4546,17 @@ namespace SelectOR
                 if (_svcClockUtc == null) StartSvcClock(DateTime.UtcNow);
                 else await SvcClockTick();   // ¿Open Rails en pausa? (entonces el tiempo no cuenta)
                 if (!_scenarioReady) { _scenarioReady = true; OnScenarioReady(); }   // y aquí aparecen los HUD
+                double nowS = _kmClock.Elapsed.TotalSeconds;
+                double dt = double.IsNaN(_kmLastFixS) ? 1.5 : Math.Max(1.0, nowS - _kmLastFixS);
+                _kmLastFixS = nowS;
                 if (_tHave)
                 {
                     double dm = Haversine(_tLat, _tLon, lat, lon);
                     InfrCheckJump(dm);   // carné (A1): salto de posición
-                    if (dm >= 0.5 && dm < 3000)   // ignora jitter y saltos/teleports
+                    double maxM = PlausibleMeters(dt);
+                    bool creible = dm <= maxM;
+                    if (!creible && dm >= 0.5) { _kmRejected++; _kmRejectedM += dm; }
+                    if (dm >= 0.5 && creible && maxM > 8)   // ignora el jitter, los saltos imposibles y lo que «se mueve» parado
                     {
                         _trackedMeters += dm;
                         if (_apOn) _apMeters += dm;   // A4: km con piloto automático (detalle de la infracción)
@@ -4431,7 +4571,9 @@ namespace SelectOR
                 SmoothFix(lat, lon);   // mapas del HUD: la marca del tren se desliza hasta aquí
                 _tLat = lat; _tLon = lon; _tHave = true;
                 if (CabHudAlive) _cabHud.SetPosition(lat, lon);   // pupitre: para saber si es de noche
-                if (_paxActive && _paxStations.Count > 0) await PollPax(lat, lon);   // embarque de viajeros
+                // Embarque de viajeros y megafonía: aparte, para que sus consultas en las estaciones no retrasen la
+                // siguiente lectura de posición (el HUD y el mini-mapa se quedaban parados).
+                if (_paxActive && _paxStations.Count > 0 && !_paxPolling) _ = PollPaxGuarded(lat, lon);
                 if (InfrActive) _ = InfrSpeedPoll();   // carné (B6/B7): velocidad frente al límite
                 if (_pendingServiceId != null) _ = AutopilotPoll();   // carné (A4): ¿conduce Open Rails?
                 if (_pendingServiceId != null) SaveServiceJournal();   // por si se cierra todo de golpe
@@ -4481,6 +4623,7 @@ namespace SelectOR
             StopLiveMap();   // mapa en vivo: desaparezco del mapa de los demás
             RoadDriveStop(); // hoja de ruta: se cierra con la conducción
             try { _kmTimer?.Stop(); _kmTimer?.Dispose(); _kmTimer = null; } catch { }
+            try { _inputWatch?.Stop(); _inputWatch?.Dispose(); _inputWatch = null; } catch { }
             try { _kmHttp?.Dispose(); _kmHttp = null; } catch { }
             return Math.Round(_trackedMeters / 1000.0, 1);
         }

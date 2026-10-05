@@ -172,9 +172,8 @@ namespace SelectOR
         {
             if (cars.Count == 0) { _status.Text = I18n.T("No se pudo generar la composición (modelos no encontrados)."); return; }
 
-            int gap = 4;
             int h = (int)(WorldHeight * Ppm);
-            var slots = new List<(Bitmap bmp, Color? hi)>();
+            var slots = new List<(Bitmap bmp, Color? hi, ShapeRenderer.SideExtent ext)>();
             float totalLen = 0;
             int n = cars.Count;
             // ---- Orientación 2D = misma regla que Open Rails (fuente fiable) ----
@@ -191,11 +190,15 @@ namespace SelectOR
                 var car = cars[i];
                 bool rotate = car.Flip ^ K;
                 var bmp = ShapeRenderer.RenderSide(car.Geom, Ppm, WorldHeight, rotate);
-                if (bmp != null) { slots.Add((bmp, car.Highlight)); totalLen += (car.Geom.Max.Z - car.Geom.Min.Z); }
+                if (bmp == null) continue;
+                // Acoplado: topes con topes (ver ShapeRenderer.CoupledLayout).
+                slots.Add((bmp, car.Highlight, ShapeRenderer.MeasureSide(bmp)));
+                totalLen += (car.Geom.Max.Z - car.Geom.Min.Z);
             }
             if (slots.Count == 0) { _status.Text = I18n.T("No se pudo renderizar la composición."); return; }
 
-            int totalW = slots.Sum(s => s.bmp.Width) + gap * (slots.Count - 1);
+            var lay = ShapeRenderer.CoupledLayout(slots.Select(s => s.ext).ToList(), Ppm, 0);
+            int totalW = lay.total;
             var composite = new Bitmap(Math.Max(totalW, 1), h);
             using (var g = Graphics.FromImage(composite))
             {
@@ -203,20 +206,19 @@ namespace SelectOR
                 // línea de carril
                 using (var pen = new Pen(Color.FromArgb(90, Theme.Subtle), 1.5f))
                     g.DrawLine(pen, 0, h - 2, totalW, h - 2);
-                int x = 0;
-                foreach (var s in slots)
-                {
-                    if (s.hi.HasValue)
+                // Franjas de fondo tintadas (verde = ya la tienes, rojo = falta comprarla, gris = vagón/coche sin
+                // tracción) en el tramo de cada vehículo, antes de dibujarlos (se solapan un poco, como en la vía).
+                for (int i = 0; i < slots.Count; i++)
+                    if (slots[i].hi is Color hc)
                     {
-                        // Franja de fondo tintada (verde = ya la tienes, rojo = falta comprarla,
-                        // gris = vagón/coche sin tracción) detrás de la silueta del coche.
-                        var band = new Rectangle(x, 2, s.bmp.Width, h - 4);
-                        using (var br = new SolidBrush(Color.FromArgb(70, s.hi.Value))) g.FillRectangle(br, band);
-                        using (var pen = new Pen(s.hi.Value, 2.5f)) g.DrawLine(pen, x, h - 3, x + s.bmp.Width, h - 3);
+                        var band = new Rectangle(lay.slotL[i], 2, Math.Max(1, lay.slotR[i] - lay.slotL[i]), h - 4);
+                        using (var br = new SolidBrush(Color.FromArgb(70, hc))) g.FillRectangle(br, band);
+                        using (var pen = new Pen(hc, 2.5f)) g.DrawLine(pen, lay.slotL[i], h - 3, lay.slotR[i], h - 3);
                     }
-                    g.DrawImage(s.bmp, x, h - s.bmp.Height); // alinear al carril (abajo)
-                    x += s.bmp.Width + gap;
-                    s.bmp.Dispose();
+                for (int i = 0; i < slots.Count; i++)
+                {
+                    g.DrawImage(slots[i].bmp, lay.drawX[i], h - slots[i].bmp.Height); // alinear al carril (abajo)
+                    slots[i].bmp.Dispose();
                 }
             }
             _pic.Image = composite;

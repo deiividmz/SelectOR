@@ -213,7 +213,7 @@ namespace SelectOR
             _svcOpenedUtc = DateTime.UtcNow;
             StartSvcClock(_tHave ? DateTime.UtcNow : (DateTime?)null);   // si aún carga, arranca con la 1.ª posición
             _estPatKm = 0; _estimatedKm = 0;
-            _trackedMeters = 0;
+            _trackedMeters = 0; _kmRejected = 0; _kmRejectedM = 0;
             // Los viajeros ya iban contándose en conducción libre: se conservan los que van a bordo
             // y el servicio solo cobra los que suban a partir de ahora.
             if (_paxActive || _paxWanted) { _paxBoarded = 0; _paxKm = 0; }

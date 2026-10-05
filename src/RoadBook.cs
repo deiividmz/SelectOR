@@ -30,6 +30,12 @@ namespace SelectOR
 
         public Edge[] Edges = Array.Empty<Edge>();
         readonly Dictionary<int, Node> _nodes = new();
+        // Para seguir un recorrido (.pat): los nodos del .tdb (desvíos y finales) por su posición en el mundo y los
+        // tramos que llegan a cada uno. Y el mismo limpiador de nombres de estación que se usó con los andenes.
+        Dictionary<int, (double x, double z)> _nodeWorld = new();
+        readonly Dictionary<long, List<int>> _nodeAt = new();
+        readonly Dictionary<int, List<int>> _edgesAt = new();
+        public Func<string, string> CleanName;
         public double Lat0, Lon0, Kx, Ky;
         const float Cell = 200f;
         Dictionary<long, List<(int e, int i)>> _grid;
@@ -175,7 +181,71 @@ namespace SelectOR
                 g._nodes[ni] = node;
             }
             g.BuildGrid();
+            g.CleanName = cleanName;
+            g._nodeWorld = nodePos;
+            foreach (var kv in nodePos)
+            {
+                long k = WKey(kv.Value.x, kv.Value.z);
+                if (!g._nodeAt.TryGetValue(k, out var l)) g._nodeAt[k] = l = new List<int>();
+                l.Add(kv.Key);
+            }
+            for (int k = 0; k < g.Edges.Length; k++)
+                foreach (int nId in new[] { g.Edges[k].A, g.Edges[k].B })
+                    if (nId >= 0) { if (!g._edgesAt.TryGetValue(nId, out var l)) g._edgesAt[nId] = l = new List<int>(); if (!l.Contains(k)) l.Add(k); }
             return g;
+        }
+
+        static long WKey(double x, double z) => ((long)Math.Floor(x / 4) << 32) ^ (uint)(int)Math.Floor(z / 4);
+
+        // Nodo del .tdb (desvío o final de vía) que está en ese punto del mundo (a menos de tolM metros), o -1.
+        // Los puntos de un .pat que caen en un desvío están justo en él.
+        public int NodeAtWorld(double x, double z, double tolM = 1.5)
+        {
+            int best = -1; double bd = tolM * tolM;
+            int cx = (int)Math.Floor(x / 4), cz = (int)Math.Floor(z / 4);
+            for (int i = cx - 1; i <= cx + 1; i++)
+                for (int j = cz - 1; j <= cz + 1; j++)
+                {
+                    if (!_nodeAt.TryGetValue(((long)i << 32) ^ (uint)j, out var l)) continue;
+                    foreach (int n in l)
+                    {
+                        var p = _nodeWorld[n]; double d = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z);
+                        if (d <= bd) { bd = d; best = n; }
+                    }
+                }
+            return best;
+        }
+
+        // Tramos que unen directamente dos nodos del .tdb.
+        public List<int> EdgesBetween(int a, int b)
+        {
+            var res = new List<int>();
+            if (a < 0 || b < 0 || !_edgesAt.TryGetValue(a, out var l)) return res;
+            foreach (int e in l) if ((Edges[e].A == a && Edges[e].B == b) || (Edges[e].A == b && Edges[e].B == a)) res.Add(e);
+            return res;
+        }
+
+        // Tramos que llegan a un nodo del .tdb.
+        public IReadOnlyList<int> EdgesAt(int n) => n >= 0 && _edgesAt.TryGetValue(n, out var l) ? l : Array.Empty<int>();
+
+        // Punto más cercano, pero solo en esos tramos (a menos de maxM metros).
+        public bool NearestOn(IEnumerable<int> edges, double lat, double lon, double maxM, out int edge, out double off)
+        {
+            edge = -1; off = 0;
+            var (x, y) = Proj(lat, lon);
+            double best = maxM * maxM;
+            foreach (int e in edges)
+            {
+                var E = Edges[e];
+                for (int i = 0; i + 1 < E.X.Length; i++)
+                {
+                    double ax = E.X[i], ay = E.Y[i], dx = E.X[i + 1] - ax, dy = E.Y[i + 1] - ay, l2 = dx * dx + dy * dy;
+                    double t = l2 > 0 ? Math.Max(0, Math.Min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+                    double px = ax + t * dx - x, py = ay + t * dy - y, d2 = px * px + py * py;
+                    if (d2 < best) { best = d2; edge = e; off = E.Cum[i] + t * (E.Cum[i + 1] - E.Cum[i]); }
+                }
+            }
+            return edge >= 0;
         }
 
         static bool[] RdpKeep(List<(double x, double z)> p, double eps)
@@ -369,7 +439,12 @@ namespace SelectOR
     // El itinerario elegido y su hoja de ruta (estado vivo; se usa desde el hilo de la interfaz).
     public sealed class RoadBook
     {
-        public sealed class Waypoint { public double Lat, Lon; public int Edge; public double Off; }
+        public sealed class Waypoint
+        {
+            public double Lat, Lon; public int Edge; public double Off;
+            public bool Guide;   // punto de paso sacado del recorrido (.pat) para seguirlo tramo a tramo: no se dibuja
+            public bool Reverse; // el recorrido invierte la marcha aquí: el tramo siguiente sale en sentido contrario
+        }
         public sealed class Stop
         {
             public string Name; public double Dist;      // distancia desde el origen del itinerario
@@ -379,8 +454,10 @@ namespace SelectOR
             public double EtaS = double.NaN;            // segundos desde ahora hasta llegar
             public bool IsEnd;                          // fila final («Destino»), no una estación
             public bool IsReverse;                      // cambio de sentido (el tren invierte la marcha)
+            public bool Synthetic;                      // fila que no es una estación («Destino», «Cambio de sentido»)
             public double Lat, Lon;                     // dónde está (para marcarla en el mapa)
             public double SchedArr = double.NaN, SchedDep = double.NaN;   // horario (s desde medianoche; NaN = sin horario)
+            public bool Planned;                        // figura en el horario o en la actividad (para ahí, con o sin hora)
             public bool HasSched => !double.IsNaN(SchedArr) || !double.IsNaN(SchedDep);
         }
 
@@ -388,6 +465,9 @@ namespace SelectOR
         // que figuran en él son paradas y el resto se pasan sin parar (el maquinista puede cambiarlo).
         public List<(string name, double arr, double dep)> Schedule;
         public bool FromPlan;   // itinerario de un horario o una actividad: horas siempre del simulador (sin SIM/PC)
+        // Modo Horario: Open Rails asocia cada estación del horario a la PRIMERA vez que el recorrido pasa por ella
+        // (TCRoutePath.SetStationReference). En una actividad, las paradas van en orden, una tras otra.
+        public bool ScheduleFirstPass;
 
         public static string NormName(string s)
         {
@@ -403,26 +483,58 @@ namespace SelectOR
             return sb.ToString().Trim();
         }
 
-        // Estación del itinerario (nombre del andén) ↔ estación del horario: igual, una contiene a la otra o
-        // misma primera palabra (de 4 letras o más).
-        bool MatchSchedule(string platform, out double arr, out double dep)
+        // Horario → estaciones del itinerario, en el orden de marcha y por el nombre EXACTO de la estación (sin
+        // mayúsculas ni tildes), como hace Open Rails: solo para donde el nombre coincide con la fila del horario o
+        // con el andén de la actividad. Antes valía «una contiene a la otra» o «misma primera palabra», y «Santiago
+        // Norte» se llevaba la hora y la parada de «Santiago - Alameda». Una estación por la que se pasa dos veces
+        // (ida y vuelta) toma cada vez la suya. Devuelve si la última del horario ha salido en el itinerario.
+        bool AssignSchedule(List<Stop> stops)
         {
-            arr = dep = double.NaN;
-            if (Schedule == null) return false;
-            string a = NormName(platform);
-            if (a.Length == 0) return false;
-            int best = -1, score = 0;
-            for (int i = 0; i < Schedule.Count; i++)
+            if (Schedule == null || Schedule.Count == 0) return false;
+            var clean = Graph?.CleanName;
+            var names = Schedule.Select(s => NormName(clean != null ? clean(s.name ?? "") : s.name)).ToArray();
+            var used = new bool[names.Length];
+            var path = stops.Select(s => NormName(s.Name)).ToArray();
+            int n = path.Length, m = names.Length;
+            // Emparejado que respeta el orden de marcha (la subsecuencia común más larga): si el tren pasa dos
+            // veces por una estación y solo para en una, la parada cae en la pasada que toca.
+            var dp = new int[n + 1, m + 1];
+            for (int i = n - 1; i >= 0; i--)
+                for (int j = m - 1; j >= 0; j--)
+                    dp[i, j] = path[i].Length > 0 && path[i] == names[j] ? dp[i + 1, j + 1] + 1 : Math.Max(dp[i + 1, j], dp[i, j + 1]);
+            var hitOf = new int[n]; Array.Fill(hitOf, -1);
+            if (ScheduleFirstPass)
             {
-                string b = NormName(Schedule[i].name);
-                if (b.Length == 0) continue;
-                int sc = a == b ? 3 : (a.Length >= 4 && b.Length >= 4 && (a.Contains(b) || b.Contains(a))) ? 2
-                       : (a.Split(' ')[0] is string fa && fa.Length >= 4 && fa == b.Split(' ')[0]) ? 1 : 0;
-                if (sc > score) { score = sc; best = i; }
+                for (int j = 0; j < m; j++)
+                {
+                    if (names[j].Length == 0) continue;
+                    // la primera pasada libre: dos filas distintas pueden quedar con el mismo nombre al juntar sus
+                    // andenes («Estación Sur» y «Estación Sur vía 11»), y para Open Rails son estaciones distintas
+                    int i = Enumerable.Range(0, path.Length).FirstOrDefault(k => path[k] == names[j] && hitOf[k] < 0, -1);
+                    if (i >= 0) { hitOf[i] = j; used[j] = true; }
+                }
+                n = 0;   // (sin el emparejado en orden)
             }
-            if (best < 0) return false;
-            arr = Schedule[best].arr; dep = Schedule[best].dep;
-            return true;
+            for (int i = 0, j = 0; i < n && j < m;)
+            {
+                if (path[i].Length > 0 && path[i] == names[j] && dp[i, j] == dp[i + 1, j + 1] + 1) { hitOf[i] = j; used[j] = true; i++; j++; }
+                else if (dp[i + 1, j] >= dp[i, j + 1]) i++;
+                else j++;
+            }
+            // Lo que quede del horario fuera de orden: solo si esa estación sale una sola vez (libre) en el itinerario.
+            for (int j = 0; j < m && !ScheduleFirstPass; j++)
+            {
+                if (used[j]) continue;
+                var free = Enumerable.Range(0, n).Where(i => hitOf[i] < 0 && path[i] == names[j]).ToList();
+                if (free.Count == 1) { hitOf[free[0]] = j; used[j] = true; }
+            }
+            for (int i = 0; i < path.Length; i++)
+            {
+                if (hitOf[i] < 0) continue;
+                var s = stops[i]; int hit = hitOf[i];
+                s.Planned = true; s.SchedArr = Schedule[hit].arr; s.SchedDep = Schedule[hit].dep;
+            }
+            return used[^1];
         }
         public const double ReverseS = 120;             // tiempo estimado para invertir la marcha
 
@@ -464,6 +576,23 @@ namespace SelectOR
             OffSinceUtc = DateTime.MaxValue; Version++;
         }
 
+        // Punto de paso en un tramo concreto (para seguir un recorrido .pat): no se dibuja en el mapa.
+        public void AddGuide(int edge, double off)
+        {
+            if (Graph == null || edge < 0 || edge >= Graph.Edges.Length) return;
+            var (x, y) = Graph.PointAt(edge, off); var (la, lo) = Graph.Unproj(x, y);
+            Points.Add(new Waypoint { Lat = la, Lon = lo, Edge = edge, Off = off, Guide = true });
+        }
+
+        // Punto en el tramo más cercano de entre esos (salida, cambio de sentido o llegada de un recorrido .pat).
+        public bool AddPointOn(IEnumerable<int> edges, double lat, double lon, double maxM)
+        {
+            if (Graph == null || !Graph.NearestOn(edges, lat, lon, maxM, out int e, out double off)) return false;
+            var (x, y) = Graph.PointAt(e, off); var (la, lo) = Graph.Unproj(x, y);
+            Points.Add(new Waypoint { Lat = la, Lon = lo, Edge = e, Off = off });
+            return true;
+        }
+
         public bool AddPoint(double lat, double lon, double maxM)
         {
             if (Graph == null || !Graph.Nearest(lat, lon, maxM, out int e, out double off, out _)) return false;
@@ -473,7 +602,13 @@ namespace SelectOR
         }
 
         public void ClearHaltChoices() => _haltChoice.Clear();   // tren nuevo con horario: mandan sus paradas
-        public void Undo() { if (Points.Count > ReachedPoints) Points.RemoveAt(Points.Count - 1); if (Points.Count == 0) ReachedPoints = 0; }
+        public void Undo()
+        {
+            if (Points.Count > ReachedPoints) Points.RemoveAt(Points.Count - 1);
+            // los puntos de paso de un recorrido (.pat) que llevaban hasta él se van con él
+            while (Points.Count > ReachedPoints && Points[^1].Guide) Points.RemoveAt(Points.Count - 1);
+            if (Points.Count == 0) ReachedPoints = 0;
+        }
         public void ClearAll() { Points.Clear(); ReachedPoints = 0; ClearPlan(); Problem = null; }
 
         public void ToggleHalt(int stopIndex)
@@ -528,7 +663,7 @@ namespace SelectOR
                     }
                 if (best == null) { Problem = string.Format(I18n.T("No hay camino por la vía hasta el punto {0}."), i + 1); ClearPlanKeepProblem(); return; }
                 parts.AddRange(best.Parts); total += best.Len; pd.Add(total);
-                e = p.Edge; off = p.Off; dirs = new List<int> { best.EndDir };
+                e = p.Edge; off = p.Off; dirs = new List<int> { p.Reverse ? 1 - best.EndDir : best.EndDir };
             }
             Build(parts, pd, oldPassed);
         }
@@ -578,19 +713,21 @@ namespace SelectOR
                 int j = k;
                 while (j + 1 < plats.Count && string.Equals(plats[j + 1].name, plats[k].name, StringComparison.OrdinalIgnoreCase) && plats[j + 1].d - plats[j].d < 800) j++;
                 string name = plats[k].name;
-                bool sched = MatchSchedule(name, out double sArr, out double sDep);
                 var s = new Stop
                 {
                     Name = name, Dist = (plats[k].d + plats[j].d) / 2,
-                    Halt = _haltChoice.TryGetValue(name, out bool h) ? h : Schedule != null ? sched : DefaultHalt,
-                    SchedArr = sArr, SchedDep = sDep
+                    Halt = _haltChoice.TryGetValue(name, out bool h) ? h : DefaultHalt,
                 };
                 if (oldPassed.TryGetValue(name, out var pa) && s.Dist < 30) { s.Passed = true; s.PassedAt = pa.PassedAt; s.PassedAtPc = pa.PassedAtPc; }
                 Stops.Add(s);
                 k = j + 1;
             }
+            // con horario (o actividad): para en las suyas y pasa por las demás (salvo que el maquinista lo cambie)
+            bool lastSeen = AssignSchedule(Stops);
+            if (Schedule != null)
+                foreach (var st in Stops) st.Halt = _haltChoice.TryGetValue(st.Name, out bool h2) ? h2 : st.Planned;
             foreach (double r in revs)
-                Stops.Add(new Stop { Name = I18n.T("Cambio de sentido"), Dist = r, Halt = true, IsReverse = true });
+                Stops.Add(new Stop { Name = I18n.T("Cambio de sentido"), Dist = r, Halt = true, IsReverse = true, Synthetic = true });
             Stops.Sort((x, y) => x.Dist.CompareTo(y.Dist));
             // estación término: «Estación · cambio de sentido · Estación» → una sola fila que invierte la marcha
             for (int i = Stops.Count - 3; i >= 0; i--)
@@ -606,20 +743,63 @@ namespace SelectOR
             if (Stops.Count == 0 || TotalLen - Stops[^1].Dist > 300)
             {
                 var (la, lo) = LatLonAt(TotalLen);
-                var dest = new Stop { Name = I18n.T("Destino"), Dist = TotalLen, Halt = true, IsEnd = true, Lat = la, Lon = lo };
+                var dest = new Stop { Name = I18n.T("Destino"), Dist = TotalLen, Halt = true, IsEnd = true, Lat = la, Lon = lo, Synthetic = true };
                 // Con horario: si su última estación no ha salido en el itinerario (el recorrido acaba justo antes de
                 // su andén), el destino es ella, con su hora.
-                if (Schedule != null && Schedule.Count > 0)
+                if (Schedule != null && Schedule.Count > 0 && !lastSeen)
                 {
+                    // ...pero solo si su andén está de verdad al final del recorrido (a menos de 400 m): si el
+                    // recorrido no llega a esa estación, Open Rails tampoco para allí y el final sigue siendo «Destino».
                     var last = Schedule[^1];
-                    string ln = NormName(last.name);
-                    bool seen = Stops.Any(st => st.HasSched && NormName(st.Name) is string sn && (sn == ln || sn.Contains(ln) || ln.Contains(sn)));
-                    if (!seen) { dest.Name = last.name; dest.SchedArr = last.arr; dest.SchedDep = last.dep; }
+                    string ln = Graph?.CleanName?.Invoke(last.name) ?? last.name;
+                    if (PlatformNear(ln, la, lo, 400))
+                    {
+                        dest.Name = ln; dest.SchedArr = last.arr; dest.SchedDep = last.dep;
+                        dest.Synthetic = false; dest.Planned = true;
+                    }
                 }
                 Stops.Add(dest);
             }
-            else { Stops[^1].IsEnd = true; Stops[^1].Halt = true; }   // el destino es esa estación
+            else
+            {
+                // el destino es esa estación; con horario, se para en ella solo si está en el horario (si no, el tren
+                // pasa por ella y sigue hasta el final del recorrido: una vía de apartado, un depósito…)
+                Stops[^1].IsEnd = true;
+                Stops[^1].Halt = Schedule == null || Stops[^1].Planned || (_haltChoice.TryGetValue(Stops[^1].Name, out bool hc) && hc);
+            }
             Version++;
+        }
+
+        // Estación de destino final del itinerario (actividad, horario o el que crea el usuario): la última fila que
+        // es una estación. Si el recorrido sigue un poco más allá (una vía de apartado…), la última estación por la
+        // que pasa. null = sin itinerario.
+        public string FinalStation()
+        {
+            if (!HasPlan || Stops == null) return null;
+            // Con horario o actividad: la última estación donde PARA (el recorrido puede seguir pasando por otras
+            // hasta una vía de apartado o un depósito; ahí ya no hay viajeros).
+            if (Schedule != null)
+                for (int i = Stops.Count - 1; i >= 0; i--)
+                    if (Stops[i].Halt && !Stops[i].Synthetic && !string.IsNullOrWhiteSpace(Stops[i].Name)) return Stops[i].Name;
+            for (int i = Stops.Count - 1; i >= 0; i--)
+                if (!Stops[i].Synthetic && !string.IsNullOrWhiteSpace(Stops[i].Name)) return Stops[i].Name;
+            return null;
+        }
+
+        // ¿Hay un andén de esa estación a menos de maxM metros de ese punto?
+        bool PlatformNear(string station, double lat, double lon, double maxM)
+        {
+            if (Graph == null) return false;
+            string n = NormName(station);
+            var (x0, y0) = Graph.Proj(lat, lon);
+            for (int e = 0; e < Graph.Edges.Length; e++)
+                foreach (var (off, name) in Graph.Edges[e].Platforms)
+                {
+                    if (NormName(name) != n) continue;
+                    var (x, y) = Graph.PointAt(e, off);
+                    if ((x - x0) * (x - x0) + (y - y0) * (y - y0) <= maxM * maxM) return true;
+                }
+            return false;
         }
 
         // Punto del itinerario a esa distancia del origen.

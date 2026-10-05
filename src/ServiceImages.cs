@@ -46,9 +46,9 @@ namespace SelectOR
         {
             float ppm = 11f;
             double meters = 0;
-            foreach (var c in cars) meters += c.geom != null && !c.geom.IsEmpty ? Math.Max(0.3, c.geom.Max.Z - c.geom.Min.Z) * 1.02 : StripMissingM;
-            double natural = meters * ppm + StripGap * cars.Count + StripPadX * 2;
-            if (natural > MaxWidth) ppm = (float)Math.Max(4.0, ppm * (MaxWidth - StripPadX * 2 - StripGap * cars.Count) / (meters * ppm));
+            foreach (var c in cars) meters += c.geom != null && !c.geom.IsEmpty ? Math.Max(0.3, c.geom.Max.Z - c.geom.Min.Z) : StripMissingM;
+            double natural = meters * ppm + StripPadX * 2;
+            if (natural > MaxWidth) ppm = (float)Math.Max(4.0, ppm * (MaxWidth - StripPadX * 2) / (meters * ppm));
             return ppm;
         }
 
@@ -67,7 +67,7 @@ namespace SelectOR
                 {
                     ui.BeginInvoke((Action)(() =>
                     {
-                        try { tcs.SetResult(TrimX(ShapeRenderer.RenderSide(geom, ppm, WorldH, flip ^ true))); }
+                        try { tcs.SetResult(ShapeRenderer.RenderSide(geom, ppm, WorldH, flip ^ true)); }   // sin recortar: se acoplan por su longitud
                         catch { tcs.SetResult(null); }
                     }));
                 }
@@ -89,7 +89,7 @@ namespace SelectOR
                 if (geom != null && !geom.IsEmpty && !rendered.ContainsKey((geom, flip)))
                 {
                     Bitmap bmp;
-                    try { bmp = TrimX(ShapeRenderer.RenderSide(geom, ppm, WorldH, flip ^ true)); } catch { bmp = null; }
+                    try { bmp = ShapeRenderer.RenderSide(geom, ppm, WorldH, flip ^ true); } catch { bmp = null; }
                     rendered[(geom, flip)] = bmp;
                 }
             return AssembleStrip(cars, rendered, ppm);
@@ -98,18 +98,22 @@ namespace SelectOR
         // Monta la tira con los dibujos ya hechos (no usa el dispositivo gráfico: vale en segundo plano) y los libera.
         static Bitmap AssembleStrip(List<(ShapeGeom geom, bool flip, string name)> cars, Dictionary<(ShapeGeom, bool), Bitmap> rendered, float ppm)
         {
-            const int gap = StripGap, padX = StripPadX, padY = StripPadY, missingM = StripMissingM;
-            var slots = new List<(Bitmap bmp, string name, int w)>();
+            const int padX = StripPadX, padY = StripPadY, missingM = StripMissingM;
+            // Acoplados: topes con topes; lo que sobresale mucho (la rueda articulada de los Talgo) se solapa con el
+            // coche vecino (ver ShapeRenderer.CoupledLayout).
+            var slots = new List<(Bitmap bmp, string name, int w, ShapeRenderer.SideExtent ext)>();
             foreach (var (geom, flip, name) in cars)
             {
                 Bitmap bmp = null;
                 if (geom != null && !geom.IsEmpty) rendered.TryGetValue((geom, flip), out bmp);
-                slots.Add((bmp, name, bmp?.Width ?? (int)(missingM * ppm)));
+                if (bmp != null) slots.Add((bmp, name, bmp.Width, ShapeRenderer.MeasureSide(bmp)));
+                else { int mw = (int)(missingM * ppm); slots.Add((null, name, mw, new ShapeRenderer.SideExtent(mw, 0, mw - 1, 0, mw - 1))); }
             }
             if (slots.All(s => s.bmp == null)) { foreach (var b in rendered.Values) b?.Dispose(); return null; }   // nada que enseñar
 
             int carH = (int)(WorldH * ppm);
-            int width = padX * 2 + slots.Sum(s => s.w) + gap * (slots.Count - 1);
+            var lay = ShapeRenderer.CoupledLayout(slots.Select(s => s.ext).ToList(), ppm, padX);
+            int width = lay.total;
             int height = padY * 2 + carH + 4;
             var img = new Bitmap(width, height, PixelFormat.Format24bppRgb);
             using (var g = Graphics.FromImage(img))
@@ -118,10 +122,11 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 int railY = padY + carH;
                 using (var rail = new Pen(Color.FromArgb(96, 102, 110), 2f)) g.DrawLine(rail, 0, railY + 1, width, railY + 1);
-                int x = padX;
                 using var f = new Font("Segoe UI", 7.5f);
-                foreach (var (bmp, name, w) in slots)
+                for (int i = 0; i < slots.Count; i++)
                 {
+                    var (bmp, name, w, _) = slots[i];
+                    int x = lay.drawX[i];
                     if (bmp != null) g.DrawImage(bmp, x, padY, bmp.Width, bmp.Height);
                     else
                     {
@@ -131,7 +136,6 @@ namespace SelectOR
                         var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
                         using (var tb = new SolidBrush(Color.FromArgb(170, 176, 184))) g.DrawString(name ?? "?", f, tb, r, sf);
                     }
-                    x += w + gap;
                 }
             }
             foreach (var b in rendered.Values) b?.Dispose();

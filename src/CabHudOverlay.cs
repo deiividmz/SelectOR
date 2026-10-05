@@ -574,12 +574,24 @@ namespace SelectOR
             Render();
             _poller.Start();
             _anim.Start();
+            _shownOnce = true;
         }
 
+        bool _shownOnce;
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
             if (Visible && IsHandleCreated) Render();
+            // Oculto no pregunta nada al simulador; al volver a enseñarse, sigue.
+            if (_shownOnce) { if (Visible) _poller.Start(); else { _poller.Stop(); ReleaseHeld(); } }
+        }
+
+        // Si el ratón se pierde a mitad de un clic (otra ventana, Alt+Tab…), la tecla no se queda pulsada
+        // en el simulador: una bocina o un Ctrl/Shift pegados cambiaban lo que hacían F2 o F9.
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (!Capture) ReleaseHeld();
         }
 
         public void CloseHud()

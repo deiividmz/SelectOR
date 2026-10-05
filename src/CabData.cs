@@ -76,7 +76,14 @@ namespace SelectOR
         readonly Dictionary<string, double> _ema = new(StringComparer.Ordinal);
         double _tmLimit = -1;   // «Limit» del Track Monitor (km/h); −1 = no lo da
         List<(double distM, double limitKmh)> _tmAhead; double _tmStep;
-        const double Alpha = 0.30;   // el de Cockpit-SF, con muestras cada 100 ms
+        const double Alpha = 0.30;   // el de Cockpit-SF, con muestras cada 100 ms (se ajusta al tiempo real entre lecturas)
+        const int CycleMs = 150;
+        int _fails;
+        // Página 5 del HUD: en las versiones de OR con las páginas de potencia distribuida y alimentación es la de
+        // FRENOS; en las anteriores (1.3, 1.4, 1.5) la 5 es la «Dispatcher», que no se debe pedir nunca (ver
+        // la nota de la página 7). 0 = sin comprobar · 1 = frenos · −1 = no se pide.
+        int _p5State;
+        long _lastSmoothTicks;
 
         public CabPoller(int port, Action<CabValues> onData)
         {
@@ -94,11 +101,15 @@ namespace SelectOR
                 while (!tok.IsCancellationRequested)
                 {
                     // Con una orden en marcha no se pregunta nada al simulador (ver OrControl.Quiet).
-                    if (OrControl.Quiet) { try { await Task.Delay(50, tok); } catch { break; } continue; }
+                    if (OrControl.Quiet) { try { await Task.Delay(100, tok); } catch { break; } continue; }
                     CabValues v;
+                    long c0 = Environment.TickCount64;
                     try { v = await Read(); } catch { v = new CabValues(); }
-                    try { _onData?.Invoke(v); } catch { }
-                    try { await Task.Delay(100, tok); } catch { break; }
+                    // Una lectura que no se pudo hacer (OR ocupado) no deja el pupitre «desconectado».
+                    if (v.Connected || ++_fails >= 4) { _fails = v.Connected ? 0 : _fails; try { _onData?.Invoke(v); } catch { } }
+                    // La vuelta dura CycleMs en total (lo que tardan las consultas cuenta), con un respiro mínimo.
+                    int espera = (int)Math.Max(60, CycleMs - (Environment.TickCount64 - c0));
+                    try { await Task.Delay(espera, tok); } catch { break; }
                 }
             }, tok);
         }
@@ -111,40 +122,60 @@ namespace SelectOR
 
         public void Dispose() { Stop(); try { _http.Dispose(); } catch { } }
 
+        // Cada consulta, por el turno único de SelectOR (OrApi): nunca dos a la vez.
         async Task<string> Get(string path)
         {
-            try { return await _http.GetStringAsync(path); } catch { return null; }
+            try { return await OrApi.GetStringAsync(_http, path, 800); } catch { return null; }
         }
 
         async Task<CabValues> Read()
         {
             var v = new CabValues();
-            bool lentas = (_tick % 10) == 0;     // páginas 2 y 7: una vez por segundo
-            bool frenos = (_tick++ % 3) == 0;     // página 5 (presiones de freno): cada 300 ms
-            // Las peticiones van DE UNA EN UNA (antes salían hasta 6 a la vez): el servidor web de OR
-            // las atiende en hilos aparte mientras el simulador cambia el estado del tren, y varias
-            // lecturas simultáneas multiplican las opciones de pillarlo a medio cambiar.
-            string j1 = await Get("/API/HUD/1");
+            // Una vuelta cada 150 ms con solo 2 consultas fijas (antes 100 ms y hasta 6): el servidor web de OR
+            // atiende cada consulta en un hilo aparte leyendo el estado del tren mientras el simulador lo
+            // cambia, y cuantas menos, menos opciones de pillarlo a medio cambiar (y de cerrar el simulador).
+            // Las páginas que recorren todo el tren o todos los trenes (2, 5, 7) se piden mucho menos.
+            // Cada vuelta, solo la página general y los mandos (2 consultas); lo demás, repartido entre vueltas.
+            int fase = _tick++ % 3;
+            bool lentas = (_tick % 14) == 1;     // página 2: cada ~2 s
+            bool frenos = fase == 1;             // página 5 (presiones de freno): cada ~450 ms
+            bool monitor = fase == 2;            // Track Monitor: cada ~450 ms
+            // Página GENERAL del HUD (la 0): trae todo lo que se usa de la 1 (velocidad, sentido, tracción,
+            // frenos, pendiente y hora) sin que OR tenga que recorrer cada vehículo de la composición.
+            string j1 = await Get("/API/HUD/0");
             v.StampTicks = System.Diagnostics.Stopwatch.GetTimestamp();   // la velocidad sale de aquí
             string jc = await Get("/API/CABCONTROLS");
-            if ((_tick % 2) == 0) { string jt = await Get("/API/TRACKMONITORDISPLAY"); if (jt != null) { _tmLimit = TrackMonitorLimit(jt); _rawTm = jt; (_tmAhead, _tmStep) = TrackMonitorAhead(jt); } }   // cada 200 ms
+            if (monitor) { string jt = await Get("/API/TRACKMONITORDISPLAY"); if (jt != null) { _tmLimit = TrackMonitorLimit(jt); _rawTm = jt; (_tmAhead, _tmStep) = TrackMonitorAhead(jt); } }   // cada 200 ms
             if (lentas)
             {
                 string j2 = await Get("/API/HUD/2");
                 if (j2 != null) _p2 = ParseHudPage(j2);
-                string j7 = await Get("/API/HUD/7");
-                if (j7 != null) _p7 = ParseHudPage(j7);
+                // La página 7 (Dispatcher) NO se pide: llama a GetStatus() de cada tren, que vacía y rellena listas
+                // de los tramos de vía compartidas con la simulación (TrackCircuitState.TrainsOccupying); pedida
+                // desde el servidor web mientras las señales recorren esas listas, cierra Open Rails («Colección
+                // modificada» en TrackCircuitSection.TestTrainAhead). Solo daba el límite (ya viene del Track
+                // Monitor) y la distancia recorrida (el pupitre no la usa).
             }
-            if (frenos)
+            if (frenos && _p5State >= 0)
             {
                 string j5 = await Get("/API/HUD/5");
-                if (j5 != null) { _p5 = ParseHudPage(j5); _raw5 = j5; }
+                if (j5 != null)
+                {
+                    var rows5 = ParseHudPage(j5);
+                    if (_p5State == 0) _p5State = EsPaginaFrenos(rows5) ? 1 : -1;
+                    if (_p5State > 0) { _p5 = rows5; _raw5 = j5; }
+                }
             }
 
             v.Connected = j1 != null || jc != null;
             if (!v.Connected) { _ema.Clear(); return v; }
 
-            if (j1 != null) FromPage1(v, ParseHudPage(j1));
+            if (j1 != null)
+            {
+                var rows1 = ParseHudPage(j1);
+                if (_p5State == 0 && VersionConDispatcherEn5(rows1)) _p5State = -1;
+                FromPage1(v, rows1);
+            }
             FromPage2(v, _p2);
             FromPage5(v, _p5);
             FromPage7(v, _p7);
@@ -218,11 +249,16 @@ namespace SelectOR
         // ---------------- suavizado ----------------
         void Smooth(CabValues v)
         {
+            // El mismo suavizado en el tiempo que con lecturas cada 100 ms, aunque ahora lleguen más espaciadas.
+            long nowT = System.Diagnostics.Stopwatch.GetTimestamp();
+            double dtMs = _lastSmoothTicks == 0 ? 100 : (nowT - _lastSmoothTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            _lastSmoothTicks = nowT;
+            double a = 1 - Math.Pow(1 - Alpha, Math.Max(0.5, Math.Min(10, dtMs / 100.0)));
             double S(string k, double x)
             {
                 if (!v.Has(k)) { _ema.Remove(k); return x; }
                 if (!_ema.TryGetValue(k, out var prev)) { _ema[k] = x; return x; }
-                double n = prev + Alpha * (x - prev);
+                double n = prev + a * (x - prev);
                 _ema[k] = n; return n;
             }
             // (la velocidad NO: el pupitre la sigue con su propia estimación de la tendencia)
@@ -321,7 +357,7 @@ namespace SelectOR
             {
                 using var d = JsonDocument.Parse(json);
                 if (d.RootElement.TryGetProperty("commonTable", out var c)) rows.AddRange(ParseTable(c));
-                if (d.RootElement.TryGetProperty("extraTable", out var e)) rows.AddRange(ParseTable(e));
+                if (d.RootElement.TryGetProperty("extraTable", out var e) && e.ValueKind == JsonValueKind.Object) rows.AddRange(ParseTable(e));
             }
             catch { }
             return rows;
@@ -548,7 +584,32 @@ namespace SelectOR
             }
         }
 
-        // ---------------- HUD página 7: despachador (límite y recorrido) ----------------
+        // ¿La página trae columnas de frenos (y no las de la «Dispatcher»)?
+        static bool EsPaginaFrenos(List<(string label, string value)> rows)
+        {
+            bool frenos = false;
+            foreach (var (label0, _) in rows)
+            {
+                string l = label0.ToLowerInvariant();
+                if (l.EndsWith(".travelled") || l.EndsWith(".max") || l.Contains("dispatcher")) return false;
+                if (l.EndsWith(".brkcyl") || l.EndsWith(".brkpipe") || l.Contains("main reservoir")) frenos = true;
+            }
+            return frenos;
+        }
+
+        // Versiones de OR en las que la página 5 del HUD es la «Dispatcher»: las estables 1.3, 1.4 y 1.5.
+        static bool VersionConDispatcherEn5(List<(string label, string value)> rows)
+        {
+            foreach (var (label0, val) in rows)
+                if (label0.Trim().Equals("Version", StringComparison.OrdinalIgnoreCase))
+                {
+                    string v = SinColor(val ?? "").Trim();
+                    return Regex.IsMatch(v, @"^1\.[345](\.|$)");
+                }
+            return false;
+        }
+
+        // ---------------- HUD página 7: despachador (límite y recorrido) — ya NO se pide ----------------
         static void FromPage7(CabValues v, List<(string label, string value)> rows)
         {
             foreach (var (label0, val) in rows)

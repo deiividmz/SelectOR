@@ -860,12 +860,25 @@ namespace SelectOR
             _box.Focus();
         }
 
-        // Cierra y devuelve el teclado al simulador.
+        // Cierra y devuelve el teclado al simulador. Sin forzar su ventana (ShowWindow/AttachThreadInput):
+        // como la activa es esta caja, basta con SetForegroundWindow.
         void Finish()
         {
             _closing = true;
             Close();
-            if (_prevFg != IntPtr.Zero) Native.ForceForeground(_prevFg);
+            if (_prevFg != IntPtr.Zero) Native.GiveForeground(_prevFg);
+        }
+
+        // F1–F12 pulsadas mientras se escribe (F2 guardar, F9 operaciones…) son para el simulador.
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            var k = keyData & Keys.KeyCode;
+            if (k >= Keys.F1 && k <= Keys.F12)
+            {
+                OrControl.ForwardKey((int)k, (keyData & Keys.Shift) != 0, (keyData & Keys.Control) != 0, (keyData & Keys.Alt) != 0);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
     }
 }

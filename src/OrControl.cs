@@ -28,7 +28,7 @@ namespace SelectOR
         // cuando la orden lo está cambiando (luces, pantógrafo…) puede hacer fallar al simulador.
         static long _quietUntil;
         public static bool Quiet => Environment.TickCount64 < System.Threading.Interlocked.Read(ref _quietUntil);
-        static void Calm(int ms)
+        public static void Calm(int ms)
         {
             long t = Environment.TickCount64 + ms;
             if (t > System.Threading.Interlocked.Read(ref _quietUntil)) System.Threading.Interlocked.Exchange(ref _quietUntil, t);
@@ -131,7 +131,7 @@ namespace SelectOR
                 long now = Environment.TickCount64;
                 if (now - _orPidsAt > 2000)
                 {
-                    _orPids = Array.ConvertAll(Process.GetProcessesByName("RunActivity"), p => p.Id);
+                    _orPids = Array.ConvertAll(SimulatorProcesses(), p => { int id = p.Id; p.Dispose(); return id; });
                     _orPidsAt = now;
                 }
                 GetWindowThreadProcessId(GetForegroundWindow(), out uint pid);
@@ -141,17 +141,98 @@ namespace SelectOR
         }
 
         // La pulsación va a la ventana activa: si no es el simulador, se le devuelve el foco.
-        static void FocusSimulator()
+        public static void FocusSimulator()
         {
             try
             {
                 IntPtr fg = GetForegroundWindow();
                 GetWindowThreadProcessId(fg, out uint pid);
-                foreach (var p in Process.GetProcessesByName("RunActivity"))
+                foreach (var p in SimulatorProcesses())
+                    using (p)
+                    {
+                        if (p.Id == pid) return;   // ya es la activa
+                        if (p.MainWindowHandle != IntPtr.Zero) { SetForegroundWindow(p.MainWindowHandle); return; }
+                    }
+            }
+            catch { }
+        }
+
+        static Process[] SimulatorProcesses()
+        {
+            var a = Process.GetProcessesByName("RunActivity");
+            var b = Process.GetProcessesByName("RunActivityLAA");
+            if (b.Length == 0) return a;
+            var all = new Process[a.Length + b.Length]; a.CopyTo(all, 0); b.CopyTo(all, a.Length);
+            return all;
+        }
+
+        // ---- Lo que hace el usuario en el simulador ----
+        // Al pulsar una tecla de función (F2 guardar, F9 operaciones del tren con sus enganches…) o al hacer
+        // clic en la ventana de OR, el simulador cambia su estado: durante un momento no se le pregunta nada.
+        // Se llama cada ~40 ms mientras se conduce (MainMenuForm.StartKmTracking).
+        static readonly bool[] _wasDown = new bool[256];
+        public static event Action<int> SimulatorKey;   // tecla de función pulsada en el simulador (VK)
+
+        public static void WatchUserInput()
+        {
+            try
+            {
+                bool focused = SimulatorFocused();
+                for (int vk = 0x70; vk <= 0x7B; vk++) Edge(vk, focused, vk == 0x71 ? 3000 : 1200);   // F1–F12 (F2: guardar tarda más)
+                Edge(0x01, focused, 250);   // clic izquierdo (botones de la ventana F9, palancas…)
+                Edge(0x02, focused, 250);   // clic derecho
+            }
+            catch { }
+        }
+
+        static void Edge(int vk, bool focused, int calmMs)
+        {
+            bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
+            if (down && !_wasDown[vk] && focused)
+            {
+                Calm(calmMs);
+                if (vk >= 0x70) try { SimulatorKey?.Invoke(vk); } catch { }
+            }
+            _wasDown[vk] = down;
+        }
+
+        // Reenvía al simulador una tecla pulsada en una ventana de SelectOR que tenía el teclado (el mapa
+        // grande, el chat…): sin esto, F2 o F9 se quedaban en SelectOR y OR no guardaba ni abría nada.
+        // Si el teclado lo tiene una ventana de SelectOR, se devuelve al simulador (sin forzar nada:
+        // SetForegroundWindow está permitido porque la ventana activa es nuestra).
+        public static void ReturnFocusIfOurs()
+        {
+            try
+            {
+                GetWindowThreadProcessId(GetForegroundWindow(), out uint pid);
+                if (pid == (uint)Environment.ProcessId) FocusSimulator();
+            }
+            catch { }
+        }
+
+        public static void ForwardKey(int vk, bool shift, bool ctrl, bool alt)
+        {
+            try
+            {
+                int sc = (int)MapVirtualKey((uint)vk, 4 /*MAPVK_VK_TO_VSC_EX: 0xE0xx en las extendidas (flechas…)*/);
+                if ((sc & 0xFF00) == 0xE000) sc = 0x100 | (sc & 0xFF);   // Scan() las marca como extendidas
+                if (sc == 0) return;
+                FocusSimulator();
+                Calm(vk == 0x71 ? 3000 : 1200);
+                var ins = new List<INPUT>();
+                if (ctrl) ins.Add(Scan(0x1D, false));
+                if (shift) ins.Add(Scan(0x2A, false));
+                if (alt) ins.Add(Scan(0x38, false));
+                ins.Add(Scan(sc, false));
+                Send(ins);
+                Task.Delay(80).ContinueWith(_ =>
                 {
-                    if (p.Id == pid) return;   // ya es la activa
-                    if (p.MainWindowHandle != IntPtr.Zero) { SetForegroundWindow(p.MainWindowHandle); return; }
-                }
+                    var up = new List<INPUT> { Scan(sc, true) };
+                    if (alt) up.Add(Scan(0x38, true));
+                    if (shift) up.Add(Scan(0x2A, true));
+                    if (ctrl) up.Add(Scan(0x1D, true));
+                    Send(up);
+                });
             }
             catch { }
         }

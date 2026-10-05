@@ -97,6 +97,80 @@ namespace SelectOR
         }
 
         // -------- Localiza el .s a partir del .eng --------
+        // ---- Composición 2D acoplada ----
+        // Cada vehículo se coloca por lo que SE VE en su dibujo: la CAJA son las columnas con bastante altura dibujada
+        // (carrocería, bastidor) y lo que SOBRESALE a cada lado son columnas finas (topes, enganches, la rueda
+        // articulada de un Talgo). Los vehículos se juntan hasta que lo que sobresale de uno toca lo del siguiente:
+        // los topes quedan tocándose, como acoplados. Si lo que sobresale es largo (más de 1 m, como el rodal de un
+        // Talgo, compartido con el coche vecino), se deja solapar.
+        // (La longitud «Size» del .eng/.wag no sirve: en muchos modelos lo dibujado no está centrado en ella.)
+        public readonly struct SideExtent { public readonly int W, BodyL, BodyR, FullL, FullR; public SideExtent(int w, int bl, int br, int fl, int fr) { W = w; BodyL = bl; BodyR = br; FullL = fl; FullR = fr; } }
+
+        public static SideExtent MeasureSide(GdiBitmap bmp)
+        {
+            if (bmp == null) return default;
+            int w = bmp.Width, h = bmp.Height;
+            if (bmp.PixelFormat != System.Drawing.Imaging.PixelFormat.Format32bppArgb) return new SideExtent(w, 0, w - 1, 0, w - 1);
+            var data = bmp.LockBits(new System.Drawing.Rectangle(0, 0, w, h), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            var col = new int[w]; int max = 0;
+            try
+            {
+                var px = new int[w * h];
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, px, 0, px.Length);
+                for (int x = 0; x < w; x++)
+                {
+                    int n = 0;
+                    for (int y = 0; y < h; y++) if (((uint)px[y * w + x] >> 24) > 24) n++;
+                    col[x] = n; if (n > max) max = n;
+                }
+            }
+            finally { bmp.UnlockBits(data); }
+            int min = Math.Max(1, max / 4);
+            int bl = -1, br = -1, fl = -1, fr = -1;
+            for (int x = 0; x < w; x++) { if (col[x] > 0) { if (fl < 0) fl = x; fr = x; } if (col[x] >= min) { if (bl < 0) bl = x; br = x; } }
+            if (bl < 0) return new SideExtent(w, 0, w - 1, 0, w - 1);
+            return new SideExtent(w, bl, br, fl, fr);
+        }
+
+        // Coloca los vehículos acoplados. items: lo medido de cada dibujo (o, si no hay dibujo, su ancho); ppm para
+        // saber qué es «largo». Devuelve dónde dibujar cada uno, el tramo que le toca (para saber qué vehículo hay bajo
+        // el ratón: de la mitad del enganche anterior a la del siguiente) y el ancho total.
+        public static (int[] drawX, int[] slotL, int[] slotR, int total) CoupledLayout(IList<SideExtent> items, float ppm, int pad)
+        {
+            int n = items.Count;
+            var dx = new int[n];
+            float longPx = 1.0f * ppm, keepPx = 0.15f * ppm;   // saliente largo (articulación) → casi todo solapa
+            int Out(int p) => p > longPx ? (int)keepPx : p;
+            int x = 0;   // dónde empieza la CAJA del vehículo actual (coordenada provisional)
+            for (int i = 0; i < n; i++)
+            {
+                var e = items[i];
+                if (i > 0)
+                {
+                    var p = items[i - 1];
+                    // Lo que sobresale de uno + del otro, como mucho 0,5 m (topes comprimidos al ir acoplados): con el
+                    // metro real entre bastidores, a tamaño de tira los topes, finos y oscuros, se leían como un hueco.
+                    int gap = Math.Min(Out(p.FullR - p.BodyR) + Out(e.BodyL - e.FullL), (int)Math.Round(0.5f * ppm));
+                    x = dx[i - 1] + p.BodyR + 1 + gap;
+                }
+                dx[i] = x - e.BodyL;
+            }
+            int minL = int.MaxValue, maxR = int.MinValue;
+            for (int i = 0; i < n; i++) { minL = Math.Min(minL, dx[i] + items[i].FullL); maxR = Math.Max(maxR, dx[i] + items[i].FullR); }
+            int shift = pad - (n > 0 ? minL : 0);
+            var rx = new int[n]; var rl = new int[n]; var rr = new int[n];
+            for (int i = 0; i < n; i++) rx[i] = dx[i] + shift;
+            for (int i = 0; i < n; i++)
+            {
+                int bodyL = rx[i] + items[i].BodyL, bodyR = rx[i] + items[i].BodyR;
+                rl[i] = i == 0 ? rx[i] + items[i].FullL : (rr[i - 1] + 1);
+                rr[i] = i == n - 1 ? rx[i] + items[i].FullR : (bodyR + (rx[i + 1] + items[i + 1].BodyL)) / 2;
+                if (rr[i] < rl[i]) rr[i] = rl[i];
+            }
+            int total = n > 0 ? maxR + shift + 1 + pad : pad * 2;
+            return (rx, rl, rr, Math.Max(1, total));
+        }
+
         public static string ShapePathFor(string engPath)
         {
             try

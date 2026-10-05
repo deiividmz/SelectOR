@@ -601,6 +601,9 @@ namespace SelectOR
             ["No operativo · mantenimiento"] = "Not operational · maintenance",
             ["No operativo · en servicio"] = "Not operational · on duty",
             ["Revisión pronto"] = "Service due soon",
+            ["SelectOR · menú y lanzador para Open Rails {0}"] = "SelectOR · menu and launcher for Open Rails {0}",
+            ["Partida no guardada"] = "Game not saved",
+            ["Open Rails no guarda las partidas multijugador cuando te unes a un servidor (solo el que la aloja puede guardarlas)."] = "Open Rails does not save multiplayer games when you join a server (only the host can save them).",
             ["Viaje recuperado: Open Rails y SelectOR se cerraron durante el servicio. Se han usado los datos recogidos hasta el {0}."] = "Trip recovered: Open Rails and SelectOR closed during the service. The data collected up to {0} has been used.",
             // Editor de composiciones
             ["Editor de composiciones"] = "Consist editor",

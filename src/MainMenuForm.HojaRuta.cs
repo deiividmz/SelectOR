@@ -24,7 +24,7 @@ namespace SelectOR
         bool RoadHudAlive => _roadHud != null && !_roadHud.IsDisposed;
 
         // Horario del tren elegido en Horarios: se guarda al pulsar CONDUCIR y la hoja de ruta lo usa al arrancar.
-        sealed class TtRoadPlan { public string PatFile, Train; public List<(string name, double arr, double dep)> Schedule; }
+        sealed class TtRoadPlan { public string PatFile, Train; public List<(string name, double arr, double dep)> Schedule; public bool Timetable; }
         TtRoadPlan _roadTtPlan;
         string _roadPatPending;
         TtRoadPlan _roadPlanWaiting;   // plan de un horario o una actividad a la espera de que el escenario esté abierto
@@ -34,7 +34,7 @@ namespace SelectOR
         {
             var tr = _cboTTTrain?.SelectedItem as Orts.Formats.OR.TimetableFileLite.TrainInformation;
             if (tr == null) return null;
-            var plan = new TtRoadPlan { Train = tr.Train, PatFile = ResolvePath(tr.Path)?.FilePath };
+            var plan = new TtRoadPlan { Train = tr.Train, PatFile = ResolvePath(tr.Path)?.FilePath, Timetable = true };
             if (_ttStops.TryGetValue(tr, out var stops) && stops != null && stops.Count > 0)
             {
                 static double Sec(string hm) { int m = TtStops.Minutes(hm); return m < 0 ? double.NaN : m * 60.0; }
@@ -65,7 +65,9 @@ namespace SelectOR
                     {
                         if (item == null || !station.TryGetValue((uint)item.PlatformStartID, out var name)) continue;
                         double arr = item.ArrivalTime.TimeOfDay.TotalSeconds, dep = item.DepartTime.TimeOfDay.TotalSeconds;
-                        if (sched.Count > 0 && string.Equals(sched[^1].name, name, StringComparison.OrdinalIgnoreCase)) continue;   // andenes de la misma estación
+                        // dos paradas seguidas en la misma estación (cambia de andén): una fila, de la primera llegada a
+                        // la última salida
+                        if (sched.Count > 0 && string.Equals(sched[^1].name, name, StringComparison.OrdinalIgnoreCase)) { sched[^1] = (name, sched[^1].arr, dep); continue; }
                         sched.Add((name, arr, dep));
                     }
                     if (sched.Count > 0) plan.Schedule = sched;
@@ -84,6 +86,7 @@ namespace SelectOR
             if (!_scenarioReady) { _roadPlanWaiting = plan; EnsureRoadGraph(); return; }
             _roadPlanWaiting = null;
             _road.Schedule = plan.Schedule;
+            _road.ScheduleFirstPass = plan.Timetable;
             _road.FromPlan = true;
             if (plan.Schedule != null) _road.ClearHaltChoices();
             _roadPatPending = plan.PatFile;
@@ -121,24 +124,71 @@ namespace SelectOR
         {
             string pat = _roadPatPending; _roadPatPending = null;
             if (string.IsNullOrEmpty(pat) || _road.Graph == null) return;
+            FollowPat(_road, pat);
+            if (_road.Points.Count >= 2) RoadReplan();
+        }
+
+        // El itinerario sigue el recorrido (.pat) TRAMO A TRAMO, como Open Rails: los puntos del .pat que caen en
+        // un desvío son nodos del .tdb, y entre dos seguidos va un tramo concreto; a mitad de cada uno se pone un
+        // punto de paso (oculto). Antes solo se usaban la salida, los cambios de sentido y la llegada, y entre ellos
+        // el camino MÁS CORTO: si el recorrido iba por otro lado, faltaban estaciones (y sus paradas). La salida, la
+        // llegada y los cambios de sentido se ponen en el tramo del recorrido (no en una vía paralela).
+        internal static void FollowPat(RoadBook road, string pat)
+        {
+            var g = road.Graph;
+            if (g == null) return;
             var all = PatWorldPoints(pat);
             if (all.Count < 2) return;
-            // Solo la salida, los cambios de sentido y la llegada: entre ellos, el camino por la vía. Ajustar CADA
-            // punto del .pat a la vía más cercana metía apartaderos y vías paralelas, y el itinerario daba vueltas.
-            var pts = new List<(float x, float z, bool rev)>();
-            for (int i = 0; i < all.Count; i++) if (i == 0 || i == all.Count - 1 || all[i].rev) pts.Add(all[i]);
-            double lastLa = double.NaN, lastLo = double.NaN;
-            for (int i = 0; i < pts.Count; i++)
+            var node = all.Select(p => g.NodeAtWorld(p.x, p.z)).ToArray();
+            // Un nodo vale si un tramo lo une al nodo anterior o al siguiente del recorrido: a veces, justo en el
+            // mismo sitio, hay el extremo de un trozo de vía suelto (sin conexión), y el itinerario se quedaba sin camino.
+            var ok = new bool[node.Length];
+            for (int i = 0; i < node.Length; i++)
             {
-                if (!OrGeo.TryLatLon(pts[i].x, pts[i].z, out double la, out double lo)) continue;
-                if (!double.IsNaN(lastLa))
-                {
-                    double dy = (la - lastLa) * 111320, dx = (lo - lastLo) * 111320 * Math.Cos(la * Math.PI / 180);
-                    if (dx * dx + dy * dy < 40 * 40) continue;   // puntos casi iguales
-                }
-                if (_road.AddPoint(la, lo, 120)) { lastLa = la; lastLo = lo; }
+                if (node[i] < 0) continue;
+                bool prevN = i > 0 && node[i - 1] >= 0, nextN = i + 1 < node.Length && node[i + 1] >= 0;
+                ok[i] = (!prevN && !nextN)
+                     || (prevN && (node[i - 1] == node[i] || g.EdgesBetween(node[i - 1], node[i]).Count > 0))
+                     || (nextN && (node[i + 1] == node[i] || g.EdgesBetween(node[i], node[i + 1]).Count > 0));
             }
-            if (_road.Points.Count >= 2) RoadReplan();
+            for (int i = 0; i < node.Length; i++) if (!ok[i]) node[i] = -1;
+            var stops = new HashSet<string>((road.Schedule ?? new List<(string name, double arr, double dep)>())
+                .Select(x => RoadBook.NormName(g.CleanName != null ? g.CleanName(x.name ?? "") : x.name)));
+            for (int i = 0; i < all.Count; i++)
+            {
+                bool visible = i == 0 || i == all.Count - 1 || all[i].rev;
+                if (visible && OrGeo.TryLatLon(all[i].x, all[i].z, out double la, out double lo))
+                {
+                    // candidatos: los tramos del desvío anterior y del siguiente del recorrido (aunque entre medias
+                    // haya otros puntos que no son desvíos) y los que les siguen; nunca una vía suelta de al lado
+                    var cand = new HashSet<int>();
+                    if (node[i] >= 0) cand.UnionWith(g.EdgesAt(node[i]));
+                    else
+                    {
+                        int pj = i - 1; while (pj >= 0 && node[pj] < 0) pj--;
+                        int nj = i + 1; while (nj < all.Count && node[nj] < 0) nj++;
+                        if (pj >= 0) cand.UnionWith(g.EdgesAt(node[pj]));
+                        if (nj < all.Count) cand.UnionWith(g.EdgesAt(node[nj]));
+                        foreach (int e in cand.ToList()) { cand.UnionWith(g.EdgesAt(g.Edges[e].A)); cand.UnionWith(g.EdgesAt(g.Edges[e].B)); }
+                    }
+                    var last = road.Points.Count > 0 ? road.Points[^1] : null;
+                    bool dup = last != null && !last.Guide && Math.Abs(last.Lat - la) * 111320 < 5 && Math.Abs(last.Lon - lo) * 111320 * Math.Cos(la * Math.PI / 180) < 5;
+                    if (!dup && !(cand.Count > 0 && road.AddPointOn(cand, la, lo, 120))) road.AddPoint(la, lo, 120);
+                    if (all[i].rev && i > 0 && i < all.Count - 1 && road.Points.Count > 0) road.Points[^1].Reverse = true;
+                }
+                if (i + 1 < all.Count && node[i] >= 0 && node[i + 1] >= 0)
+                {
+                    // Dos desvíos pueden estar unidos por más de un tramo (vía general y vía de apartado de una
+                    // estación): se coge el que tiene andén de una estación donde el tren para; si no, el más corto.
+                    var es = g.EdgesBetween(node[i], node[i + 1]);
+                    if (es.Count > 0)
+                    {
+                        int e = es.OrderByDescending(x => g.Edges[x].Platforms.Any(pl => stops.Contains(RoadBook.NormName(pl.name))))
+                                  .ThenBy(x => g.Edges[x].Len).First();
+                        road.AddGuide(e, g.Edges[e].Len / 2);
+                    }
+                }
+            }
         }
 
         // Conducción nueva: itinerario vacío (el grafo se conserva si la ruta es la misma); en Horarios, el del tren.
@@ -147,7 +197,7 @@ namespace SelectOR
             RoadDriveStop();
             var plan = _roadTtPlan; _roadTtPlan = null;
             _road.Reset(_curRoute?.Path ?? "");
-            _road.Schedule = null; _road.FromPlan = false;
+            _road.Schedule = null; _road.FromPlan = false; _road.ScheduleFirstPass = false;
             _roadPatPending = null; _roadPlanWaiting = null; _roadHudWaiting = false;
             _roadVmax = 0; _roadLimit = double.NaN; _roadGameS = double.NaN;
             try { _roadVmax = TrainMaxKmh(_drivenConsist ?? CurrentDrivenConsist()); } catch { }
@@ -238,7 +288,7 @@ namespace SelectOR
                 }
                 if (_kmHttp != null && _roadTicks % 4 == 0 && _road.HasPlan)
                 {
-                    try { var (_, lim) = TmSpeedLimit(await _kmHttp.GetStringAsync("/API/TRACKMONITORDISPLAY")); if (!double.IsNaN(lim) && lim > 0) _roadLimit = lim; } catch { }
+                    try { var (_, lim) = TmSpeedLimit(await OrApi.GetStringAsync(_kmHttp, "/API/TRACKMONITORDISPLAY")); if (!double.IsNaN(lim) && lim > 0) _roadLimit = lim; } catch { }
                 }
                 if (_roadTimer == null) return;
                 var t = RoadTrain();

@@ -41,13 +41,14 @@ namespace SelectOR
         Label _stCars, _stLen, _stMass, _stPower, _stSpeed, _stBrake, _stCap, _stType;   // datos del tren
         const int Ed2DLabelH = 20;       // franja de etiquetas (nº y nombre) sobre los coches
 
-        // Píxeles por metro para que el tren ocupe TODO el alto del marco de la vista 2D.
-        float Ed2DPpm()
-        {
-            int h = (_ed2DHost?.ClientSize.Height ?? 0) - 18 - Ed2DLabelH;   // margen, barra y etiquetas
-            if (h < 40) h = 40;
-            return Math.Max(8f, Math.Min(60f, h / Ed2DWorldH));
-        }
+        // Escala FIJA de la composición 2D: 10 px por metro, en proporción con el resto de la interfaz (UiScale).
+        // Antes salía del alto que le quedaba al marco: diminuta en un portátil y enorme en un monitor grande.
+        // El marco tiene justo el alto del tren y, si el tren es más largo que el hueco, barra horizontal.
+        static float Ed2DPpm() => 10f * Theme.UiScale;
+        static int Ed2DFrameH() => (int)(Ed2DWorldH * Ed2DPpm()) + Ed2DLabelH + 6 + 6 + SystemInformation.HorizontalScrollBarHeight;
+        // Fila de las vistas 2D/3D: título + marco del 2D (con el relleno de su tarjeta) + datos del tren
+        static int EditorStatsH() => Theme.Px(104);
+        static int EditorPreviewHeight() => Theme.Px(30) + Ed2DFrameH() + 8 + EditorStatsH();
 
         // Plazas de viajeros (PassengerCapacity) del coche seleccionado, sobre su .eng/.wag
         RoundedInput _edCap; RoundButton _edCapApply, _edCapClear; Label _edCapLbl; string _edCapPath;
@@ -220,7 +221,7 @@ namespace SelectOR
             _ed2DCol = comp2D;
             comp2D.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             comp2D.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            comp2D.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            comp2D.RowStyles.Add(new RowStyle(SizeType.Absolute, Ed2DFrameH() + 8));   // marco del tren (alto fijo)
             _ed2DInfo = EmpHeader("COMPOSICIÓN 2D");
             comp2D.Controls.Add(_ed2DInfo, 0, 0);
             var card2D = new Card { Dock = DockStyle.Fill, Fill = Theme.Bg, BorderColor = Blend(Theme.Surface, Theme.Bg, 0.35f), Radius = 10, Padding = new Padding(4) };
@@ -228,7 +229,6 @@ namespace SelectOR
             Native.UseDarkScrollBars(_ed2DHost);
             _ed2DPic = new PictureBox { SizeMode = PictureBoxSizeMode.AutoSize, BackColor = Color.Transparent, Location = new Point(6, 6) };
             _ed2DPic.MouseDown += (s, e) => PickCarFrom2D(e.X);
-            _ed2DHost.Resize += (s, e) => Queue2DRender();   // el tren se redibuja al alto del marco
             _ed2DHost.Controls.Add(_ed2DPic);
             card2D.Controls.Add(_ed2DHost);
             comp2D.Controls.Add(card2D, 0, 1);
@@ -246,7 +246,7 @@ namespace SelectOR
             stats.Controls.Add(FleetChip("VELOCIDAD MÁX.", out _stSpeed), 1, 1);
             stats.Controls.Add(FleetChip("PLAZAS", out _stCap), 2, 1);
             stats.Controls.Add(FleetChip("TIPO", out _stType), 3, 1);
-            comp2D.RowStyles.Add(new RowStyle(SizeType.Absolute, EditorStatsHeight()));
+            comp2D.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // datos del tren: el resto
             comp2D.RowCount = 3;
             comp2D.Controls.Add(stats, 0, 2);
             _edStats = stats;
@@ -297,11 +297,8 @@ namespace SelectOR
         // Medidas proporcionales al tamaño REAL de la ventana (con topes), para que la sección se
         // aproveche igual en un portátil de 1366×768 que en un monitor grande.
         int EditorListWidth() => Clamp((int)(ClientSize.Width * 0.24), Theme.Px(320), Theme.Px(440));
-        int EditorPreviewHeight() => Clamp((int)(ClientSize.Height * 0.31), Theme.Px(150), Theme.Px(400));
         int EditorPreview3DWidth() => Clamp((int)(ClientSize.Width * 0.33), Theme.Px(300), Theme.Px(620));
         static int Clamp(int v, int min, int max) => v < min ? min : v > max ? max : v;
-        // Bajo la tira 2D van los datos del tren; ese espacio es el hueco que antes quedaba libre.
-        int EditorStatsHeight() => Clamp((int)(ClientSize.Height * 0.115), Theme.Px(62), Theme.Px(140));
 
         void ApplyEditorSize()
         {
@@ -314,16 +311,6 @@ namespace SelectOR
             {
                 float w3 = EditorPreview3DWidth();
                 if (_edPreviews.ColumnStyles.Count > 1 && _edPreviews.ColumnStyles[1].Width != w3) _edPreviews.ColumnStyles[1].Width = w3;
-                if (_ed2DCol != null && _ed2DCol.RowStyles.Count > 2)
-                {
-                    float hs = EditorStatsHeight();
-                    if (_ed2DCol.RowStyles[2].Height != hs) { _ed2DCol.RowStyles[2].Height = hs; Queue2DRender(); }
-                }
-                if (_edPreviews.Parent is TableLayoutPanel rt && rt.RowStyles.Count > 2)
-                {
-                    float h = EditorPreviewHeight();
-                    if (rt.RowStyles[2].Height != h) rt.RowStyles[2].Height = h;
-                }
             }
         }
 
@@ -416,10 +403,9 @@ namespace SelectOR
                         if (token != _edStockToken) return;
                         _edStockAll.Clear();
                         _edStockAll.AddRange(list);
-                        // Con decenas de miles de vehículos, meterlos en la tabla son segundos: no se hace
-                        // esperar al menú por una pestaña que no se ve. Se rellena a trozos con el menú ya
-                        // abierto (sin congelarlo); al abrir el editor ya suele estar entera.
-                        LoadStep("stock");
+                        // Con decenas de miles de vehículos, meterlos en la tabla son segundos. Se hace ANTES de
+                        // abrir el menú (la pantalla de inicio va en su propio hilo y espera al paso «stock»): con
+                        // el menú ya abierto, ese relleno le quitaba soltura los primeros segundos.
                         FillStockTableChunked(token);
                     }));
                 }
@@ -462,16 +448,17 @@ namespace SelectOR
 
         void FillStockTableChunked(int token)
         {
-            if (_edStock == null) return;
+            if (_edStock == null) { LoadStep("stock"); return; }
             int gen = ++_edStockFill;
             _edStock.ClearRows();
-            if (_edStockAll.Count == 0) { _edStock.SetEmpty(Tr("No hay material en TRAINS\\TRAINSET.")); return; }
+            if (_edStockAll.Count == 0) { _edStock.SetEmpty(Tr("No hay material en TRAINS\\TRAINSET.")); LoadStep("stock"); return; }
             var items = new List<(string name, string folder, string path, bool isEngine)>(_edStockAll);
             int next = 0, chunk = 200;
             var t = new System.Windows.Forms.Timer { Interval = 1 };
             t.Tick += (s, e) =>
             {
-                if (token != _edStockToken || gen != _edStockFill || IsDisposed) { t.Stop(); t.Dispose(); return; }
+                // (abandonado: el que lo sustituye ya está o lo hará; la pantalla de inicio no se queda esperando)
+                if (token != _edStockToken || gen != _edStockFill || IsDisposed) { t.Stop(); t.Dispose(); LoadStep("stock"); return; }
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 _edStock.BeginUpdate();
                 int end = Math.Min(items.Count, next + chunk);
@@ -482,8 +469,9 @@ namespace SelectOR
                                     new Color?[] { null, Theme.Subtle, st.isEngine ? Theme.AccentHi : Theme.Subtle });
                 }
                 _edStock.EndUpdate();   // aquí es donde Windows mete de verdad las filas
-                chunk = NextChunk(chunk, sw.ElapsedMilliseconds);
-                if (next >= items.Count) { t.Stop(); t.Dispose(); LoadLog("editor: tabla de material rellenada"); }
+                // con el menú aún oculto, trozos más grandes (nada que dibujar ni que atender): acaba antes
+                chunk = NextChunk(chunk, sw.ElapsedMilliseconds, _uiRevealed ? 30 : 250);
+                if (next >= items.Count) { t.Stop(); t.Dispose(); LoadLog("editor: tabla de material rellenada"); LoadStep("stock"); }
             };
             t.Start();
         }
@@ -567,11 +555,12 @@ namespace SelectOR
 
         // Tamaño del siguiente trozo para que cada uno dure unos 30 ms (contando lo que tarda Windows en
         // meter las filas al reanudar el repintado): la interfaz responde entre trozo y trozo.
-        static int NextChunk(int chunk, long ms)
+        static int NextChunk(int chunk, long ms, int targetMs = 30)
         {
-            if (ms <= 0) return Math.Min(4000, chunk * 2);
-            int ideal = (int)(chunk * 30.0 / ms);
-            return Math.Max(50, Math.Min(4000, Math.Min(chunk * 2, ideal)));
+            int max = targetMs > 30 ? 20000 : 4000;
+            if (ms <= 0) return Math.Min(max, chunk * 2);
+            int ideal = (int)(chunk * (double)targetMs / ms);
+            return Math.Max(50, Math.Min(max, Math.Min(chunk * 2, ideal)));
         }
 
         // Lista de composiciones a trozos (unos 30 ms cada vez) y, al terminar, el nº de coches.
@@ -733,6 +722,7 @@ namespace SelectOR
             // Name y el nombre del archivo (si no se ha renombrado, se respeta el que traía).
             if (_edOriginal == null || !string.Equals(_edOriginal.DisplayName, _edDoc.DisplayName, StringComparison.Ordinal))
                 _edDoc.Id = _edDoc.DisplayName;
+            string before = _edDoc.Path;
             string err = _edDoc.Save();
             ClearContentCaches();   // el .con ha cambiado: sus datos se releerán
             if (err != null) { Msg(_edMsg, Tr("No se pudo guardar: ") + err, true); return; }
@@ -740,7 +730,7 @@ namespace SelectOR
             string renamed = SyncFileNameToTrainName();
             _edOriginal = _edDoc.Clone();
             UpdateEditorDirty();
-            ReloadConsistsAfterEdit();
+            ReloadConsistsAfterEdit(changed: new[] { before, _edDoc.Path });   // Exploración: datos, ficha y 2D al día
             if (renamed != null) LoadEditorConsists(_edDoc.Path);   // la lista debe apuntar al archivo nuevo
             if (!silent)
                 Msg(_edMsg, renamed != null
@@ -774,7 +764,7 @@ namespace SelectOR
             string err = doc.Save(file);
             ClearContentCaches();
             if (err != null) { Msg(_edMsg, Tr("No se pudo crear: ") + err, true); return; }
-            ReloadConsistsAfterEdit();
+            ReloadConsistsAfterEdit(changed: new[] { file });
             LoadEditorConsists(file);
             Msg(_edMsg, Tr("Composición creada: añade coches y pulsa Guardar cambios."), false);
         }
@@ -848,7 +838,7 @@ namespace SelectOR
             catch (Exception e) { Msg(_edMsg, Tr("No se pudo eliminar: ") + e.Message, true); return; }
             _edDoc = null; _edOriginal = null;
             SetEditorEnabled(false);
-            ReloadConsistsAfterEdit();
+            ReloadConsistsAfterEdit(changed: new[] { file });
             LoadEditorConsists();
             Msg(_edMsg, string.Format(Tr("Composición eliminada: {0}"), Path.GetFileName(file)), false);
         }
@@ -915,7 +905,8 @@ namespace SelectOR
             if (next != null) _prefs.LastConsist = next.FilePath;
             if (fallos.Count > 0) Warn(Tr("No se pudo eliminar: ") + string.Join("\n", fallos));
             // Exploración, Horarios, Compra… sin esos trenes; la lista vuelve a la misma altura
-            ReloadConsistsAfterEdit(() => { try { _lstConsists.TopIndex = Math.Min(top, Math.Max(0, _lstConsists.Items.Count - 1)); } catch { } });
+            ReloadConsistsAfterEdit(() => { try { _lstConsists.TopIndex = Math.Min(top, Math.Max(0, _lstConsists.Items.Count - 1)); } catch { } },
+                                    list.Select(c => c.FilePath));
             LoadEditorConsists();
         }
 
@@ -986,6 +977,7 @@ namespace SelectOR
                 : string.Format(Tr("Plazas guardadas en {0}."), file), false);
             ShowCarCapacity(_edCars?.SelectedRow ?? -1);
             UpdateEditorStats();   // PLAZAS y TIPO cambian al momento
+            RefreshTrainsUsing(_edCapPath);   // Exploración: plazas, tipo y filtro Viajeros/Mercancías de esos trenes
         }
 
         // 3D del coche elegido (se puede girar arrastrando; doble clic vuelve a la vista inicial).
@@ -1091,7 +1083,7 @@ namespace SelectOR
             _ed2DInfo.Text = Tr("COMPOSICIÓN 2D") + "  ·  " + Tr("dibujando…");
             Task.Run(() =>
             {
-                var slots = new List<(Bitmap bmp, bool missing, string name)>();
+                var slots = new List<(Bitmap bmp, bool missing, string name, ShapeRenderer.SideExtent ext)>();
                 double meters = 0;
                 var st = ComputeConsistStats(models);
                 foreach (var (path, flip, name, isEngine) in models)
@@ -1107,28 +1099,29 @@ namespace SelectOR
                             if (geom != null) lock (_geomCache) _geomCache[path] = geom;
                         }
                     }
-                    if (geom == null) { slots.Add((null, true, name)); continue; }
+                    if (geom == null) { slots.Add((null, true, name, new ShapeRenderer.SideExtent(40, 0, 39, 0, 39))); continue; }
                     // Misma regla de orientación que la ventana de composición (cabeza a la izquierda).
                     Bitmap bmp = null;
                     try { bmp = ShapeRenderer.RenderSide(geom, ppm, Ed2DWorldH, flip ^ true); } catch { }
-                    if (bmp == null) { slots.Add((null, true, name)); continue; }
+                    if (bmp == null) { slots.Add((null, true, name, new ShapeRenderer.SideExtent(40, 0, 39, 0, 39))); continue; }
+                    // Acoplado: topes con topes (ver ShapeRenderer.CoupledLayout).
                     meters += geom.Max.Z - geom.Min.Z;
-                    slots.Add((bmp, false, name));
+                    slots.Add((bmp, false, name, ShapeRenderer.MeasureSide(bmp)));
                 }
                 if (!IsHandleCreated) return;
                 try { BeginInvoke((Action)(() => Compose2D(token, slots, meters, st))); } catch { }
             });
         }
 
-        void Compose2D(int token, List<(Bitmap bmp, bool missing, string name)> slots, double meters, ConsistStats st)
+        void Compose2D(int token, List<(Bitmap bmp, bool missing, string name, ShapeRenderer.SideExtent ext)> slots, double meters, ConsistStats st)
         {
             if (token != _ed2DToken || _ed2DPic == null) return;
-            const int gap = 3, missingW = 40;
+            const int missingW = 40;
             int carH = (int)(Ed2DWorldH * Ed2DPpm());
             int h = carH + Ed2DLabelH;
-            int total = 0, missing = 0;
-            foreach (var s in slots) total += (s.bmp?.Width ?? missingW) + gap;
-            total = Math.Max(total - gap, 1);
+            int missing = 0;
+            var lay = ShapeRenderer.CoupledLayout(slots.Select(s => s.ext).ToList(), Ed2DPpm(), 0);
+            int total = lay.total;
             var composite = new Bitmap(total, h);
             _ed2DSlots.Clear();
             using (var g = Graphics.FromImage(composite))
@@ -1137,11 +1130,15 @@ namespace SelectOR
                 using (var pen = new Pen(Color.FromArgb(90, Theme.Subtle), 1.5f)) g.DrawLine(pen, 0, h - 2, total, h - 2);
                 using var fNum = Theme.Font(8f, FontStyle.Bold);
                 using var fName = Theme.Font(8f);
-                int x = 0, idx = 0;
-                foreach (var s in slots)
+                int idx = 0;
+                // Primero todos los vehículos (se solapan un poco, como en la vía) y después los rótulos encima.
+                for (int i = 0; i < slots.Count; i++)
+                    if (slots[i].bmp != null) g.DrawImage(slots[i].bmp, lay.drawX[i], Ed2DLabelH);
+                for (int i = 0; i < slots.Count; i++)
                 {
-                    int w = s.bmp?.Width ?? missingW;
-                    if (s.bmp != null) g.DrawImage(s.bmp, x, Ed2DLabelH);
+                    var s = slots[i];
+                    int x = lay.slotL[i], w = Math.Max(1, lay.slotR[i] - lay.slotL[i]);
+                    if (s.bmp != null) { }
                     else
                     {
                         missing++;
@@ -1166,7 +1163,6 @@ namespace SelectOR
                             Blend(Theme.Text, Theme.Subtle, 0.25f),
                             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
                     _ed2DSlots.Add((x, x + w));
-                    x += w + gap;
                     s.bmp?.Dispose();
                 }
             }
@@ -1284,10 +1280,49 @@ namespace SelectOR
 
         // Tras crear/editar/borrar: SelectOR vuelve a leer los trenes de la carpeta (Exploración,
         // Horarios, Empresas…), sin recargar rutas ni actividades.
-        void ReloadConsistsAfterEdit(Action after = null)
+        // Ha cambiado un vehículo (.eng/.wag): se ponen al día TODOS los trenes que lo llevan.
+        void RefreshTrainsUsing(string vehPath)
+        {
+            if (string.IsNullOrEmpty(vehPath)) return;
+            string vehName = Path.GetFileNameWithoutExtension(vehPath), vehFolder = Path.GetFileName(Path.GetDirectoryName(vehPath) ?? "");
+            var all = _consistsAll?.ToList() ?? new List<TrainItem>();
+            Task.Run(() =>
+            {
+                var afectados = all.Where(c => c?.FilePath != null && ConsistCarRefs(c.FilePath).Any(r =>
+                        string.Equals(r.name, vehName, StringComparison.OrdinalIgnoreCase) && string.Equals(r.folder, vehFolder, StringComparison.OrdinalIgnoreCase)))
+                    .Select(c => c.FilePath).ToList();
+                try { BeginInvoke((Action)(() => ReloadConsistsAfterEdit(changed: afectados))); } catch { }
+            });
+        }
+
+        // El contenido de estos trenes ha cambiado (Editor): fuera sus datos (tipo, masa, longitud, plazas…), su
+        // composición 2D y su línea en la caché de disco; se vuelven a calcular. Antes se quedaban los de antes
+        // (iban por la ruta del archivo) hasta reiniciar SelectOR.
+        void InvalidateTrains(IEnumerable<string> conPaths)
+        {
+            var set = new HashSet<string>((conPaths ?? Enumerable.Empty<string>()).Where(p => !string.IsNullOrEmpty(p)), StringComparer.OrdinalIgnoreCase);
+            if (set.Count == 0) return;
+            lock (_trainSpecs) foreach (var p in set) _trainSpecs.Remove(p);
+            _lstConsists?.ForgetSpecs(set);   // la tarjeta guarda los suyos (coches, plazas, viajeros/mercancías)
+            foreach (var p in set)
+                if (_stripMem.TryGetValue(p, out var b)) { _stripMem.Remove(p); if (!ReferenceEquals(b, _exStrip?.Image)) b.Dispose(); }
+            var lower = new HashSet<string>(set.Select(p => p.ToLowerInvariant()));
+            bool quitado = false;
+            lock (_classDisk)
+                foreach (var k in _classDisk.Keys.ToList())
+                {
+                    int bar = k.LastIndexOf('|');
+                    if (lower.Contains(bar > 0 ? k.Substring(0, bar) : k)) { _classDisk.Remove(k); quitado = true; }
+                }
+            if (quitado) Task.Run(SaveClassDisk);
+        }
+
+        void ReloadConsistsAfterEdit(Action after = null, IEnumerable<string> changed = null)
         {
             var folder = _curFolder;
             if (folder == null) return;
+            var cambiados = (changed ?? Enumerable.Empty<string>()).Where(p => !string.IsNullOrEmpty(p)).ToList();
+            InvalidateTrains(cambiados);
             lock (_consistCache) _consistCache.Remove(folder.Path);
             Task.Run(() =>
             {
@@ -1305,6 +1340,13 @@ namespace SelectOR
                         after?.Invoke();
                         RebuildCompanyEngs();
                         UpdateStatus();
+                        if (cambiados.Count > 0)
+                        {
+                            StartTrainClassification(_consistsAll);   // recalcula los que han cambiado (el resto ya se sabe)
+                            // La ficha y la composición 2D del tren elegido, si es uno de ellos
+                            if (_lstConsists?.SelectedItem is TrainItem sel && cambiados.Any(p => string.Equals(p, sel.FilePath, StringComparison.OrdinalIgnoreCase)))
+                                UpdateExploreSpecs(sel);
+                        }
                     }));
                 }
                 catch { }

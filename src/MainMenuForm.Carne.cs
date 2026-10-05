@@ -219,7 +219,7 @@ namespace SelectOR
             _apBusy = true; _apLastPollUtc = DateTime.UtcNow;
             try
             {
-                bool on = HudHasAutopilot(await _kmHttp.GetStringAsync("/API/HUD/0"));
+                bool on = HudHasAutopilot(await OrApi.GetStringAsync(_kmHttp, "/API/HUD/0"));
                 if (on == _apOn) _apVotes = 0;
                 else if (on || ++_apVotes >= 2) { _apOn = on; _apVotes = 0; }
                 if (_apOn && !_apTold) OnAutopilotOn();   // también si ya iba puesto al empezar a contar el servicio
@@ -297,8 +297,9 @@ namespace SelectOR
             _osBusy = true;
             try
             {
-                string jt = await _kmHttp.GetStringAsync("/API/TRACKMONITORDISPLAY");
+                string jt = await OrApi.GetStringAsync(_kmHttp, "/API/TRACKMONITORDISPLAY");
                 var (v, lim) = TmSpeedLimit(jt);
+                KmSpeedSample(v);   // los km del servicio solo avanzan si OR dice que el tren se mueve
                 bool ok = !double.IsNaN(v) && !double.IsNaN(lim) && lim > 0;
                 InfrOverspeedSample(ok && v > lim * 1.1 && v > lim + 5, ok && v > lim * 1.3 && v > lim + 5, v, lim);
             }
