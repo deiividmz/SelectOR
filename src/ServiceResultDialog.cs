@@ -16,7 +16,7 @@ using System.Windows.Forms;
 
 namespace SelectOR
 {
-    public class ServiceResultDialog : Form
+    public partial class ServiceResultDialog : Form
     {
         public sealed class Data
         {
@@ -61,6 +61,8 @@ namespace SelectOR
             public List<Carne.Item> Infractions = new List<Carne.Item>();
             public int LicensePoints = -1;
             public DateTime? SuspendedUntil;
+            // Mapa del recorrido real (solo al volver de conducir; null = sin rastro)
+            public TripMap Map;
         }
 
         static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-ES");
@@ -130,6 +132,8 @@ namespace SelectOR
                     carga = "🧍 " + string.Format(I18n.T("{0} viajeros transportados"), d.Pax.ToString("N0", Es));
                 if (carga != null && d.Valid)
                     body.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(W, 0), ForeColor = Green, Font = Theme.Font(9.5f, FontStyle.Bold), Text = carga, Margin = new Padding(2, 0, 2, 10) });
+                if (d.Map != null && d.Map.Trail.Count >= 2)
+                    body.Controls.Add(new TripMapCard(d.Map, d.Km, d.Infractions.Count > 0) { Width = W, Margin = new Padding(0, 0, 0, 10) });
 
                 if (d.Valid)
                 {

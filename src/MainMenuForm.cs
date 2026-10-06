@@ -1049,7 +1049,7 @@ namespace SelectOR
         // ============================ EXPLORACIÓN ============================
         // Arriba «Tu viaje» (salida, llegada, mapa y modo actividad); luego hora, estación y clima en tarjetas;
         // debajo los trenes en tarjetas con filtros; a la derecha el tren elegido con su vista 3D y su ficha.
-        Label _tripCap, _tripMeta;
+        Label _tripCap;
         FlowLayoutPanel _trainChips;
         SpecTiles _exSpecs;
 
@@ -1084,55 +1084,8 @@ namespace SelectOR
         {
             var page = new Panel { BackColor = Theme.Bg };
 
-            // ---- arriba: tu viaje y condiciones, en una sola tarjeta ----
-            var top = new Card { Dock = DockStyle.Top, Height = 210, Fill = TripFill, Radius = 14, Padding = new Padding(16, 10, 16, 10) };
-            _tripCap = new Label { Text = Tr("TU VIAJE"), Dock = DockStyle.Top, Height = 20, ForeColor = Theme.AccentHi, BackColor = TripFill, Font = Theme.Font(8f, FontStyle.Bold) };
-            _cboStart = NewCombo(); _cboStart.DropDownStyle = ComboBoxStyle.DropDownList;
-            _cboStart.SelectedIndexChanged += (s, e) => { OnStartChanged(); UpdateTripMeta(); };
-            _cboEnd = NewCombo(); _cboEnd.DropDownStyle = ComboBoxStyle.DropDownList;
-            _cboEnd.SelectedIndexChanged += (s, e) => { UpdateStatus(); UpdateTripMeta(); };
-            var od = new TableLayoutPanel { Dock = DockStyle.Top, Height = 52, ColumnCount = 3, RowCount = 1, BackColor = TripFill, Margin = new Padding(0) };
-            od.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            od.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            od.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));
-            od.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var btnMap = new RoundButton { Text = Tr("Ver mapa del recorrido"), GlyphKind = "map", Dock = DockStyle.Top, Height = 32, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f };
-            btnMap.Click += (s, e) => OpenPathMap();
-            var mapHost = new Panel { Dock = DockStyle.Fill, BackColor = TripFill, Padding = new Padding(0, 18, 0, 0), Margin = new Padding(0) };
-            mapHost.Controls.Add(btnMap);
-            od.Controls.Add(Field("SALIDA", _cboStart, TripFill), 0, 0);
-            od.Controls.Add(Field("LLEGADA", _cboEnd, TripFill), 1, 0);
-            od.Controls.Add(mapHost, 2, 0);
-            var tripFoot = new Panel { Dock = DockStyle.Top, Height = 26, BackColor = TripFill };
-            _tripMeta = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Subtle, BackColor = TripFill, Font = Theme.Font(8.5f), TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
-            _chkExploreActivity = MakeCheck("Explorar en modo actividad");
-            _chkExploreActivity.Dock = DockStyle.Right; _chkExploreActivity.Width = 240; _chkExploreActivity.BackColor = TripFill;
-            AddAdaptiveText(_chkExploreActivity, Tr("Explorar en modo actividad"), Tr("Modo actividad"));
-            tripFoot.Controls.Add(_tripMeta); tripFoot.Controls.Add(_chkExploreActivity);
-
-            var cond = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = TripFill, Margin = new Padding(0), Padding = new Padding(0, 6, 0, 0) };
-            cond.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
-            cond.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-            cond.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
-            cond.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            _hourSlider = new HourSlider { Minutes = 12 * 60, Height = 34 };
-            _hourSlider.Changed += UpdateStatus;
-            var hourBody = new Panel { Height = 64, BackColor = TripFill };
-            var presets = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 30, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = TripFill, Margin = new Padding(0) };
-            foreach (var (t, min) in new[] { ("06:30", 390), ("12:00", 720), ("19:45", 1185), ("23:00", 1380) })
-            {
-                var b = BankChip(t, false); b.Height = 26; b.Margin = new Padding(0, 2, 6, 2); b.BaseColor = Color.FromArgb(52, 60, 55);
-                b.Click += (s, e) => { _hourSlider.Minutes = min; UpdateStatus(); };
-                presets.Controls.Add(b);
-            }
-            _hourSlider.Dock = DockStyle.Top;
-            hourBody.Controls.Add(presets); hourBody.Controls.Add(_hourSlider);
-            _segSeason = new Segmented(new[] { "spring", "summer", "autumn", "winter" }, new[] { Tr("Primavera"), Tr("Verano"), Tr("Otoño"), Tr("Invierno") }) { SelectedIndex = 1, CardStyle = true, Height = 56 };
-            _segWeather = new Segmented(new[] { "clear", "snow", "rain" }, new[] { Tr("Despejado"), Tr("Nieve"), Tr("Lluvia") }) { SelectedIndex = 0, CardStyle = true, Height = 56 };
-            cond.Controls.Add(Field("HORA DE SALIDA", hourBody, TripFill, 16), 0, 0);
-            cond.Controls.Add(Field("ESTACIÓN DEL AÑO", _segSeason, TripFill, 16), 1, 0);
-            cond.Controls.Add(Field("CLIMA", _segWeather, TripFill, 0), 2, 0);
-            top.Controls.Add(cond); top.Controls.Add(tripFoot); top.Controls.Add(od); top.Controls.Add(_tripCap);
+            // ---- arriba: tu viaje y condiciones, en forma de billete (MainMenuForm.TuViaje.cs) ----
+            var top = BuildTripHeader();
 
             // ---- elige tu tren: filtros por tipo ----
             var bar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 6, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -1231,6 +1184,8 @@ namespace SelectOR
             selGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             selGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             _trainPreview = new TrainPreviewPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 14, 0), BaseDistance = 3.1f };
+            _trainPreview.ViewerSource = () => _previewGeom == null ? null : new ShapeViewSource
+                { Geom = _previewGeom, Flip = _previewFlip, BaseDistance = _trainPreview.BaseDistance, Yaw = _yaw, Pitch = _pitch, Caption = _trainPreview.Caption, BeforeRender = () => TeleRedirect(_teleExplore) };
             _trainPreview.Dragged += OnPreviewDrag;
             _trainPreview.ResetRequested += OnPreviewReset;
             _trainPreview.Zoomed += () => { if (_previewGeom != null) RenderLive(); };
@@ -1239,6 +1194,7 @@ namespace SelectOR
             _trainPreview.Resize += (s, e) => { if (_previewGeom != null) { _previewRerender.Stop(); _previewRerender.Start(); } };
             var info = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
             var lblP = MakeSectionLabel("TREN ELEGIDO"); lblP.Dock = DockStyle.Top;
+            lblP.Padding = new Padding(2, 0, 0, 0); lblP.TextAlign = ContentAlignment.MiddleLeft;   // centrado en la cabecera, como el teleindicador
             var (hdrP, stChip) = MakeTrainHeader(lblP); _lblStatusExplore = stChip;   // título + estado en la flota
             _teleExplore = MakeTeleUi(hdrP, () => RenderLive());                       // teleindicador (si el tren tiene destinos)
             _buyWrapExplore = MakeBuyTrainWrap(() => _lstConsists?.SelectedItem as TrainItem, 32);   // oculto salvo gerente/gestor/superadmin
@@ -1288,8 +1244,19 @@ namespace SelectOR
             var p = l.Split('\t'); if (p.Length < 12 || p[11] != ClassFormat) return null;   // líneas antiguas: se recalculan
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             return new TrainSpec { Freight = p[0] == "1", Automotor = p[1] == "1", Kw = double.Parse(p[2], ci), Kmh = double.Parse(p[3], ci), Capacity = double.Parse(p[4], ci),
-                                   Cars = int.Parse(p[5]), Engines = int.Parse(p[6]), Traction = p[7], Service = p[8],
+                                   Cars = int.Parse(p[5]), Engines = int.Parse(p[6]), Traction = TractionLocal(p[7]), Service = p[8],
                                    MassT = double.Parse(p[9], ci), LengthM = double.Parse(p[10], ci), Known = true };
+        }
+        // La línea guarda la tracción en el idioma con el que se calculó: se pasa al idioma actual.
+        static string TractionLocal(string s)
+        {
+            switch (s)
+            {
+                case "Eléctrica": case "Electric": return TractionName("electric");
+                case "Diésel": case "Diesel": return TractionName("diesel");
+                case "Vapor": case "Steam": return TractionName("steam");
+                default: return s;
+            }
         }
 
         TrainSpec KnownSpec(TrainItem c)
@@ -1380,12 +1347,8 @@ namespace SelectOR
 
         void UpdateTripMeta()
         {
-            if (_tripMeta == null) return;
             if (_tripCap != null) _tripCap.Text = Tr("TU VIAJE") + (_curRoute != null ? "  ·  " + _curRoute.Name.ToUpper() : "");
-            var p = CurrentPath();
-            int from = _pathsAll.Count(x => (x.Start ?? "") == (_cboStart.SelectedItem as string ?? ""));
-            _tripMeta.Text = p == null ? (_pathsAll.Count == 0 ? Tr("Esta ruta no tiene recorridos.") : "")
-                : string.Format(Tr("Recorrido {0}  ·  {1} desde {2}"), SysPath.GetFileNameWithoutExtension(p.FilePath), Plural(from, "{0} recorrido sale", "{0} recorridos salen"), p.Start);
+            UpdateTripLine();
         }
 
         // Datos de un tren para su tarjeta y su ficha (los mismos cálculos que Compra; en segundo plano).
@@ -1629,7 +1592,10 @@ namespace SelectOR
             // ---- derecha: tren elegido ----
             var right = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(12, 8, 12, 12), Margin = new Padding(0) };
             var lblP = MakeSectionLabel("TREN ELEGIDO"); lblP.Dock = DockStyle.Top;
+            lblP.Padding = new Padding(2, 0, 0, 0); lblP.TextAlign = ContentAlignment.MiddleLeft;   // centrado en la cabecera, como el teleindicador
             _ttPreview = new TrainPreviewPanel { Dock = DockStyle.Top, Height = 170, BaseDistance = 3.1f };
+            _ttPreview.ViewerSource = () => _ttPreviewGeom == null ? null : new ShapeViewSource
+                { Geom = _ttPreviewGeom, Flip = _ttPreviewFlip, BaseDistance = _ttPreview.BaseDistance, Yaw = _ttYaw, Pitch = _ttPitch, Caption = _ttPreview.Caption, BeforeRender = () => TeleRedirect(_teleTT) };
             _ttPreview.Dragged += OnTTPreviewDrag;
             _ttPreview.ResetRequested += OnTTPreviewReset;
             _ttPreview.Zoomed += () => { if (_ttPreviewGeom != null) RenderTTLive(); };
@@ -1638,14 +1604,10 @@ namespace SelectOR
             _ttPreview.Resize += (s, e) => { if (_ttPreviewGeom != null) { _ttRerender.Stop(); _ttRerender.Start(); } };
             _ttItin = new ItineraryView { Dock = DockStyle.Fill, Empty = Tr("Elige un tren del panel de salidas"), LblOrigin = Tr("origen"), LblDest = Tr("destino"),
                                          LblNoStops = Tr("Este horario no detalla las paradas de este tren."), BriefCap = Tr("RESUMEN") };
-            _segTTSeason = new Segmented(new[] { "spring", "summer", "autumn", "winter" }, new[] { Tr("Primavera"), Tr("Verano"), Tr("Otoño"), Tr("Invierno") }) { SelectedIndex = 1, CardStyle = true, Height = 50 };
-            _segTTWeather = new Segmented(new[] { "clear", "snow", "rain" }, new[] { Tr("Despejado"), Tr("Nieve"), Tr("Lluvia") }) { SelectedIndex = 0, CardStyle = true, Height = 50 };
-            var conds = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 78, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0), Padding = new Padding(0, 6, 0, 0) };
-            conds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-            conds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-            conds.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            conds.Controls.Add(Field("ESTACIÓN DEL AÑO", _segTTSeason, Theme.Surface, 8), 0, 0);
-            conds.Controls.Add(Field("CLIMA", _segTTWeather, Theme.Surface, 0), 1, 0);
+            // estación y clima: los mismos chips que Exploración (un clic abre sus tarjetas en un desplegable)
+            _segTTSeason = new Segmented(SeasonKinds, SeasonNames) { SelectedIndex = 1, CardStyle = true, Height = 58 };
+            _segTTWeather = new Segmented(WeatherKinds, WeatherNames) { SelectedIndex = 0, CardStyle = true, Height = 58 };
+            var conds = BuildTTCondChips();
             // «Composición 2D» y «Comprar este tren» a partes iguales (o la primera sola si no se puede comprar).
             var btnCompTT = new RoundButton { Text = Tr("Composición 2D"), GlyphKind = "train", Dock = DockStyle.Fill, Height = 34, Radius = 9, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9.5f, Margin = new Padding(0, 0, 4, 0) };
             btnCompTT.Click += (s, e) => OpenTTComposition();
@@ -1665,11 +1627,14 @@ namespace SelectOR
             _buyWrapTT.VisibleChanged += (s, e) => fitCompRow();
             fitCompRow();
             var (hdrTT, stChipTT) = MakeTrainHeader(lblP); _lblStatusTT = stChipTT;   // título + estado en la flota
-            _teleTT = MakeTeleUi(hdrTT, () => RenderTTLive());                          // teleindicador (si el tren tiene destinos)
+            // teleindicador (si el tren tiene destinos): en su propia fila bajo el título (junto a él no cabe)
+            var teleRowTT = new Panel { Dock = DockStyle.Top, Height = Theme.Px(40), BackColor = hdrTT.BackColor, Visible = false, Margin = new Padding(0) };
+            _teleTT = MakeTeleUi(teleRowTT, () => RenderTTLive(), ownRow: true);
             right.Controls.Add(_ttItin);
             right.Controls.Add(_ttPreview);
             right.Controls.Add(conds);
             right.Controls.Add(compRowTT);
+            right.Controls.Add(teleRowTT);
             right.Controls.Add(hdrTT);
 
             split.Controls.Add(ttCol, 0, 0);

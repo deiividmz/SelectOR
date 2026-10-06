@@ -118,21 +118,76 @@ namespace SelectOR
 
         bool _dragging; System.Drawing.Point _last;
 
+        // Botón «ver en grande» (arriba a la derecha): abre el modelo en el visor 3D. Solo si quien usa el panel
+        // dice qué modelo es (ViewerSource) y ya hay render.
+        public Func<ShapeViewSource> ViewerSource;
+        bool _expHover;
+        readonly ToolTip _expTip = new ToolTip();
+        // Arriba a la derecha; si ahí hay otro botón dentro del panel (p. ej. «Ver en 2D» en Flota y Compra), a su izquierda.
+        Rectangle ExpandRect
+        {
+            get
+            {
+                var r = new Rectangle(ClientRectangle.Right - 38, ClientRectangle.Y + 6, 32, 32);
+                for (int pass = 0; pass < 4; pass++)
+                {
+                    bool moved = false;
+                    foreach (Control c in Controls)
+                        if (c.Visible && c.Bounds.IntersectsWith(Rectangle.Inflate(r, 3, 0)))
+                        { r.X = c.Left - 32 - 6; moved = true; }
+                    // también los que el contenedor pone ENCIMA del panel (hermanos por delante, como «Ver en 2D»)
+                    if (Parent != null)
+                        foreach (Control c in Parent.Controls)
+                        {
+                            if (c == this || !c.Visible || Parent.Controls.GetChildIndex(c) > Parent.Controls.GetChildIndex(this)) continue;
+                            var b = RectangleToClient(Parent.RectangleToScreen(c.Bounds));
+                            if (b.IntersectsWith(Rectangle.Inflate(r, 3, 0))) { r.X = b.Left - 32 - 6; moved = true; }
+                        }
+                    if (!moved) break;
+                }
+                return r;
+            }
+        }
+        bool ExpandVisible => ViewerSource != null && Rotatable && _image != null;
+
+        void OpenViewer()
+        {
+            ShapeViewSource src = null;
+            try { src = ViewerSource?.Invoke(); } catch { }
+            if (src != null) ShapeViewerWindow.Open(src, FindForm());
+        }
+
         public TrainPreviewPanel()
         {
             DoubleBuffered = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            MouseDown += (s, e) => { if (Rotatable && e.Button == MouseButtons.Left) { _dragging = true; _last = e.Location; Cursor = Cursors.SizeAll; } };
-            MouseUp += (s, e) => { _dragging = false; Cursor = Cursors.Default; };
+            MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left && ExpandVisible && ExpandRect.Contains(e.Location)) { OpenViewer(); return; }
+                if (Rotatable && e.Button == MouseButtons.Left) { _dragging = true; _last = e.Location; Cursor = Cursors.SizeAll; }
+            };
+            MouseUp += (s, e) => { _dragging = false; Cursor = _expHover ? Cursors.Hand : Cursors.Default; };
             MouseMove += (s, e) =>
             {
                 if (_dragging)
                 {
                     Dragged?.Invoke(e.X - _last.X, e.Y - _last.Y);
                     _last = e.Location;
+                    return;
+                }
+                bool h = ExpandVisible && ExpandRect.Contains(e.Location);
+                if (h != _expHover)
+                {
+                    _expHover = h; Cursor = h ? Cursors.Hand : Cursors.Default; Invalidate(ExpandRect);
+                    _expTip.SetToolTip(this, h ? I18n.T("Ver en grande") : "");
                 }
             };
-            DoubleClick += (s, e) => { if (Rotatable) { Zoom = 1f; ResetRequested?.Invoke(); } };
+            MouseLeave += (s, e) => { if (_expHover) { _expHover = false; Cursor = Cursors.Default; Invalidate(ExpandRect); } };
+            DoubleClick += (s, e) =>
+            {
+                if (ExpandVisible && ExpandRect.Contains(PointToClient(Control.MousePosition))) return;
+                if (Rotatable) { Zoom = 1f; ResetRequested?.Invoke(); }
+            };
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -177,8 +232,20 @@ namespace SelectOR
 
             if (Rotatable && _image != null)
                 using (var f = Theme.Font(8f))
-                    TextRenderer.DrawText(g, I18n.T("↺ arrastra para girar · rueda: zoom"), f, new Rectangle(rect.X + 8, rect.Y + 6, rect.Width - 16, 16), Color.FromArgb(150, Theme.Subtle),
-                        TextFormatFlags.Left | TextFormatFlags.Top);
+                    TextRenderer.DrawText(g, I18n.T("↺ arrastra para girar · rueda: zoom"), f, new Rectangle(rect.X + 8, rect.Y + 6, rect.Width - 56, 16), Color.FromArgb(150, Theme.Subtle),
+                        TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis);
+
+            if (ExpandVisible)
+            {
+                // ⤢ dos flechas hacia las esquinas, sobre una pastilla
+                var r = ExpandRect;
+                Theme.FillRound(g, r, 8, _expHover ? Theme.SurfaceHi : Color.FromArgb(200, Theme.Surface2));
+                using var p = new Pen(_expHover ? Color.White : Theme.Text, 1.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+                float x0 = r.X + 9, y0 = r.Y + 9, x1 = r.Right - 9, y1 = r.Bottom - 9;
+                g.DrawLine(p, x0, y1, x1, y0);
+                g.DrawLines(p, new[] { new PointF(x1 - 6, y0), new PointF(x1, y0), new PointF(x1, y0 + 6) });
+                g.DrawLines(p, new[] { new PointF(x0, y1 - 6), new PointF(x0, y1), new PointF(x0 + 6, y1) });
+            }
         }
 
         // Silueta estilizada de locomotora (cuando no hay imagen).

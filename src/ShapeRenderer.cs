@@ -562,7 +562,10 @@ namespace SelectOR
         // composición 2D (fuente fiable = Open Rails): rotate = Flip XOR K, en vez de detectar la cabina.
         // Si es null (sin contexto de consist), se mantiene el comportamiento anterior (cabina hacia cámara).
         // distance: separación de la cámara en radios del modelo (a más, el tren se ve más lejos).
-        public static GdiBitmap Render(ShapeGeom geom, int w, int h, float yawDeg = 0f, float pitchDeg = 0f, int ss = 1, bool? conFlip = null, float distance = 2.25f)
+        // panX/panY: desplazamiento de la cámara en el plano de la vista, en radios del modelo; fovDeg: ángulo de visión
+        // (el visor en grande acerca cerrándolo, como un teleobjetivo: la cámara no entra en el modelo).
+        public static GdiBitmap Render(ShapeGeom geom, int w, int h, float yawDeg = 0f, float pitchDeg = 0f, int ss = 1, bool? conFlip = null, float distance = 2.25f,
+                                       float panX = 0f, float panY = 0f, float fovDeg = 30f)
         {
             if (geom == null || geom.IsEmpty) return null;
             try
@@ -585,9 +588,17 @@ namespace SelectOR
                     float az = 0.62f + MathHelper.ToRadians(yawDeg);
                     float el = MathHelper.Clamp(0.13f + MathHelper.ToRadians(pitchDeg), -1.4f, 1.4f);
                     var dir = new Vector3((float)(Math.Cos(el) * Math.Sin(az)), (float)Math.Sin(el), (float)(Math.Cos(el) * Math.Cos(az)));
-                    var eye = center + dir * radius * Math.Max(0.5f, distance);   // más lejos → el tren no toca el marco
-                    var view = Matrix.CreateLookAt(eye, center, Vector3.Up);
-                    var proj = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(30f), (float)rw / rh, Math.Max(0.05f, radius * 0.05f), radius * 16f);
+                    var target = center;
+                    if (panX != 0f || panY != 0f)
+                    {
+                        var right = Vector3.Normalize(Vector3.Cross(Vector3.Up, dir));   // derecha de la pantalla
+                        var up = Vector3.Normalize(Vector3.Cross(dir, right));
+                        target += (right * panX + up * panY) * radius;
+                    }
+                    float dist = Math.Max(0.5f, distance);
+                    var eye = target + dir * radius * dist;   // más lejos → el tren no toca el marco
+                    var view = Matrix.CreateLookAt(eye, target, Vector3.Up);
+                    var proj = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(MathHelper.Clamp(fovDeg, 0.5f, 90f)), (float)rw / rh, Math.Max(0.05f, radius * 0.05f), radius * 16f);
 
                     // Orientación: si tenemos el flag Flip del .con, usamos la MISMA regla que la 2D
                     // (rotate = Flip XOR K, K=true) para que el 3D apunte en la dirección del consist,

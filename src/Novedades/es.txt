@@ -1,9 +1,9 @@
-1.2.50
-Mapa con detalle|Vías, andenes a su lado, apartaderos, cruces, puntos de carga y PK, también en el mini-mapa.
-Itinerarios guardados|Guárdalos en el mapa grande y cárgalos otro día; si el tren va a mitad, sigue desde ahí.
-Itinerario limpio|El trazo se borra justo bajo el tren, y los rótulos ya no se salen del mini-mapa.
-Campanita de avisos|Junto a tu perfil: los avisos sin leer y todo su historial.
-Cancelar servicio|El maquinista puede cancelar su servicio en curso en vez de registrarlo.
-Tracción correcta|Eléctrica, diésel o vapor según el .eng, como en Open Rails (también en el precio).
-Mapa más claro|Cada elemento con su color y una leyenda en el mapa grande.
-Y más|En los cuadros de texto, Intro acepta y Esc cancela.
+1.2.51
+Mapa del recorrido|El informe del servicio y el historial enseñan el recorrido real, con paradas y horas.
+Visor 3D|Botón ⤢ en las vistas 3D: el tren en grande, con zoom al detalle, vistas rápidas y foto.
+Teleindicador más claro|El cartel en grande, con flechas y una galería de destinos con buscador.
+Exploración renovada|Salida y llegada como un billete; hora, estación y clima en chips.
+Horarios al día|Teleindicador en su propia fila y estación y clima en chips, como en Exploración.
+Billete con tu tren|El confort del tren que conduces cuenta en el precio del billete.
+Arranque más rápido|Tras cambiar el contenido, el menú se abre en segundos.
+Y más|La barra de Horarios enseña bien el teleindicador elegido.

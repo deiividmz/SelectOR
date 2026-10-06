@@ -1,9 +1,9 @@
-1.2.50
-Detailed map|Tracks, platforms on their side, sidings, crossings, pickup points and mileposts, also on the mini-map.
-Saved itineraries|Save them on the big map and load them another day; if the train is halfway, it carries on from there.
-Clean itinerary|The line disappears right under the train, and labels no longer spill out of the mini-map.
-Notification bell|Next to your profile: unread notifications and their full history.
-Cancel service|Drivers can cancel their service in progress instead of recording it.
-Right traction|Electric, diesel or steam as declared in the .eng, like Open Rails (also in the price).
-Clearer map|Each element in its own colour, with a legend on the big map.
-And more|In text boxes, Enter accepts and Esc cancels.
+1.2.51
+Route map|The service report and the history show the real route driven, with stops and times.
+3D viewer|⤢ button on the 3D views: the train large, with close-up zoom, quick views and a photo.
+Clearer destination sign|The sign large, with arrows and a destination gallery with search.
+Explore refreshed|Departure and arrival like a ticket; time, season and weather in chips.
+Timetables updated|Destination sign on its own row and season and weather in chips, as in Explore.
+Fare with your train|The comfort of the train you drive counts in the ticket price.
+Faster start|After changing the content, the menu opens in seconds.
+And more|The Timetables bar shows the chosen destination sign correctly.

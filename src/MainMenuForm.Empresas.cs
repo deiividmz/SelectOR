@@ -83,6 +83,7 @@ namespace SelectOR
             _svcClockUtc = t;
             _svcRunS = 0; _svcLastTickUtc = t; _svcLastGameS = double.NaN; _svcPaused = false;
             InfrReset();   // carné por puntos: servicio nuevo, nada detectado
+            _svcTrail.Clear();   // y su rastro para el mapa del informe
         }
 
         double ServiceSecondsExact()
@@ -1225,7 +1226,8 @@ namespace SelectOR
             _fsRentPct = EmpInput("0,00008"); _fsRentPct.Width = 240; fsInner.Controls.Add(_fsRentPct);
             fsInner.Controls.Add(EmpFieldLabel(Tr("Mantenimiento por taller (fracción del valor, p. ej. 0,0015)")));
             _fsMaintPct = EmpInput("0,0015"); _fsMaintPct.Width = 240; fsInner.Controls.Add(_fsMaintPct);
-            fsInner.Controls.Add(EmpFieldLabel(Tr("Billete base (€) — viajeros: billete = base + confort·0,05 + vel·0,02 + €/km × km a bordo")));
+            _fsFareLbl = EmpFieldLabel(FareFormulaText(0.02, 0.005));   // con los coeficientes del servidor al cargar (LoadFleetSettings)
+            fsInner.Controls.Add(_fsFareLbl);
             _fsFareBase = EmpInput("1,5"); _fsFareBase.Width = 240; fsInner.Controls.Add(_fsFareBase);
             fsInner.Controls.Add(EmpFieldLabel(Tr("Billete por km (€ por viajero y km a bordo, p. ej. 0,08)")));
             _fsFareKm = EmpInput("0,08"); _fsFareKm.Width = 240; fsInner.Controls.Add(_fsFareKm);
@@ -2103,7 +2105,9 @@ namespace SelectOR
             // Datos extra del servicio (tren, recorrido, notas) — máxima info que registró OR/servidor.
             try
             {
-                var (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes,calc,stops&id=eq.{Uri.EscapeDataString(s.Id)}");
+                var (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes,calc,stops,trail&id=eq.{Uri.EscapeDataString(s.Id)}");
+                if (se != null && se.IndexOf("trail", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor sin recorrido-servicio.sql
+                    (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes,calc,stops&id=eq.{Uri.EscapeDataString(s.Id)}");
                 if (se != null && se.IndexOf("stops", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor sin paradas-servicio.sql
                     (sj, se) = await Supa.SelectAsync($"services?select=consist,path,notes,calc&id=eq.{Uri.EscapeDataString(s.Id)}");
                 if (se != null && se.IndexOf("calc", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor sin calculo-servicio.sql
@@ -2124,6 +2128,7 @@ namespace SelectOR
                             foreach (var x in sp.EnumerateArray())
                                 data.Stops.Add((Str(x, "s"), Str(x, "t"), (int)Num(x, "b"), (int)Num(x, "a")));
                         }
+                        if (e.TryGetProperty("trail", out var tr)) data.Map = ParseTrail(tr);
                     }
                 }
             }
@@ -2150,6 +2155,12 @@ namespace SelectOR
                 }
             }
             catch { }
+            // el mapa, sobre el detalle de la ruta si está instalada en este equipo (si no, solo el recorrido)
+            if (data.Map != null)
+            {
+                var ruta = _routesAll.Find(x => string.Equals(x.Name, s.Route, StringComparison.OrdinalIgnoreCase));
+                if (ruta != null) data.Map.Detail = await TripDetailFor(ruta.Path);
+            }
             using var dlg = new ServiceResultDialog(data);
             dlg.ShowDialog(this);
         }
@@ -3329,6 +3340,22 @@ namespace SelectOR
                 // ¿Es un tren de viajeros? (tarifas-equilibrio.sql): sin plazas declaradas cobra como traslado
                 // en vacío, no como un mercancías. Si el servidor aún no lo conoce, se abre sin ese dato.
                 bool? viajeros = TrainIsPassenger(train);
+                // Confort del tren que se conduce (confort-por-servicio.sql): con él se calcula el billete de ESTE
+                // servicio, no con el de la unidad al comprarla. Si el servidor aún no lo conoce, se abre sin él.
+                double? confort = viajeros != null ? await Task.Run(() => DrivenComfort(train)) : null;
+                if (viajeros != null && confort != null)
+                {
+                    var (jc, ec) = await Supa.RpcAsync("start_service", new
+                    {
+                        p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle,
+                        p_mass = Math.Round(tot.mass, 1), p_cars = tot.cars, p_capacity = Math.Round(tot.capacity), p_engines = engines,
+                        p_passenger = viajeros.Value, p_comfort = confort.Value
+                    });
+                    bool sinConfort = ec != null && (ec.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                                                     || ec.IndexOf("p_comfort", StringComparison.OrdinalIgnoreCase) >= 0
+                                                     || ec.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (!sinConfort) return (jc, ec);
+                }
                 if (viajeros != null)
                 {
                     var (j0, e0) = await Supa.RpcAsync("start_service", new
@@ -3363,6 +3390,20 @@ namespace SelectOR
             }
             return await Supa.RpcAsync("start_service", new
             { p_company = company, p_route = route, p_consist = consist, p_path = path, p_vehicle = vehicle });
+        }
+
+        // Confort (0-100) del tren tal como se va a conducir: el mismo cálculo que la ficha de Compra (velocidad máxima de
+        // la cabeza, densidad de viajeros y basculante), con los coches de ESTE .con. Sin plazas declaradas, 0.
+        double? DrivenComfort(TrainItem train)
+        {
+            try
+            {
+                string eng = train?.Locomotive?.FilePath;
+                double kmh = string.IsNullOrEmpty(eng) ? 0 : ReadEngineSpecs(eng).kmh;
+                var an = AnalyzeComposition(train, kmh);
+                return an.Capacity > 0 ? an.Comfort : 0;
+            }
+            catch { return null; }
         }
 
         // Busca una unidad de la empresa que corresponda a la máquina de cabeza del tren y esté
@@ -3795,7 +3836,7 @@ namespace SelectOR
         string _paxNextName, _paxNextNorm; int _paxNextWaiting; double _paxNextDist;
         string _paxLastEvent; DateTime _paxLastEventUtc;
         // Paradas comerciales del viaje (puertas abiertas en un andén): para la ventana del servicio.
-        sealed class StopRec { public string Station, Time; public DateTime Utc; public int Board, Alight; }
+        sealed class StopRec { public string Station, Time; public DateTime Utc; public int Board, Alight; public double Lat = double.NaN, Lon = double.NaN; }
         readonly List<StopRec> _svcStopsLog = new();
         int _paxLastHour = 12; DateTime _paxHourUtc;
 
@@ -4366,7 +4407,8 @@ namespace SelectOR
                 _paxDone.Add(bestNorm);
                 _paxVisits[bestNorm] = visit + 1;
                 // Parada comercial: queda anotada (estación y hora del simulador) para la ventana del servicio.
-                _svcStopsLog.Add(new StopRec { Station = m.name ?? bestNorm, Time = await FetchGameClock(), Utc = DateTime.UtcNow });
+                _svcStopsLog.Add(new StopRec { Station = m.name ?? bestNorm, Time = await FetchGameClock(), Utc = DateTime.UtcNow,
+                                                Lat = _tHave ? _tLat : double.NaN, Lon = _tHave ? _tLon : double.NaN });
                 SaveServiceJournal(force: true);
                 // El intercambio se hace poco a poco (el HUD va mostrando cómo cambian las cifras).
                 StartPaxAnimation(m.name ?? bestNorm, bestNorm, alight, board);
@@ -4568,6 +4610,7 @@ namespace SelectOR
                         if (_paxOnboard > 0) _paxKm += _paxOnboard * dm / 1000.0;   // viajeros a bordo × km
                         // Con el HUD cerrado el rastro sigue grabándose (con él abierto lo graba el HUD, más fino).
                         if (!HudAlive) _driveTrail.Add(lat, lon);
+                        SvcTrailAdd(lat, lon);   // rastro del servicio (mapa del informe)
                     }
                     // Parado = casi sin desplazamiento entre sondeos (~1,5 s): < 0,8 m ≈ < 2 km/h.
                     if (dm < 0.8) { if (_stoppedSinceUtc == null) _stoppedSinceUtc = DateTime.UtcNow; }
@@ -5143,6 +5186,8 @@ namespace SelectOR
 
             var fviewport = new Card { Dock = DockStyle.Fill, Fill = Theme.Bg, BorderColor = Blend(Theme.Surface, Theme.Bg, 0.35f), Radius = 10, Padding = new Padding(4), Margin = new Padding(0, 0, 0, 8) };
             _fleetOwnPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
+            _fleetOwnPreview.ViewerSource = () => _fleetOwnGeom == null ? null : new ShapeViewSource
+                { Geom = _fleetOwnGeom, Flip = _fleetOwnFlip, BaseDistance = FleetOwnCamDistance, Yaw = _fleetOwnYaw, Pitch = _fleetOwnPitch, Caption = _fleetOwnPreview.Caption };
             _fleetOwnPreview.Dragged += OnFleetOwnDrag;
             _fleetOwnPreview.ResetRequested += OnFleetOwnReset;
             _fleetOwnPreview.Zoomed += () => { if (_fleetOwnGeom != null) RenderFleetOwnLive(); };
@@ -5274,6 +5319,8 @@ namespace SelectOR
 
             var viewport = new Card { Dock = DockStyle.Fill, Fill = Theme.Bg, BorderColor = Blend(Theme.Surface, Theme.Bg, 0.35f), Radius = 10, Padding = new Padding(4), Margin = new Padding(0, 0, 0, 8) };
             _fleetPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
+            _fleetPreview.ViewerSource = () => _fleetGeom == null ? null : new ShapeViewSource
+                { Geom = _fleetGeom, Flip = _fleetFlip, BaseDistance = _fleetPreview.BaseDistance, Yaw = _fleetYaw, Pitch = _fleetPitch, Caption = _fleetPreview.Caption };
             _fleetPreview.Dragged += OnFleetPreviewDrag;
             _fleetPreview.ResetRequested += OnFleetPreviewReset;
             _fleetPreview.Zoomed += () => { if (_fleetGeom != null) RenderFleetLive(); };
@@ -5861,8 +5908,14 @@ namespace SelectOR
         (Panel hdr, Label status) MakeTrainHeader(Label title)
         {
             var hdr = new Panel { Dock = DockStyle.Top, Height = Math.Max(24, title.PreferredHeight + 6), BackColor = Theme.Surface };   // va dentro de las tarjetas del tren elegido
-            title.Dock = DockStyle.Left; title.AutoSize = true;
+            // ancho fijo medido (con AutoSize la etiqueta no centra en vertical: el título quedaba más alto que lo demás)
+            title.Dock = DockStyle.Left; title.AutoSize = false;
+            title.Width = TextRenderer.MeasureText(title.Text, title.Font).Width + title.Padding.Horizontal + 4;
             var status = new Label { Dock = DockStyle.Right, AutoSize = false, Width = 320, TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f, FontStyle.Bold) };
+            // solo lo que mide su texto: así deja sitio al teleindicador de la cabecera
+            void FitStatus() { status.Width = string.IsNullOrEmpty(status.Text) ? 0 : TextRenderer.MeasureText(status.Text, status.Font).Width + 8; }
+            status.TextChanged += (s, e) => FitStatus();
+            FitStatus();
             hdr.Controls.Add(title); hdr.Controls.Add(status);
             return (hdr, status);
         }
@@ -7185,6 +7238,14 @@ namespace SelectOR
             @"MaxPower\s*\(\s*([0-9.]+)",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
+        // ¿Se conoce ya la cabecera (sin leer el archivo)?
+        static bool HeadCached(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return true;
+            lock (_vehHead) if (_vehHead.ContainsKey(path)) return true;
+            return ContentIndex.Heads.ContainsKey(path);
+        }
+
         static VehHead Head(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
@@ -8189,6 +8250,7 @@ namespace SelectOR
                     Reasons = InfrVoidReasons(infr.Items), Infractions = infr.Items, LicensePoints = infr.Points, SuspendedUntil = infr.Until
                 };
                 _estimatedKm = 0;
+                if (showDialog) nv.Map = await BuildTripMap(openedUtc);
                 return ShowNotRegistered(nv, showDialog);
             }
 
@@ -8220,6 +8282,7 @@ namespace SelectOR
                         Infractions = infr.Items, LicensePoints = infr.Points, SuspendedUntil = infr.Until
                     };
                     _estimatedKm = 0;
+                    if (showDialog) nr.Map = await BuildTripMap(openedUtc);
                     return ShowNotRegistered(nr, showDialog);
                 }
                 // (sin el SQL nuevo, un viaje de más de 3 km pero corto de tiempo se registra como antes)
@@ -8248,6 +8311,7 @@ namespace SelectOR
             if (err != null) { Msg(_empHomeMsg, Tr("No se pudo registrar el servicio: ") + err, true); return (false, Tr("No se pudo registrar el servicio: ") + err); }
             _pendingServiceId = null; _svcOpenedUtc = null; DeleteServiceJournal();
             UpdateDutyUi();
+            var trailPayload = TrailPayload(openedUtc);   // el recorrido, para el mapa del historial (se envía si queda registrado)
 
             // Datos del viaje devueltos por el servidor (economía autoritativa) → ventana de resultado.
             var r = new ServiceResultDialog.Data
@@ -8324,9 +8388,11 @@ namespace SelectOR
             catch { }
 
             _estimatedKm = 0;
+            if (showDialog) r.Map = await BuildTripMap(openedUtc);
             if (!r.Valid) return ShowNotRegistered(r, showDialog);
             Msg(_empHomeMsg, Tr("Servicio registrado."), false);
             if (r.Stops != null) SaveServiceStops(svc, r.Stops);
+            SaveServiceTrail(svc, trailPayload);
             // Registro publicado → refresca saldo y la subpestaña visible (sin botón "Actualizar").
             LoadCompanies(soft: true);
             RefreshActiveSubtab(skipCompanyLists: true);
@@ -8900,6 +8966,7 @@ namespace SelectOR
         async void LoadFleetSettings()
         {
             if (_fsScale == null || !Supa.IsSuperadmin) return;
+            LoadFareFormula();
             var (json, err) = await Supa.RpcAsync("get_fleet_settings", new { });
             if (err != null) return;
             try
@@ -8914,6 +8981,30 @@ namespace SelectOR
                 if (Num(root, "capacity_base") > 0) _fsCapBaseVal = Num(root, "capacity_base");
                 if (_fsFareBase != null) _fsFareBase.Box.Text = Num(root, "fare_base").ToString("0.##", EsEs);
                 if (_fsPaxDemand != null) _fsPaxDemand.Box.Text = Num(root, "pax_demand").ToString("0.##", EsEs);
+            }
+            catch { }
+        }
+
+        // La fórmula del billete tal como la aplica el servidor al registrar (close_service): confort y velocidad media
+        // del viaje por sus coeficientes (app_settings.fare_comfort_k / fare_speed_k, 0,02 y 0,005 por defecto).
+        Label _fsFareLbl;
+        string FareFormulaText(double kComfort, double kSpeed)
+            => string.Format(Tr("Billete base (€) — viajeros: billete = base + confort × {0} + velocidad media × {1} + €/km × km a bordo"),
+                             kComfort.ToString("0.####", EsEs), kSpeed.ToString("0.####", EsEs));
+
+        async void LoadFareFormula()
+        {
+            if (_fsFareLbl == null) return;
+            var (json, err) = await Supa.SelectAsync("app_settings?select=fare_comfort_k,fare_speed_k&id=eq.1");
+            if (err != null) return;   // servidor sin tarifas-equilibrio.sql: los de por defecto
+            try
+            {
+                using var d = JsonDocument.Parse(json);
+                if (d.RootElement.ValueKind != JsonValueKind.Array || d.RootElement.GetArrayLength() == 0) return;
+                var e = d.RootElement[0];
+                double kc = e.TryGetProperty("fare_comfort_k", out var a) && a.ValueKind == JsonValueKind.Number ? a.GetDouble() : 0.02;
+                double ks = e.TryGetProperty("fare_speed_k", out var b) && b.ValueKind == JsonValueKind.Number ? b.GetDouble() : 0.005;
+                _fsFareLbl.Text = FareFormulaText(kc, ks);
             }
             catch { }
         }

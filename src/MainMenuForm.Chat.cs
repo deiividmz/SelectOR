@@ -117,6 +117,9 @@ namespace SelectOR
                 r.Member = root.TryGetProperty("member", out var m) && m.ValueKind == JsonValueKind.True;
                 r.Muted = root.TryGetProperty("muted", out var mu) && mu.ValueKind == JsonValueKind.True;
                 r.CanModerate = root.TryGetProperty("can_moderate", out var cm) && cm.ValueKind == JsonValueKind.True;
+                // superadministrador: escribe en cualquier empresa (servidor con chat-superadmin.sql)
+                r.AsSuper = root.TryGetProperty("superadmin", out var sa) && sa.ValueKind == JsonValueKind.True
+                            && root.TryGetProperty("can_write", out var cw) && cw.ValueKind == JsonValueKind.True;
                 r.MutedUsers.Clear();
                 if (root.TryGetProperty("muted_users", out var arr) && arr.ValueKind == JsonValueKind.Array)
                     foreach (var u in arr.EnumerateArray()) if (u.ValueKind == JsonValueKind.String) r.MutedUsers.Add(u.GetString());
@@ -360,11 +363,13 @@ namespace SelectOR
             var r = ChatSectionRoom();
             if (_chatNote == null || r == null) return;
             if (r.Error != null) { Msg(_chatNote, r.Error, true); return; }
-            if (r.StateLoaded && !r.Member) { Msg(_chatNote, Tr("Estás viendo el chat como superadministrador: solo los socios de la empresa pueden escribir."), false); return; }
+            if (r.StateLoaded && !r.Member && !r.AsSuper) { Msg(_chatNote, Tr("Estás viendo el chat como superadministrador: solo los socios de la empresa pueden escribir."), false); return; }
             if (r.Muted) { Msg(_chatNote, Tr("El gerente te ha retirado el permiso para escribir en este chat. Puedes seguir leyéndolo."), true); return; }
             int n = _chatInput.Box.TextLength;
             if (_chatEditing != null) { Msg(_chatNote, Tr("Editando tu mensaje · Intro para guardar · Esc para cancelar"), false); return; }
-            Msg(_chatNote, n > 400 ? string.Format(Tr("{0} de 500 caracteres"), n) : Tr("Intro para enviar. Los mensajes los ven todos los socios de la empresa. Clic derecho en uno tuyo: editarlo o eliminarlo."), false);
+            Msg(_chatNote, n > 400 ? string.Format(Tr("{0} de 500 caracteres"), n)
+                : r.AsSuper && !r.Member ? Tr("Escribes como superadministrador: tus mensajes llevan la marca «Superadmin» y los ven todos los socios de la empresa.")
+                : Tr("Intro para enviar. Los mensajes los ven todos los socios de la empresa. Clic derecho en uno tuyo: editarlo o eliminarlo."), false);
         }
 
         void ChatStartEdit(ChatMsg m)
@@ -580,7 +585,7 @@ namespace SelectOR
             if (string.IsNullOrEmpty(_chatHudCompanyId)) return (false, "");
             var r = ChatRoomFor(_chatHudCompanyId);
             if (r.Error != null) return (false, "");
-            if (!r.Member) return (false, Tr("Solo los socios pueden escribir"));
+            if (!r.Member && !r.AsSuper) return (false, Tr("Solo los socios pueden escribir"));
             if (r.Muted) return (false, Tr("No tienes permiso para escribir en este chat"));
             return (true, null);
         }

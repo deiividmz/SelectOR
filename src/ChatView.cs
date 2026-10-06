@@ -30,7 +30,8 @@ namespace SelectOR
         public string LastChange;   // hora (del servidor) del último cambio visto: para pedir ediciones y borrados
         public bool Loaded, Loading, StateLoaded;
         public bool Member = true, Muted, CanModerate;
-        public bool CanWrite => Member && !Muted;
+        public bool AsSuper;   // el superadministrador escribe aunque no sea socio (chat-superadmin.sql)
+        public bool CanWrite => (Member && !Muted) || AsSuper;
         public readonly HashSet<string> MutedUsers = new(StringComparer.OrdinalIgnoreCase);
         public string Error;   // p. ej. el servidor aún no tiene el chat
     }
@@ -264,10 +265,10 @@ namespace SelectOR
 
         public static string RoleText(string role) => role switch
         {
-            "owner" => I18n.T("Gerente"), "manager" => I18n.T("Gestor"), _ => ""
+            "owner" => I18n.T("Gerente"), "manager" => I18n.T("Gestor"), "superadmin" => I18n.T("Superadmin"), _ => ""
         };
 
-        static Color RoleColor(string role) => role == "owner" ? Color.FromArgb(245, 197, 66) : Color.FromArgb(167, 139, 250);
+        static Color RoleColor(string role) => role == "owner" ? Color.FromArgb(245, 197, 66) : role == "superadmin" ? Color.FromArgb(96, 165, 250) : Color.FromArgb(167, 139, 250);
 
         protected override void OnPaint(PaintEventArgs e)
         {

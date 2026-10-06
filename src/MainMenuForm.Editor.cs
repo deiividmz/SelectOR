@@ -261,6 +261,8 @@ namespace SelectOR
             view3D.Controls.Add(_ed3DTitle, 0, 0);
             var card3D = new Card { Dock = DockStyle.Fill, Fill = Theme.Bg, BorderColor = Blend(Theme.Surface, Theme.Bg, 0.35f), Radius = 10, Padding = new Padding(4) };
             _edPreview3D = new TrainPreviewPanel { Dock = DockStyle.Fill };
+            _edPreview3D.ViewerSource = () => _edGeom == null ? null : new ShapeViewSource
+                { Geom = _edGeom, Flip = _edGeomFlip, BaseDistance = _edPreview3D.BaseDistance, Yaw = _edYaw, Pitch = _edPitch, Caption = _edPreview3D.Caption };
             _edPreview3D.Dragged += (dx, dy) => { if (_edGeom != null) { _edYaw += dx * 0.6f; _edPitch = Math.Max(-55f, Math.Min(70f, _edPitch - dy * 0.6f)); Render3DLive(); } };
             _edPreview3D.ResetRequested += () => { _edYaw = 22; _edPitch = 12; Render3DLive(); };
             _edPreview3D.Zoomed += () => { if (_edGeom != null) Render3DLive(); };
@@ -396,6 +398,7 @@ namespace SelectOR
                 LoadLog("editor: recorriendo TRAINSET…");
                 var list = ScanEditorStock(root);
                 LoadLog($"editor: {list.Count} vehículos encontrados");
+
                 try
                 {
                     BeginInvoke((Action)(() =>
@@ -408,6 +411,24 @@ namespace SelectOR
                         // el menú ya abierto, ese relleno le quitaba soltura los primeros segundos.
                         FillStockTableChunked(token);
                     }));
+                }
+                catch { }
+                // El TIPO de cada vehículo (columna de la tabla): si el índice no lo trae (contenido cambiado) hay que leer
+                // miles de archivos. Antes se hacía al añadir cada fila, en el hilo de la interfaz, y la tabla no acababa
+                // antes de que el menú se abriera por la red de seguridad (30 s). Ahora la tabla se llena al momento con
+                // «Tracción/Remolcado» y aquí, en segundo plano, se leen los que faltan y se corrige la columna.
+                try
+                {
+                    var missing = new List<int>();
+                    for (int i = 0; i < list.Count; i++) if (!HeadCached(list[i].path)) missing.Add(i);
+                    if (missing.Count == 0) return;
+                    LoadLog($"editor: leyendo el tipo de {missing.Count} vehículos…");
+                    System.Threading.Tasks.Parallel.ForEach(missing, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 2 },
+                        (i, st) => { if (token != _edStockToken) { st.Stop(); return; } Head(list[i].path); });
+                    if (token != _edStockToken) return;
+                    LoadLog("editor: tipos de los vehículos leídos");
+                    try { ContentIndex.Save(); } catch { }   // el próximo arranque ya los trae
+                    BeginInvoke((Action)(() => UpdateStockKinds(token, missing)));
                 }
                 catch { }
             });
@@ -465,13 +486,39 @@ namespace SelectOR
                 for (; next < end; next++)
                 {
                     var st = items[next];
-                    _edStock.AddRow(new[] { st.name, st.folder, VehicleKindLabel(st.path, st.isEngine) },
+                    _edStock.AddRow(new[] { st.name, st.folder, VehicleKindLabelQuick(st.path, st.isEngine) },
                                     new Color?[] { null, Theme.Subtle, st.isEngine ? Theme.AccentHi : Theme.Subtle });
                 }
                 _edStock.EndUpdate();   // aquí es donde Windows mete de verdad las filas
                 // con el menú aún oculto, trozos más grandes (nada que dibujar ni que atender): acaba antes
                 chunk = NextChunk(chunk, sw.ElapsedMilliseconds, _uiRevealed ? 30 : 250);
                 if (next >= items.Count) { t.Stop(); t.Dispose(); LoadLog("editor: tabla de material rellenada"); LoadStep("stock"); }
+            };
+            t.Start();
+        }
+
+        // Tipo del vehículo sin leer el archivo: el ya conocido o, si no, Tracción/Remolcado (se corrige después).
+        string VehicleKindLabelQuick(string path, bool isEngine)
+            => HeadCached(path) ? VehicleKindLabel(path, isEngine) : (isEngine ? Tr("Tracción") : Tr("Remolcado"));
+
+        // La columna «tipo» de las filas que se llenaron sin él, a trozos (sin trabar la interfaz).
+        void UpdateStockKinds(int token, List<int> rows)
+        {
+            if (_edStock == null || token != _edStockToken) return;
+            int next = 0;
+            var t = new System.Windows.Forms.Timer { Interval = 15 };
+            t.Tick += (s, e) =>
+            {
+                if (token != _edStockToken || IsDisposed) { t.Stop(); t.Dispose(); return; }
+                int end = Math.Min(rows.Count, next + 3000);
+                for (; next < end; next++)
+                {
+                    int i = rows[next];
+                    if (i >= _edStockAll.Count) continue;
+                    var st = _edStockAll[i];
+                    _edStock.SetCell(i, 2, VehicleKindLabel(st.path, st.isEngine), st.isEngine ? Theme.AccentHi : Theme.Subtle, applyWidths: false);
+                }
+                if (next >= rows.Count) { t.Stop(); t.Dispose(); _edStock.RefreshWidths(); LoadLog("editor: tipos puestos en la tabla"); }
             };
             t.Start();
         }
@@ -483,7 +530,7 @@ namespace SelectOR
             _edStock.ClearRows();
             _edStock.BeginUpdate();
             foreach (var s in _edStockAll)
-                _edStock.AddRow(new[] { s.name, s.folder, VehicleKindLabel(s.path, s.isEngine) },
+                _edStock.AddRow(new[] { s.name, s.folder, VehicleKindLabelQuick(s.path, s.isEngine) },
                                 new Color?[] { null, Theme.Subtle, s.isEngine ? Theme.AccentHi : Theme.Subtle });
             _edStock.EndUpdate();
             if (_edStockAll.Count == 0) _edStock.SetEmpty(Tr("No hay material en TRAINS\\TRAINSET."));
