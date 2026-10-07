@@ -301,6 +301,7 @@ namespace SelectOR
             ("stock",      7, "Preparando el editor de composiciones…"),
             ("editor",     7, "Preparando el editor de composiciones…"),
             ("vistas2d",   9, "Preparando los trenes y sus vistas 2D…"),
+            ("empresas",   6, "Conectando con Empresas…"),
         };
         readonly HashSet<string> _loadDone = new(StringComparer.Ordinal);
         bool _uiRevealed;
@@ -672,6 +673,7 @@ namespace SelectOR
                 SubOf = o => RouteCardSub((Route)o),
                 FavOf = o => _prefs.Favorites.Contains(((Route)o).Path),
                 ImageOf = o => RouteCardImage((Route)o),
+                BadgeOf = o => RouteCardBadge((Route)o),
             };
             _lstRoutes.SelectedIndexChanged += (s, e) => OnRouteChanged();
             // La portada de bienvenida se quita en cuanto el usuario elige una ruta (aunque sea la ya cargada).
@@ -2283,6 +2285,7 @@ namespace SelectOR
             // la pestaña Empresas, ya hay sesión y no se ve parpadear el formulario de acceso.
             // Antes de leer carpetas (que puede salir pronto si no hay contenido).
             TryAutoLogin();
+            PreloadEmpresas();   // con la sesión recordada, los datos de Empresas antes de enseñar el menú
             try
             {
                 if (_settings == null) _settings = new UserSettings(new string[0]);

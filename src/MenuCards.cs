@@ -306,9 +306,10 @@ namespace SelectOR
         public Func<object, Image> ImageOf;
         public Func<object, string> TitleOf, SubOf;
         public Func<object, bool> FavOf;
-        readonly Font _fT = Theme.Font(10f, FontStyle.Bold), _fS = Theme.Font(8.25f), _fStar = Theme.Font(12f, FontStyle.Bold);
+        public Func<object, (string text, Color color)?> BadgeOf;   // distintivo arriba a la izquierda (rutas autorizadas)
+        readonly Font _fT = Theme.Font(10f, FontStyle.Bold), _fS = Theme.Font(8.25f), _fStar = Theme.Font(12f, FontStyle.Bold), _fB = Theme.Font(7.75f, FontStyle.Bold);
         public RouteCardList() { BackColor = Theme.BgSidebar; }
-        protected override void Dispose(bool disposing) { if (disposing) { _fT.Dispose(); _fS.Dispose(); _fStar.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { _fT.Dispose(); _fS.Dispose(); _fStar.Dispose(); _fB.Dispose(); } base.Dispose(disposing); }
         protected override int MaxCols => 1;
         protected override int CardH => Theme.Px(116);
         protected override int Gap => Theme.Px(8);
@@ -332,6 +333,14 @@ namespace SelectOR
                 var sr = new Rectangle(rc.Right - Theme.Px(30), rc.Y + Theme.Px(6), Theme.Px(24), Theme.Px(22));
                 Fill(g, sr, Theme.Px(11), Color.FromArgb(150, 0, 0, 0));
                 TextRenderer.DrawText(g, "★", _fStar, sr, Theme.Gold, C1);
+            }
+            var badge = BadgeOf?.Invoke(it);
+            if (badge != null)
+            {
+                var bs = TextRenderer.MeasureText(badge.Value.text, _fB, Size.Empty, TextFormatFlags.NoPadding);
+                var br = new Rectangle(rc.X + Theme.Px(7), rc.Y + Theme.Px(7), bs.Width + Theme.Px(14), bs.Height + Theme.Px(6));
+                Fill(g, br, br.Height / 2, Color.FromArgb(215, 22, 25, 28));
+                TextRenderer.DrawText(g, badge.Value.text, _fB, br, badge.Value.color, C1);
             }
             int x = rc.X + Theme.Px(12), w = rc.Width - Theme.Px(24);
             TextRenderer.DrawText(g, TitleOf?.Invoke(it) ?? it.ToString(), _fT, new Rectangle(x, ir.Bottom + Theme.Px(7), w, Theme.Px(20)), Theme.Text, L1);

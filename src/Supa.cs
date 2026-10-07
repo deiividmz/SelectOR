@@ -74,6 +74,16 @@ namespace SelectOR
         // Nombre a mostrar: nombre de maquinista si lo hay; si no, el correo.
         public static string DisplayName => !string.IsNullOrWhiteSpace(Username) ? Username : (Email ?? "");
 
+        // Peticiones al servidor en curso (la pantalla de inicio espera a que acaben las de Empresas).
+        static int _inFlight;
+        public static int InFlight => System.Threading.Volatile.Read(ref _inFlight);
+        static async Task<HttpResponseMessage> Send(HttpRequestMessage req)
+        {
+            System.Threading.Interlocked.Increment(ref _inFlight);
+            try { return await Http().SendAsync(req); }
+            finally { System.Threading.Interlocked.Decrement(ref _inFlight); }
+        }
+
         static HttpClient Http()
         {
             if (_http == null)
@@ -114,7 +124,7 @@ namespace SelectOR
             {
                 var json = JsonSerializer.Serialize(body);
                 var req = Req(HttpMethod.Post, path, json, useUserToken: false);
-                var resp = await Http().SendAsync(req);
+                var resp = await Send(req);
                 var txt = await resp.Content.ReadAsStringAsync();
                 if (!resp.IsSuccessStatusCode) return Err(resp.StatusCode.ToString(), txt);
                 using var d = JsonDocument.Parse(txt);
@@ -146,7 +156,7 @@ namespace SelectOR
             bool su = false; string forUser = null;
             try
             {
-                var resp = await Http().SendAsync(Req(HttpMethod.Post, "/rest/v1/rpc/is_superadmin", "{}", useUserToken: true));
+                var resp = await Send(Req(HttpMethod.Post, "/rest/v1/rpc/is_superadmin", "{}", useUserToken: true));
                 var txt = await resp.Content.ReadAsStringAsync();
                 if (resp.IsSuccessStatusCode) { su = txt.Trim() == "true"; forUser = UserId; }
             }
@@ -213,7 +223,7 @@ namespace SelectOR
             {
                 var req = Req(m, path, bodyJson, useUserToken);
                 configure?.Invoke(req);
-                var resp = await Http().SendAsync(req);
+                var resp = await Send(req);
                 var txt = await resp.Content.ReadAsStringAsync();
                 return (resp.IsSuccessStatusCode, txt, resp.StatusCode.ToString());
             }

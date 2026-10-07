@@ -878,9 +878,9 @@ namespace SelectOR
             try
             {
                 // A la papelera de Windows (recuperable desde ahí), sin dejar copias sueltas.
-                Native.RecycleFile(file);
+                _recycleFile(file);
                 ClearContentCaches();
-                if (File.Exists(file + ".bak")) Native.RecycleFile(file + ".bak");   // copia de versiones antiguas de SelectOR
+                if (File.Exists(file + ".bak")) _recycleFile(file + ".bak");   // copia de versiones antiguas de SelectOR
             }
             catch (Exception e) { Msg(_edMsg, Tr("No se pudo eliminar: ") + e.Message, true); return; }
             _edDoc = null; _edOriginal = null;

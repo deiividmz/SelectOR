@@ -1,9 +1,5 @@
-1.2.51
-Mapa del recorrido|El informe del servicio y el historial enseñan el recorrido real, con paradas y horas.
-Visor 3D|Botón ⤢ en las vistas 3D: el tren en grande, con zoom al detalle, vistas rápidas y foto.
-Teleindicador más claro|El cartel en grande, con flechas y una galería de destinos con buscador.
-Exploración renovada|Salida y llegada como un billete; hora, estación y clima en chips.
-Horarios al día|Teleindicador en su propia fila y estación y clima en chips, como en Exploración.
-Billete con tu tren|El confort del tren que conduces cuenta en el precio del billete.
-Arranque más rápido|Tras cambiar el contenido, el menú se abre en segundos.
-Y más|La barra de Horarios enseña bien el teleindicador elegido.
+1.2.52
+Rutas autorizadas|Propón rutas a tu empresa; el gerente las solicita y el administrador las aprueba con su plano.
+Megafonía sin la ruta|Megafonía enseña también las rutas con anuncios que no tienes instaladas.
+Megafonía del HUD|La lista de líneas del mini mapa se desplaza con la rueda o la barra y cabe siempre en pantalla.
+Empresas más fluida|Los datos de cada sección llegan al arrancar y el plano de las rutas se mueve sin tirones.

@@ -1,9 +1,5 @@
-1.2.51
-Route map|The service report and the history show the real route driven, with stops and times.
-3D viewer|⤢ button on the 3D views: the train large, with close-up zoom, quick views and a photo.
-Clearer destination sign|The sign large, with arrows and a destination gallery with search.
-Explore refreshed|Departure and arrival like a ticket; time, season and weather in chips.
-Timetables updated|Destination sign on its own row and season and weather in chips, as in Explore.
-Fare with your train|The comfort of the train you drive counts in the ticket price.
-Faster start|After changing the content, the menu opens in seconds.
-And more|The Timetables bar shows the chosen destination sign correctly.
+1.2.52
+Authorised routes|Propose routes to your company; the administrator approves them.
+Announcements without the route|Also lists routes with announcements that you have not installed.
+HUD announcements|The minimap line list scrolls with the wheel or the bar and always fits on screen.
+Smoother Companies|Each section's data arrives at startup and the route plan moves without stutter.

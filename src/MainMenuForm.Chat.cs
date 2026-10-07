@@ -284,7 +284,7 @@ namespace SelectOR
             perm.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             perm.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             perm.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            var intro = EmpIntro("Quién puede escribir en el chat de la empresa. A quien le retires el permiso podrá seguir leyendo, pero no escribir. Solo el gerente y el superadministrador pueden cambiarlo.");
+            var intro = EmpIntro("Quién puede escribir en el chat de la empresa. A quien le retires el permiso podrá seguir leyendo, pero no escribir. Solo el gerente y el administrador pueden cambiarlo.");
             intro.MaximumSize = new Size(900, 0);
             perm.Controls.Add(intro);
             // Una tarjeta por socio: su rol y si puede escribir (verde) o no (rojo).
@@ -363,12 +363,12 @@ namespace SelectOR
             var r = ChatSectionRoom();
             if (_chatNote == null || r == null) return;
             if (r.Error != null) { Msg(_chatNote, r.Error, true); return; }
-            if (r.StateLoaded && !r.Member && !r.AsSuper) { Msg(_chatNote, Tr("Estás viendo el chat como superadministrador: solo los socios de la empresa pueden escribir."), false); return; }
+            if (r.StateLoaded && !r.Member && !r.AsSuper) { Msg(_chatNote, Tr("Estás viendo el chat como administrador: solo los socios de la empresa pueden escribir."), false); return; }
             if (r.Muted) { Msg(_chatNote, Tr("El gerente te ha retirado el permiso para escribir en este chat. Puedes seguir leyéndolo."), true); return; }
             int n = _chatInput.Box.TextLength;
             if (_chatEditing != null) { Msg(_chatNote, Tr("Editando tu mensaje · Intro para guardar · Esc para cancelar"), false); return; }
             Msg(_chatNote, n > 400 ? string.Format(Tr("{0} de 500 caracteres"), n)
-                : r.AsSuper && !r.Member ? Tr("Escribes como superadministrador: tus mensajes llevan la marca «Superadmin» y los ven todos los socios de la empresa.")
+                : r.AsSuper && !r.Member ? Tr("Escribes como administrador: tus mensajes llevan la marca «Administrador» y los ven todos los socios de la empresa.")
                 : Tr("Intro para enviar. Los mensajes los ven todos los socios de la empresa. Clic derecho en uno tuyo: editarlo o eliminarlo."), false);
         }
 

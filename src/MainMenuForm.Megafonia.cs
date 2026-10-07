@@ -4,6 +4,8 @@
 //    el tren, y
 //  · las LÍNEAS, con las estaciones en las que paran (el orden da igual: el aviso salta por
 //    proximidad y sentido de marcha, así que de la línea solo importa qué estaciones la forman).
+// Además de las rutas instaladas, el desplegable trae las que tienen megafonía guardada en la empresa aunque
+// no estén en este equipo (megafonias-sin-ruta.sql): se ve y se edita lo grabado, sin las estaciones del .tdb.
 // La sección solo existe si el superadmin ha habilitado la megafonía de esa empresa
 // (companies.pa_enabled); el superadmin la ve siempre, con el interruptor arriba.
 
@@ -34,6 +36,16 @@ namespace SelectOR
             public bool InRoute;                // sale del .tdb de la ruta
             public bool LineStop;               // para en la línea elegida
         }
+
+        // Una ruta del desplegable: instalada (con su carpeta) o solo con megafonía guardada en el servidor.
+        sealed class PaRouteItem
+        {
+            public string Id, Name, Dir;
+            public bool Local => Dir != null;
+            public override string ToString() => Local ? Name : Name + "   ·  " + I18n.T("no instalada en este equipo");
+        }
+        readonly List<PaRouteItem> _paRouteItems = new List<PaRouteItem>();
+        int _paRemoteSeq;
 
         sealed class PaLine
         {
@@ -268,38 +280,85 @@ namespace SelectOR
             LoadPaRoute();
         }
 
+        bool _paFillingRoutes;
+
         void FillPaRoutes()
         {
-            var want = _paRouteDir ?? _curRoute?.Path;
+            string wantId = _paRoute, wantDir = _paRouteDir ?? (_paRoute == null ? _curRoute?.Path : null);
+            _paRouteItems.Clear();
+            foreach (var r in _routesAll) _paRouteItems.Add(new PaRouteItem { Id = RouteIds.IdOf(r.Path, r.Name), Name = r.Name, Dir = r.Path });
+            ShowPaRouteItems(wantId, wantDir);
+            _ = LoadPaRemoteRoutes();   // y las que solo tienen megafonía guardada (sin la ruta en el equipo)
+        }
+
+        // Rellena el desplegable y elige la ruta pedida (por carpeta o por RouteID), o la primera.
+        void ShowPaRouteItems(string wantId, string wantDir)
+        {
+            _paFillingRoutes = true;
             _paRouteBox.BeginUpdate();
             _paRouteBox.Items.Clear();
-            foreach (var r in _routesAll) _paRouteBox.Items.Add(r);
+            foreach (var it in _paRouteItems) _paRouteBox.Items.Add(it);
             _paRouteBox.EndUpdate();
-            if (_paRouteBox.Items.Count == 0) { _paRoute = null; _paRouteName = null; _paRouteDir = null; return; }
-            int sel = 0;
-            if (!string.IsNullOrEmpty(want))
-                for (int i = 0; i < _routesAll.Count; i++)
-                    if (string.Equals(_routesAll[i].Path, want, StringComparison.OrdinalIgnoreCase)) { sel = i; break; }
+            _paFillingRoutes = false;
+            if (_paRouteItems.Count == 0) { _paRoute = null; _paRouteName = null; _paRouteDir = null; return; }
+            int sel = -1;
+            if (!string.IsNullOrEmpty(wantDir)) sel = _paRouteItems.FindIndex(x => string.Equals(x.Dir, wantDir, StringComparison.OrdinalIgnoreCase));
+            if (sel < 0 && !string.IsNullOrEmpty(wantId)) sel = _paRouteItems.FindIndex(x => string.Equals(x.Id, wantId, StringComparison.OrdinalIgnoreCase));
+            if (sel < 0) sel = 0;
+            _paFillingRoutes = true;
             _paRouteBox.SelectedIndex = sel;
-            SetPaRoute(_routesAll[sel]);
+            _paFillingRoutes = false;
+            SetPaRoute(_paRouteItems[sel]);
+        }
+
+        async Task LoadPaRemoteRoutes()
+        {
+            var c = _empSel; if (c == null) return;
+            int seq = ++_paRemoteSeq;
+            var (json, err) = await Supa.RpcAsync("pa_company_routes", new { p_company = c.Id });
+            if (err != null || seq != _paRemoteSeq || _empSel?.Id != c.Id) return;   // servidor sin megafonias-sin-ruta.sql: solo las instaladas
+            var locals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var it in _paRouteItems) { locals.Add(it.Id); if (it.Local) locals.Add(it.Name); }   // (el nombre: lo grabado antes del RouteID)
+            var extra = new List<PaRouteItem>();
+            try
+            {
+                using var d = JsonDocument.Parse(json);
+                foreach (var e in d.RootElement.EnumerateArray())
+                {
+                    string id = Str(e, "route"); if (id.Length == 0 || locals.Contains(id)) continue;
+                    extra.Add(new PaRouteItem { Id = id, Name = Str(e, "name").Length > 0 ? Str(e, "name") : id, Dir = null });
+                }
+            }
+            catch { }
+            if (extra.Count == 0) return;
+            extra.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+            _paRouteItems.RemoveAll(x => !x.Local);
+            _paRouteItems.AddRange(extra);
+            bool hadNone = string.IsNullOrEmpty(_paRoute);
+            ShowPaRouteItems(_paRoute, _paRouteDir);
+            if (hadNone && !string.IsNullOrEmpty(_paRoute) && (PaEnabledHere() || Supa.IsSuperadmin)) LoadPaRoute();   // sin rutas instaladas: la primera con megafonía
         }
 
         void OnPaRouteChanged()
         {
+            if (_paFillingRoutes) return;
             int i = _paRouteBox.SelectedIndex;
-            if (i < 0 || i >= _routesAll.Count) return;
-            if (string.Equals(_routesAll[i].Path, _paRouteDir, StringComparison.OrdinalIgnoreCase)) return;
-            SetPaRoute(_routesAll[i]);
+            if (i < 0 || i >= _paRouteItems.Count) return;
+            var it = _paRouteItems[i];
+            if (string.Equals(it.Id, _paRoute, StringComparison.OrdinalIgnoreCase) && string.Equals(it.Dir, _paRouteDir, StringComparison.OrdinalIgnoreCase)) return;
+            SetPaRoute(it);
             _paLineId = null;          // las líneas son de cada ruta
             LoadPaRoute();
         }
 
-        void SetPaRoute(ORTS.Menu.Route r)
+        void SetPaRoute(PaRouteItem it)
         {
-            _paRouteName = r.Name;
-            _paRouteDir = r.Path;
-            _paRoute = RouteIds.IdOf(r.Path, r.Name);
+            _paRouteName = it.Local ? it.Name : null;   // sin la ruta: nada que trasladar por su nombre
+            _paRouteDir = it.Dir;
+            _paRoute = it.Id;
+            _paRouteDisplay = it.Name;
         }
+        string _paRouteDisplay;
 
         void OnPaLineChanged()
         {
@@ -319,7 +378,8 @@ namespace SelectOR
             {
                 Msg(_paMsg, Tr("Cargando estaciones…"), false);
                 string dir = _paRouteDir;
-                var tdb = await Task.Run(() => TdbStationNames(dir));
+                var tdb = dir == null ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)   // ruta no instalada
+                                      : await Task.Run(() => TdbStationNames(dir));
 
                 var (json, err) = await PaBundle(_empSel.Id, _paRoute, _paRouteName);
                 if (err != null) { Msg(_paMsg, Tr("Error: ") + err, true); return; }
@@ -340,6 +400,7 @@ namespace SelectOR
 
                 string resumen = string.Format(Tr("{0} estaciones · {1} con audio · {2} líneas."),
                                                _paRows.Count, CountWithAudio(), _paLines.Count);
+                if (_paRouteDir == null) resumen += "  " + Tr("Esta ruta no está instalada en este equipo: se ve lo grabado para ella.");
                 if (!PaEnabledHere())   // el superadmin la ve aunque esté apagada: que no se le olvide
                     resumen += "  " + Tr("La megafonía está DESHABILITADA para esta empresa: nadie la oirá.");
                 Msg(_paMsg, resumen, !PaEnabledHere());
@@ -358,7 +419,8 @@ namespace SelectOR
                 PaRow Ensure(string norm)
                 {
                     if (byNorm.TryGetValue(norm, out var r)) return r;
-                    r = new PaRow { Norm = norm, Display = norm, InRoute = false };
+                    // sin el .tdb (o fuera de él) solo se tiene la clave en minúsculas: con mayúscula inicial
+                    r = new PaRow { Norm = norm, Display = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(norm), InRoute = false };
                     byNorm[norm] = r; _paRows.Add(r);
                     return r;
                 }
@@ -469,8 +531,8 @@ namespace SelectOR
                 Color? audioCol = path == null ? Theme.Subtle : (own || _paLineId == null) ? Theme.Accent : (Color?)null;
                 string nombre = r.Display;
                 if (_paLineId != null && !r.LineStop) nombre += "   ·  " + Tr("no para en esta línea");
-                else if (_paLineId == null && !r.InRoute) nombre += "   ·  " + Tr("no está en la ruta");
-                Color? nameCol = (_paLineId != null && !r.LineStop) || (_paLineId == null && !r.InRoute) ? Theme.Subtle : (Color?)null;
+                else if (_paLineId == null && !r.InRoute && _paRouteDir != null) nombre += "   ·  " + Tr("no está en la ruta");
+                Color? nameCol = (_paLineId != null && !r.LineStop) || (_paLineId == null && !r.InRoute && _paRouteDir != null) ? Theme.Subtle : (Color?)null;
                 // Con una línea elegida: su aviso propio (marcado) o, si no tiene, el de la estación.
                 (int radius, int lead) lcfg = default;
                 bool cfgLinea = _paLineId != null && _paLineCfg.TryGetValue(LineCfgKey(_paLineId, r.Norm), out lcfg);
@@ -479,7 +541,8 @@ namespace SelectOR
                 _paStList.AddRow(new[] { nombre, audio, rad + " m" + (cfgLinea ? " ·L" : ""), lead + " s" + (cfgLinea ? " ·L" : "") },
                                  new Color?[] { nameCol, audioCol, cfgCol, cfgCol });
             }
-            if (orden.Count == 0) _paStList.SetEmpty(Tr("No se han encontrado estaciones en el .tdb de esta ruta."));
+            if (orden.Count == 0) _paStList.SetEmpty(_paRouteDir == null ? Tr("Esta ruta no tiene estaciones con megafonía guardada.")
+                                                                         : Tr("No se han encontrado estaciones en el .tdb de esta ruta."));
             _paStList.EndReload();
 
             // --- líneas ---

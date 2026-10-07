@@ -215,7 +215,7 @@ namespace SelectOR
                     body = string.Format(Tr("Un administrador ha eliminado tu servicio {0} en {1}."), routeTxt, co); sub = 0; break;
                 case "service_annulled":
                     icon = "⛔"; c = bad; title = Tr("Servicio anulado");
-                    body = string.Format(Tr("El superadministrador ha anulado tu servicio {0} en {1}."), routeTxt, co)
+                    body = string.Format(Tr("El administrador ha anulado tu servicio {0} en {1}."), routeTxt, co)
                          + (DataStr(r, "reason").Length > 0 ? "\n" + Tr("Motivo: ") + DataStr(r, "reason") : ""); sub = 0; break;
                 // Préstamos
                 case "loan_approved":
@@ -233,6 +233,41 @@ namespace SelectOR
                 case "loan_paid":
                     icon = "🎉"; c = ok; title = Tr("Préstamo devuelto");
                     body = string.Format(Tr("{0} ha terminado de devolver un préstamo."), co); sub = 1; break;
+                // Rutas autorizadas
+                case "route_request":
+                    icon = "🛤"; c = buy; title = Tr("Solicitud de ruta");
+                    body = string.Format(Tr("{0} pide autorizar la ruta «{1}» para {2}."), who, DataOr(r, "route", DataStr(r, "route_id")), co)
+                         + (DataStr(r, "note").Length > 0 ? "\n«" + DataStr(r, "note") + "»" : ""); sub = CatalogoSubtab; cid = null; break;
+                case "route_version":
+                    icon = "🛤"; c = buy; title = Tr("Versión nueva de una ruta");
+                    body = string.Format(Tr("Se ha usado una versión de «{0}» distinta de la autorizada ({1}). Revísala en el catálogo."), DataOr(r, "route", DataStr(r, "route_id")), co);
+                    sub = CatalogoSubtab; cid = null; break;
+                case "route_authorized":
+                    icon = "✅"; c = ok; title = Tr("Ruta autorizada");
+                    body = string.Format(Tr("La ruta «{0}» ya está autorizada para los servicios de {1}."), DataOr(r, "route", DataStr(r, "route_id")), co); sub = RutasSubtab; break;
+                case "route_version_ok":
+                    icon = "✅"; c = ok; title = Tr("Versión de ruta aprobada");
+                    body = string.Format(Tr("La versión nueva de «{0}» ya vale para los servicios de {1}."), DataOr(r, "route", DataStr(r, "route_id")), co); sub = RutasSubtab; break;
+                case "route_rejected":
+                case "route_version_rejected":
+                case "route_revoked":
+                    icon = "⛔"; c = bad;
+                    title = r.Kind == "route_revoked" ? Tr("Ruta retirada") : r.Kind == "route_rejected" ? Tr("Ruta rechazada") : Tr("Versión de ruta rechazada");
+                    body = string.Format(r.Kind == "route_revoked" ? Tr("La ruta «{0}» ya no está autorizada para los servicios de {1}.")
+                                       : r.Kind == "route_rejected" ? Tr("La ruta «{0}» no se ha autorizado para los servicios de {1}.")
+                                       : Tr("La versión de «{0}» que usa {1} no se ha aprobado."), DataOr(r, "route", DataStr(r, "route_id")), co)
+                         + (DataStr(r, "reason").Length > 0 ? "\n" + Tr("Motivo: ") + DataStr(r, "reason") : ""); sub = RutasSubtab; break;
+                case "route_proposal":
+                    icon = "🛤"; c = info; title = Tr("Propuesta de ruta");
+                    body = string.Format(Tr("{0} propone usar la ruta «{1}» en {2}. Revísala y solicítala en Rutas."), who, DataOr(r, "route", DataStr(r, "route_id")), co)
+                         + (DataStr(r, "note").Length > 0 ? "\n«" + DataStr(r, "note") + "»" : ""); sub = RutasSubtab; break;
+                case "route_proposal_sent":
+                    icon = "🛤"; c = ok; title = Tr("Tu propuesta de ruta, solicitada");
+                    body = string.Format(Tr("{0} ha solicitado al administrador la ruta «{1}» que propusiste para {2}."), who, DataOr(r, "route", DataStr(r, "route_id")), co); sub = RutasSubtab; break;
+                case "route_proposal_dismissed":
+                    icon = "🛤"; c = bad; title = Tr("Propuesta de ruta descartada");
+                    body = string.Format(Tr("{0} ha descartado la ruta «{1}» que propusiste para {2}."), who, DataOr(r, "route", DataStr(r, "route_id")), co)
+                         + (DataStr(r, "reason").Length > 0 ? "\n" + Tr("Motivo: ") + DataStr(r, "reason") : ""); sub = RutasSubtab; break;
                 // Normas de la empresa
                 case "rule_new":
                     icon = "📜"; c = info; title = Tr("Norma nueva en la empresa");

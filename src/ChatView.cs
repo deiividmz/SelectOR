@@ -265,7 +265,7 @@ namespace SelectOR
 
         public static string RoleText(string role) => role switch
         {
-            "owner" => I18n.T("Gerente"), "manager" => I18n.T("Gestor"), "superadmin" => I18n.T("Superadmin"), _ => ""
+            "owner" => I18n.T("Gerente"), "manager" => I18n.T("Gestor"), "superadmin" => I18n.T("Administrador"), _ => ""
         };
 
         static Color RoleColor(string role) => role == "owner" ? Color.FromArgb(245, 197, 66) : role == "superadmin" ? Color.FromArgb(96, 165, 250) : Color.FromArgb(167, 139, 250);

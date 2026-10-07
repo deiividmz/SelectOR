@@ -515,15 +515,15 @@ namespace SelectOR
         }
 
         // Secciones de Empresas (el índice es el que usan ShowSubtab / UpdateSubtabVisibility).
-        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía", "Chat", "Normas", "Préstamos" };
-        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "shield", "connect", "globe", "train", "train", "speaker", "chat", "rules", "bank" };
+        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía", "Chat", "Normas", "Préstamos", "Rutas", "Catálogo de rutas" };
+        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "shield", "connect", "globe", "train", "train", "speaker", "chat", "rules", "bank", "map", "map" };
         // Agrupación del menú lateral.
         static readonly (string title, int[] items)[] NavGroupDefs =
         {
             ("OPERACIÓN", new[] { 0, 9, 10 }),        // Servicios · Flota · Compra
             ("FINANZAS", new[] { 1, 4 }),             // Banca · Ranking
-            ("EMPRESA", new[] { 12, 2, 13, 3, 11, 5 }),   // Chat · Socios · Normas · Ajustes · Megafonía · Mi perfil
-            ("ADMINISTRACIÓN", new[] { 6, 14, 7, 8 }),    // Revisión (carné) · Préstamos · Usuarios · Administración
+            ("EMPRESA", new[] { 12, 2, 13, 15, 3, 11, 5 }),   // Chat · Socios · Normas · Rutas · Ajustes · Megafonía · Mi perfil
+            ("ADMINISTRACIÓN", new[] { 6, 14, 16, 7, 8 }),    // Revisión (carné) · Préstamos · Catálogo de rutas · Usuarios · Administración
         };
         const int RailW = 250;          // ancho del menú lateral de Empresas
         static readonly Color RailCardC = Color.FromArgb(38, 46, 41);   // tarjeta de la empresa (verde muy oscuro)
@@ -534,7 +534,7 @@ namespace SelectOR
             Color.FromArgb(120, 144, 226), Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191), Color.FromArgb(150, 160, 170),
             Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(229, 115, 115), Color.FromArgb(45, 212, 191),
             Color.FromArgb(167, 139, 250), Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(167, 139, 250), Color.FromArgb(120, 144, 226),
-            Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191)
+            Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191), Color.FromArgb(240, 180, 70), Color.FromArgb(240, 180, 70)
         };
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
         bool _subtabAutoFallback;       // se abrió Ranking automáticamente (sin empresas aún): al cargar, volver a Servicios
@@ -778,6 +778,7 @@ namespace SelectOR
                 if (_empSubtab == 4) LoadRankTab();
                 if (_empSubtab == 11) OnMegafoniaShown();   // otra empresa → otros audios
                 if (_empSubtab == ChatSubtab) OnChatShown();  // otra empresa → otro chat
+                if (_empSubtab == RutasSubtab) LoadCoRoutes();   // otra empresa → otras rutas
             }
             else { _myRole = null; UpdateRoleUi(); }
         }
@@ -850,7 +851,9 @@ namespace SelectOR
             _paPanel = BuildPaSubpanel();
             _rulesPanel = BuildRulesSubpanel();           // normas internas de la empresa
             BuildLoansAdminSubpanel();                    // préstamos de todas las empresas (superadmin)
-            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel, _chatPanel, _rulesPanel, _loansAdminPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
+            BuildCoRoutesSubpanel();                      // rutas que afectan a la empresa
+            BuildCatalogSubpanel();                       // catálogo global de rutas (superadmin)
+            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel, _chatPanel, _rulesPanel, _loansAdminPanel, _coRoutesPanel, _catPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
 
             _empHomeMsg = EmpMsg(); _empHomeMsg.Dock = DockStyle.Bottom;
 
@@ -1174,7 +1177,7 @@ namespace SelectOR
 
             // --- Tarifas ---
             var pTar = FormPage(true);
-            pTar.Controls.Add(EmpHeader("TARIFAS GLOBALES DE LOS SERVICIOS (€) — SOLO SUPERADMIN"));
+            pTar.Controls.Add(EmpHeader("TARIFAS GLOBALES DE LOS SERVICIOS (€) — SOLO ADMINISTRADOR"));
             pTar.Controls.Add(EmpFieldLabel(Tr("Ingreso por km (mercancías de 500 t)")));
             _tarIncome = EmpInput("8"); _tarIncome.Width = 240; pTar.Controls.Add(_tarIncome);
             pTar.Controls.Add(EmpFieldLabel(Tr("Cánon AI (administrador de infraestructuras) por km")));
@@ -1196,8 +1199,8 @@ namespace SelectOR
             var pBal = FormPage(false);
             _tarBalanceRow = new Panel { AutoSize = true, BackColor = Theme.Bg, Margin = new Padding(0) };
             var brInner = new TableLayoutPanel { AutoSize = true, ColumnCount = 1 };
-            brInner.Controls.Add(EmpHeader("SALDO DE LA EMPRESA (SUPERADMIN)"));
-            brInner.Controls.Add(EmpFieldLabel(Tr("Fijar saldo (€) — solo el superadministrador")));
+            brInner.Controls.Add(EmpHeader("SALDO DE LA EMPRESA (ADMINISTRADOR)"));
+            brInner.Controls.Add(EmpFieldLabel(Tr("Fijar saldo (€) — solo el administrador")));
             _tarBalance = EmpInput("0"); _tarBalance.Width = 240; brInner.Controls.Add(_tarBalance);
             _tarBalanceBtn = EmpButton(Tr("Fijar saldo"), primary: true); _tarBalanceBtn.Width = 200;
             _tarBalanceBtn.Click += (s, e) => AdminSetBalance();
@@ -1206,7 +1209,7 @@ namespace SelectOR
             pBal.Controls.Add(_tarBalanceRow);
             _defBalanceRow = new Panel { AutoSize = true, BackColor = Theme.Bg, Margin = new Padding(0, 12, 0, 0) };
             var dbInner = new TableLayoutPanel { AutoSize = true, ColumnCount = 1 };
-            dbInner.Controls.Add(EmpHeader("SALDO INICIAL DE EMPRESAS NUEVAS (GLOBAL, SUPERADMIN)"));
+            dbInner.Controls.Add(EmpHeader("SALDO INICIAL DE EMPRESAS NUEVAS (GLOBAL, ADMINISTRADOR)"));
             dbInner.Controls.Add(EmpFieldLabel(Tr("Saldo con el que nace toda empresa nueva (€)")));
             _defBalance = EmpInput("0"); _defBalance.Width = 240; dbInner.Controls.Add(_defBalance);
             _defBalanceBtn = EmpButton(Tr("Guardar saldo inicial"), primary: true); _defBalanceBtn.Width = 220;
@@ -1219,7 +1222,7 @@ namespace SelectOR
             var pFs = FormPage(false);
             _fleetSettingsRow = new Panel { AutoSize = true, BackColor = Theme.Bg, Margin = new Padding(0) };
             var fsInner = new TableLayoutPanel { AutoSize = true, ColumnCount = 1 };
-            fsInner.Controls.Add(EmpHeader("ECONOMÍA DE FLOTA (GLOBAL, SUPERADMIN)"));
+            fsInner.Controls.Add(EmpHeader("ECONOMÍA DE FLOTA (GLOBAL, ADMINISTRADOR)"));
             fsInner.Controls.Add(EmpFieldLabel(Tr("Escala de precio (1 = precios reales en millones)")));
             _fsScale = EmpInput("1"); _fsScale.Width = 240; fsInner.Controls.Add(_fsScale);
             fsInner.Controls.Add(EmpFieldLabel(Tr("Alquiler por servicio (fracción del valor, p. ej. 0,00008)")));
@@ -1246,7 +1249,7 @@ namespace SelectOR
             var L = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
             var R = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(48, 0, 0, 0) };
             pPax.Controls.Add(L, 0, 0); pPax.Controls.Add(R, 1, 0);
-            L.Controls.Add(EmpHeader("MODELO DE VIAJEROS (GLOBAL, SUPERADMIN)"));
+            L.Controls.Add(EmpHeader("MODELO DE VIAJEROS (GLOBAL, ADMINISTRADOR)"));
             L.Controls.Add(EmpNote(Tr("Viajeros que esperan = plazas del tren × % base × tamaño de estación × tipo de servicio × hora × estación del año × clima × variación aleatoria. Nunca suben más viajeros que plazas libres.")));
             L.Controls.Add(EmpFieldLabel(Tr("Viajeros que esperan en una estación de tamaño ×1 (% de las plazas del tren)")));
             _pmCapPct = EmpInput("12"); _pmCapPct.Anchor = AnchorStyles.Left; _pmCapPct.Width = 200; L.Controls.Add(_pmCapPct);
@@ -1278,7 +1281,7 @@ namespace SelectOR
 
             // --- Clasificación (tipo de servicio) ---
             var pCls = FormPage(false); pCls.Width = 720;
-            pCls.Controls.Add(EmpHeader("CLASIFICACIÓN DEL TIPO DE SERVICIO (GLOBAL, SUPERADMIN)"));
+            pCls.Controls.Add(EmpHeader("CLASIFICACIÓN DEL TIPO DE SERVICIO (GLOBAL, ADMINISTRADOR)"));
             pCls.Controls.Add(EmpNote(Tr("Se clasifica por la velocidad máxima de la composición. En la banda media, si la densidad de viajeros es alta (muchas plazas de pie), se considera Cercanías.")));
             pCls.Controls.Add(ParamGrid(new[] { "Alta Vel. ≥ km/h", "Larga ≥ km/h", "Media ≥ km/h", "Media < pax/m²" }, new[]
             {
@@ -1291,7 +1294,7 @@ namespace SelectOR
 
             // --- Actualizaciones (publicar nueva versión de SelectOR) ---
             var pUpd = FormPage(false); pUpd.Width = 720;
-            pUpd.Controls.Add(EmpHeader("PUBLICAR ACTUALIZACIÓN (SUPERADMIN)"));
+            pUpd.Controls.Add(EmpHeader("PUBLICAR ACTUALIZACIÓN (ADMINISTRADOR)"));
             _updInfo = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.Font(10f, FontStyle.Bold), Margin = new Padding(2, 4, 2, 6) };
             pUpd.Controls.Add(_updInfo);
             pUpd.Controls.Add(EmpNote(Tr("Cómo publicar: 1) sube la versión en SelectOR.csproj (p. ej. 1.2.1), 2) compila, 3) abre esa nueva versión, 4) escribe las novedades y pulsa Publicar. Se empaquetan los archivos de SelectOR que se están ejecutando y todos los usuarios recibirán el aviso para instalarla.")));
@@ -1506,6 +1509,8 @@ namespace SelectOR
             if (_chatPanel != null && !(i == ChatSubtab)) _chatPanel.Visible = false;
             if (_rulesPanel != null && !(i == NormasSubtab)) _rulesPanel.Visible = false;
             if (_loansAdminPanel != null && !(i == PrestamosSubtab)) _loansAdminPanel.Visible = false;
+            if (_coRoutesPanel != null && !(i == RutasSubtab)) _coRoutesPanel.Visible = false;
+            if (_catPanel != null && !(i == CatalogoSubtab)) _catPanel.Visible = false;
             if (i == 0) ShowFast(_svcPanel, true);
             if (i == 1) ShowFast(_bankPanel, true);
             if (i == 2) ShowFast(_memberPanel, true);
@@ -1522,6 +1527,8 @@ namespace SelectOR
             if (i == ChatSubtab) ShowFast(_chatPanel, true);
             if (i == NormasSubtab) ShowFast(_rulesPanel, true);
             if (i == PrestamosSubtab) ShowFast(_loansAdminPanel, true);
+            if (i == RutasSubtab) ShowFast(_coRoutesPanel, true);
+            if (i == CatalogoSubtab) ShowFast(_catPanel, true);
             __vis.Dispose();
             var __load = Perf.T("ShowSubtab " + i + " · carga");
             // Cada subpestaña recarga sus datos al abrirse (ya no hay botón "Actualizar").
@@ -1540,6 +1547,8 @@ namespace SelectOR
             if (i == ChatSubtab) OnChatShown();
             if (i == NormasSubtab) { UpdateRuleButtons(); LoadRules(); }
             if (i == PrestamosSubtab) LoadLoansAdmin();
+            if (i == RutasSubtab) LoadCoRoutes();
+            if (i == CatalogoSubtab) LoadCatalog();
             __load.Dispose();
             using (Perf.T("ShowSubtab " + i + " · kpis"))
             UpdateCompanyKpis();                  // la tira de la empresa se muestra u oculta según la sección
@@ -1550,7 +1559,7 @@ namespace SelectOR
         {
             RefreshEmpresasView();
             AjustarNav();   // al hacerse visible ya se conoce el alto real del menú lateral
-            if (Supa.IsSuperadmin) { LoadReview(onlyCount: true); LoadLoansAdmin(onlyCount: true); }   // «Revisión (n)» y «Préstamos (n)»
+            if (Supa.IsSuperadmin) { LoadReview(onlyCount: true); LoadLoansAdmin(onlyCount: true); LoadCatalog(onlyCount: true); }   // «Revisión (n)», «Préstamos (n)» y «Catálogo de rutas (n)»
             if (Supa.IsLoggedIn && !_empLoaded) LoadCompanies();
             else if (!Supa.IsLoggedIn) TryAutoLogin();
         }
@@ -1591,6 +1600,7 @@ namespace SelectOR
                 if (string.IsNullOrWhiteSpace(Supa.Username)) LoadMyUsername();
                 StartRealtime();   // escucha de cambios en vivo (una sola vez)
                 StartNotifications();   // avisos emergentes (solicitudes, compras, roles…)
+                if (!_routeStatesAsked) { _routeStatesAsked = true; _ = RefreshLocalRouteStatesAsync(); }   // distintivos de las rutas
             }
         }
 
@@ -2819,7 +2829,7 @@ namespace SelectOR
         async void ChangeLogo()
         {
             if (_empSel == null) return;
-            if (!(CanManage() || Supa.IsSuperadmin)) { Msg(_empHomeMsg, Tr("Solo el gerente, un gestor o el superadministrador pueden cambiar el logotipo."), true); return; }
+            if (!(CanManage() || Supa.IsSuperadmin)) { Msg(_empHomeMsg, Tr("Solo el gerente, un gestor o el administrador pueden cambiar el logotipo."), true); return; }
             using var dlg = new OpenFileDialog { Title = Tr("Elegir logotipo"), Filter = "Imágenes|*.png;*.jpg;*.jpeg;*.bmp;*.gif" };
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             string dataUri;
@@ -3295,6 +3305,9 @@ namespace SelectOR
             }
             var (vehicleId, reason) = await ResolveCompanyUnitReason(_empOnDutyCompany.Id, engNames);
             if (vehicleId == null) { _empStartFailReason = reason; return null; }   // no es de la flota / no disponible
+            // Ruta autorizada (rutas-autorizadas.sql): en modo obligatorio, sin ella no hay servicio.
+            string routeBlock = await RouteGateAsync(_empOnDutyCompany.Id);
+            if (routeBlock != null) { _empStartFailReason = routeBlock; return null; }
             var (json, err) = await StartServiceRpc(_empOnDutyCompany.Id, _curRoute?.Name ?? "", CurrentConsistLabel(),
                                                     CurrentPathLabel(), vehicleId, CurrentDrivenConsist());
             if (err != null || string.IsNullOrWhiteSpace(json))
@@ -8154,7 +8167,7 @@ namespace SelectOR
         // el servidor lo vuelve a comprobar). Única dentro de la empresa. Vacía = quitar matrícula.
         async void AssignPlateUi()
         {
-            if (!CanManage() && !Supa.IsSuperadmin) { Msg(_fleetMsg, Tr("Solo el gerente, un gestor o el superadministrador pueden asignar matrículas."), true); return; }
+            if (!CanManage() && !Supa.IsSuperadmin) { Msg(_fleetMsg, Tr("Solo el gerente, un gestor o el administrador pueden asignar matrículas."), true); return; }
             int i = FleetSelectedRow();
             if (i < 0 || i >= _fleetIds.Count) { Msg(_fleetMsg, Tr("Selecciona un vehículo de la lista."), true); return; }
             string current = i < _fleetPlates.Count ? _fleetPlates[i] : "";
@@ -8785,6 +8798,7 @@ namespace SelectOR
             if (_empLogoPic != null) _empLogoPic.Cursor = manage ? Cursors.Hand : Cursors.Default;   // cambiar logotipo: solo gestión
             if (_empLogoTip != null && _empLogoPic != null) _empLogoTip.SetToolTip(_empLogoPic, manage ? Tr("Cambiar logotipo") : "");
             UpdateTrainShortcuts();   // «Comprar este tren» en Exploración/Horarios según el rol
+            UpdateCoRouteButtons();   // Rutas: «Solicitar autorización» solo para gerente y gestores
             UpdateSubtabVisibility();
         }
 
@@ -8807,8 +8821,8 @@ namespace SelectOR
             // gestiona solo la ve si está habilitada; el superadmin la ve siempre (para habilitarla).
             bool pa = su || (PaEnabledHere() && CanManage());
             bool[] show = hasCompany
-                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true, true, su }   // Compra: solo gestión · Revisión y Préstamos: superadmin
-                : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false, false, su };
+                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true, true, su, su || _routeMode != "collect", su }   // Compra: solo gestión · Revisión, Préstamos y Catálogo de rutas: superadmin · Rutas: no en «solo recopilar»
+                : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false, false, su, false, su };
             for (int k = 0; k < _empSubtabs.Length && k < show.Length; k++)
                 if (_empSubtabs[k] != null) _empSubtabs[k].Visible = show[k];
             UpdateNavGroupHeaders();   // oculta el encabezado de un grupo si ninguna de sus secciones se ve
@@ -8910,7 +8924,7 @@ namespace SelectOR
 
         async void SaveTariffs()
         {
-            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el superadministrador puede modificar las tarifas."), true); return; }
+            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el administrador puede modificar las tarifas."), true); return; }
             Msg(_tariffMsg, Tr("Guardando tarifas…"), false);
             var (_, err) = await Supa.RpcAsync("set_default_tariffs", new
             {
@@ -8931,7 +8945,7 @@ namespace SelectOR
         async void AdminSetBalance()
         {
             if (_empSel == null) return;
-            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el superadministrador puede fijar el saldo."), true); return; }
+            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el administrador puede fijar el saldo."), true); return; }
             double bal = ParseNum(_tarBalance.Box.Text);
             Msg(_tariffMsg, Tr("Fijando saldo…"), false);
             var (_, err) = await Supa.RpcAsync("admin_set_balance", new { p_company = _empSel.Id, p_balance = bal });
@@ -8954,7 +8968,7 @@ namespace SelectOR
         // Guarda el saldo inicial GLOBAL de empresas nuevas (SOLO superadmin).
         async void SaveDefaultBalance()
         {
-            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el superadministrador puede cambiar el saldo inicial."), true); return; }
+            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el administrador puede cambiar el saldo inicial."), true); return; }
             double bal = ParseNum(_defBalance.Box.Text);
             Msg(_tariffMsg, Tr("Guardando saldo inicial…"), false);
             var (_, err) = await Supa.RpcAsync("set_default_initial_balance", new { p_balance = bal });
@@ -9022,7 +9036,7 @@ namespace SelectOR
         // Guarda la economía de flota (escala de precio + % alquiler + % mantenimiento; SOLO superadmin).
         async void SaveFleetSettings()
         {
-            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el superadministrador puede modificar la economía de flota."), true); return; }
+            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el administrador puede modificar la economía de flota."), true); return; }
             Msg(_tariffMsg, Tr("Guardando economía de flota…"), false);
             var (_, err) = await Supa.RpcAsync("set_fleet_settings", new
             {
@@ -9059,7 +9073,7 @@ namespace SelectOR
 
         async void PublishUpdate()
         {
-            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el superadministrador puede publicar actualizaciones."), true); return; }
+            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el administrador puede publicar actualizaciones."), true); return; }
             string cur = Updater.CurrentVersionText;
             var latest = await Updater.GetLatestAsync();
             if (latest != null && Updater.TryParse(latest.Version, out var lv) && lv >= Updater.CurrentVersion)
@@ -9191,7 +9205,7 @@ namespace SelectOR
         // Guarda el modelo (app_settings.pax_model). Desde «Viajeros» guarda también la demanda base.
         async void SavePaxModel(bool withDemand)
         {
-            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el superadministrador puede modificar el modelo de viajeros."), true); return; }
+            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el administrador puede modificar el modelo de viajeros."), true); return; }
             var c = ReadPaxModelInputs();
             if (c == null) return;
             Msg(_tariffMsg, Tr("Guardando…"), false);

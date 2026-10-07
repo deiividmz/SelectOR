@@ -273,7 +273,7 @@ namespace SelectOR
             var next = live.Where(l => l.NextDue != DateTime.MinValue).Select(l => l.NextDue).DefaultIfEmpty(DateTime.MinValue).Min();
             int pend = list.Count(l => l.Status == "pending"), late = live.Sum(l => l.Late);
             _loanSummary.Text = live.Count == 0 && pend == 0
-                ? Tr("🏦  El banco presta a la empresa entre 10.000 € y 50.000.000 €, a devolver en 6 a 60 meses con cuotas mensuales. El superadministrador estudia cada solicitud y fija el interés.")
+                ? Tr("🏦  El banco presta a la empresa entre 10.000 € y 50.000.000 €, a devolver en 6 a 60 meses con cuotas mensuales. El administrador estudia cada solicitud y fija el interés.")
                 : "🏦  " + string.Format(Tr("Deuda viva: {0}  ·  cuotas: {1}/mes"), EurC(debt), EurC(monthly))
                   + (next != DateTime.MinValue ? "  ·  " + string.Format(Tr("próximo cobro: {0}"), next.ToString("dd/MM/yyyy", EsEs)) : "")
                   + (pend > 0 ? "  ·  " + string.Format(Tr(pend == 1 ? "{0} solicitud en estudio" : "{0} solicitudes en estudio"), pend) : "")
@@ -343,7 +343,7 @@ namespace SelectOR
             if (c == null || !(CanManage() || Supa.IsSuperadmin)) return;
             int[] plazos = { 6, 12, 18, 24, 36, 48, 60 };
             using var dlg = new FormDialog(Tr("Solicitar préstamo"), Tr("Enviar solicitud"), 560);
-            dlg.AddInfo(string.Format(Tr("{0} pide un préstamo al banco. El superadministrador estudiará la solicitud y fijará el tipo de interés; si lo aprueba, el dinero se ingresa en la tesorería y cada mes se cobra la cuota."), c.Name));
+            dlg.AddInfo(string.Format(Tr("{0} pide un préstamo al banco. El administrador estudiará la solicitud y fijará el tipo de interés; si lo aprueba, el dinero se ingresa en la tesorería y cada mes se cobra la cuota."), c.Name));
             var amt = dlg.AddText("amount", Tr("Importe (€) · entre 10.000 y 50.000.000"), "", Tr("Por ejemplo: 500000"));
             var term = dlg.AddCombo("months", Tr("Plazo"), plazos.Select(p => string.Format(Tr("{0} meses"), p)), 3);
             dlg.AddText("purpose", Tr("Finalidad (opcional)"), "", Tr("Por ejemplo: compra de dos unidades nuevas"));

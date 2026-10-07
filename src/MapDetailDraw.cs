@@ -56,7 +56,24 @@ namespace SelectOR
                 var c1 = proj(l.MinLa, l.MinLo); var c2 = proj(l.MaxLa, l.MaxLo);
                 return vis.IntersectsWith(RectangleF.FromLTRB(Math.Min(c1.X, c2.X) - 1, Math.Min(c1.Y, c2.Y) - 1, Math.Max(c1.X, c2.X) + 1, Math.Max(c1.Y, c2.Y) + 1));
             }
-            PointF[] Pts(HudMapDetail.Line l) { var p = new PointF[l.Lat.Length]; for (int i = 0; i < p.Length; i++) p[i] = proj(l.Lat[i], l.Lon[i]); return p; }
+            // En pantalla, sin los puntos que caen a menos de 0,8 px del anterior (con toda la ruta a la vista, una vía de
+            // cientos de vértices se queda en unos pocos): el trazo es el mismo y se dibuja mucho más deprisa.
+            var buf = new List<PointF>(256);
+            PointF[] Pts(HudMapDetail.Line l)
+            {
+                buf.Clear();
+                int n = l.Lat.Length;
+                PointF last = default;
+                for (int i = 0; i < n; i++)
+                {
+                    var p = proj(l.Lat[i], l.Lon[i]);
+                    if (i == 0 || i == n - 1) { buf.Add(p); last = p; continue; }
+                    float dx = p.X - last.X, dy = p.Y - last.Y;
+                    if (dx * dx + dy * dy >= 0.64f) { buf.Add(p); last = p; }
+                }
+                if (buf.Count == 1) buf.Add(buf[0]);
+                return buf.ToArray();
+            }
             // En el mini-mapa (pocos cientos de píxeles) todo un poco más fino, para que no se amontone.
             bool compact = area.Width < 420;
             float k = Math.Max(1f, scale * 0.6f) * (compact ? 0.72f : 1f);

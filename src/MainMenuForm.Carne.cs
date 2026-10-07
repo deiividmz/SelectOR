@@ -655,7 +655,7 @@ namespace SelectOR
             if (onlyCount || _revList == null) return;
             _revAll.Clear(); _revAll.AddRange(rows);
             _revList.EmptyText = err != null
-                ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no tiene la revisión del superadministrador (falta carne-revision-superadmin.sql).") : Tr("Error: ") + err)
+                ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no tiene la revisión del administrador (falta carne-revision-superadmin.sql).") : Tr("Error: ") + err)
                 : Tr("No hay infracciones.");
             FillReviewCards();
         }

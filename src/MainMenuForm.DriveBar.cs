@@ -34,7 +34,7 @@ namespace SelectOR
 
         // Tren que se está conduciendo (capturado al lanzar: la selección del menú puede cambiar luego).
         TrainItem _drivenConsist;
-        string _drivenLabel = "", _drivenPath = "", _drivenRoute = "";
+        string _drivenLabel = "", _drivenPath = "", _drivenRoute = "", _drivenRouteDir = "";
 
         // Comprobación en caché de si el tren conducido es de la flota (para habilitar el botón).
         string _fleetCheckCompany; DateTime _fleetCheckUtc; string _fleetCheckReason; bool _fleetCheckOk, _fleetChecking;
@@ -50,6 +50,7 @@ namespace SelectOR
             _drivenLabel = _drivenConsist?.Name ?? CurrentConsistLabel();
             _drivenPath = CurrentPathLabel();
             _drivenRoute = _curRoute?.Name ?? "";
+            _drivenRouteDir = _curRoute?.Path ?? "";
             _fleetCheckCompany = null;
         }
 
@@ -196,6 +197,9 @@ namespace SelectOR
             var (vid, reason) = await ResolveCompanyUnitReason(co.Id, names);
             if (vid == null) { _empOnDutyCompany = prev; _fleetCheckCompany = null; return (false, ShortFleetReason(reason, co.Name)); }
             string plate = _lastUnitPlate;
+            // Ruta autorizada (rutas-autorizadas.sql): con OR en marcha, sin ventanas; en modo obligatorio, el motivo en la barra.
+            string block = await RouteGateAsync(co.Id, _drivenRouteDir, _drivenRoute, quiet: true);
+            if (block != null) { _empOnDutyCompany = prev; return (false, block.Split('\n')[0]); }
 
             var (json, err) = await StartServiceRpc(co.Id, _drivenRoute, _drivenLabel, _drivenPath, vid, _drivenConsist);
             if (err != null || string.IsNullOrWhiteSpace(json)) { _empOnDutyCompany = prev; return (false, Tr("No se pudo abrir el servicio: ") + err); }

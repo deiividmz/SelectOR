@@ -354,7 +354,7 @@ namespace SelectOR
             // Como «Economía de flota»: columna interior de ancho propio (los campos no se estiran).
             var p = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
             page.Controls.Add(p);
-            p.Controls.Add(EmpHeader("LIGA MENSUAL DE EMPRESAS (GLOBAL, SUPERADMIN)"));
+            p.Controls.Add(EmpHeader("LIGA MENSUAL DE EMPRESAS (GLOBAL, ADMINISTRADOR)"));
             p.Controls.Add(EmpIntro("Cada mes natural es una temporada. Al terminar, el servidor ingresa los premios en la tesorería de las empresas ganadoras y los apunta en su Banca."));
             _lgEnabled = ParamCheck(Tr("Liga activada")); _lgEnabled.Checked = true; p.Controls.Add(_lgEnabled);
             RoundedInput Campo(string etiqueta, string ph) { p.Controls.Add(EmpFieldLabel(etiqueta)); var i = EmpInput(ph); i.Width = 240; i.Anchor = AnchorStyles.Left; p.Controls.Add(i); return i; }
@@ -385,7 +385,7 @@ namespace SelectOR
 
         async void SaveLeagueSettings()
         {
-            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el superadministrador puede configurar la liga."), true); return; }
+            if (!Supa.IsSuperadmin) { Msg(_tariffMsg, Tr("Solo el administrador puede configurar la liga."), true); return; }
             Msg(_tariffMsg, Tr("Guardando liga…"), false);
             var prizes = new
             {

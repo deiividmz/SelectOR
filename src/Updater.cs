@@ -435,7 +435,7 @@ namespace SelectOR
         // Sube el paquete al bucket público y registra la versión. Devuelve null si OK o el error.
         public static async Task<string> PublishAsync(string notes, IProgress<string> status)
         {
-            if (!Supa.IsSuperadmin || string.IsNullOrEmpty(Supa.AccessToken)) return I18n.T("Solo el superadministrador puede publicar actualizaciones.");
+            if (!Supa.IsSuperadmin || string.IsNullOrEmpty(Supa.AccessToken)) return I18n.T("Solo el administrador puede publicar actualizaciones.");
             if (!HasSigningKey) return I18n.T("Este equipo no tiene la clave de firma de actualizaciones: sin ella las copias instaladas rechazarían el paquete.");
             await Supa.EnsureFreshTokenAsync();
             string ver = CurrentVersionText;

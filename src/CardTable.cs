@@ -28,6 +28,7 @@ namespace SelectOR
         public int TitleCol = 0;
         public int[] SubCols = Array.Empty<int>();       // segunda línea, separadas por «·»
         public int QuoteCol = -1;                        // tercera línea, entre comillas (si no está vacía)
+        public bool QuoteMarks = true;                   // false: la tercera línea sin comillas y con el color de su celda
         public int PillCol = -1;                         // pastilla a la derecha del título (con el color de su celda)
         public int RightCol = -1;                        // valor grande a la derecha
         public int[] RightSubCols = Array.Empty<int>();  // debajo del valor grande
@@ -255,7 +256,8 @@ namespace SelectOR
                 y += lh + Theme.Px(2);
             }
             if (quote.Length > 0)
-                TextRenderer.DrawText(g, "«" + quote + "»", _fQuote, new Rectangle(x, y, right - x, lh), Color.FromArgb(205, 210, 214), L1);
+                TextRenderer.DrawText(g, QuoteMarks ? "«" + quote + "»" : quote, _fQuote, new Rectangle(x, y, right - x, lh),
+                    QuoteMarks ? Color.FromArgb(205, 210, 214) : Col(r, QuoteCol) ?? Color.FromArgb(205, 210, 214), L1);
         }
     }
 }
