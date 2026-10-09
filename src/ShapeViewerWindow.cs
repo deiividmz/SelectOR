@@ -1,4 +1,4 @@
-// Visor 3D en grande: el modelo de una vista 3D (Exploración, Horarios, Editor, Flota, Compra) en su propia ventana,
+// Visor 3D en grande: el modelo de una vista 3D (Conducción libre, Horarios, Editor, Flota, Compra) en su propia ventana,
 // renderizado de nuevo a la resolución de la ventana (y con supersampling al soltar) para verlo al detalle.
 //  · Arrastrar: girar · botón derecho (o central) arrastrando: mover la cámara · rueda: acercar hacia el cursor
 //    (acercar = cerrar el ángulo de visión, como un teleobjetivo: la cámara nunca se mete dentro del modelo)
@@ -147,9 +147,9 @@ namespace SelectOR
             try { _src.BeforeRender?.Invoke(); } catch { }
             int w = Math.Min(7680, _canvas.Width * 2), h = Math.Min(4320, _canvas.Height * 2);
             using var bmp = ShapeRenderer.Render(_src.Geom, w, h, _yaw, _pitch, 2, _src.Flip, Distance(), _panX, _panY, Fov());
-            if (bmp == null) { MessageBox.Show(this, I18n.T("No se ha podido generar la imagen."), "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (bmp == null) { ThemedBox.Show(this, I18n.T("No se ha podido generar la imagen."), "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             try { bmp.Save(dlg.FileName, System.Drawing.Imaging.ImageFormat.Png); }
-            catch (Exception ex) { MessageBox.Show(this, I18n.T("No se ha podido guardar la imagen: ") + ex.Message, "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (Exception ex) { ThemedBox.Show(this, I18n.T("No se ha podido guardar la imagen: ") + ex.Message, "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 
         static string MakeFileName(string s)

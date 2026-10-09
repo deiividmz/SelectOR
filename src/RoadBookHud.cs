@@ -242,7 +242,7 @@ namespace SelectOR
                 g.DrawLine(pen, m.Left + m.Width / 3, m.Top, m.Left + m.Width / 3, m.Bottom);
                 g.DrawLine(pen, m.Left + 2 * m.Width / 3, m.Top, m.Left + 2 * m.Width / 3, m.Bottom);
             }
-            // Reloj de las horas: SIM (simulador) o PC (solo en Exploración)
+            // Reloj de las horas: SIM (simulador) o PC (solo en Conducción libre)
             if (ClockToggle)
             {
             using (var cb = new SolidBrush(_hoverZone == 5 ? Theme.SurfaceHi : Color.FromArgb(40, 255, 255, 255)))

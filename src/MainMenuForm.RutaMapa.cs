@@ -43,10 +43,10 @@ namespace SelectOR
             _rutaMap.SetData(null);
             _rutaMap.EmptyText = Tr("Cargando el trazado de la ruta…");
             SetRutaMapMode(true);
-            Task.Run(() =>
+            Task.Run(async () =>
             {
                 RouteMapData d = null;
-                try { d = BuildRouteMapData(dir); } catch { d = null; }
+                try { d = BuildRouteMapData(dir, await RouteTrackAsync(dir)); } catch { d = null; }
                 try
                 {
                     if (!IsHandleCreated) return;
@@ -129,22 +129,25 @@ namespace SelectOR
         }
 
         // ---------------- trazado ----------------
-        // Vías del .tdb (como el mapa del HUD) simplificadas a ~1 m, en lat/lon con la conversión de OR,
-        // y estaciones con su nombre bien escrito. null si no hay trazado utilizable.
-        static RouteMapData BuildRouteMapData(string routeDir)
+        // La vía del HUD (detail: la del .tdb, en lat/lon con la conversión de OR) y las estaciones con su nombre bien
+        // escrito. Sin el detalle, el trazado de antes. null si no hay trazado utilizable.
+        static RouteMapData BuildRouteMapData(string routeDir, HudMapDetail detail)
         {
-            ReadTdbWorld(routeDir, out var net, out var stWorld);
-            if (net == null || net.Count == 0) return null;
+            bool hud = detail != null && detail.Track.Count > 0;
+            ReadTdbWorld(routeDir, out var net, out var stWorld, withNet: !hud);   // con la vía del HUD, solo las estaciones
             var segLat = new List<double[]>(); var segLon = new List<double[]>();
-            foreach (var poly in net)
-            {
-                if (poly.Length < 2) continue;
-                var simp = Rdp(poly, 1.0);
-                var la = new double[simp.Count]; var lo = new double[simp.Count];
-                for (int i = 0; i < simp.Count; i++)
-                    if (!OrGeo.TryLatLon(simp[i].X, simp[i].Y, out la[i], out lo[i])) return null;
-                segLat.Add(la); segLon.Add(lo);
-            }
+            if (hud)
+                foreach (var l in detail.Track) { if (l.Lat.Length >= 2) { segLat.Add(l.Lat); segLon.Add(l.Lon); } }
+            else if (net != null)
+                foreach (var poly in net)
+                {
+                    if (poly.Length < 2) continue;
+                    var simp = Rdp(poly, 1.0);
+                    var la = new double[simp.Count]; var lo = new double[simp.Count];
+                    for (int i = 0; i < simp.Count; i++)
+                        if (!OrGeo.TryLatLon(simp[i].X, simp[i].Y, out la[i], out lo[i])) return null;
+                    segLat.Add(la); segLon.Add(lo);
+                }
             if (segLat.Count == 0) return null;
 
             var good = TdbNames(routeDir);

@@ -4,7 +4,9 @@
 //    la clave lleva la fecha y el tamaño del archivo, así que si cambias el modelo se rehace sola.
 //    La geometría y las texturas se cargan en segundo plano (2 a la vez); solo el dibujo (unos ms) va
 //    en el hilo de la interfaz, porque usa el dispositivo gráfico.
-//  · FleetCardList: una tarjeta por modelo con sus unidades en chips de color (estado).
+//    Un .con se dibuja entero (todos sus vehículos): lo hace MainMenuForm (ConsistFile) y va a su propia caché.
+//  · FleetCardList: una línea por tren (o máquina anterior), con su 2D ajustado a la línea y sus unidades en chips de
+//    color (estado) a la derecha, por apartados; los trenes, con el botón «i» (el desglose).
 //  · BuyCardGrid: cuadrícula de máquinas en venta; imita lo que se usaba del ListBox (Items, SelectedItem,
 //    SelectedIndex, TopIndex…) para que el resto de Compra siga igual. Los datos y el precio de cada
 //    tarjeta se calculan al aparecer en pantalla (2 a la vez) y se guardan.
@@ -34,6 +36,9 @@ namespace SelectOR
 
         public VehicleThumbs(Control ui) { _ui = ui; }
 
+        // .con → PNG de la composición entera (lo pone MainMenuForm: ConsistStripFileAsync).
+        public static Func<string, Task<string>> ConsistFile;
+
         public static string Dir => Path.Combine(AppDataTidy.CacheRoot, "vistas2d");
 
         static string KeyFile(string path)
@@ -49,9 +54,16 @@ namespace SelectOR
         public Task<string> FileAsync(string path)
         {
             if (string.IsNullOrEmpty(path)) return Task.FromResult<string>(null);
+            // una imagen ya hecha (la composición guardada de un tren de la empresa o de una solicitud)
+            if (path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(File.Exists(path) ? path : null);
             lock (_files)
             {
-                if (!_files.TryGetValue(path, out var t)) { t = Make(path); _files[path] = t; }
+                if (!_files.TryGetValue(path, out var t))
+                {
+                    t = ConsistFile != null && path.EndsWith(".con", StringComparison.OrdinalIgnoreCase) ? ConsistFile(path) : Make(path);
+                    _files[path] = t;
+                }
                 return t;
             }
         }
@@ -187,6 +199,12 @@ namespace SelectOR
 
         bool _disposed;
         public void Clear() { foreach (var b in _img.Values) b.Dispose(); _img.Clear(); _order.Clear(); _failed.Clear(); }
+        public void Forget(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            _failed.Remove(key);
+            if (_img.TryGetValue(key, out var b)) { b.Dispose(); _img.Remove(key); _order.Remove(key); }
+        }
         public void Dispose() { _disposed = true; Clear(); }
     }
 
@@ -230,6 +248,8 @@ namespace SelectOR
     public sealed class FleetModel
     {
         public string Key = "", Title = "", Sub = "", Path = "";
+        public string Group = "";   // apartado (rótulo encima de su primera tarjeta); vacío: sin rótulo
+        public bool Info;           // con el botón «i» (un tren: el desglose de su precio)
         public List<FleetUnit> Units = new List<FleetUnit>();
     }
 
@@ -248,13 +268,35 @@ namespace SelectOR
 
         readonly List<FleetModel> _models = new();
         readonly List<Card> _cards = new();
+        readonly List<(string text, int y)> _groups = new();
         int _total, _layoutW = -1, _state = -1;   // -1 todas · 0 disponibles · 1 en servicio · 2 en taller
         string _filter = "";
         FleetUnit _hover;
         public VehicleThumbs Thumbs;
-        readonly ThumbMemory _mem = new ThumbMemory(80);
+        readonly ThumbMemory _mem = new ThumbMemory(60);
+        public event Action<FleetModel> InfoClicked;
+        FleetModel _infoHover;
         public string SelectedId { get; private set; }
         public event Action SelectionChanged;
+        // Varios a la vez: Ctrl añade o quita, Mayús elige un tramo (en el orden de la lista); en la tarjeta, todos los suyos.
+        readonly HashSet<string> _marked = new(StringComparer.OrdinalIgnoreCase);
+        string _anchor;
+        public event Action MarksChanged;
+        public int MarkedCount => _marked.Count;
+        bool IsMarked(FleetUnit u) => u.Id == SelectedId || _marked.Contains(u.Id);
+        // Los elegidos, en el orden de la lista (sin marcas: el elegido).
+        public List<string> SelectedIds
+        {
+            get
+            {
+                var l = new List<string>();
+                if (_marked.Count == 0) { if (SelectedId != null) l.Add(SelectedId); return l; }
+                foreach (var c in _cards) foreach (var u in c.Shown) if (_marked.Contains(u.Id)) l.Add(u.Id);
+                return l;
+            }
+        }
+        public void ClearMarks() { if (_marked.Count == 0) return; _marked.Clear(); Invalidate(); MarksChanged?.Invoke(); }
+        List<FleetUnit> ShownUnits() { var l = new List<FleetUnit>(); foreach (var c in _cards) l.AddRange(c.Shown); return l; }
         public string EmptyText;
         Font _fTitle, _fSub, _fChip, _fCnt, _fMsg;
 
@@ -282,8 +324,10 @@ namespace SelectOR
             _models.Clear(); _models.AddRange(models);
             foreach (var m in _models) foreach (var u in m.Units) u.W = TextRenderer.MeasureText(u.Label, _fChip, Size.Empty, CardPaint.Measure).Width + Theme.Px(30);
             bool exists = false;
-            foreach (var m in _models) foreach (var u in m.Units) if (u.Id == SelectedId) exists = true;
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var m in _models) foreach (var u in m.Units) { ids.Add(u.Id); if (u.Id == SelectedId) exists = true; }
             if (!exists) SelectedId = null;
+            _marked.RemoveWhere(x => !ids.Contains(x));
             _hover = null; _layoutW = -1; Relayout();
         }
 
@@ -299,19 +343,25 @@ namespace SelectOR
         }
         public void Filter(string text) { var f = (text ?? "").Trim().ToLowerInvariant(); if (f == _filter) return; _filter = f; AutoScrollPosition = Point.Empty; _layoutW = -1; Relayout(); }
 
+        // La imagen de un tren ha cambiado (ya se tiene su .con, o se ha descargado la guardada): se vuelve a pedir.
+        public void ForgetImage(string path) { _mem.Forget(path); Invalidate(); }
+
         bool UnitPass(FleetUnit u) => _state < 0 || u.State == _state || (_state == 0 && u.State == 3);
 
-        int ThumbW => Theme.Px(200);
+        // Columnas de la línea: nombre y datos · composición · ejemplares · «i».
+        int TextW(int w) => Math.Max(Theme.Px(200), Math.Min(Theme.Px(380), (int)(w * 0.27)));
+        int ChipsW(int w) => Math.Max(Theme.Px(170), Math.Min(Theme.Px(330), (int)(w * 0.24)));
+        static int InfoW => Theme.Px(26);
 
         void Relayout()
         {
             int w = Math.Max(200, ClientSize.Width - Theme.Px(4));
             if (w == _layoutW) return;
             _layoutW = w;
-            _cards.Clear();
-            int y = Theme.Px(2), gap = Theme.Px(8), pad = Theme.Px(10);
-            int chipH = Theme.Px(26), chipGap = Theme.Px(6);
-            int x0 = pad + ThumbW + Theme.Px(14), maxX = w - pad;
+            _cards.Clear(); _groups.Clear();
+            int y = Theme.Px(2), gap = Theme.Px(6), pad = Theme.Px(12);
+            string group = "";
+            int chipH = Theme.Px(24), chipGap = Theme.Px(6);
             foreach (var m in _models)
             {
                 var c = new Card { M = m };
@@ -319,15 +369,18 @@ namespace SelectOR
                 foreach (var u in m.Units)
                     if (UnitPass(u) && (_filter.Length == 0 || textHit || u.Label.ToLowerInvariant().Contains(_filter))) c.Shown.Add(u);
                 if (c.Shown.Count == 0) continue;
-                int cx = x0, cy = Theme.Px(38);
+                if (!string.IsNullOrEmpty(m.Group) && m.Group != group) { _groups.Add((m.Group, y + Theme.Px(8))); y += Theme.Px(34); }
+                group = m.Group ?? "";
+                int right = w - pad - (m.Info ? InfoW + Theme.Px(12) : 0), left = right - ChipsW(w);
+                int cx = left, cy = Theme.Px(19);
                 foreach (var u in c.Shown)
                 {
-                    if (cx + u.W > maxX && cx > x0) { cx = x0; cy += chipH + chipGap; }
-                    c.Chips.Add(new Rectangle(cx, cy, u.W, chipH));
+                    if (cx + u.W > right && cx > left) { cx = left; cy += chipH + chipGap; }
+                    c.Chips.Add(new Rectangle(cx, cy, Math.Min(u.W, right - left), chipH));
                     cx += u.W + chipGap;
                 }
                 c.Y = y;
-                c.H = Math.Max(Theme.Px(94), cy + chipH + pad);
+                c.H = Math.Max(Theme.Px(62), cy + chipH + Theme.Px(19));
                 _cards.Add(c);
                 y += c.H + gap;
             }
@@ -358,42 +411,43 @@ namespace SelectOR
             }
             int top = ScrollY, bottom = top + ClientSize.Height;
             var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (text, gy) in _groups)
+                if (gy + Theme.Px(24) >= top && gy <= bottom)
+                    TextRenderer.DrawText(g, text, _fCnt, new Rectangle(Theme.Px(6), gy - top, ClientSize.Width - Theme.Px(12), Theme.Px(22)), Theme.Subtle, CardPaint.Line);
             foreach (var c in _cards)
             {
-                if (c.Y + c.H < top || c.Y > bottom) continue;
+                if (c.Y + c.H < top - Theme.Px(200) || c.Y > bottom + Theme.Px(200)) continue;   // y las de al lado, para que lleguen antes
                 visible.Add(c.M.Path ?? "");
-                Paint1(g, c, top);
+                if (c.Y + c.H >= top && c.Y <= bottom) Paint1(g, c, top);
             }
             foreach (var p in visible)
-                _mem.Request(Thumbs, p, Theme.Px(56), ThumbW - Theme.Px(14), () => Invalidate(), k => visible.Contains(k));
+                _mem.Request(Thumbs, p, StripPaint.ImageH, 0, () => Invalidate(), k => visible.Contains(k));
         }
+
+        Rectangle InfoRect(Card c, int top) => new Rectangle(_layoutW - Theme.Px(12) - InfoW, c.Y - top + (c.H - InfoW) / 2, InfoW, InfoW);
 
         void Paint1(Graphics g, Card c, int top)
         {
             var rc = new Rectangle(Theme.Px(2), c.Y - top, _layoutW - Theme.Px(2), c.H);
-            bool sel = c.Shown.Exists(u => u.Id == SelectedId);
-            CardPaint.FillRound(g, rc, Theme.Px(10), sel ? CardPaint.Sel : Color.FromArgb(52, 56, 60));
+            bool sel = c.Shown.Exists(IsMarked);
+            CardPaint.FillRound(g, rc, Theme.Px(10), sel ? CardPaint.Sel : Color.FromArgb(48, 52, 56));
             if (sel) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.DrawRoundBorder(g, rc, Theme.Px(10), Theme.Accent, 1.5f); g.SmoothingMode = SmoothingMode.None; }
-            int pad = Theme.Px(10);
-            var tr = new Rectangle(rc.X + pad, rc.Y + pad, ThumbW, Math.Min(rc.Height - pad * 2, Theme.Px(74)));
-            CardPaint.Rail_(g, tr, _mem.Get(c.M.Path), _mem.Failed(c.M.Path) || string.IsNullOrEmpty(c.M.Path) ? "🚆" : null, _fSub);
-            int x = tr.Right + Theme.Px(14), right = rc.Right - pad;
-            // cabecera: nombre · datos · nº de unidades
-            string cnt = c.M.Units.Count.ToString("N0", CultureInfo.GetCultureInfo("es-ES"));
-            int cw = TextRenderer.MeasureText(cnt, _fCnt, Size.Empty, CardPaint.Measure).Width + Theme.Px(16);
-            var cr = new Rectangle(right - cw, rc.Y + pad + Theme.Px(2), cw, Theme.Px(20));
-            CardPaint.FillRound(g, cr, Theme.Px(10), Theme.Surface2);
-            TextRenderer.DrawText(g, cnt, _fCnt, cr, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            int tw = Math.Min(TextRenderer.MeasureText(c.M.Title, _fTitle, Size.Empty, CardPaint.Measure).Width, Math.Max(0, cr.X - x - Theme.Px(80)));
-            TextRenderer.DrawText(g, c.M.Title, _fTitle, new Rectangle(x, rc.Y + pad, tw, Theme.Px(24)), Theme.Text, CardPaint.Line);
-            if (cr.X - x - tw > Theme.Px(30))
-                TextRenderer.DrawText(g, c.M.Sub, _fSub, new Rectangle(x + tw + Theme.Px(8), rc.Y + pad, cr.X - x - tw - Theme.Px(16), Theme.Px(24)), Theme.Subtle, CardPaint.Line);
+            int pad = Theme.Px(12), x = rc.X + pad, tw = TextW(_layoutW), mid = rc.Y + rc.Height / 2;
+            // nombre y, debajo, sus datos
+            TextRenderer.DrawText(g, c.M.Title, _fTitle, new Rectangle(x, mid - Theme.Px(22), tw, Theme.Px(22)), Theme.Text, CardPaint.Line);
+            TextRenderer.DrawText(g, c.M.Sub, _fSub, new Rectangle(x, mid + Theme.Px(2), tw, Theme.Px(18)), Theme.Subtle, CardPaint.Line);
+            // la composición (o la máquina), ajustada a la línea
+            int chipsLeft = c.Chips.Count > 0 ? c.Chips[0].X + rc.X : rc.Right - pad;
+            foreach (var r0 in c.Chips) chipsLeft = Math.Min(chipsLeft, r0.X + rc.X);
+            int sx = x + tw + Theme.Px(12), sh = Math.Min(rc.Height - Theme.Px(12), Theme.Px(50));
+            var sr = new Rectangle(sx, mid - sh / 2, Math.Max(Theme.Px(40), chipsLeft - Theme.Px(12) - sx), sh);
+            StripPaint.Draw(g, sr, _mem.Get(c.M.Path), _mem.Failed(c.M.Path) || string.IsNullOrEmpty(c.M.Path) ? "🚆" : null, _fSub, maxRows: 1, left: true);
             // chips de las unidades
             for (int i = 0; i < c.Shown.Count; i++)
             {
                 var u = c.Shown[i];
                 var r = c.Chips[i]; r.Offset(rc.X, rc.Y);
-                bool us = u.Id == SelectedId, uh = u == _hover;
+                bool us = IsMarked(u), uh = u == _hover;
                 CardPaint.FillRound(g, r, Theme.Px(7), us ? Color.FromArgb(44, 72, 48) : uh ? Theme.Surface2 : CardPaint.Rail);
                 if (us) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.DrawRoundBorder(g, r, Theme.Px(7), Theme.Accent); g.SmoothingMode = SmoothingMode.None; }
                 int d = Theme.Px(8);
@@ -402,7 +456,10 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.None;
                 TextRenderer.DrawText(g, u.Label, _fChip, new Rectangle(r.X + Theme.Px(22), r.Y, r.Width - Theme.Px(24), r.Height), Theme.Text, CardPaint.Line);
             }
+            if (c.M.Info) StripPaint.InfoButton(g, InfoRect(c, top), c.M == _infoHover);
         }
+
+        Card CardAt(Point p) { int y = p.Y + ScrollY; foreach (var c in _cards) if (y >= c.Y && y < c.Y + c.H) return c; return null; }
 
         FleetUnit UnitAt(Point p, out Card card)
         {
@@ -427,17 +484,55 @@ namespace SelectOR
             base.OnMouseMove(e);
             var u = UnitAt(e.Location, out var c);
             Cursor = c != null ? Cursors.Hand : Cursors.Default;
-            if (u != _hover) { _hover = u; Invalidate(); }
+            var ih = c != null && c.M.Info && InfoRect(c, ScrollY).Contains(e.Location) ? c.M : null;
+            if (u != _hover || ih != _infoHover) { _hover = u; _infoHover = ih; Invalidate(); }
         }
-        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (_hover != null) { _hover = null; Invalidate(); } }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (_hover != null || _infoHover != null) { _hover = null; _infoHover = null; Invalidate(); } }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
             Focus();
+            var ic = CardAt(e.Location);
+            if (ic != null && ic.M.Info && e.Button == MouseButtons.Left && InfoRect(ic, ScrollY).Contains(e.Location))
+            {
+                if (!ic.Shown.Exists(x => x.Id == SelectedId)) Select(ic.Shown[0].Id, false);
+                InfoClicked?.Invoke(ic.M);
+                return;
+            }
             var u = UnitAt(e.Location, out var c);
-            if (u == null && c != null && !c.Shown.Exists(x => x.Id == SelectedId)) u = c.Shown[0];   // clic en la tarjeta: su primera unidad
-            if (u != null) Select(u.Id, false);
+            if (c == null) return;
+            var mk = ModifierKeys;
+            bool ctrl = (mk & Keys.Control) != 0, shift = (mk & Keys.Shift) != 0;
+            if (e.Button == MouseButtons.Left && (ctrl || shift))
+            {
+                var target = u != null ? new List<FleetUnit> { u } : new List<FleetUnit>(c.Shown);   // en la tarjeta: todos sus ejemplares
+                if (shift)
+                {
+                    // un tramo, desde el último elegido hasta este (en el orden de la lista)
+                    var all = ShownUnits();
+                    int a = all.FindIndex(x => x.Id == (_anchor ?? SelectedId)), b = all.FindIndex(x => x.Id == target[target.Count - 1].Id);
+                    if (a < 0) a = b;
+                    if (!ctrl) _marked.Clear();
+                    for (int k = Math.Min(a, b); k <= Math.Max(a, b); k++) if (k >= 0) _marked.Add(all[k].Id);
+                    foreach (var t in target) _marked.Add(t.Id);
+                }
+                else
+                {
+                    if (_marked.Count == 0 && SelectedId != null) _marked.Add(SelectedId);
+                    bool allIn = target.TrueForAll(t => _marked.Contains(t.Id));
+                    foreach (var t in target) { if (allIn) _marked.Remove(t.Id); else _marked.Add(t.Id); }
+                    _anchor = target[0].Id;
+                }
+                var keep = _marked.Count > 0 ? (_marked.Contains(target[0].Id) ? target[0].Id : SelectedIds[0]) : target[0].Id;
+                if (SelectedId != keep) { SelectedId = keep; SelectionChanged?.Invoke(); }
+                Invalidate(); MarksChanged?.Invoke();
+                return;
+            }
+            if (_marked.Count > 0) { _marked.Clear(); MarksChanged?.Invoke(); }
+            if (u == null && !c.Shown.Exists(x => x.Id == SelectedId)) u = c.Shown[0];   // clic en la tarjeta: su primera unidad
+            if (u != null) { _anchor = u.Id; Select(u.Id, false); }
+            Invalidate();
         }
 
         protected override bool IsInputKey(Keys k) => k == Keys.Up || k == Keys.Down || k == Keys.Left || k == Keys.Right || base.IsInputKey(k);
@@ -448,11 +543,23 @@ namespace SelectOR
             foreach (var c in _cards) all.AddRange(c.Shown);
             if (all.Count == 0) return;
             int i = all.FindIndex(u => u.Id == SelectedId);
+            if (e.KeyCode == Keys.Escape) { ClearMarks(); e.Handled = true; return; }
+            int from = i;
             if (e.KeyCode == Keys.Right || e.KeyCode == Keys.Down) i = Math.Min(all.Count - 1, i + 1);
             else if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Up) i = Math.Max(0, i - 1);
             else return;
             e.Handled = true;
+            if (e.Shift)
+            {
+                // Mayús + flechas: se amplía el tramo
+                if (_marked.Count == 0 && from >= 0) _marked.Add(all[from].Id);
+                _marked.Add(all[Math.Max(0, i)].Id);
+                MarksChanged?.Invoke();
+            }
+            else if (_marked.Count > 0) { _marked.Clear(); MarksChanged?.Invoke(); }
+            _anchor = e.Shift ? _anchor ?? (from >= 0 ? all[from].Id : null) : all[Math.Max(0, i)].Id;
             Select(all[Math.Max(0, i)].Id, true);
+            Invalidate();
         }
 
         public void Select(string id, bool scrollTo)
@@ -731,6 +838,7 @@ namespace SelectOR
         Bitmap _img; string _path, _caption = "", _empty;
         public VehicleThumbs Thumbs;
         public bool Is3D { get; private set; }
+        public bool ToggleShown = true;             // false: sin el botón 2D/3D (Compra y Flota: siempre en 3D)
         public event Action<bool> ModeChanged;      // true = se ha pasado al 3D (hay que dibujarlo)
         int _token;
 
@@ -783,6 +891,7 @@ namespace SelectOR
             Is3D = on;
             _3d.Visible = on; _2d.Visible = !on;
             _toggle.Text = on ? "🖼  " + I18n.T("Ver en 2D") : "🧊  " + I18n.T("Ver en 3D");
+            _toggle.Visible = ToggleShown && _toggle.Visible;
             _toggle.BringToFront(); _toggle.Invalidate();
             if (on) ModeChanged?.Invoke(true);
         }
@@ -791,7 +900,7 @@ namespace SelectOR
         public async void Show(string path, string caption, string empty = null)
         {
             _caption = caption ?? ""; _empty = string.IsNullOrEmpty(path) ? empty : null;
-            _toggle.Visible = !string.IsNullOrEmpty(path);
+            _toggle.Visible = ToggleShown && !string.IsNullOrEmpty(path);
             if (string.Equals(path, _path, StringComparison.OrdinalIgnoreCase) && _img != null) { _2d.Invalidate(); return; }
             _path = path;
             int token = ++_token;

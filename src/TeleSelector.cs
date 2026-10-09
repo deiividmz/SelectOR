@@ -1,4 +1,4 @@
-// Selector del teleindicador (cabecera «Tren elegido» de Exploración y «Tren seleccionado» de Horarios):
+// Selector del teleindicador (cabecera «Tren elegido» de Conducción libre y «Tren seleccionado» de Horarios):
 //   ◀  [ cartel elegido, en grande ]  ▾  ▶
 // Las flechas (y la rueda sobre el cartel) pasan al destino anterior o siguiente; un clic en el cartel abre la
 // galería: todos los carteles en cuadrícula, con buscador, «Original del tren» el primero y el elegido en verde.

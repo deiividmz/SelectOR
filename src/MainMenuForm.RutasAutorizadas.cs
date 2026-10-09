@@ -57,7 +57,7 @@ namespace SelectOR
             if (mode == "warn")
             {
                 if (!quiet && _routeWarned.Add(id.Id + "|" + id.Hash))
-                    MessageBox.Show(this, msg + "\n\n" + Tr("De momento el servicio se registra igual, marcado como «ruta sin autorizar»."),
+                    ThemedBox.Show(this, msg + "\n\n" + Tr("De momento el servicio se registra igual, marcado como «ruta sin autorizar»."),
                         "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return null;
             }
@@ -126,11 +126,12 @@ namespace SelectOR
         {
             if (!Supa.IsLoggedIn) return;
             int seq = ++_localRouteSeq;
+            _routeStatesAt = DateTime.UtcNow;
             var (jm, em) = await Supa.RpcAsync("route_mode", new { });
             if (em != null || seq != _localRouteSeq) return;   // servidor sin rutas-autorizadas.sql
             string mode = JsonText(jm);
             if (mode != _routeMode) { _routeMode = mode; UpdateSubtabVisibility(); }   // «Rutas» no se ve en «solo recopilar»
-            if (mode == "collect" && !forList) return;
+            if (mode == "collect" && !forList) { _lstRoutes?.Invalidate(); return; }   // sin distintivos
             var routes = _routesAll.ToList();
             var ids = await Task.Run(() =>
             {
@@ -155,6 +156,25 @@ namespace SelectOR
             }
             catch { }
             _lstRoutes?.Invalidate();
+        }
+
+        // Los distintivos de las tarjetas, al día: tras una solicitud, una decisión, un cambio de modo o un aviso de
+        // rutas, al momento (force); al volver a una pestaña con la lista de rutas, como mucho cada 20 s (el modo o
+        // una decisión pueden cambiar en otro equipo).
+        DateTime _routeStatesAt;
+        void RefreshRouteBadges(bool force = false)
+        {
+            if (!Supa.IsLoggedIn) return;   // con la sesión iniciada (los distintivos solo salen con sesión)
+            if (!force && (DateTime.UtcNow - _routeStatesAt).TotalSeconds < 20) return;
+            _ = RefreshLocalRouteStatesAsync();
+        }
+
+        // Ha llegado un aviso de rutas (solicitud, decisión, propuesta…): distintivos, sección Rutas y catálogo al día.
+        void OnRouteNotif()
+        {
+            RefreshRouteBadges(force: true);
+            if (_coRoutesPanel?.Visible == true) LoadCoRoutes();
+            if (Supa.IsSuperadmin) LoadCatalog(onlyCount: _catPanel?.Visible != true);
         }
 
         // Distintivo de la tarjeta de la ruta (solo con sesión y en modo «Aviso» u «Obligatorio»).
@@ -242,7 +262,8 @@ namespace SelectOR
         {
             var r = SelectedCoRoute();
             bool manage = CanManage() || Supa.IsSuperadmin;
-            bool open = r != null && r.State is not ("authorized" or "pending" or "version_pending");
+            // una versión pendiente también se puede solicitar: el administrador recibe el aviso de versión nueva
+            bool open = r != null && r.State is not ("authorized" or "pending");
             if (_coRouteReqBtn != null)
             {
                 // el gerente y los gestores: con la ruta instalada o con la versión que ya conoce el servidor (una propuesta)
@@ -333,6 +354,8 @@ namespace SelectOR
             using var dlg = new FormDialog(Tr("Solicitar autorización de ruta"), Tr("Solicitar"), 600);
             dlg.AddInfo(string.Format(Tr("Ruta: {0}"), li.Name) + "\n" + string.Format(Tr("RouteID: {0} · versión {1}"), li.Id, li.Hash.Substring(0, 8)));
             if (r.Kind == "proposal") dlg.AddInfo(string.Format(Tr("Propuesta por {0}"), r.By) + (r.Note.Length > 0 ? ": «" + r.Note + "»" : ""));
+            if (r.State is "version_pending" or "version_rejected")
+                dlg.AddInfo(Tr("Es una versión distinta de la autorizada (su archivo de vías ha cambiado): el administrador tiene que aprobarla."));
             dlg.AddMultiline("note", Tr("Comentario para el administrador (opcional)"), "", 110);
             dlg.AddInfo(r.Local != null ? Tr("Con la solicitud se envían la ficha y el plano de la ruta, para que se pueda revisar aunque no se tenga instalada.")
                                         : Tr("No tienes esta ruta instalada: se solicita la versión que propuso el maquinista, con su ficha y su plano."));
@@ -441,8 +464,8 @@ namespace SelectOR
         }
 
         // ============================ Empresas → Catálogo de rutas (superadmin) ============================
-        sealed class CatRoute { public string Id, Name, Status, Reason, State, Mode; public bool Requested; public long Companies, Services, Versions, Pending; public string Last; public JsonElement Stats; }
-        sealed class CatVersion { public string Hash, Name, Status, Reason, FirstSeen; public bool HasPlan; public long Services, PlanSize; public JsonElement Stats; }
+        sealed class CatRoute { public string Id, Name, Status, Reason, State, Mode, VerReqCo = "", VerReqAt = ""; public bool Requested; public long Companies, Services, Versions, Pending; public string Last; public JsonElement Stats; }
+        sealed class CatVersion { public string Hash, Name, Status, Reason, FirstSeen, ReqBy = "", ReqCo = "", ReqAt = "", ReqNote = ""; public bool HasPlan; public long Services, PlanSize; public JsonElement Stats; }
         Panel _catPanel, _catDetailHost, _catDetailEmpty;
         CardTable _catList;
         FlowLayoutPanel _catModeBar, _catBtns;
@@ -513,29 +536,54 @@ namespace SelectOR
             left.Controls.Add(tabs, 0, 0); left.Controls.Add(search, 0, 1); left.Controls.Add(_catList, 0, 2);
             body.Controls.Add(left, 0, 0);
 
-            _catDetailHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, AutoScroll = true, Margin = new Padding(0) };
-            Native.UseDarkScrollBars(_catDetailHost);
-            var det = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0), Padding = new Padding(0, 0, 12, 12) };
+            // la ficha, sin desplazarse: arriba sus datos; luego la versión y los botones; y el resto, el plano y las empresas
+            _catDetailHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
+            var det = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Bg, Margin = new Padding(0), Padding = new Padding(0, 0, 4, 0) };
             det.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            det.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // nombre, estado, quién, alertas y casillas
+            det.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // versión · botones
+            det.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // plano · empresas
             _catInfo = new RouteAdminInfo { Dock = DockStyle.Top, Margin = new Padding(0) };
-            var verRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 10, 0, 6) };
+            det.Controls.Add(_catInfo, 0, 0);
+
+            // la versión y, debajo, los botones (de izquierda a derecha, empezando por la decisión)
+            var bar = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 2, BackColor = Theme.Bg, Margin = new Padding(0, 6, 0, 8) };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var verRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0), Anchor = AnchorStyles.Left };
             _catVerLbl = new Label { Text = Tr("VERSIÓN"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 9, 10, 0) };
-            _catVersion = new ThemeCombo { DropDownStyle = ComboBoxStyle.DropDownList, Width = Theme.Px(560), Margin = new Padding(0) };
+            _catVersion = new ThemeCombo { DropDownStyle = ComboBoxStyle.DropDownList, Width = Theme.Px(400), Margin = new Padding(0, 2, 0, 0) };
+            StyleCombo(_catVersion);   // sin su DrawItem, la lista desplegada sale en blanco
             _catVersion.SelectedIndexChanged += (s, e) => OnCatVersionChanged();
             verRow.Controls.Add(_catVerLbl); verRow.Controls.Add(_catVersion);
-            _catPlan = new RoutePlanView { Height = Theme.Px(430), Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 10) };
-            _catCompanies = new RouteAdminCompanies { Dock = DockStyle.Top, Margin = new Padding(0) };
-            _catBtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 4, 0, 0) };
-            _catAuthBtn = EmpButton(Tr("Autorizar ruta"), primary: true); _catAuthBtn.Width = 200; _catAuthBtn.Click += (s, e) => CatDecide("authorize");
-            _catRejectBtn = EmpButton(Tr("Rechazar con motivo")); _catRejectBtn.Width = 210; _catRejectBtn.Margin = new Padding(8, 10, 2, 2); _catRejectBtn.Click += (s, e) => CatDecide("reject");
-            _catRevokeBtn = EmpButton(Tr("Retirar autorización")); _catRevokeBtn.Width = 210; _catRevokeBtn.Margin = new Padding(8, 10, 2, 2); _catRevokeBtn.TextColor = RedC; _catRevokeBtn.Click += (s, e) => CatDecide("revoke");
-            _catDeleteBtn = EmpButton(Tr("Quitar del catálogo")); _catDeleteBtn.Width = 190; _catDeleteBtn.Margin = new Padding(8, 10, 2, 2);
+            bar.Controls.Add(verRow, 0, 0);
+            _catBtns = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 8, 0, 0) };
+            RoundButton Act(string text, bool primary = false)
+            {
+                var b = EmpButton(Tr(text), primary); b.Height = 34; b.Margin = new Padding(0, 0, 8, 0);
+                using var fb = Theme.Font(9.5f, FontStyle.Bold); b.Width = TextRenderer.MeasureText(b.Text, fb).Width + 36;
+                return b;
+            }
+            _catAuthBtn = Act("Aprobar esta versión", primary: true); _catAuthBtn.Click += (s, e) => CatDecide("authorize");
+            _catRejectBtn = Act("Rechazar esta versión"); _catRejectBtn.Click += (s, e) => CatDecide("reject");
+            _catRevokeBtn = Act("Retirar autorización"); _catRevokeBtn.TextColor = RedC; _catRevokeBtn.Click += (s, e) => CatDecide("revoke");
+            _catDeleteBtn = Act("Quitar del catálogo");
             _catDeleteBtn.BaseColor = Theme.Surface2; _catDeleteBtn.HoverColor = Color.FromArgb(150, 60, 60); _catDeleteBtn.TextColor = RedC; _catDeleteBtn.Click += (s, e) => CatDelete();
             _catBtns.Controls.AddRange(new Control[] { _catAuthBtn, _catRejectBtn, _catRevokeBtn, _catDeleteBtn });
-            det.Controls.Add(_catInfo); det.Controls.Add(verRow); det.Controls.Add(_catPlan); det.Controls.Add(_catCompanies); det.Controls.Add(_catBtns);
+            bar.Controls.Add(_catBtns, 0, 1);
+            det.Controls.Add(bar, 0, 1);
+
+            var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); split.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.Px(360)));
+            split.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _catPlan = new RoutePlanView { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 10, 0) };
+            split.Controls.Add(_catPlan, 0, 0);
+            var coHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, AutoScroll = true, Margin = new Padding(0) };
+            Native.UseDarkScrollBars(coHost);
+            _catCompanies = new RouteAdminCompanies { Dock = DockStyle.Top, Margin = new Padding(0) };
+            coHost.Controls.Add(_catCompanies);
+            split.Controls.Add(coHost, 1, 0);
+            det.Controls.Add(split, 0, 2);
             _catDetailHost.Controls.Add(det);
-            void Fit() { int w = Math.Max(300, _catDetailHost.ClientSize.Width - det.Padding.Horizontal); _catInfo.Width = w; _catPlan.Width = w; _catCompanies.Width = w; }
-            _catDetailHost.Resize += (s, e) => Fit();
             _catDetailEmpty = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
             var emptyLbl = new Label { Dock = DockStyle.Fill, Text = Tr("Elige una ruta de la lista para ver su ficha y su plano."), ForeColor = Theme.Subtle, Font = Theme.Font(10f), TextAlign = ContentAlignment.MiddleCenter };
             _catDetailEmpty.Controls.Add(emptyLbl);
@@ -585,6 +633,7 @@ namespace SelectOR
                         Requested = e.TryGetProperty("requested", out var rq) && rq.ValueKind == JsonValueKind.True,
                         Companies = (long)Num(e, "companies"), Services = (long)Num(e, "services"), Versions = (long)Num(e, "versions"),
                         Pending = (long)Num(e, "pending_versions"), Last = FmtDate(Str(e, "last_at")),
+                        VerReqCo = Str(e, "version_request_company"), VerReqAt = FmtDate(Str(e, "version_request_at")),   // rutas-versiones.sql
                         Stats = e.TryGetProperty("stats", out var st) ? st.Clone() : default
                     };
                     r.State = r.Status == "authorized" && r.Pending > 0 ? "version_pending" : r.Status;
@@ -604,7 +653,10 @@ namespace SelectOR
             foreach (var r in rows)
             {
                 var alerts = RouteAuth.Alerts(r.Stats);
-                string sub1 = (r.Requested ? Tr("Solicitada") : Tr("Detectada al conducir")) + (r.Last.Length > 0 ? " · " + r.Last : "");
+                // una versión nueva solicitada por una empresa se dice en la tarjeta (con su fecha)
+                string sub1 = r.State == "version_pending" && r.VerReqCo.Length > 0
+                    ? string.Format(Tr("Versión nueva solicitada por {0}"), r.VerReqCo) + (r.VerReqAt.Length > 0 ? " · " + r.VerReqAt : "")
+                    : (r.Requested ? Tr("Solicitada") : Tr("Detectada al conducir")) + (r.Last.Length > 0 ? " · " + r.Last : "");
                 string sub2 = string.Format(r.Companies == 1 ? Tr("{0} empresa") : Tr("{0} empresas"), r.Companies) + " · "
                             + string.Format(r.Services == 1 ? Tr("{0} servicio") : Tr("{0} servicios"), r.Services.ToString("N0", EsEs));
                 string quote = r.Status is "rejected" or "revoked" && r.Reason.Length > 0 ? Tr("Motivo: ") + r.Reason
@@ -624,7 +676,7 @@ namespace SelectOR
             if (_catModeBar == null) return;
             int idx = mode == "warn" ? 1 : mode == "enforce" ? 2 : 0;
             SetChipActive(_catModeBar, idx);
-            if (_routeMode != mode) { _routeMode = mode; UpdateSubtabVisibility(); }
+            if (_routeMode != mode) { _routeMode = mode; UpdateSubtabVisibility(); RefreshRouteBadges(force: true); }   // distintivos según el modo
         }
 
         async void SetRouteMode(string mode)
@@ -636,7 +688,7 @@ namespace SelectOR
                 "warn" => Tr("¿Pasar a «Aviso»? Quien use una ruta sin autorizar verá un aviso y su servicio quedará marcado."),
                 _ => Tr("¿Pasar a «Solo recopilar»? Las rutas se seguirán recogiendo, pero nadie notará nada."),
             };
-            if (MessageBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) { SetModeChips(_routeMode); return; }
+            if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) { SetModeChips(_routeMode); return; }
             var (_, err) = await Supa.RpcAsync("route_set_mode", new { p_mode = mode });
             if (err != null) { Msg(_catMsg, Tr("Error: ") + err, true); SetModeChips(_routeMode); return; }
             SetModeChips(mode);
@@ -674,7 +726,8 @@ namespace SelectOR
                     {
                         Hash = Str(v, "hash"), Name = Str(v, "name"), Status = Str(v, "status"), Reason = Str(v, "reason"), FirstSeen = FmtDate(Str(v, "first_seen")),
                         HasPlan = v.TryGetProperty("has_plan", out var hp) && hp.ValueKind == JsonValueKind.True,
-                        Services = (long)Num(v, "services"), PlanSize = (long)Num(v, "plan_size"), Stats = v.TryGetProperty("stats", out var st) ? st.Clone() : default
+                        Services = (long)Num(v, "services"), PlanSize = (long)Num(v, "plan_size"), Stats = v.TryGetProperty("stats", out var st) ? st.Clone() : default,
+                        ReqBy = Str(v, "requested_by"), ReqCo = Str(v, "requested_company"), ReqAt = FmtDate(Str(v, "requested_at")), ReqNote = Str(v, "request_note")
                     });
                 foreach (var q in root.GetProperty("requests").EnumerateArray())
                 {
@@ -695,7 +748,8 @@ namespace SelectOR
             foreach (var v in _catVersions)
                 _catVersion.Items.Add(v.Hash.Substring(0, 4) + "…" + v.Hash.Substring(v.Hash.Length - 4) + "  ·  " + RouteAuth.StateText(v.Status == "pending" && _catDetailStatus == "authorized" ? "version_pending" : v.Status)
                                       + "  ·  " + string.Format(v.Services == 1 ? Tr("{0} servicio") : Tr("{0} servicios"), v.Services.ToString("N0", EsEs))
-                                      + (v.FirstSeen.Length > 0 ? "  ·  " + string.Format(Tr("desde {0}"), v.FirstSeen) : ""));
+                                      + (v.FirstSeen.Length > 0 ? "  ·  " + string.Format(Tr("desde {0}"), v.FirstSeen) : "")
+                                      + (v.Status == "pending" && v.ReqCo.Length > 0 ? "  ·  " + string.Format(Tr("solicitada por {0}"), v.ReqCo) : ""));
             int pick = _catVersions.FindIndex(v => v.Status == "pending"); if (pick < 0) pick = 0;
             _catVersion.EndUpdate();
             _catVerLbl.Text = _catVersions.Count > 1 ? string.Format(Tr("VERSIONES ({0})"), _catVersions.Count) : Tr("VERSIÓN");
@@ -704,7 +758,6 @@ namespace SelectOR
             _catInfoBase = (r, requestedBy, requestedCo, requestedNote, requestedAt, decidedBy, decidedAt);
             if (_catVersions.Count > 0) { if (_catVersion.SelectedIndex == pick) OnCatVersionChanged(); else _catVersion.SelectedIndex = pick; }
             else { _catPlan.SetPlan(null, Tr("Esta ruta no tiene ninguna versión registrada.")); FillCatInfo(null); }
-            _catDetailHost.AutoScrollPosition = Point.Empty;
         }
 
         (CatRoute r, string by, string co, string note, string at, string decidedBy, string decidedAt) _catInfoBase;
@@ -716,12 +769,14 @@ namespace SelectOR
             var (r, by, co, note, at, decidedBy, decidedAt) = _catInfoBase;
             if (r == null) return;
             string state = r.Status == "authorized" && v != null && v.Status != "authorized" ? (v.Status == "rejected" ? "version_rejected" : "version_pending") : r.Status;
+            bool verReq = state == "version_pending" && v.ReqCo.Length > 0;   // versión nueva pedida por una empresa
             var data = new RouteAdminInfo.Data
             {
                 Name = r.Name.Length > 0 ? r.Name : r.Id, StateText = RouteAuth.StateText(state), StateColor = RouteAuth.StateColor(state),
                 Sub = "RouteID " + r.Id + (v != null ? "   ·   " + Tr("huella") + " " + v.Hash.Substring(0, 12) + "…" : ""),
-                Who = by.Length > 0 ? string.Format(Tr("Solicitada por {0} ({1}) · {2}"), by, co, at) : Tr("Detectada al conducir (nadie la ha solicitado todavía)"),
-                Note = note,
+                Who = verReq ? string.Format(Tr("Versión nueva solicitada por {0} ({1}) · {2}"), v.ReqBy.Length > 0 ? v.ReqBy : "—", v.ReqCo, v.ReqAt)
+                    : by.Length > 0 ? string.Format(Tr("Solicitada por {0} ({1}) · {2}"), by, co, at) : Tr("Detectada al conducir (nadie la ha solicitado todavía)"),
+                Note = verReq ? v.ReqNote : note,
                 Decision = r.Status is "authorized" or "rejected" or "revoked" && decidedAt.Length > 0
                     ? string.Format(Tr("Decidido por {0} el {1}"), decidedBy.Length > 0 ? decidedBy : "—", decidedAt) + (r.Reason.Length > 0 ? " · " + Tr("Motivo: ") + r.Reason : "")
                     : (v != null && v.Reason.Length > 0 ? Tr("Motivo: ") + v.Reason : ""),
@@ -745,6 +800,8 @@ namespace SelectOR
             _catRejectBtn.Text = authorized ? Tr("Rechazar esta versión") : Tr("Rechazar con motivo");
             _catRejectBtn.Visible = v != null && (authorized ? v.Status == "pending" : r.Status != "rejected");
             _catRevokeBtn.Visible = authorized;
+            using var fb = Theme.Font(9.5f, FontStyle.Bold);   // a la medida de su texto (cambia según el estado)
+            foreach (var b in new[] { _catAuthBtn, _catRejectBtn }) { b.Width = TextRenderer.MeasureText(b.Text, fb).Width + 36; b.Invalidate(); }
         }
 
         async void OnCatVersionChanged()
@@ -795,18 +852,20 @@ namespace SelectOR
             }, false);
             LoadCatalog(selectId: r.Id);
             OnCatSelected();
+            RefreshRouteBadges(force: true);   // los distintivos de las rutas de este equipo
         }
 
         async void CatDelete()
         {
             var r = _catSel; if (r == null) return;
-            if (MessageBox.Show(this, string.Format(Tr("¿Quitar «{0}» del catálogo, con sus versiones y solicitudes? Si alguien la vuelve a usar o a pedir, volverá a aparecer."), r.Name),
+            if (ThemedBox.Show(this, string.Format(Tr("¿Quitar «{0}» del catálogo, con sus versiones y solicitudes? Si alguien la vuelve a usar o a pedir, volverá a aparecer."), r.Name),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             var (_, err) = await Supa.RpcAsync("route_admin_delete", new { p_route_id = r.Id });
             if (err != null) { Msg(_catMsg, Tr("Error: ") + err, true); return; }
             Msg(_catMsg, string.Format(Tr("«{0}» quitada del catálogo."), r.Name), false);
             _catSel = null; ShowCatDetail(false);
             LoadCatalog();
+            RefreshRouteBadges(force: true);
         }
     }
 

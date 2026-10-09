@@ -78,7 +78,7 @@ namespace SelectOR
         }
 
         // Aplica el plan (de un horario o de una actividad) a la hoja de ruta de la conducción en curso.
-        // Como en Exploración, la hoja de ruta sale con la simulación ya abierta (primera posición del tren):
+        // Como en Conducción libre, la hoja de ruta sale con la simulación ya abierta (primera posición del tren):
         // mientras Open Rails carga solo se prepara el grafo de vías.
         void ApplyRoadPlan(TtRoadPlan plan)
         {
@@ -206,6 +206,7 @@ namespace SelectOR
             _roadTimer.Tick += async (s, e) => await RoadTick();
             _roadTimer.Start();
             ApplyRoadPlan(plan);   // Horarios: el recorrido y las horas del tren
+            if (plan == null) ApplyExploreItineraryOnDrive();   // Conducción libre: el itinerario marcado en «Tu viaje»
         }
 
         void RoadDriveStop()

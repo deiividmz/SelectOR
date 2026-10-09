@@ -174,7 +174,7 @@ namespace SelectOR
         async void DeleteRule()
         {
             var r = _rulesView?.Selected; if (r == null) return;
-            if (MessageBox.Show(this, string.Format(Tr("¿Eliminar la norma «{0}»?"), r.Title), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, string.Format(Tr("¿Eliminar la norma «{0}»?"), r.Title), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             var (_, err) = await Supa.RpcAsync("delete_company_rule", new { p_id = r.Id });
             if (err != null) { Msg(_rulesMsg, Tr("Error: ") + err, true); return; }
             Msg(_rulesMsg, Tr("Norma eliminada."), false);

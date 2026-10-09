@@ -868,7 +868,7 @@ namespace SelectOR
         {
             if (!PaCanEdit()) return;
             var line = SelectedPaLine(); if (line == null) return;
-            if (MessageBox.Show(this,
+            if (ThemedBox.Show(this,
                     string.Format(Tr("¿Eliminar la línea «{0}»? Se borran sus paradas y los audios propios de esa línea (los de base se quedan)."), line.Name),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             // Las filas de audio de la línea se van en cascada, pero los ARCHIVOS del bucket no:

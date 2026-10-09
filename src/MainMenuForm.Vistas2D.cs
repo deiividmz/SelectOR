@@ -1,6 +1,6 @@
 ﻿// Todo lo posible antes de abrir el menú (durante la pantalla de inicio): las pestañas ya montadas y dibujadas
 // una vez (la primera visita era la más lenta), la clasificación de todos los trenes (tipo, masa, longitud) y
-// las vistas 2D de los primeros trenes de Exploración y de las primeras máquinas de Compra (dibujadas o leídas
+// las vistas 2D de los primeros trenes de Conducción libre y de las primeras máquinas de Compra (dibujadas o leídas
 // de la caché de disco). Después no queda nada trabajando en segundo plano: la interfaz queda libre.
 
 using System;
@@ -34,7 +34,7 @@ namespace SelectOR
                 // tipo, masa y longitud de todos los trenes (filtros y fichas listos al abrir): de la caché, casi al
                 // momento; la primera vez, unos segundos
                 var classify = Task.Run(async () => { while (_classTotal > 0 && _classDone < _classTotal) await Task.Delay(100); });
-                // la vista 3D y la composición 2D del tren que Exploración tiene elegido (el último usado)
+                // la vista 3D y la composición 2D del tren que Conducción libre tiene elegido (el último usado)
                 var selected = Task.Run(async () =>
                 {
                     while (true)
@@ -47,19 +47,36 @@ namespace SelectOR
                 _ = trains.ContinueWith(_ => LoadLog("vistas 2D: trenes listos"));
                 _ = machines.ContinueWith(_ => LoadLog("vistas 2D: máquinas de Compra listas"));
                 _ = classify.ContinueWith(_ => LoadLog($"vistas 2D: clasificación lista ({_classDone}/{_classTotal})"));
-                _ = selected.ContinueWith(_ => LoadLog("vistas 2D: tren elegido de Exploración listo (3D y 2D)"));
+                _ = selected.ContinueWith(_ => LoadLog("vistas 2D: tren elegido de Conducción libre listo (3D y 2D)"));
                 await Task.WhenAny(Task.WhenAll(trains, machines, classify, selected), Task.Delay(Prewarm2DMaxMs));
                 LoadLog($"vistas 2D: fin de la espera · trenes {trains.IsCompleted} · máquinas {machines.IsCompleted} · clasificación {classify.IsCompleted} ({_classDone}/{_classTotal}) · tren elegido {selected.IsCompleted}");
+                // El material del Editor (~47 000 filas) se rellena por tandas y suele acabar después de la primera pasada:
+                // con todo ya cargado, otra pasada deja cada pestaña maquetada con sus datos (si no, el Editor se
+                // maquetaba entero la primera vez que se abría: ~50 ms).
+                for (int i = 0; i < 100 && !StepDone("stock"); i++) await Task.Delay(100);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try { WarmPages(); } catch { }
+                LoadLog($"pestañas maquetadas otra vez con sus datos ({sw.ElapsedMilliseconds} ms)");
             }
             catch { }
             finally { LoadStep("vistas2d"); }
         }
 
+        bool StepDone(string key) { lock (_loadDone) return _loadDone.Contains(key); }
+
         // Cada pestaña se monta una vez con la ventana aún oculta (controles, maquetación, horario, editor…)
-        // y se vuelve a la que toca. Multijugador (pide la lista a internet) y Empresas (sesión) no.
+        // y se vuelve a la que toca. Multijugador también, pero sin pedir la lista de servidores a internet
+        // (_warmingPages); Empresas, con su sesión, aparte (WarmEmpresas).
+        bool _warmingPages;
         void WarmPages()
         {
             if (_uiRevealed) return;
+            _warmingPages = true;
+            try { WarmPagesCore(); } finally { _warmingPages = false; }
+        }
+
+        void WarmPagesCore()
+        {
             int keep = _activePage, keepTab = _prefs.LastTab;
             // Además de montarla, se dibuja una vez fuera de pantalla: así quedan hechas las cachés de textos,
             // imágenes escaladas y emojis que el primer pintado de cada pestaña pagaba al abrirla.
@@ -73,11 +90,11 @@ namespace SelectOR
             // Con la ventana oculta, mostrar la pestaña no la maqueta: se le da ya el tamaño del hueco y se maqueta.
             void Fit(int p)
             {
-                Control pg = p switch { 0 => _pageRuta, 1 => _pageActividad, 2 => _pageExplora, 3 => _pageHorarios, _ => _pageEditor };
+                Control pg = p switch { 0 => _pageRuta, 1 => _pageActividad, 2 => _pageExplora, 3 => _pageHorarios, 4 => _pageMulti, _ => _pageEditor };
                 pg.Bounds = _pageHost.ClientRectangle;
                 pg.PerformLayout();
             }
-            foreach (int p in new[] { 0, 1, 2, 3, PageEditor })
+            foreach (int p in new[] { 0, 1, 2, 3, 4, PageEditor })
             {
                 try { if (p != keep) ShowPage(p); Fit(p); Paint(); } catch { }
             }

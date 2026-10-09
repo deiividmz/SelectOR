@@ -75,11 +75,12 @@ namespace SelectOR
                 foreach (var r in rows) ids.Add(r.Id);
                 await Supa.RpcAsync("mark_notifications_seen", new { p_ids = ids.ToArray() });
 
-                bool membership = false;
+                bool membership = false, routes = false;
                 int shown = 0;
                 foreach (var r in rows)
                 {
                     if (r.Kind is "join_approved" or "member_added" or "member_removed" or "role_changed" or "company_approved" or "company_deleted") membership = true;
+                    if (r.Kind != null && r.Kind.StartsWith("route_", StringComparison.Ordinal)) routes = true;
                     if (shown == MaxToasts - 1 && rows.Count > MaxToasts)
                     {
                         // Muchos de golpe: los primeros y un resumen del resto.
@@ -93,6 +94,8 @@ namespace SelectOR
                 }
                 // Te han añadido, quitado o cambiado de rol: la lista de empresas y los permisos cambian.
                 if (membership && _empLoaded) LoadCompanies();
+                // Algo ha cambiado en las rutas autorizadas: distintivos, Rutas y catálogo al momento.
+                if (routes) OnRouteNotif();
             }
             catch { }
             finally { _notifBusy = false; RefreshBellCount(); }
@@ -140,14 +143,14 @@ namespace SelectOR
 
         // Cómo se enseña un aviso (ventana emergente y lista de la campanita): icono, color, título, texto y
         // adónde lleva el clic.
-        sealed class NotifView { public string Icon, Title, Body, Cid; public Color Color; public int Sub = -1, BuyTab = -1; }
+        sealed class NotifView { public string Icon, Title, Body, Cid, RouteId; public Color Color; public int Sub = -1, BuyTab = -1; }
 
         NotificationToast BuildToast(NotifRow r)
         {
             var v = DescribeNotif(r);
             var t = new NotificationToast(v.Icon, v.Title, v.Body, "SelectOR · " + Tr("Empresas") + " · " + AgoText(r.At), v.Color);
             string id = r.Id;
-            t.Opened = () => { MarkNotifRead(id); OpenEmpresasAt(v.Cid, v.Sub, v.BuyTab); };
+            t.Opened = () => { MarkNotifRead(id); OpenEmpresasAt(v.Cid, v.Sub, v.BuyTab, v.RouteId); };
             return t;
         }
 
@@ -238,6 +241,10 @@ namespace SelectOR
                     icon = "🛤"; c = buy; title = Tr("Solicitud de ruta");
                     body = string.Format(Tr("{0} pide autorizar la ruta «{1}» para {2}."), who, DataOr(r, "route", DataStr(r, "route_id")), co)
                          + (DataStr(r, "note").Length > 0 ? "\n«" + DataStr(r, "note") + "»" : ""); sub = CatalogoSubtab; cid = null; break;
+                case "route_version_request":
+                    icon = "🛤"; c = buy; title = Tr("Solicitud de versión nueva");
+                    body = string.Format(Tr("{0} pide aprobar una versión nueva de la ruta «{1}» para {2}. Revísala en el catálogo."), who, DataOr(r, "route", DataStr(r, "route_id")), co)
+                         + (DataStr(r, "note").Length > 0 ? "\n«" + DataStr(r, "note") + "»" : ""); sub = CatalogoSubtab; cid = null; break;
                 case "route_version":
                     icon = "🛤"; c = buy; title = Tr("Versión nueva de una ruta");
                     body = string.Format(Tr("Se ha usado una versión de «{0}» distinta de la autorizada ({1}). Revísala en el catálogo."), DataOr(r, "route", DataStr(r, "route_id")), co);
@@ -301,7 +308,7 @@ namespace SelectOR
                     title = Tr("Aviso"); body = co; break;
             }
             body = body.Replace("  ", " ");
-            return new NotifView { Icon = icon, Title = title, Body = body, Color = c, Cid = cid, Sub = sub, BuyTab = buyTab };
+            return new NotifView { Icon = icon, Title = title, Body = body, Color = c, Cid = cid, Sub = sub, BuyTab = buyTab, RouteId = sub == CatalogoSubtab ? DataStr(r, "route_id") : null };
         }
 
         static string DataOr(NotifRow r, string k, string def) { var v = DataStr(r, k); return string.IsNullOrWhiteSpace(v) ? def : v; }
@@ -352,7 +359,7 @@ namespace SelectOR
         }
 
         // Clic en un aviso: SelectOR al frente, en Empresas, con esa empresa y en la sección que toca.
-        void OpenEmpresasAt(string companyId, int subtab, int buyTab = -1)
+        void OpenEmpresasAt(string companyId, int subtab, int buyTab = -1, string routeId = null)
         {
             try
             {
@@ -369,6 +376,7 @@ namespace SelectOR
                 {
                     ShowSubtab(subtab);
                     if (buyTab >= 0) ShowBuyTab(buyTab);
+                    if (subtab == CatalogoSubtab && !string.IsNullOrEmpty(routeId)) LoadCatalog(selectId: routeId);   // con esa ruta elegida
                 }
             }
             catch { }

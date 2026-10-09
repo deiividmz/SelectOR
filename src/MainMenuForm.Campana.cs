@@ -81,7 +81,7 @@ namespace SelectOR
                 {
                     Icon = v.Icon, Title = v.Title, Body = v.Body, Accent = v.Color, Unread = !r.IsRead, Resolved = r.Resolved,
                     Foot = (string.IsNullOrWhiteSpace(r.Company) ? "" : r.Company + " · ") + AgoText(r.At),
-                    Open = () => OpenEmpresasAt(v.Cid, v.Sub, v.BuyTab)
+                    Open = () => OpenEmpresasAt(v.Cid, v.Sub, v.BuyTab, v.RouteId)
                 };
             }).ToList();
             int unread = items.Count(i => i.Unread);

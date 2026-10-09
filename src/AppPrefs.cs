@@ -64,7 +64,7 @@ namespace SelectOR
         public float CabHudScale { get; set; } = 1f;
         // HUD del chat de empresa: si lo dejaste abierto, dónde, su tamaño y si estaba plegado.
         public bool ChatHudOn { get; set; }
-        public bool TrainListView { get; set; }        // Exploración: trenes en lista (true) o en tarjetas
+        public bool TrainListView { get; set; }        // Conducción libre: trenes en lista (true) o en tarjetas
         public bool NotifySound { get; set; } = true;   // sonido suave con los avisos y los mensajes nuevos del chat
         public int ChatHudX { get; set; } = -1;      // -1 = abajo a la derecha
         public int ChatHudY { get; set; } = -1;
@@ -94,6 +94,12 @@ namespace SelectOR
         public bool ShareLivePosition { get; set; } = true;
         // Teleindicador elegido por tren: clave = ruta del .con, valor = subcarpeta de Destinos ("" = original).
         public Dictionary<string, string> TeleDest { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Horarios: tren elegido por el usuario para una línea. Clave = archivo del horario + "|" + tren; valor = el .con
+        // (su nombre de archivo, sin extensión). El horario original no se toca: se conduce una copia (HorarioTrenes).
+        public Dictionary<string, string> TtConsistOverride { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Conducción libre: itinerario elegido para la próxima conducción en cada ruta. Clave = carpeta de la ruta (RouteKey),
+        // valor = Id del itinerario guardado (SavedItineraries). Se carga solo en el HUD y la hoja de ruta al conducir.
+        public Dictionary<string, string> ExploreItinerary { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         // Megafonía: si suenan los avisos, a qué volumen (0-100) y la última línea elegida por ruta.
         public bool PaOn { get; set; } = true;
         public int PaVolume { get; set; } = 90;

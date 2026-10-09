@@ -1,5 +1,7 @@
 // Mapa 2D de la ruta (tipo Track Viewer): esquema de vías (TDB) + recorrido (.pat) + origen +
 // nombres de estaciones. Zoom hacia el cursor y arrastre. Complemento independiente; no toca OR.
+// La vía es la del HUD (la del detalle del .tdb, con su color y su grosor): todo se pasa a lat/lon con la conversión de
+// OR. Sin ella (versión de OR sin la conversión), el esquema de antes, con el mismo trazo.
 
 using System;
 using System.Collections.Generic;
@@ -20,6 +22,8 @@ namespace SelectOR
         readonly bool _overview;   // true = encuadra TODO el trayecto (plano general), no centrado en la salida
         MapPanel _map;
         Label _status;
+        // La vía del HUD de una ruta (MainMenuForm.RouteDetailAsync); null: no hay.
+        public static Func<string, Task<HudMapDetail>> DetailFor;
 
         // Mapa GENERAL de la ruta (toda la red), sin un Path concreto.
         public PathMapDialog(string routeDir) : this(null, routeDir, "", "") { _routeOnly = true; }
@@ -51,6 +55,8 @@ namespace SelectOR
         void LoadAsync()
         {
             var patPath = _patPath; var routeDir = _routeDir;
+            Task<HudMapDetail> detTask = null;
+            try { if (!string.IsNullOrEmpty(routeDir)) detTask = DetailFor?.Invoke(routeDir); } catch { }
             Task.Run(() =>
             {
                 var network = new List<PointF[]>();
@@ -150,17 +156,41 @@ namespace SelectOR
                 }
                 catch { }
 
+                // La vía del HUD: el recorrido, los desvíos y las estaciones se pasan a su mismo plano (lat/lon en metros,
+                // con el norte arriba). Si algo no se puede convertir, el esquema de antes.
+                HudMapDetail det = null; Func<double, double, PointF> frame = null;
+                try { det = detTask?.GetAwaiter().GetResult(); } catch { det = null; }
+                if (det != null && det.Track.Count > 0)
+                {
+                    var l0 = det.Track[0];
+                    double lat0 = l0.Lat[0], lon0 = l0.Lon[0], ky = 111320.0, kx = 111320.0 * Math.Cos(lat0 * Math.PI / 180.0);
+                    frame = (la, lo) => new PointF((float)((lo - lon0) * kx), (float)((la - lat0) * ky));
+                    bool ok = true;
+                    PointF Conv(PointF w)
+                    {
+                        if (!OrGeo.TryLatLon(w.X, w.Y, out double la, out double lo)) { ok = false; return w; }
+                        return frame(la, lo);
+                    }
+                    var path2 = path.Select(Conv).ToList();
+                    var junc2 = junctions.Select(Conv).ToList();
+                    var labels2 = labels.Select(kv => new KeyValuePair<PointF, string>(Conv(kv.Key), kv.Value)).ToList();
+                    if (ok) { path = path2; junctions = junc2; labels = labels2; }
+                    else { det = null; frame = null; }
+                }
+                else det = null;
+                int tramos = det != null ? det.Track.Count : network.Count;
+
                 if (!IsHandleCreated) return;
                 BeginInvoke((Action)(() =>
                 {
-                    _map.SetData(network, path, junctions, labels);
+                    _map.SetData(network, path, junctions, labels, det, frame);
                     if (_routeOnly)
-                        _status.Text = network.Count > 0
-                            ? string.Format(I18n.T("{0} tramos · {1} estaciones · rueda: zoom al cursor · arrastra: mover"), network.Count, labels.Count)
+                        _status.Text = tramos > 0
+                            ? string.Format(I18n.T("{0} tramos · {1} estaciones · rueda: zoom al cursor · arrastra: mover"), tramos, labels.Count)
                             : I18n.T("No se pudo leer el esquema de vías.");
                     else
-                        _status.Text = network.Count > 0
-                            ? string.Format(I18n.T("{0} tramos · {1} estaciones · recorrido de {2} puntos · rueda: zoom al cursor · arrastra: mover"), network.Count, labels.Count, path.Count)
+                        _status.Text = tramos > 0
+                            ? string.Format(I18n.T("{0} tramos · {1} estaciones · recorrido de {2} puntos · rueda: zoom al cursor · arrastra: mover"), tramos, labels.Count, path.Count)
                             : (path.Count >= 2 ? string.Format(I18n.T("Recorrido de {0} puntos (sin esquema de vías)"), path.Count) : I18n.T("No se pudo leer el trazado."));
                 }));
             });
@@ -169,6 +199,7 @@ namespace SelectOR
         class MapPanel : Panel
         {
             List<PointF[]> _net; List<PointF> _path, _junc; List<KeyValuePair<PointF, string>> _labels;
+            HudMapDetail _det; Func<double, double, PointF> _frame;   // la vía del HUD y su paso a este plano (o null)
             float _minX, _maxX, _minZ, _maxZ, _scale, _offX, _offY;
             bool _fitted; bool _drag; Point _last;
             public string StartName, EndName;
@@ -188,8 +219,11 @@ namespace SelectOR
                 MouseMove += (s, e) => { if (_drag) { _offX += e.X - _last.X; _offY += e.Y - _last.Y; _last = e.Location; Invalidate(); } };
             }
 
-            public void SetData(List<PointF[]> net, List<PointF> path, List<PointF> junc, List<KeyValuePair<PointF, string>> labels)
-            { _net = net; _path = path; _junc = junc; _labels = labels; _fitted = false; Invalidate(); }
+            public void SetData(List<PointF[]> net, List<PointF> path, List<PointF> junc, List<KeyValuePair<PointF, string>> labels,
+                                HudMapDetail det = null, Func<double, double, PointF> frame = null)
+            { _net = net; _path = path; _junc = junc; _labels = labels; _det = frame != null ? det : null; _frame = frame; _fitted = false; Invalidate(); }
+
+            bool HasTrack => _det != null || (_net != null && _net.Count > 0);
 
             void OnWheel(object s, MouseEventArgs e)
             {
@@ -210,7 +244,8 @@ namespace SelectOR
                 if (_fitted) return;
                 _minX = float.MaxValue; _maxX = float.MinValue; _minZ = float.MaxValue; _maxZ = float.MinValue;
                 Action<PointF> acc = p => { _minX = Math.Min(_minX, p.X); _maxX = Math.Max(_maxX, p.X); _minZ = Math.Min(_minZ, p.Y); _maxZ = Math.Max(_maxZ, p.Y); };
-                if (_net != null && _net.Count > 0) foreach (var poly in _net) foreach (var p in poly) acc(p);
+                if (_det != null) foreach (var l in _det.Track) { acc(_frame(l.MinLa, l.MinLo)); acc(_frame(l.MaxLa, l.MaxLo)); }
+                else if (_net != null && _net.Count > 0) foreach (var poly in _net) foreach (var p in poly) acc(p);
                 else if (_path != null) foreach (var p in _path) acc(p);
                 if (_minX > _maxX) { _minX = 0; _maxX = 1; _minZ = 0; _maxZ = 1; }
                 float w = Math.Max(1, _maxX - _minX), h = Math.Max(1, _maxZ - _minZ);
@@ -253,16 +288,20 @@ namespace SelectOR
                 var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
                 var rect = ClientRectangle;
                 using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, rect);
-                if ((_net == null || _net.Count == 0) && (_path == null || _path.Count < 2)) return;
+                if (!HasTrack && (_path == null || _path.Count < 2)) return;
                 EnsureFit(rect);
 
-                if (_net != null)
-                    using (var pen = new Pen(Color.FromArgb(110, 120, 128), 1f) { LineJoin = LineJoin.Round })
+                // la vía del HUD (su color y su grosor, el del plano de las rutas según el ancho del mapa)
+                float k = Math.Max(1f, Math.Min(1.5f, Width / 900f + 0.6f));
+                if (_det != null)
+                    MapDetailDraw.Track(g, rect, (la, lo) => Map(_frame(la, lo)), _det, k);
+                else if (_net != null)
+                    using (var pen = MapDetailDraw.TrackPen(MapDetailDraw.TrackWidth(rect, k)))
                         foreach (var poly in _net)
                         {
                             var sp = new PointF[poly.Length];
                             for (int i = 0; i < poly.Length; i++) sp[i] = Map(poly[i]);
-                            g.DrawLines(pen, sp);
+                            try { g.DrawLines(pen, sp); } catch { }
                         }
 
                 if (_path != null && _path.Count >= 2)

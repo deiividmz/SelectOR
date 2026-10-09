@@ -155,7 +155,7 @@ namespace SelectOR
                 else
                 {
                     var prev = _empOnDutyCompany; _empOnDutyCompany = co;   // el mensaje usa el nombre de la empresa
-                    var (vid, reason) = await ResolveCompanyUnitReason(co.Id, names);
+                    var (vid, reason) = await ResolveServiceUnitAsync(co.Id, _drivenConsist, names, quiet: true);
                     _empOnDutyCompany = prev;
                     _fleetCheckOk = vid != null;
                     _fleetCheckReason = vid != null ? null : ShortFleetReason(reason, co.Name);
@@ -194,7 +194,7 @@ namespace SelectOR
             if (names.Count == 0) return (false, Tr("No se puede identificar el tren"));
 
             var prev = _empOnDutyCompany; _empOnDutyCompany = co;
-            var (vid, reason) = await ResolveCompanyUnitReason(co.Id, names);
+            var (vid, reason) = await ResolveServiceUnitAsync(co.Id, _drivenConsist, names, quiet: true);   // un ejemplar del tren de la empresa
             if (vid == null) { _empOnDutyCompany = prev; _fleetCheckCompany = null; return (false, ShortFleetReason(reason, co.Name)); }
             string plate = _lastUnitPlate;
             // Ruta autorizada (rutas-autorizadas.sql): con OR en marcha, sin ventanas; en modo obligatorio, el motivo en la barra.

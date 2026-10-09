@@ -1,5 +1,5 @@
 // Teleindicador del tren (Teleindicadores.cs): selector ◀ [cartel] ▾ ▶ con galería de los carteles LED de los destinos en la
-// cabecera «TREN SELECCIONADO» de Exploración y Horarios. La vista 3D enseña el cartel elegido al
+// cabecera «TREN SELECCIONADO» de Conducción libre y Horarios. La vista 3D enseña el cartel elegido al
 // momento; los ficheros del tren solo se cambian al pulsar CONDUCIR. El destino se recuerda por tren.
 
 using System;
@@ -27,7 +27,7 @@ namespace SelectOR
 
         // Selector «TELEINDICADOR ◀ [cartel] ▾ ▶» (oculto hasta que el tren tenga destinos). El cartel abre la galería
         // con todos los destinos (TeleSelector.cs).
-        //  · Exploración: en la cabecera, a la derecha del título (con aire entre los dos), todo centrado en vertical.
+        //  · Conducción libre: en la cabecera, a la derecha del título (con aire entre los dos), todo centrado en vertical.
         //  · Horarios (ownRow): «hdr» es una fila propia bajo el título, donde junto a él no cabe.
         TeleUi MakeTeleUi(Panel hdr, Action rerender, bool ownRow = false)
         {

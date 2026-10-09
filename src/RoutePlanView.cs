@@ -20,6 +20,14 @@ namespace SelectOR
         bool _keyOpen = true;
         public bool Expandable = true;
         public string WindowTitle = "";
+        // Para el planificador de itinerarios (Conducción libre): lo que se dibuja encima del plano con la vista actual
+        // (no va en la imagen guardada: cambia sin volver a dibujar el plano), el clic sin arrastrar sobre el plano
+        // (lat, lon y metros por píxel) y el texto de ayuda de abajo.
+        public Action<Graphics, Func<double, double, PointF>, Rectangle> Overlay;
+        public event Action<double, double, double> MapClick;
+        public string Hint;
+        public void Redraw() => Invalidate();
+        public void ResetView() { _zoom = 1; _cLat = _cLon = double.NaN; Invalidate(); }
         static readonly Color MapBg = Color.FromArgb(30, 34, 38);
         // Fuentes de cada repintado, creadas una vez (al arrastrar se repinta muchas veces por segundo).
         readonly Font _fEmpty = Theme.Font(9.5f), _fHint = Theme.Font(8f), _fExp = Theme.Font(12f, FontStyle.Bold),
@@ -136,6 +144,7 @@ namespace SelectOR
                 _cZoom = _zoom; (_cLat0, _cLon0) = Center();
                 g.DrawImageUnscaled(_cache, area.X, area.Y);
             }
+            if (Overlay != null) { try { Overlay(g, ViewProj(area), area); } catch { } }
             Overlays(g, area);
         }
 
@@ -175,7 +184,7 @@ namespace SelectOR
         {
             DrawKey(g, area);
             var fH = _fHint;
-            string hint = I18n.T("Rueda: acercar · arrastrar: mover · doble clic: toda la ruta");
+            string hint = Hint ?? I18n.T("Rueda: acercar · arrastrar: mover · doble clic: toda la ruta");
             var hs = TextRenderer.MeasureText(hint, fH);
             var hr = new Rectangle(area.Right - hs.Width - Theme.Px(14), area.Bottom - hs.Height - Theme.Px(10), hs.Width + Theme.Px(8), hs.Height + Theme.Px(4));
             using (var path = Theme.Round(hr, Theme.Px(6))) using (var b = new SolidBrush(Color.FromArgb(200, 22, 25, 28))) g.FillPath(b, path);
@@ -293,13 +302,21 @@ namespace SelectOR
             _drag = null;
             if (!HasPlan || e.Button != MouseButtons.Left || wasDrag) return;
             if (_hitKey.Contains(e.Location)) { _keyOpen = !_keyOpen; Invalidate(); return; }
-            if (_hitExpand.Contains(e.Location)) OpenWindow();
+            if (_hitExpand.Contains(e.Location)) { OpenWindow(); return; }
+            if (MapClick != null)
+            {
+                var (la, lo) = Center(); double px = PxPerM();
+                double mLat = 111320.0, mLon = 111320.0 * Math.Cos(la * Math.PI / 180);
+                var mr = MapRect; double cx = mr.X + mr.Width / 2.0, cy = mr.Y + mr.Height / 2.0;
+                MapClick(la - (e.Y - cy) / (mLat * px), lo + (e.X - cx) / (mLon * px), 1 / px);
+            }
         }
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
             base.OnMouseDoubleClick(e);
             if (!HasPlan || _hitExpand.Contains(e.Location) || _hitKey.Contains(e.Location)) return;
+            if (MapClick != null) return;   // en el planificador cada clic marca un punto: la vista entera, con su botón
             _zoom = 1; _cLat = _cLon = double.NaN; Invalidate();
         }
 

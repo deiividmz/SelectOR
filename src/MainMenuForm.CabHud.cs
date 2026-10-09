@@ -209,6 +209,7 @@ namespace SelectOR
         // eléctricos de viajeros). No si se han leído todos y ninguno. null si no se pudo leer.
         bool? TrainIsPassenger(TrainItem c)
         {
+            if (SeatsOverride(c) != null) return true;   // la empresa le ha fijado plazas: es de viajeros, como con PassengerCapacity
             int leidos = 0;
             try
             {

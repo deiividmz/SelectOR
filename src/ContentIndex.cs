@@ -109,6 +109,17 @@ namespace SelectOR
             }
         }
 
+        // La lista de trenes al día tras un cambio con SelectOR abierto (FastConsists.Load con rescan). El archivo del disco
+        // no se toca: su huella ya no casa, así que en el próximo arranque se vuelve a leer y a guardar entero.
+        public static void ReplaceConsists(List<(string name, string conPath, string leadPath)> filas)
+        {
+            lock (_lock)
+            {
+                Consists.Clear();
+                Consists.AddRange(filas);
+            }
+        }
+
         public static void SetUnits(Dictionary<string, UnitRow> units, IEnumerable<string> hidden,
                                     Dictionary<string, List<string>> conEngines, Dictionary<string, string> firstConsist)
         {

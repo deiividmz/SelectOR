@@ -1,5 +1,5 @@
-1.2.52
-Authorised routes|Propose routes to your company; the administrator approves them.
-Announcements without the route|Also lists routes with announcements that you have not installed.
-HUD announcements|The minimap line list scrolls with the wheel or the bar and always fits on screen.
-Smoother Companies|Each section's data arrives at startup and the route plan moves without stutter.
+1.2.53
+Company trains|Companies buy complete trains (.con); Fleet and Purchase show them in 2D.
+Company seats|The manager sets the seats of each fleet train and they apply to every member.
+Automatic workshop|Each train goes through the workshop on its own when it reaches its km.
+Free driving|Formerly Explore: ★ and ⚠ filters, and new trains appear at once.

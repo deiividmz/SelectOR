@@ -2,6 +2,7 @@
 // (Usuarios, superadmin). Se dibujan a mano, solo lo visible, como el resto de listas en tarjetas.
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Windows.Forms;
@@ -80,8 +81,11 @@ namespace SelectOR
         public int Companies;
         public DateTime Created = DateTime.MinValue;
         public bool Self;
+        public int Points = -1;                       // puntos del carné (−1: el servidor no los da, falta usuarios-carne-empresas.sql)
+        public DateTime? SuspendedUntil;              // carné suspendido hasta (UTC)
+        public List<string> CompanyNames = new();     // sus empresas, por orden alfabético
         internal string Search;
-        public string SearchText => Search ??= (Name + " " + Id + " " + Key + " " + Email).ToLowerInvariant();
+        public string SearchText => Search ??= (Name + " " + Id + " " + Key + " " + Email + " " + string.Join(" ", CompanyNames)).ToLowerInvariant();
     }
 
     // Usuarios (superadmin): una tarjeta por usuario con su ID, su clave de recuperación, sus empresas y su alta.
@@ -92,7 +96,7 @@ namespace SelectOR
                       _fAv = Theme.Font(10f, FontStyle.Bold), _fPill = Theme.Font(8f, FontStyle.Bold);
         public UserCardList() { EmptyText = I18n.T("No hay usuarios."); }
         protected override int MinCardW => Theme.Px(400);
-        protected override int CardH => Theme.Px(92);
+        protected override int CardH => Theme.Px(116);
         protected override int Gap => Theme.Px(8);
         protected override void Dispose(bool disposing)
         {
@@ -121,12 +125,24 @@ namespace SelectOR
             TextRenderer.DrawText(g, Initials(u.Name), _fAv, ar, Theme.AccentHi, C1);
             int tx = ar.Right + Theme.Px(12);
 
-            // derecha: empresas y alta
+            // derecha: empresas, carné y alta
             string co = string.Format(I18n.T(u.Companies == 1 ? "{0} empresa" : "{0} empresas"), u.Companies);
             int pw = TW(co, _fPill) + Theme.Px(16), ph = Theme.Px(20);
             var pill = new Rectangle(r - pw, y, pw, ph);
             Fill(g, pill, ph / 2, Color.FromArgb(40, u.Companies > 0 ? Theme.Accent : Theme.Subtle));
             TextRenderer.DrawText(g, co, _fPill, pill, u.Companies > 0 ? Theme.AccentHi : Theme.Subtle, C1);
+            if (u.Points >= 0)
+            {
+                // carné: sus puntos con el color del carné (suspendido, en rojo)
+                bool susp = u.SuspendedUntil.HasValue;
+                string ct = susp ? I18n.T("Carné suspendido") : "🛡 " + u.Points + " " + I18n.T(u.Points == 1 ? "punto" : "puntos");
+                var cc = susp ? Carne.PointsColor(0) : Carne.PointsColor(u.Points);
+                int cw = TW(ct, _fPill) + Theme.Px(16);
+                var cp = new Rectangle(pill.Left - Theme.Px(6) - cw, y, cw, ph);
+                Fill(g, cp, ph / 2, Color.FromArgb(40, cc));
+                TextRenderer.DrawText(g, ct, _fPill, cp, cc, C1);
+                pill = Rectangle.Union(pill, cp);   // el nombre se corta antes de las dos pastillas
+            }
             if (u.Created != DateTime.MinValue)
                 TextRenderer.DrawText(g, string.Format(I18n.T("alta {0}"), u.Created.ToString("dd/MM/yyyy", Es)), _fText,
                     new Rectangle(r - Theme.Px(150), y + Theme.Px(24), Theme.Px(150), Theme.Px(18)), Theme.Subtle, R1);
@@ -135,6 +151,10 @@ namespace SelectOR
             TextRenderer.DrawText(g, u.Name + (u.Self ? "  ★" : ""), _fName, new Rectangle(tx, y, tw, Theme.Px(22)), u.Self ? Theme.Accent : Theme.Text, L1);
             TextRenderer.DrawText(g, "ID " + u.Id, _fText, new Rectangle(tx, y + Theme.Px(24), r - Theme.Px(156) - tx, Theme.Px(18)), Theme.Subtle, L1);
             TextRenderer.DrawText(g, "🗝 " + (u.Key.Length > 0 ? u.Key : "—"), _fKey, new Rectangle(tx, y + Theme.Px(44), r - tx, Theme.Px(22)), Theme.AccentHi, L1);
+            // sus empresas, por nombre
+            if (u.Points >= 0)
+                TextRenderer.DrawText(g, u.CompanyNames.Count > 0 ? "🏢 " + string.Join("  ·  ", u.CompanyNames) : I18n.T("Sin empresa"), _fText,
+                    new Rectangle(tx, y + Theme.Px(70), r - tx, Theme.Px(18)), u.CompanyNames.Count > 0 ? Theme.Text : Theme.Subtle, L1 | TextFormatFlags.EndEllipsis);
         }
     }
 }

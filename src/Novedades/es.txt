@@ -1,5 +1,5 @@
-1.2.52
-Rutas autorizadas|Propón rutas a tu empresa; el gerente las solicita y el administrador las aprueba con su plano.
-Megafonía sin la ruta|Megafonía enseña también las rutas con anuncios que no tienes instaladas.
-Megafonía del HUD|La lista de líneas del mini mapa se desplaza con la rueda o la barra y cabe siempre en pantalla.
-Empresas más fluida|Los datos de cada sección llegan al arrancar y el plano de las rutas se mueve sin tirones.
+1.2.53
+Trenes de empresa|La empresa compra trenes completos (.con); Flota y Compra los enseñan con su 2D.
+Plazas de la empresa|El gerente fija las plazas de cada tren de la flota y valen para todos los socios.
+Taller automático|Cada tren pasa por el taller solo al cumplir sus kilómetros.
+Conducción libre|Antes Exploración: filtros ★ y ⚠ y los trenes nuevos salen al momento.

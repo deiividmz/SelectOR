@@ -30,6 +30,92 @@ namespace SelectOR
         public bool ShowCompany;
     }
 
+    // Cabecera de Banca → Préstamos, como el Resumen: la tarjeta del banco con la deuda viva y cuatro indicadores.
+    public sealed class LoanSummary : CanvasPanel
+    {
+        public string Company = "", Code = "";
+        public double Debt, Monthly, Interest; public DateTime NextDue = DateTime.MinValue;
+        public int Live, Total, Pending, Late; public double LateTotal;
+        public bool NoLoans;
+        public string LblBank = "SELECTOR · BANCA FERROVIARIA", LblLoans = "PRÉSTAMOS", LblDebt = "Deuda viva", LblPay = "Cuotas: {0}/mes", LblNext = "próximo cobro: {0}",
+                      LblHolder = "Titular", LblTerms = "Condiciones", LblTermsVal = "10.000 € – 50.000.000 € · 6 a 60 meses", LblNone = "Sin préstamos: el banco presta entre 10.000 € y 50.000.000 €, a devolver en 6 a 60 meses.",
+                      LblLive = "PRÉSTAMOS VIVOS", LblLiveSub = "de {0} en total", LblInterest = "INTERESES", LblInterestSub = "de los préstamos vivos",
+                      LblPending = "EN ESTUDIO", LblPendingSub = "solicitudes al banco", LblLate = "IMPAGOS", LblLateSub = "recargo {0}", LblUpToDate = "al día";
+        Font _fCap, _fBig, _fSmall, _fSmallB, _fKpi, _fKpiCap;
+        Rectangle _card; readonly Rectangle[] _k = new Rectangle[4];
+        static readonly Color Red = Color.FromArgb(229, 115, 115), Amber = Color.FromArgb(232, 178, 80), Blue = Color.FromArgb(120, 144, 226);
+
+        public LoanSummary()
+        {
+            AutoHeight = true;
+            _fCap = F(7.5f, FontStyle.Bold); _fBig = F(22f, FontStyle.Bold); _fSmall = F(8.25f); _fSmallB = F(9.5f, FontStyle.Bold); _fKpi = F(15f, FontStyle.Bold); _fKpiCap = F(7.5f, FontStyle.Bold);
+        }
+
+        protected override int DoLayout(int w)
+        {
+            int gap = Theme.Px(14), h = Theme.Px(176);
+            int cw = (int)((w - gap) * 0.52);
+            _card = new Rectangle(0, 0, cw, h);
+            int kx = cw + gap, kw = (w - kx - Theme.Px(10)) / 2, kh = (h - Theme.Px(10)) / 2;
+            for (int i = 0; i < 4; i++) _k[i] = new Rectangle(kx + (i % 2) * (kw + Theme.Px(10)), (i / 2) * (kh + Theme.Px(10)), kw, kh);
+            return h + Theme.Px(4);
+        }
+
+        static string Eur(double v) => v.ToString(Math.Abs(v % 1) < 0.005 ? "N0" : "N2", Es) + " €";
+
+        protected override void DoPaint(Graphics g, int top)
+        {
+            PaintCard(g, _card);
+            Kpi(g, _k[0], LblLive, Live.ToString("N0", Es), string.Format(LblLiveSub, Total), Live > 0 ? Blue : Theme.Text);
+            Kpi(g, _k[1], LblInterest, Eur(Interest), LblInterestSub, Theme.Text);
+            Kpi(g, _k[2], LblPending, Pending.ToString("N0", Es), LblPendingSub, Pending > 0 ? Amber : Theme.Text);
+            Kpi(g, _k[3], LblLate, Late > 0 ? Late.ToString("N0", Es) : LblUpToDate, Late > 0 ? string.Format(LblLateSub, Eur(LateTotal)) : "", Late > 0 ? Red : Theme.AccentHi);
+        }
+
+        void PaintCard(Graphics g, Rectangle r)
+        {
+            int rad = Theme.Px(18);
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(r, rad))
+            {
+                using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(r, Color.FromArgb(36, 64, 104), Color.FromArgb(18, 26, 38), System.Drawing.Drawing2D.LinearGradientMode.ForwardDiagonal)) g.FillPath(b, path);
+                using (var p = new Pen(Color.FromArgb(22, 255, 255, 255))) g.DrawPath(p, path);
+            }
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+            int x = r.X + Theme.Px(20), w = r.Width - Theme.Px(40), y = r.Y + Theme.Px(16);
+            Color soft = Color.FromArgb(200, 255, 255, 255);
+            int tw = TW("🏦 " + LblLoans, _fCap) + 4;
+            Text(g, LblBank, _fCap, new Rectangle(x, y, w - tw - 10, Theme.Px(16)), soft, L1);
+            Text(g, "🏦 " + LblLoans, _fCap, new Rectangle(x + w - tw, y, tw, Theme.Px(16)), soft, R1);
+            y += Theme.Px(26);
+            if (NoLoans)
+            {
+                Text(g, LblNone, _fSmallB, new Rectangle(x, y, w, Theme.Px(60)), Color.White, Wrap);
+            }
+            else
+            {
+                Text(g, LblDebt, _fSmall, new Rectangle(x, y, w, Theme.Px(16)), soft, L1); y += Theme.Px(16);
+                Text(g, Eur(Debt), _fBig, new Rectangle(x, y, w, Theme.Px(38)), Late > 0 ? Color.FromArgb(255, 190, 190) : Color.White, L1); y += Theme.Px(40);
+                string l = string.Format(LblPay, Eur(Monthly)) + (NextDue != DateTime.MinValue ? "   ·   " + string.Format(LblNext, NextDue.ToString("dd/MM/yyyy", Es)) : "");
+                Text(g, l, _fSmallB, new Rectangle(x, y, w, Theme.Px(18)), Color.FromArgb(225, 255, 255, 255), L1);
+            }
+            int fy = r.Bottom - Theme.Px(40);
+            Text(g, LblHolder, _fSmall, new Rectangle(x, fy, w / 2, Theme.Px(14)), soft, L1);
+            Text(g, Company + (Code.Length > 0 ? "  ·  " + Code : ""), _fSmallB, new Rectangle(x, fy + Theme.Px(14), w / 2, Theme.Px(18)), Color.White, L1);
+            Text(g, LblTerms, _fSmall, new Rectangle(x + w / 2, fy, w / 2, Theme.Px(14)), soft, R1);
+            Text(g, LblTermsVal, _fSmallB, new Rectangle(x + w / 2, fy + Theme.Px(14), w / 2, Theme.Px(18)), Color.White, R1);
+        }
+
+        void Kpi(Graphics g, Rectangle r, string cap, string val, string sub, Color col)
+        {
+            Round(g, r, Theme.Px(12), Color.FromArgb(42, 46, 50));
+            int x = r.X + Theme.Px(14);
+            Text(g, cap, _fKpiCap, new Rectangle(x, r.Y + Theme.Px(12), r.Width - Theme.Px(24), Theme.Px(14)), Theme.Subtle, L1);
+            Text(g, val, _fKpi, new Rectangle(x, r.Y + Theme.Px(28), r.Width - Theme.Px(24), Theme.Px(28)), col, L1);
+            Text(g, sub, _fSmall, new Rectangle(x, r.Y + Theme.Px(56), r.Width - Theme.Px(24), Theme.Px(16)), Theme.Subtle, L1);
+        }
+    }
+
     public sealed class LoanCardList : CardListBase
     {
         static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-ES");
@@ -38,7 +124,7 @@ namespace SelectOR
                       _fBold = Theme.Font(9f, FontStyle.Bold), _fPill = Theme.Font(8.5f, FontStyle.Bold), _fSmall = Theme.Font(8.25f);
 
         public LoanCardList() { EmptyText = I18n.T("Sin préstamos."); }
-        protected override int MinCardW => Theme.Px(560);
+        protected override int MinCardW => Theme.Px(380);
         protected override int MaxCols => 1;
         protected override int CardH => Theme.Px(108);
         protected override int Gap => Theme.Px(8);
@@ -152,41 +238,64 @@ namespace SelectOR
         Panel _loansPage;
         LoanCardList _loanCards;
         InstallmentCardList _loanSched;
-        Label _loanSummary, _loanMsg, _loanSchedTitle;
+        LoanSummary _loanSummary;
+        Label _loanMsg, _loanSchedTitle;
         RoundButton _loanReqBtn, _loanPrepayBtn, _loanCancelBtn;
         int _loansSeq;
 
         Panel BuildLoansPage()
         {
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = Theme.Bg, Visible = false };
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Bg, Visible = false };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // resumen
-            t.RowStyles.Add(new RowStyle(SizeType.Percent, 48));    // préstamos
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // título del cuadro
-            t.RowStyles.Add(new RowStyle(SizeType.Percent, 52));    // cuadro de amortización
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // acciones
-            _loanSummary = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.Font(10f), Margin = new Padding(2, 8, 2, 8), MaximumSize = new Size(1100, 0) };
-            t.Controls.Add(_loanSummary);
-            _loanCards = new LoanCardList { Dock = DockStyle.Fill, Margin = new Padding(2, 2, 2, 4) };
-            _loanCards.SelectedIndexChanged += (s, e) => { LoadLoanSchedule(); UpdateLoanButtons(); };
-            t.Controls.Add(_loanCards);
-            _loanSchedTitle = new Label { AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(9f, FontStyle.Bold), Margin = new Padding(2, 6, 2, 4), Text = Tr("CUADRO DE AMORTIZACIÓN") };
-            t.Controls.Add(_loanSchedTitle);
-            _loanSched = NewScheduleCards();
-            t.Controls.Add(_loanSched);
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // la tarjeta del banco y los indicadores
+            t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // préstamos · cuadro de amortización
+            _loanSummary = new LoanSummary { Dock = DockStyle.Top, Margin = new Padding(2, 4, 2, 10) };
+            var ls = _loanSummary;
+            ls.LblBank = "SelectOR · " + Tr("BANCA FERROVIARIA"); ls.LblLoans = Tr("PRÉSTAMOS"); ls.LblDebt = Tr("Deuda viva"); ls.LblPay = Tr("Cuotas: {0}/mes");
+            ls.LblNext = Tr("próximo cobro: {0}"); ls.LblHolder = Tr("Titular"); ls.LblTerms = Tr("Condiciones"); ls.LblTermsVal = Tr("10.000 € – 50.000.000 € · 6 a 60 meses");
+            ls.LblNone = Tr("Sin préstamos: el banco presta a la empresa entre 10.000 € y 50.000.000 €, a devolver en 6 a 60 meses con cuotas mensuales. El administrador estudia cada solicitud y fija el interés.");
+            ls.LblLive = Tr("PRÉSTAMOS VIVOS"); ls.LblLiveSub = Tr("de {0} en total"); ls.LblInterest = Tr("INTERESES"); ls.LblInterestSub = Tr("de los préstamos vivos");
+            ls.LblPending = Tr("EN ESTUDIO"); ls.LblPendingSub = Tr("solicitudes al banco"); ls.LblLate = Tr("IMPAGOS"); ls.LblLateSub = Tr("recargo {0}"); ls.LblUpToDate = Tr("al día");
+            t.Controls.Add(_loanSummary, 0, 0);
 
-            var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
-            _loanReqBtn = EmpButton(Tr("Solicitar préstamo"), primary: true); _loanReqBtn.Width = 200;
+            var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 46)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 54));
+            body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            // izquierda: los préstamos y lo que se puede hacer con ellos
+            var left = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 14, Padding = new Padding(12, 10, 12, 10), Margin = new Padding(0, 0, 7, 0) };
+            var lt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Surface, Margin = new Padding(0) };
+            lt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            lt.RowStyles.Add(new RowStyle(SizeType.AutoSize)); lt.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); lt.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            lt.Controls.Add(new Label { Text = Tr("PRÉSTAMOS DE LA EMPRESA"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(7.75f, FontStyle.Bold), Margin = new Padding(2, 2, 2, 8) });
+            _loanCards = new LoanCardList { Dock = DockStyle.Fill, Margin = new Padding(0), BackColor = Theme.Surface };
+            _loanCards.SelectedIndexChanged += (s, e) => { LoadLoanSchedule(); UpdateLoanButtons(); };
+            lt.Controls.Add(_loanCards);
+            var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Surface, Margin = new Padding(0, 6, 0, 0) };
+            _loanReqBtn = EmpButton(Tr("Solicitar préstamo"), primary: true); _loanReqBtn.Width = 190;
             _loanReqBtn.Click += (s, e) => RequestLoan();
-            _loanPrepayBtn = EmpButton(Tr("Amortizar…")); _loanPrepayBtn.Width = 150; _loanPrepayBtn.Margin = new Padding(8, 10, 2, 2);
+            _loanPrepayBtn = EmpButton(Tr("Amortizar…")); _loanPrepayBtn.Width = 140; _loanPrepayBtn.Margin = new Padding(8, 10, 2, 2);
             _loanPrepayBtn.Click += (s, e) => PrepayLoan();
             _loanCancelBtn = EmpButton(Tr("Retirar solicitud")); _loanCancelBtn.Width = 170; _loanCancelBtn.Margin = new Padding(8, 10, 2, 2);
             _loanCancelBtn.BaseColor = Theme.Surface2; _loanCancelBtn.HoverColor = Color.FromArgb(150, 60, 60); _loanCancelBtn.TextColor = RedC;
             _loanCancelBtn.Click += (s, e) => CancelLoanRequest();
             btns.Controls.AddRange(new Control[] { _loanReqBtn, _loanPrepayBtn, _loanCancelBtn });
-            _loanMsg = EmpMsg(); _loanMsg.Margin = new Padding(12, 20, 2, 2); _loanMsg.MaximumSize = new Size(560, 0);
-            btns.Controls.Add(_loanMsg);
-            t.Controls.Add(btns);
+            _loanMsg = EmpMsg(); _loanMsg.Margin = new Padding(2, 8, 2, 2); _loanMsg.MaximumSize = new Size(520, 0);
+            btns.SetFlowBreak(_loanCancelBtn, true); btns.Controls.Add(_loanMsg);
+            lt.Controls.Add(btns);
+            left.Controls.Add(lt);
+            body.Controls.Add(left, 0, 0);
+            // derecha: el cuadro de amortización del préstamo elegido
+            var right = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 14, Padding = new Padding(12, 10, 12, 10), Margin = new Padding(7, 0, 0, 0) };
+            var rt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0) };
+            rt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            rt.RowStyles.Add(new RowStyle(SizeType.AutoSize)); rt.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _loanSchedTitle = new Label { AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(7.75f, FontStyle.Bold), Margin = new Padding(2, 2, 2, 8), Text = Tr("CUADRO DE AMORTIZACIÓN"), MaximumSize = new Size(900, 0) };
+            rt.Controls.Add(_loanSchedTitle);
+            _loanSched = NewScheduleCards(); _loanSched.BackColor = Theme.Surface; _loanSched.Margin = new Padding(0);
+            rt.Controls.Add(_loanSched);
+            right.Controls.Add(rt);
+            body.Controls.Add(right, 1, 0);
+            t.Controls.Add(body, 0, 1);
             _loansPage = t;
             return t;
         }
@@ -261,7 +370,7 @@ namespace SelectOR
             {
                 _loanCards.EmptyText = err.Contains("PGRST202") ? Tr("El servidor aún no tiene los préstamos (falta prestamos.sql).") : Tr("Error: ") + err;
                 SetLoanItems(_loanCards, new List<LoanItem>());
-                _loanSummary.Text = "";
+                _loanSummary.NoLoans = true; _loanSummary.Invalidate();
                 UpdateLoanButtons();
                 return;
             }
@@ -272,13 +381,12 @@ namespace SelectOR
             double debt = live.Sum(l => l.Outstanding), monthly = live.Sum(l => l.Payment);
             var next = live.Where(l => l.NextDue != DateTime.MinValue).Select(l => l.NextDue).DefaultIfEmpty(DateTime.MinValue).Min();
             int pend = list.Count(l => l.Status == "pending"), late = live.Sum(l => l.Late);
-            _loanSummary.Text = live.Count == 0 && pend == 0
-                ? Tr("🏦  El banco presta a la empresa entre 10.000 € y 50.000.000 €, a devolver en 6 a 60 meses con cuotas mensuales. El administrador estudia cada solicitud y fija el interés.")
-                : "🏦  " + string.Format(Tr("Deuda viva: {0}  ·  cuotas: {1}/mes"), EurC(debt), EurC(monthly))
-                  + (next != DateTime.MinValue ? "  ·  " + string.Format(Tr("próximo cobro: {0}"), next.ToString("dd/MM/yyyy", EsEs)) : "")
-                  + (pend > 0 ? "  ·  " + string.Format(Tr(pend == 1 ? "{0} solicitud en estudio" : "{0} solicitudes en estudio"), pend) : "")
-                  + (late > 0 ? "  ·  ⚠ " + string.Format(Tr(late == 1 ? "{0} cuota impagada" : "{0} cuotas impagadas"), late) : "");
-            _loanSummary.ForeColor = late > 0 ? RedC : Theme.Text;
+            var sm = _loanSummary;
+            sm.Company = c.Name; sm.Code = "";
+            sm.Debt = debt; sm.Monthly = monthly; sm.NextDue = next; sm.Interest = live.Sum(l => l.InterestTotal);
+            sm.Live = live.Count; sm.Total = list.Count(l => l.Status is "active" or "paid"); sm.Pending = pend; sm.Late = late; sm.LateTotal = live.Sum(l => l.LateTotal);
+            sm.NoLoans = live.Count == 0 && pend == 0;
+            sm.Invalidate();
             LoadLoanSchedule();
             UpdateLoanButtons();
         }
@@ -416,7 +524,7 @@ namespace SelectOR
         {
             var l = _loanCards?.SelectedItem as LoanItem;
             if (l == null || l.Status != "pending") return;
-            if (MessageBox.Show(this, Tr("¿Retirar la solicitud de préstamo?"), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, Tr("¿Retirar la solicitud de préstamo?"), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             var (_, err) = await Supa.RpcAsync("cancel_loan_request", new { p_loan = l.Id });
             if (err != null) { Msg(_loanMsg, Tr("Error: ") + err, true); return; }
             Msg(_loanMsg, Tr("Solicitud retirada."), false);

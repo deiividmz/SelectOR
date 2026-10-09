@@ -1,4 +1,4 @@
-// Pestaña «Ruta»: mapa de la ruta elegida (vías y estaciones del .tdb, pasadas a lat/lon con la misma
+// Pestaña «Ruta»: mapa de la ruta elegida (la vía del HUD y las estaciones del .tdb, pasadas a lat/lon con la misma
 // conversión que usa Open Rails para la posición del tren) con los usuarios de la comunidad SelectOR que
 // circulan ahora por ella (mismo RouteID). Las posiciones llegan a saltos: cada conductor envía la suya
 // cada 5 s y aquí se consultan cada 2,5 s. LiveSmoother recorre esas lecturas con unos segundos de
@@ -465,12 +465,14 @@ namespace SelectOR
             float hx = W / 2f, hy = H / 2f;
             double vx0 = cx - (hx + 10) / s, vx1 = cx + (hx + 10) / s, vy0 = cy - (hy + 10) / s, vy1 = cy + (hy + 10) / s;
             double z = Math.Log(Math.Max(1e-9, s / fitS), 2);
-            float lw = (float)Math.Max(1.3, Math.Min(4, 1.3 + z * 0.4));
+            // la vía del HUD: su color y su grosor (el del plano de las rutas, según el ancho del mapa)
+            int viewW = W - 2 * Margin2;
+            float lw = MapDetailDraw.TrackWidth(new Rectangle(0, 0, viewW, H), Math.Max(1f, Math.Min(1.5f, viewW / 900f + 0.6f)));
 
             // vías: el nivel de detalle que toca, solo lo que se ve, en trazos de ~1500 puntos (GDI+ bloquea a
             // los demás hilos mientras dibuja: con trozos pequeños, la ventana puede repintar entre uno y otro)
             var lv = d.LevelFor(s);
-            using (var pen = new Pen(Color.FromArgb(112, 122, 132), lw) { LineJoin = LineJoin.Round })
+            using (var pen = MapDetailDraw.TrackPen(lw))
             {
                 var path = new GraphicsPath();
                 for (int p = 0; p < lv.X.Length; p++)

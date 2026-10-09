@@ -28,6 +28,44 @@ namespace SelectOR
             }
         }
 
+        // El detalle del .tdb de una ruta (la vía del HUD y lo demás), calculado una sola vez y compartido por el HUD, el
+        // informe del servicio y los mapas de la ruta (Ruta, «Mapa», Actividad, Horarios). null si no se puede.
+        readonly Dictionary<string, Task<HudMapDetail>> _detailTasks = new(StringComparer.OrdinalIgnoreCase);
+
+        Task<HudMapDetail> RouteDetailAsync(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return Task.FromResult<HudMapDetail>(null);
+            lock (_detailTasks)
+            {
+                if (_detailTasks.TryGetValue(dir, out var t) && !(t.IsCompleted && t.Result == null)) return t;
+                t = Task.Run(async () =>
+                {
+                    try { var g = await RouteGraphFor(dir); return g == null ? null : HudMapDetail.From(g); }
+                    catch { return null; }
+                });
+                _detailTasks[dir] = t;
+                return t;
+            }
+        }
+
+        // Solo la vía del HUD (Ruta, «Mapa», Actividad, Horarios): si el detalle completo ya está, el suyo; si no, solo la
+        // vía, que en las rutas grandes sale en una fracción del tiempo del grafo entero.
+        readonly Dictionary<string, Task<HudMapDetail>> _trackTasks = new(StringComparer.OrdinalIgnoreCase);
+
+        Task<HudMapDetail> RouteTrackAsync(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return Task.FromResult<HudMapDetail>(null);
+            lock (_detailTasks)
+                if (_detailTasks.TryGetValue(dir, out var full) && full.IsCompletedSuccessfully && full.Result != null) return full;
+            lock (_trackTasks)
+            {
+                if (_trackTasks.TryGetValue(dir, out var t) && !(t.IsCompleted && t.Result == null)) return t;
+                t = Task.Run(() => { try { return RouteGraph.TrackLatLon(dir); } catch { return null; } });
+                _trackTasks[dir] = t;
+                return t;
+            }
+        }
+
         async void PushHudDetail()
         {
             string dir = _curRoute?.Path ?? "";
@@ -36,11 +74,7 @@ namespace SelectOR
             if (hud == null || hud.IsDisposed) return;
             if (!_hudDetailCache.TryGetValue(dir, out var d))
             {
-                try
-                {
-                    var g = await RouteGraphFor(dir);
-                    d = g == null ? null : await Task.Run(() => HudMapDetail.From(g));
-                }
+                try { d = await RouteDetailAsync(dir); }
                 catch { d = null; }
                 if (d == null) return;
                 _hudDetailCache[dir] = d;

@@ -70,7 +70,7 @@ namespace SelectOR
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.ToString(), "Error al iniciar el selector",
+                ThemedBox.Show(ex.ToString(), "Error al iniciar el selector",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -137,7 +137,7 @@ namespace SelectOR
                   + "Copy SelectOR.exe and its files into that folder and run it from there.\n\n"
                   + "Folder it was started from:\n" + dir;
 
-            MessageBox.Show(texto, titulo, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ThemedBox.Show(texto, titulo, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         private static Assembly ResolveFromAppFolder(AssemblyLoadContext ctx, AssemblyName name)

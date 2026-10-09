@@ -637,7 +637,7 @@ namespace SelectOR
             if (i < 0 || i >= _edFiles.Count) return;
             if (_edDoc != null && _edOriginal != null && !_edDoc.SameAs(_edOriginal))
             {
-                var r = MessageBox.Show(this, Tr("Hay cambios sin guardar en esta composición. ¿Guardarlos antes de cambiar de tren?"),
+                var r = ThemedBox.Show(this, Tr("Hay cambios sin guardar en esta composición. ¿Guardarlos antes de cambiar de tren?"),
                     "SelectOR", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                 if (r == DialogResult.Cancel) return;
                 if (r == DialogResult.Yes) SaveConsistDoc(silent: true);
@@ -777,7 +777,7 @@ namespace SelectOR
             string renamed = SyncFileNameToTrainName();
             _edOriginal = _edDoc.Clone();
             UpdateEditorDirty();
-            ReloadConsistsAfterEdit(changed: new[] { before, _edDoc.Path });   // Exploración: datos, ficha y 2D al día
+            ReloadConsistsAfterEdit(changed: new[] { before, _edDoc.Path });   // Conducción libre: datos, ficha y 2D al día
             if (renamed != null) LoadEditorConsists(_edDoc.Path);   // la lista debe apuntar al archivo nuevo
             if (!silent)
                 Msg(_edMsg, renamed != null
@@ -873,7 +873,7 @@ namespace SelectOR
             int i = _edList?.SelectedRow ?? -1;
             if (i < 0 || i >= _edFiles.Count) { Msg(_edMsg, Tr("Elige una composición de la lista."), true); return; }
             string file = _edFiles[i];
-            if (MessageBox.Show(this, string.Format(Tr("¿Eliminar la composición «{0}»?\n\nSe envía a la papelera de Windows."), Path.GetFileName(file)),
+            if (ThemedBox.Show(this, string.Format(Tr("¿Eliminar la composición «{0}»?\n\nSe envía a la papelera de Windows."), Path.GetFileName(file)),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             try
             {
@@ -890,7 +890,7 @@ namespace SelectOR
             Msg(_edMsg, string.Format(Tr("Composición eliminada: {0}"), Path.GetFileName(file)), false);
         }
 
-        // Exploración → «Editar composición»: el Editor con ese .con ya abierto (si había cambios sin guardar en
+        // Conducción libre → «Editar composición»: el Editor con ese .con ya abierto (si había cambios sin guardar en
         // otra composición, el Editor pregunta como siempre al cambiar de tren).
         void EditConsistFromExplore(TrainItem c)
         {
@@ -907,7 +907,7 @@ namespace SelectOR
             else LoadEditorConsists(path);   // la lista aún no tenía ese archivo: se rehace con él elegido
         }
 
-        // Exploración → «Eliminar composición…»: a la papelera de Windows, como desde el Editor. Con varias
+        // Conducción libre → «Eliminar composición…»: a la papelera de Windows, como desde el Editor. Con varias
         // marcadas (Ctrl+clic), todas a la vez. La lista se queda donde estaba, con el tren siguiente elegido.
         static Action<string> _recycleFile = Native.RecycleFile;   // a la papelera (las pruebas lo sustituyen)
 
@@ -921,7 +921,7 @@ namespace SelectOR
                   + string.Join("\n", list.Take(12).Select(c => "• " + Path.GetFileName(c.FilePath)))
                   + (list.Count > 12 ? "\n" + string.Format(Tr("… y {0} más"), list.Count - 12) : "")
                   + "\n\n" + Tr("Se envían a la papelera de Windows.");
-            if (confirm && MessageBox.Show(this, msg, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            if (confirm && ThemedBox.Show(this, msg, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
             // El que quedará elegido: el primero que no se borra a partir del primero borrado (o el anterior).
             var gone = new HashSet<object>(list);
@@ -951,7 +951,7 @@ namespace SelectOR
             _lstConsists.ClearMarks();
             if (next != null) _prefs.LastConsist = next.FilePath;
             if (fallos.Count > 0) Warn(Tr("No se pudo eliminar: ") + string.Join("\n", fallos));
-            // Exploración, Horarios, Compra… sin esos trenes; la lista vuelve a la misma altura
+            // Conducción libre, Horarios, Compra… sin esos trenes; la lista vuelve a la misma altura
             ReloadConsistsAfterEdit(() => { try { _lstConsists.TopIndex = Math.Min(top, Math.Max(0, _lstConsists.Items.Count - 1)); } catch { } },
                                     list.Select(c => c.FilePath));
             LoadEditorConsists();
@@ -1015,7 +1015,7 @@ namespace SelectOR
             string q = remove
                 ? string.Format(Tr("¿Quitar las plazas de «{0}»? Dejará de contar como coche de viajeros en TODOS los trenes que lo lleven."), file)
                 : string.Format(Tr("¿Poner {0} plazas en «{1}»? Se aplica a TODOS los trenes que lleven ese coche."), ParseNum(_edCap.Box.Text).ToString("0", EsEs), file);
-            if (MessageBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             string err = StockFile.SetCapacity(_edCapPath, value);
             ClearContentCaches();   // han cambiado las plazas del vehículo
             if (err != null) { Msg(_edMsg, Tr("No se pudo guardar las plazas: ") + err, true); return; }
@@ -1024,7 +1024,7 @@ namespace SelectOR
                 : string.Format(Tr("Plazas guardadas en {0}."), file), false);
             ShowCarCapacity(_edCars?.SelectedRow ?? -1);
             UpdateEditorStats();   // PLAZAS y TIPO cambian al momento
-            RefreshTrainsUsing(_edCapPath);   // Exploración: plazas, tipo y filtro Viajeros/Mercancías de esos trenes
+            RefreshTrainsUsing(_edCapPath);   // Conducción libre: plazas, tipo y filtro Viajeros/Mercancías de esos trenes
         }
 
         // 3D del coche elegido (se puede girar arrastrando; doble clic vuelve a la vista inicial).
@@ -1297,8 +1297,11 @@ namespace SelectOR
             _stPower.Text = st.PowerKw > 0 ? st.PowerKw.ToString("N0", EsEs) + " kW" : "—";
             _stSpeed.Text = st.MaxKmh > 0 ? st.MaxKmh.ToString("N0", EsEs) + " km/h" : "—";
             _stCap.Text = st.Capacity > 0 ? st.Capacity.ToString("N0", EsEs) : "—";
+            // Si es un tren de la empresa con plazas fijadas, valen esas (no las de los archivos que se editan aquí).
+            int? fixedSeats = _edDoc?.Path != null && _conTrain.TryGetValue(_edDoc.Path, out var tid) && _trainSeats.TryGetValue(tid, out var n) ? n : null;
+            if (fixedSeats != null) _stCap.Text = fixedSeats.Value.ToString("N0", EsEs) + " · " + Tr("fijadas por la empresa");
             // TIPO del tren según lo que declaran sus coches (y, si no lo declaran, según las plazas).
-            bool pax = st.Pax || st.Capacity > 0;
+            bool pax = st.Pax || st.Capacity > 0 || fixedSeats != null;
             _stType.Text = st.Kind.Length > 0 ? st.Kind : (pax ? Tr("Viajeros") : Tr("Mercancías"));
             _stType.ForeColor = pax ? Theme.Accent : ColOrange;
         }
@@ -1325,7 +1328,7 @@ namespace SelectOR
                 if (x >= _ed2DSlots[i].x0 && x <= _ed2DSlots[i].x1) { _edCars.SelectRow(i); return; }
         }
 
-        // Tras crear/editar/borrar: SelectOR vuelve a leer los trenes de la carpeta (Exploración,
+        // Tras crear/editar/borrar: SelectOR vuelve a leer los trenes de la carpeta (Conducción libre,
         // Horarios, Empresas…), sin recargar rutas ni actividades.
         // Ha cambiado un vehículo (.eng/.wag): se ponen al día TODOS los trenes que lo llevan.
         void RefreshTrainsUsing(string vehPath)
@@ -1350,6 +1353,11 @@ namespace SelectOR
             var set = new HashSet<string>((conPaths ?? Enumerable.Empty<string>()).Where(p => !string.IsNullOrEmpty(p)), StringComparer.OrdinalIgnoreCase);
             if (set.Count == 0) return;
             lock (_trainSpecs) foreach (var p in set) _trainSpecs.Remove(p);
+            // lo que se sabe de cada uno de esos .con: sus vehículos, lo que le falta y su precio en Compra
+            lock (_conRefs) foreach (var p in set) _conRefs.Remove(p);
+            lock (_trainVehCache) foreach (var p in set) _trainVehCache.Remove(p);
+            lock (_missingCache) foreach (var p in set) _missingCache.Remove(p);
+            foreach (var p in set) _shopInfo.Remove(p);
             _lstConsists?.ForgetSpecs(set);   // la tarjeta guarda los suyos (coches, plazas, viajeros/mercancías)
             foreach (var p in set)
                 if (_stripMem.TryGetValue(p, out var b)) { _stripMem.Remove(p); if (!ReferenceEquals(b, _exStrip?.Image)) b.Dispose(); }
@@ -1374,7 +1382,7 @@ namespace SelectOR
             Task.Run(() =>
             {
                 FastConsists.ClearCache();   // el editor ha tocado archivos del contenido
-                var consists = FastConsists.Load(folder.Path);
+                var consists = FastConsists.Load(folder.Path, cambiados, rescan: true);
                 if (consists.Count == 0)
                     consists = SafeList(() => ORTS.Menu.Consist.GetConsists(folder).Select(FromOrConsist).OrderBy(c => c.Name).ToList());
                 lock (_consistCache) _consistCache[folder.Path] = consists;
@@ -1383,9 +1391,11 @@ namespace SelectOR
                     BeginInvoke((Action)(() =>
                     {
                         _consistsAll = consists;
+                        lock (_missingCache) foreach (var p in cambiados) _missingCache.Remove(p);
                         RefreshConsistList();
                         after?.Invoke();
                         RebuildCompanyEngs();
+                        OnConsistsChanged();   // Compra, Flota y etiquetas de los trenes de la empresa, al día
                         UpdateStatus();
                         if (cambiados.Count > 0)
                         {

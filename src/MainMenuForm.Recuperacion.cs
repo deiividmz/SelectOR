@@ -41,7 +41,7 @@ namespace SelectOR
             try { return JsonSerializer.Deserialize<string>(json) ?? ""; } catch { return json.Trim().Trim('"'); }
         }
 
-        void FancyMsg(string text) => MessageBox.Show(this, text, "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        void FancyMsg(string text) => ThemedBox.Show(this, text, "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         // ¿Nombre de empresa libre? (sin distinguir mayúsculas, acentos ni espacios). Avisa si no lo está.
         // Un servidor sin nombres-unicos.sql no lo sabe: se deja pasar.
@@ -95,7 +95,7 @@ namespace SelectOR
             if (!Supa.IsSuperadmin || _usersList == null) return;
             int i = SelectedUserIndex();
             if (i < 0 || i >= _userIds.Count) { Msg(_usersMsg, Tr("Selecciona un usuario de la lista."), true); return; }
-            if (MessageBox.Show(this, Tr("¿Generar otra clave de recuperación para este usuario? La anterior dejará de valer."), "SelectOR",
+            if (ThemedBox.Show(this, Tr("¿Generar otra clave de recuperación para este usuario? La anterior dejará de valer."), "SelectOR",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             var (json, err) = await Supa.RpcAsync("admin_new_recovery_key", new { p_user = _userIds[i] });
             if (err != null) { Msg(_usersMsg, Tr("Error: ") + err, true); return; }

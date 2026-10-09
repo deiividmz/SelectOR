@@ -116,7 +116,7 @@ namespace SelectOR
                 }
             }
             // vía (toda del mismo color)
-            using (var pT = new Pen(TrackCol, w) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+            using (var pT = TrackPen(w))
                 foreach (var l in d.Track)
                 {
                     if (!Box(l)) continue;
@@ -176,6 +176,35 @@ namespace SelectOR
                     TextRenderer.DrawText(g, t, fPk, new Point(at.X + 1, at.Y + 1), Color.FromArgb(10, 10, 10), TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
                     TextRenderer.DrawText(g, t, fPk, at, Color.FromArgb(200, 205, 210), TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
                 }
+            }
+        }
+
+        // La vía del HUD (su color y su grosor) para los mapas que solo enseñan la vía (Ruta, «Mapa» de Conducción libre,
+        // Actividad y Horarios): el resto del detalle no se dibuja.
+        public static float TrackWidth(Rectangle area, float scale) => Math.Max(area.Width < 420 ? 2.2f : 2.6f, 1.9f * scale);
+        public static Pen TrackPen(float w) => new Pen(TrackCol, w) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+
+        public static void Track(Graphics g, Rectangle area, Func<double, double, PointF> proj, HudMapDetail d, float scale)
+        {
+            if (d == null) return;
+            var vis = RectangleF.Inflate(area, 12, 12);
+            var buf = new List<PointF>(256);
+            using var pen = TrackPen(TrackWidth(area, scale));
+            foreach (var l in d.Track)
+            {
+                var c1 = proj(l.MinLa, l.MinLo); var c2 = proj(l.MaxLa, l.MaxLo);
+                if (!vis.IntersectsWith(RectangleF.FromLTRB(Math.Min(c1.X, c2.X) - 1, Math.Min(c1.Y, c2.Y) - 1, Math.Max(c1.X, c2.X) + 1, Math.Max(c1.Y, c2.Y) + 1))) continue;
+                buf.Clear();
+                PointF last = default;
+                for (int i = 0, n = l.Lat.Length; i < n; i++)
+                {
+                    var p = proj(l.Lat[i], l.Lon[i]);
+                    if (i == 0 || i == n - 1) { buf.Add(p); last = p; continue; }
+                    float dx = p.X - last.X, dy = p.Y - last.Y;
+                    if (dx * dx + dy * dy >= 0.64f) { buf.Add(p); last = p; }
+                }
+                if (buf.Count == 1) buf.Add(buf[0]);
+                try { g.DrawLines(pen, buf.ToArray()); } catch { }
             }
         }
 

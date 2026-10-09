@@ -87,11 +87,11 @@ namespace SelectOR
         ActivityCardGrid _lstActivities;
         TextBox _txtBriefing;
         Panel _pageRuta, _pageActividad, _pageExplora, _pageHorarios, _pageMulti, _pageEditor, _pageEmpresas;
-        // Exploración
+        // Conducción libre
         RoundedInput _consistSearch;
         ViewModeToggle _trainView;
         CheckBox _chkTrainFavOnly;
-        ComboBox _cboTrainCompany;   // filtro de trenes por empresa (Exploración)
+        ComboBox _cboTrainCompany;   // filtro de trenes por empresa (Conducción libre)
         Control _trainCompanyHost;   // fila etiqueta+combo del filtro (se oculta si no hay empresas)
         TrainCardGrid _lstConsists;
         ListStatePanel _routesOverlay, _consistsOverlay;   // "Cargando…" / "Sin rutas" / "Sin trenes"
@@ -110,7 +110,7 @@ namespace SelectOR
         Label _ttCompanyLbl; Panel _ttCompanyHost; TableLayoutPanel _ttGrid; int _ttCompanyRow;   // fila "Empresa" (colapsable)
         Segmented _segTTSeason, _segTTWeather;
         TextBox _txtTTBriefing;
-        // Filtro por empresa (Exploración/Horarios)
+        // Filtro por empresa (Conducción libre/Horarios)
         const string AllCompaniesLabel = "Todas las empresas";
         bool _companyFilterLoading;
         // Multijugador
@@ -130,6 +130,8 @@ namespace SelectOR
             _kiosk = kiosk;
             _prefs = AppPrefs.Load();
             NotifySound.Enabled = () => _prefs?.NotifySound != false;
+            VehicleThumbs.ConsistFile = ConsistStripFileAsync;   // vistas 2D de un tren entero (Compra y Flota)
+            PathMapDialog.DetailFor = RouteTrackAsync;           // la vía del HUD en «Mapa» (Conducción libre, Actividad, Horarios)
             try { _settings = new UserSettings(new string[0]); DetectLanguage(); } catch { }
             // Escala de la interfaz según la pantalla, ANTES de montar nada: las fuentes ya se crean
             // a la medida buena y luego se escalan los tamaños fijos de la maqueta.
@@ -216,7 +218,7 @@ namespace SelectOR
             Shown += (s, e) => StartUpdateChecks();   // aviso de nueva versión (al arrancar y cada 3 h)            LayoutBottomBar();
         }
 
-        // Secciones con barra inferior: las que llevan CONDUCIR (Actividad, Exploración, Horarios),
+        // Secciones con barra inferior: las que llevan CONDUCIR (Actividad, Conducción libre, Horarios),
         // Multijugador con su CONECTAR y Empresas con «Ponerme de servicio». Ruta y el Editor no
         // tienen ninguna acción ahí, así que ese espacio se lo queda el contenido.
         static bool PageHasBottomBar(int page) => page == 1 || page == 2 || page == 3 || page == 4 || page == PageEmpresas;
@@ -462,7 +464,7 @@ namespace SelectOR
         // Barra superior ÚNICA: logotipo, las secciones (pestañas) y las herramientas (contenido, reanudar,
         // opciones y acerca de). Las pestañas miden lo que su texto; si no caben, primero se quitan los
         // rótulos de las herramientas, luego los iconos de las pestañas y por último se acortan.
-        static readonly string[] TabNames = { "Ruta", "Actividad", "Exploración", "Horarios", "Multijugador", "Editor de composiciones", "Empresas" };
+        static readonly string[] TabNames = { "Ruta", "Actividad", "Conducción libre", "Horarios", "Multijugador", "Editor de composiciones", "Empresas" };
         static readonly string[] TabKinds = { "map", "activity", "explore", "clock", "globe", "train", "bank" };
 
         void BuildHeader()
@@ -609,7 +611,7 @@ namespace SelectOR
             rightCol.HandleCreated += (s, e) => centerPlay();
 
             // Grupo "de servicio" para la sección Empresas: ocupa el sitio de CONDUCIR.
-            // Ya no hay flota: se conduce el tren seleccionado en Exploración/Horarios/Actividad.
+            // Ya no hay flota: se conduce el tren seleccionado en Conducción libre/Horarios/Actividad.
             _empDutyHost = new Panel { Dock = DockStyle.Right, Width = 584, BackColor = Theme.Surface, Visible = false };
             var dutyFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = Theme.Surface, Padding = new Padding(0, 15, 20, 0) };
             _empDutyBtn = new RoundButton
@@ -729,14 +731,14 @@ namespace SelectOR
                 try
                 {
                     var d = SysPath.Combine(path, "OPENRAILS");
-                    if (Directory.Exists(d)) tts = Directory.GetFiles(d, "*.timetable_or").Length + Directory.GetFiles(d, "*.timetable-or").Length
-                                                 + Directory.GetFiles(d, "*.timetablelist_or").Length + Directory.GetFiles(d, "*.timetablelist-or").Length;
+                    if (Directory.Exists(d)) tts = new[] { "*.timetable_or", "*.timetable-or", "*.timetablelist_or", "*.timetablelist-or" }
+                                                     .Sum(pat => Directory.GetFiles(d, pat).Count(f => !IsTtDerived(f)));
                 }
                 catch { }
                 var parts = new List<string>();
                 if (acts > 0) parts.Add(string.Format(Tr(acts == 1 ? "{0} actividad" : "{0} actividades"), acts));
                 if (tts > 0) parts.Add(string.Format(Tr(tts == 1 ? "{0} horario" : "{0} horarios"), tts));
-                if (parts.Count == 0) parts.Add(Tr("solo exploración"));
+                if (parts.Count == 0) parts.Add(Tr("solo conducción libre"));
                 lock (_routeSub) _routeSub[path] = string.Join("  ·  ", parts);
                 SafeInvalidateRoutes();
             });
@@ -892,7 +894,7 @@ namespace SelectOR
             _rutaGo.Items = new List<RouteGoPanel.Go>
             {
                 new() { Icon = "🏁", Title = Tr("Actividades"), Sub = Tr("con briefing, paradas y horario"), Count = _activitiesAll.Count.ToString("N0", EsEs), Tint = Color.FromArgb(251, 146, 60), Page = 1 },
-                new() { Icon = "🧭", Title = Tr("Exploración"), Sub = Tr("tu tren, tu recorrido, tu hora"), Count = _pathsAll.Count.ToString("N0", EsEs), Tint = Theme.AccentHi, Page = 2 },
+                new() { Icon = "🧭", Title = Tr("Conducción libre"), Sub = Tr("tu tren, tu recorrido, tu hora"), Count = _pathsAll.Count.ToString("N0", EsEs), Tint = Theme.AccentHi, Page = 2 },
                 new() { Icon = "🕒", Title = Tr("Horarios"), Sub = Tr("trenes con su itinerario"), Count = ttTrains.ToString("N0", EsEs), Tint = Color.FromArgb(120, 144, 226), Page = 3 },
             };
             _rutaGo.Stats = new List<(string, string, string)>
@@ -1077,10 +1079,12 @@ namespace SelectOR
             return c;
         }
 
-        int _trainKind;                       // 0 todos · 1 viajeros · 2 mercancías · 3 automotores · 4 locomotoras · 5 favoritos
+        ToolTip _tipIncomplete;
+        RoundButton _trainWarnChip, _trainFavChip;   // «⚠» incompletos y «★» favoritos (fuera de _trainChips)
+        int _trainKind;                       // 0 todos · 1 viajeros · 2 mercancías · 3 automotores · 4 locomotoras · 5 favoritos · 6 incompletos
         Label _classifyLbl;
         ConsistStripView _exStrip;
-        static readonly string[] TrainKindNames = { "Todos", "Viajeros", "Mercancías", "Automotores", "Locomotoras", "★ Favoritos" };
+        static readonly string[] TrainKindNames = { "Todos", "Viajeros", "Mercancías", "Automotores", "Locomotoras", "★ Favoritos", "⚠ Incompletos" };
 
         Panel BuildExploraPage()
         {
@@ -1109,13 +1113,15 @@ namespace SelectOR
                 b.Click += (s, e) =>
                 {
                     _trainKind = idx; SetChipActive(_trainChips, idx);
+                    if (_trainWarnChip != null) { _trainWarnChip.Active = idx == 6; _trainWarnChip.Invalidate(); }
+                    if (_trainFavChip != null) { _trainFavChip.Active = idx == 5; _trainFavChip.Invalidate(); }
                     _chkTrainFavOnly.Checked = idx == 5;   // (dispara RefreshConsistList)
                     RefreshConsistList();
                 };
                 _trainChips.Controls.Add(b);
             }
             _classifyLbl = new Label { AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Margin = new Padding(8, 0, 4, 0), Text = "" };
-            var coHost = new Panel { Width = 250, Height = 34, BackColor = Theme.Bg, Anchor = AnchorStyles.Right, Margin = new Padding(8, 3, 0, 3) };
+            var coHost = new Panel { Width = 215, Height = 34, BackColor = Theme.Bg, Anchor = AnchorStyles.Right, Margin = new Padding(8, 3, 0, 3) };
             var coLbl = new Label { Text = Tr("Empresa"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(9f), Dock = DockStyle.Left, Padding = new Padding(0, 8, 8, 0) };
             _cboTrainCompany = new ThemeCombo { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
             StyleCombo(_cboTrainCompany);
@@ -1131,16 +1137,29 @@ namespace SelectOR
             // tarjetas o lista (se recuerda)
             _trainView = new ViewModeToggle { Anchor = AnchorStyles.Right, Margin = new Padding(8, 5, 0, 5), Mode = _prefs.TrainListView ? 1 : 0, TipCards = Tr("Ver en tarjetas"), TipList = Tr("Ver en lista") };
             _trainView.ModeChanged += (s, e) => { _prefs.TrainListView = _trainView.Mode == 1; _lstConsists.ListMode = _prefs.TrainListView; };
-            bar.Controls.Add(lblT, 0, 0); bar.Controls.Add(_trainChips, 1, 0); bar.Controls.Add(_classifyLbl, 2, 0); bar.Controls.Add(coHost, 3, 0); bar.Controls.Add(_trainView, 4, 0); bar.Controls.Add(_consistSearch, 5, 0);
+            // «⚠ Incompletos» va aparte, junto al rótulo de clasificación: así no se corta al final de las pastillas
+            // ★ (favoritos) y ⚠ (incompletos), con su número, van aparte: así no se cortan al final de las pastillas
+            _trainWarnChip = (RoundButton)_trainChips.Controls[6];
+            _trainFavChip = (RoundButton)_trainChips.Controls[5];
+            _trainChips.Controls.Remove(_trainWarnChip); _trainChips.Controls.Remove(_trainFavChip);
+            _trainWarnChip.Margin = new Padding(6, 4, 0, 4); _trainFavChip.Margin = new Padding(8, 4, 0, 4);
+            _tipIncomplete = new ToolTip();
+            _tipIncomplete.SetToolTip(_trainFavChip, Tr("Trenes favoritos"));
+            _tipIncomplete.SetToolTip(_trainWarnChip, Tr("Trenes incompletos: les falta algún .eng o .wag"));
+            var extra = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Anchor = AnchorStyles.Right, Margin = new Padding(0) };
+            extra.Controls.Add(_classifyLbl); extra.Controls.Add(_trainFavChip); extra.Controls.Add(_trainWarnChip);
+            _classifyLbl.Anchor = AnchorStyles.None; _classifyLbl.Margin = new Padding(8, 11, 4, 0);
+            bar.Controls.Add(lblT, 0, 0); bar.Controls.Add(_trainChips, 1, 0); bar.Controls.Add(extra, 2, 0); bar.Controls.Add(coHost, 3, 0); bar.Controls.Add(_trainView, 4, 0); bar.Controls.Add(_consistSearch, 5, 0);
 
             _thumbs ??= new VehicleThumbs(this);
             _lstConsists = new TrainCardGrid
             {
                 Dock = DockStyle.Fill, Thumbs = _thumbs, MultiSelect = true,   // Ctrl+clic: varias a la vez (eliminar)
                 PathOf = o => (o as TrainItem)?.Locomotive?.FilePath, KeyOf = o => (o as TrainItem)?.FilePath,
-                SpecOf = o => TrainSpecAsync(o as TrainItem),
+                SpecOf = o => TrainSpecSeatsAsync(o as TrainItem),   // con las plazas de la empresa, si las ha fijado
                 FavOf = o => o is TrainItem t && _prefs.FavoriteTrains.Contains(t.FilePath),
                 CompaniesOf = o => ConsistCompanies(o as TrainItem),
+                WarnOf = o => MissingText(o as TrainItem),   // le falta algún .eng o .wag
                 LblPax = Tr("VIAJEROS"), LblFreight = Tr("MERCANCÍAS"), LblCars = Tr("{0} coches"), LblSeats = Tr("plazas"), LblLoading = Tr("Calculando…"),
                 ListMode = _prefs.TrainListView,
             };
@@ -1149,7 +1168,7 @@ namespace SelectOR
             var consistCtx = MenuStyle.Apply(new ContextMenuStrip());
             var miTFav = new ToolStripMenuItem(Tr("Añadir / quitar de favoritos")); miTFav.Click += (s, e) => ToggleTrainFavorite();
             consistCtx.Items.Add(miTFav);
-            // El tren en el Editor de composiciones, o a la papelera, sin salir de Exploración.
+            // El tren en el Editor de composiciones, o a la papelera, sin salir de Conducción libre.
             var miTEdit = new ToolStripMenuItem(Tr("Editar composición")); miTEdit.Click += (s, e) => EditConsistFromExplore(_lstConsists.SelectedItem as TrainItem);
             var miTDel = new ToolStripMenuItem(Tr("Eliminar composición…")) { ForeColor = Color.FromArgb(229, 115, 115) };
             miTDel.Click += (s, e) => DeleteConsistsFromExplore(_lstConsists.SelectedItems.OfType<TrainItem>().ToList());
@@ -1162,7 +1181,8 @@ namespace SelectOR
                 int n = _lstConsists.SelectedItems.OfType<TrainItem>().Count(t => File.Exists(t.FilePath));
                 // Con varias marcadas (Ctrl+clic), solo se puede eliminarlas: lo demás no se enseña.
                 bool many = _lstConsists.MarkedCount > 1;
-                miTFav.Visible = sepT.Visible = miTEdit.Visible = !many;
+                miTEdit.Visible = !many;   // con varios: favoritos y eliminar (a todos)
+                miTFav.Text = many ? string.Format(Tr("Añadir / quitar {0} de favoritos"), _lstConsists.MarkedCount) : Tr("Añadir / quitar de favoritos");
                 miTEdit.Enabled = n == 1;
                 miTDel.Enabled = n > 0;
                 miTDel.Text = n > 1 ? string.Format(Tr("Eliminar {0} composiciones…"), n) : Tr("Eliminar composición…");
@@ -1224,7 +1244,7 @@ namespace SelectOR
             return page;
         }
 
-        string TrainKindText(int k) => k == 5 ? "★ " + Tr("Favoritos") : Tr(TrainKindNames[k]);
+        string TrainKindText(int k) => k == 5 ? "★" : k == 6 ? "⚠" : Tr(TrainKindNames[k]);   // favoritos e incompletos: solo el icono (y su número)
 
         // ---- tipo de cada tren (para los filtros): se calcula en segundo plano y se guarda en disco ----
         System.Threading.CancellationTokenSource _classifyCts;
@@ -1409,7 +1429,7 @@ namespace SelectOR
             if (_exSpecs == null) return;
             ShowExploreStrip(c);
             if (c == null) { _exSpecs.SetItems(null); return; }
-            var sp = await TrainSpecAsync(c);
+            var sp = await TrainSpecSeatsAsync(c);
             if (!ReferenceEquals(_lstConsists.SelectedItem, c) || sp == null) return;
             var es = EsEs;
             var items = new List<(string, string)>
@@ -1446,49 +1466,72 @@ namespace SelectOR
             if (c?.FilePath == null) { _exStrip.Set(null, cap, false); return; }
             if (_stripMem.TryGetValue(c.FilePath, out var bmp)) { _exStrip.Set(bmp, cap, false); return; }
             _exStrip.Set(null, cap, true);
-            string con = c.FilePath, file = StripCacheFile(con);
-            Task.Run(async () =>
+            ShowExploreStripAsync(c);
+        }
+
+        async void ShowExploreStripAsync(TrainItem c)
+        {
+            string file = await ConsistStripFileAsync(c.FilePath);
+            var bmp = await Task.Run(() => LoadStripFile(file));
+            if (!IsDisposed) StripReady(c, bmp);
+        }
+
+        static Bitmap LoadStripFile(string file)
+        {
+            try { if (file != null && File.Exists(file)) using (var ms = new MemoryStream(File.ReadAllBytes(file))) return new Bitmap(Image.FromStream(ms)); } catch { }
+            return null;
+        }
+
+        // PNG de la composición 2D de un .con (todos sus vehículos), en la caché de disco: la de Conducción libre, la de las
+        // tarjetas de Compra y Flota (VehicleThumbs.ConsistFile) y la imagen que se guarda con el tren de la empresa.
+        // Un tren por vez; null si no se puede dibujar.
+        readonly System.Threading.SemaphoreSlim _stripGate = new(1);
+        async Task<string> ConsistStripFileAsync(string con)
+        {
+            if (string.IsNullOrEmpty(con)) return null;
+            string file = await Task.Run(() => File.Exists(con) ? StripCacheFile(con) : null);
+            if (file == null) return null;
+            if (File.Exists(file)) return file;
+            await _stripGate.WaitAsync();
+            try
             {
-                Bitmap fromDisk = null;
-                try { if (File.Exists(file)) using (var ms = new MemoryStream(File.ReadAllBytes(file))) fromDisk = new Bitmap(Image.FromStream(ms)); } catch { }
-                if (fromDisk != null) { try { BeginInvoke((Action)(() => StripReady(c, fromDisk))); } catch { } return; }
-                List<(string path, bool flip, string name)> models;
-                try
+                if (File.Exists(file)) return file;
+                var cars = await Task.Run(() =>
                 {
                     var doc = ConsistDoc.Load(con);
-                    if (doc == null || doc.Cars.Count == 0) { try { BeginInvoke((Action)(() => StripReady(c, null))); } catch { } return; }
-                    models = doc.Cars.Select(x => (ResolveCarFile(x.Name, x.Folder), x.Flip, x.Name)).ToList();
-                }
-                catch { try { BeginInvoke((Action)(() => StripReady(c, null))); } catch { } return; }
-                var cars = new List<(ShapeGeom geom, bool flip, string name)>();
-                foreach (var (path, flip, name) in models)
-                {
-                    ShapeGeom g = null;
-                    if (path != null)
+                    if (doc == null || doc.Cars.Count == 0) return null;
+                    var l = new List<(ShapeGeom geom, bool flip, string name)>();
+                    foreach (var x in doc.Cars)
                     {
-                        lock (_geomCache) _geomCache.TryGetValue(path, out g);
-                        if (g == null)
+                        string path = ResolveCarFile(x.Name, x.Folder);
+                        ShapeGeom g = null;
+                        if (path != null)
                         {
-                            try { g = ShapeRenderer.BuildGeometry(path); } catch { }
-                            try { ShapeRenderer.PrefetchTextures(g); } catch { }
-                            if (g != null) lock (_geomCache) _geomCache[path] = g;
+                            lock (_geomCache) _geomCache.TryGetValue(path, out g);
+                            if (g == null)
+                            {
+                                try { g = ShapeRenderer.BuildGeometry(path); } catch { }
+                                try { ShapeRenderer.PrefetchTextures(g); } catch { }
+                                if (g != null) lock (_geomCache) _geomCache[path] = g;
+                            }
                         }
+                        l.Add((g, x.Flip, x.Name));
                     }
-                    cars.Add((g, flip, name));
-                }
-                try
+                    return l;
+                });
+                if (cars == null || IsDisposed) return null;
+                // un modelo por turno de la interfaz: la ventana no se congela mientras se dibuja el tren
+                Bitmap strip = null;
+                try { strip = await ServiceImages.ComposeStripAsync(cars, this); } catch { }
+                if (strip == null) return null;
+                await Task.Run(() =>
                 {
-                    // un modelo por turno de la interfaz: la ventana no se congela mientras se dibuja el tren
-                    Bitmap strip = null;
-                    try { strip = await ServiceImages.ComposeStripAsync(cars, this); } catch { }
-                    if (strip != null)
-                    {
-                        try { Directory.CreateDirectory(SysPath.GetDirectoryName(file)); strip.Save(file + ".tmp", System.Drawing.Imaging.ImageFormat.Png); File.Move(file + ".tmp", file, true); } catch { }
-                    }
-                    BeginInvoke((Action)(() => StripReady(c, strip)));
-                }
-                catch { }
-            });
+                    try { using (strip) { Directory.CreateDirectory(SysPath.GetDirectoryName(file)); strip.Save(file + ".tmp", System.Drawing.Imaging.ImageFormat.Png); } File.Move(file + ".tmp", file, true); } catch { }
+                });
+                return File.Exists(file) ? file : null;
+            }
+            catch { return null; }
+            finally { _stripGate.Release(); }
         }
 
         void StripReady(TrainItem c, Bitmap bmp)
@@ -1533,6 +1576,7 @@ namespace SelectOR
 
             // ---- columna: primero el CONJUNTO (desplegable) y debajo sus HORARIOS (lista, con buscador) ----
             var ttCol = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(10, 8, 8, 10), Margin = new Padding(0, 0, 14, 0) };
+            ttCol.BackColor = Theme.Surface;   // el desplegable y el buscador toman este fondo en sus esquinas (si no, un marco negro)
             var setCap = new Label { Text = Tr("CONJUNTO"), Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold) };
             _cboTTSet.Dock = DockStyle.Top;
             _ttListCap = new Label { Text = Tr("HORARIO"), Dock = DockStyle.Top, Height = 30, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(0, 0, 0, 4) };
@@ -1579,6 +1623,7 @@ namespace SelectOR
                 Heads = new[] { Tr("HORA"), Tr("TREN"), Tr("RECORRIDO"), Tr("PARADAS"), Tr("COMPOSICIÓN") },
                 LblStops = Tr("{0} paradas"), LblStop = Tr("1 parada"), LblNoStops = Tr("sin paradas"),
             };
+            WireTtBoardMenu();   // clic derecho: elegir el tren de la línea
             _ttBoard.SelectedIndexChanged += (s, e) =>
             {
                 if (_ttSyncing || _ttBoard.SelectedItem is not DepartureBoard.Row r) return;
@@ -1606,7 +1651,7 @@ namespace SelectOR
             _ttPreview.Resize += (s, e) => { if (_ttPreviewGeom != null) { _ttRerender.Stop(); _ttRerender.Start(); } };
             _ttItin = new ItineraryView { Dock = DockStyle.Fill, Empty = Tr("Elige un tren del panel de salidas"), LblOrigin = Tr("origen"), LblDest = Tr("destino"),
                                          LblNoStops = Tr("Este horario no detalla las paradas de este tren."), BriefCap = Tr("RESUMEN") };
-            // estación y clima: los mismos chips que Exploración (un clic abre sus tarjetas en un desplegable)
+            // estación y clima: los mismos chips que Conducción libre (un clic abre sus tarjetas en un desplegable)
             _segTTSeason = new Segmented(SeasonKinds, SeasonNames) { SelectedIndex = 1, CardStyle = true, Height = 58 };
             _segTTWeather = new Segmented(WeatherKinds, WeatherNames) { SelectedIndex = 0, CardStyle = true, Height = 58 };
             var conds = BuildTTCondChips();
@@ -1710,10 +1755,11 @@ namespace SelectOR
             var set = _cboTTSet.SelectedItem as TimetableInfo;
             int fi = _cboTT.SelectedIndex;
             TtStops.Table table = null;
+            string file = null;
             try
             {
                 var files = set == null ? new List<string>() : TtStops.FilesOf(set.fileName);
-                string file = fi >= 0 && fi < files.Count ? files[fi] : files.Count == 1 ? files[0] : null;
+                file = fi >= 0 && fi < files.Count ? files[fi] : files.Count == 1 ? files[0] : null;
                 table = TtStops.Load(file);
             }
             catch { }
@@ -1731,7 +1777,7 @@ namespace SelectOR
                     Train = tr, Name = tr.Train ?? "", Via = tr.Path ?? "",
                     Time = stops.Count > 0 ? stops[0].Dep : FirstHm(tr.StartTime),
                     From = stops.Count > 0 ? stops[0].Station : "", To = stops.Count > 1 ? stops[^1].Station : "",
-                    Consist = !string.IsNullOrWhiteSpace(tr.LeadingConsist) ? tr.LeadingConsist : tr.Consist ?? "",
+                    Consist = TtOverride(file, tr) is string ov ? "✎ " + ov : TtOriginalConsist(tr) ?? "",   // ✎: tren elegido por el usuario
                     Stops = stops.Count >= 2 ? stops.Count - 2 : (table == null ? -1 : 0),
                 };
                 if (q.Length > 0 && !(r.Name + " " + r.From + " " + r.To + " " + r.Consist + " " + r.Via).Contains(q, StringComparison.OrdinalIgnoreCase)
@@ -1806,7 +1852,7 @@ namespace SelectOR
                                               ("🔗", Tr("Unirme a un servidor"), Tr("Elige uno público abajo o escribe la dirección")) })
                       { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0), Caption = Tr("CÓMO QUIERES JUGAR") };
             // La nota sigue en una etiqueta (la rellena ApplyMPMode), pero la pinta la tarjeta.
-            var info = new Label { Visible = false, Text = Tr("Se lanza la selección de «Exploración» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.") };
+            var info = new Label { Visible = false, Text = Tr("Se lanza la selección de «Conducción libre» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.") };
             _lblMPInfo = info;
             info.TextChanged += (s, e) => { _mpMode.Info = info.Text; LayoutMpTop(); };
             _mpMode.Info = info.Text;
@@ -1948,7 +1994,7 @@ namespace SelectOR
                 _txtMPHost.ForeColor = Theme.Text;
                 _mpShowingOwnIp = false;
                 if (_lblMPInfo != null)
-                    _lblMPInfo.Text = Tr("Se lanza la selección de «Exploración» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.");
+                    _lblMPInfo.Text = Tr("Se lanza la selección de «Conducción libre» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.");
             }
             _txtMPHost.Enabled = true;
         }
@@ -2237,24 +2283,36 @@ namespace SelectOR
             if (_uiRevealed && i != 0 && _curRoute != null) DismissRutaWelcome();   // ya usa la ruta cargada: al volver, su ficha
             for (int k = 0; k < _pills.Length; k++) { _pills[k].Active = (k == i); _pills[k].Invalidate(); }
             var __lay = Perf.T("ShowPage " + i + " · maquetación");
-            _root?.SuspendLayout();
-            _pageHost.SuspendLayout();
             // Se ocultan las demás, se ajusta la columna RUTAS y se enseña la pestaña (sin volver a maquetarla
-            // entera si conserva su tamaño: ShowFast).
+            // entera si conserva su tamaño: ShowFast). La columna va ANTES de enseñarla: con todas las pestañas
+            // ocultas, el hueco toma su ancho definitivo casi gratis y la pestaña ya no se maqueta dos veces (al
+            // pasar al Editor o a Empresas, que no llevan la columna, eran 60-80 ms).
             var pages = new Control[] { _pageRuta, _pageActividad, _pageExplora, _pageHorarios, _pageMulti, _pageEditor, _pageEmpresas };
             int[] ids = { 0, 1, 2, 3, 4, PageEditor, PageEmpresas };
+            _pageHost.SuspendLayout();
             for (int k = 0; k < pages.Length; k++) if (ids[k] != i && pages[k].Visible) pages[k].Visible = false;
-            ApplySidebarForPage(i);   // Editor y Empresas: sin columna RUTAS (todo el ancho para el contenido)
-            for (int k = 0; k < pages.Length; k++) if (ids[k] == i) ShowFast(pages[k], true);
             _pageHost.ResumeLayout(false);
-            _root?.ResumeLayout(true);    // una sola maquetación con la página y el ancho ya definitivos
+            using (Perf.T("ShowPage " + i + " · maquetación · columna"))
+            {
+                ApplySidebarForPage(i);   // Editor y Empresas: sin columna RUTAS (todo el ancho para el contenido)
+                ApplyCenterPadding();
+                _root?.PerformLayout();
+            }
+            using (Perf.T("ShowPage " + i + " · maquetación · pestaña"))
+            {
+                _pageHost.SuspendLayout();
+                for (int k = 0; k < pages.Length; k++) if (ids[k] == i) ShowFast(pages[k], true);
+            }
+            using (Perf.T("ShowPage " + i + " · maquetación · hueco"))
+                _pageHost.ResumeLayout(true);
             __lay.Dispose();
             var __rest = Perf.T("ShowPage " + i + " · datos");
             _btnPlay.Visible = i != 0 && i != 4 && i != PageEditor && i != PageEmpresas;   // estas pestañas no usan CONDUCIR
             _btnConnect.Visible = i == 4;                                                  // Multijugador: CONECTAR
             UpdateDutyHostVisible();   // barra "de servicio" en Empresas (solo si perteneces a alguna empresa)
             _prefs.LastTab = i;
-            if (i == 4 && (_serversAll == null || _serversAll.Count == 0)) LoadServers();
+            if (i == 4 && !_warmingPages && (_serversAll == null || _serversAll.Count == 0)) LoadServers();
+            if (i != PageEditor && i != PageEmpresas) RefreshRouteBadges();   // la lista de rutas vuelve a verse: distintivos al día
             // El editor enseña su estructura al momento y cada lista va con su propio «Cargando…».
             if (i == PageEditor) OnEditorShown();
             if (i == PageEmpresas) OnEmpresasShown();
@@ -2293,7 +2351,7 @@ namespace SelectOR
             }
             catch (Exception ex)
             {
-                MessageBox.Show(Tr("No se pudieron leer los ajustes de Open Rails:\n\n") + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ThemedBox.Show(Tr("No se pudieron leer los ajustes de Open Rails:\n\n") + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 _folders = new List<Folder>();
             }
 
@@ -2419,6 +2477,8 @@ namespace SelectOR
                     _consistsOverlay?.SetState(_consistsAll.Count == 0 ? ListStatePanel.Mode.Empty : ListStatePanel.Mode.Hidden, Tr("Sin trenes"), Tr("Esta carpeta de contenido no tiene composiciones (.con) en TRAINS\\CONSISTS."));
                     UpdateTimetablePreview();   // ya hay consists → resuelve el tren del timetable (si estaba pendiente)
                     RebuildCompanyEngs();       // recalcula qué trenes son de mis empresas (etiqueta)
+                    OnConsistsChanged();        // Compra, Flota y etiquetas de los trenes de la empresa, al día
+                    WatchContent(folder.Path);  // y al día si cambian los .con o el material (fuera de SelectOR)
                     LoadLog("horario y trenes de empresa hechos");
                     LoadStep("consists");
                     if (!_uiRevealed) Prewarm2D(); else LoadStep("vistas2d");   // vistas 2D listas antes de abrir el menú
@@ -2466,7 +2526,7 @@ namespace SelectOR
                 {
                     if (token != _routeToken) return;
                     LoadLog("ruta: actividades, recorridos y horarios leídos; llenando listas…");
-                    _activitiesAll = acts; _pathsAll = paths; _timetablesAll = tts;
+                    _activitiesAll = acts; _pathsAll = paths; _timetablesAll = tts.Where(t => !IsTtDerived(t.fileName)).ToList();   // sin las copias de SelectOR
                     RefreshActivityList(); RefreshPathList(); RefreshTimetableSets();
                     UpdateRouteOverview();
                     SetIdle(); UpdateStatus();
@@ -2515,7 +2575,7 @@ namespace SelectOR
                 if (!pass[_actFilter]) continue;
                 _lstActivities.Items.Add(a);
             }
-            _lstActivities.EmptyText = _activitiesAll.Count == 0 ? Tr("Esta ruta no tiene actividades. Usa «Exploración» u «Horarios».") : Tr("Nada coincide con el filtro.");
+            _lstActivities.EmptyText = _activitiesAll.Count == 0 ? Tr("Esta ruta no tiene actividades. Usa «Conducción libre» u «Horarios».") : Tr("Nada coincide con el filtro.");
             _lstActivities.EndUpdate();
             if (_actChips != null)
             {
@@ -2528,7 +2588,7 @@ namespace SelectOR
                     }
             }
             if (_lstActivities.SelectedIndex < 0 && _lstActivities.Items.Count > 0) _lstActivities.SelectedIndex = 0;
-            if (_activitiesAll.Count == 0) _txtBriefing.Text = Tr("Esta ruta no tiene actividades. Usa «Exploración» u «Horarios».");
+            if (_activitiesAll.Count == 0) _txtBriefing.Text = Tr("Esta ruta no tiene actividades. Usa «Conducción libre» u «Horarios».");
         }
 
         void RefreshConsistList()
@@ -2538,15 +2598,20 @@ namespace SelectOR
             string coFilter = SelectedCompany(_cboTrainCompany);
             var prev = _lstConsists.SelectedItem as TrainItem;
             var shown = new List<object>(_consistsAll.Count);
-            var kindCount = new int[6];
+            var kindCount = new int[7];
             foreach (var c in _consistsAll)
             {
-                if (favOnly && !_prefs.FavoriteTrains.Contains(c.FilePath)) continue;
                 if (q.Length > 0 && (c.Name == null || c.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0)) continue;
                 if (coFilter != null && !HasCo(ConsistCompanies(c), coFilter)) continue;
-                var sp = KnownSpec(c);
+                // los que no sirven (les falta algún .eng o .wag) van aparte, en «⚠»
+                bool incomplete = KnownIncomplete(c) == true;
+                if (incomplete) { kindCount[6]++; if (_trainKind == 6) shown.Add(c); continue; }
+                var sp = KnownSpecSeats(c);
                 if (sp != null) { kindCount[sp.Freight ? 2 : 1]++; kindCount[sp.Automotor ? 3 : (sp.Freight || !sp.Automotor ? 4 : 0)]++; }
                 kindCount[0]++;
+                bool fav = _prefs.FavoriteTrains.Contains(c.FilePath);
+                if (fav) kindCount[5]++;
+                if (_trainKind == 6 || (favOnly && !fav)) continue;
                 if (_trainKind >= 1 && _trainKind <= 4)
                 {
                     if (sp == null) continue;   // aún sin clasificar: entra en cuanto se sepa
@@ -2559,19 +2624,22 @@ namespace SelectOR
             for (int k = 0; same && k < shown.Count; k++) same = ReferenceEquals(shown[k], _lstConsists.Items[k]);
             _lstConsists.BeginUpdate();
             if (!same) { _lstConsists.Items.Clear(); _lstConsists.Items.AddRange(shown.ToArray()); }
-            _lstConsists.EmptyText = _trainKind >= 1 && _trainKind <= 4 && _classDone < _classTotal ? Tr("Clasificando los trenes del contenido…") : Tr("Nada coincide con el filtro.");
+            _lstConsists.EmptyText = _trainKind == 6 ? (_missingScanning ? Tr("Buscando los trenes a los que les falta algún .eng o .wag…") : Tr("Ningún tren incompleto: a todos les encuentras sus .eng y .wag."))
+                                   : _trainKind >= 1 && _trainKind <= 4 && _classDone < _classTotal ? Tr("Clasificando los trenes del contenido…") : Tr("Nada coincide con el filtro.");
             _lstConsists.EndUpdate();
             if (_trainChips != null)
             {
                 using var f = Theme.Font(9f, FontStyle.Bold);
-                for (int k = 0; k < 5 && k < _trainChips.Controls.Count; k++)
-                    if (_trainChips.Controls[k] is RoundButton b)
+                for (int k = 0; k < 7; k++)
+                    if ((k == 6 ? _trainWarnChip : k == 5 ? _trainFavChip : k < _trainChips.Controls.Count ? _trainChips.Controls[k] : null) is RoundButton b)
                     {
-                        string t = TrainKindText(k) + (k == 0 || _classDone >= _classTotal ? "  " + kindCount[k].ToString("N0", EsEs) : "");
+                        if (k == 6) b.Visible = kindCount[6] > 0 || _trainKind == 6;   // incompletos: solo si hay alguno (o si está elegido)
+                        string t = TrainKindText(k) + (k == 0 || k >= 5 || _classDone >= _classTotal ? "  " + kindCount[k].ToString("N0", EsEs) : "");
                         if (b.Text != t) { b.Text = t; b.Width = TextRenderer.MeasureText(t, f).Width + 28; b.Invalidate(); }
                     }
             }
             WarmConsistListSoon();
+            ScanMissingSoon();   // los incompletos, en segundo plano
             if (prev != null)
                 for (int i = 0; i < _lstConsists.Items.Count; i++)
                     if (((TrainItem)_lstConsists.Items[i]).FilePath == prev.FilePath) { _lstConsists.SelectedIndex = i; break; }
@@ -2583,7 +2651,7 @@ namespace SelectOR
 
         // Mientras la pestaña está cerrada, la lista no tiene ventana nativa y Windows se guarda los miles de
         // trenes para volcarlos al abrirla por primera vez. Se crea poco después de llenarla, con la interfaz
-        // libre, y así abrir Exploración es inmediato.
+        // libre, y así abrir Conducción libre es inmediato.
         System.Windows.Forms.Timer _consistWarm;
         void WarmConsistListSoon()
         {
@@ -2680,8 +2748,9 @@ namespace SelectOR
                 sb.AppendLine().AppendLine("──  " + Tr("Tren seleccionado") + "  ──");
                 if (!string.IsNullOrWhiteSpace(tr.Train)) sb.AppendLine(Tr("Tren") + ": " + tr.Train);
                 if (!string.IsNullOrWhiteSpace(tr.StartTime)) sb.AppendLine(Tr("Salida") + ": " + tr.StartTime);
-                string consist = !string.IsNullOrWhiteSpace(tr.LeadingConsist) ? tr.LeadingConsist : tr.Consist;
-                if (!string.IsNullOrWhiteSpace(consist)) sb.AppendLine(Tr("Composición") + ": " + consist + (tr.ReverseConsist ? "  (" + Tr("invertida") + ")" : ""));
+                string consist = TtConsistText(tr);
+                bool mine = TtOverride(CurrentTtFile(), tr) != null;
+                if (!string.IsNullOrWhiteSpace(consist)) sb.AppendLine(Tr("Composición") + ": " + consist + (mine ? "  (" + Tr("elegida por ti") + ")" : tr.ReverseConsist ? "  (" + Tr("invertida") + ")" : ""));
                 if (!string.IsNullOrWhiteSpace(tr.Path)) sb.AppendLine(Tr("Recorrido") + ": " + tr.Path);
                 if (!string.IsNullOrWhiteSpace(tr.Briefing)) sb.AppendLine().AppendLine(tr.Briefing.Trim());
             }
@@ -2701,19 +2770,19 @@ namespace SelectOR
             return null;
         }
 
-        // ===== Preview 3D/2D del tren del timetable (Horarios), igual que en Exploración =====
+        // ===== Preview 3D/2D del tren del timetable (Horarios), igual que en Conducción libre =====
         // Resuelve el consist del tren seleccionado y lanza su render 3D (rotable) + composición 2D.
         void UpdateTimetablePreview()
         {
             if (_ttPreview == null) return;
             var tr = _cboTTTrain?.SelectedItem as Orts.Formats.OR.TimetableFileLite.TrainInformation;
-            string ttConsist = tr != null ? (!string.IsNullOrWhiteSpace(tr.LeadingConsist) ? tr.LeadingConsist : tr.Consist) : null;
-            var c = ResolveConsist(ttConsist);
+            var c = ResolveConsist(tr != null ? TtConsistText(tr) : null);   // la elegida por el usuario, si la hay
             _ttConsist = c;
             TeleRefresh(_teleTT, c);   // destinos del tren (antes del render: la vista 3D ya sale con el cartel elegido)
             _ttPreviewGeom = null; _ttYaw = 0; _ttPitch = 0;
             _ttPreview.Image = null; _ttPreview.Rotatable = false; _ttPreview.Invalidate();
-            _ttPreview.Caption = c?.FilePath != null ? SysPath.GetFileNameWithoutExtension(c.FilePath) : (c != null ? c.Name : "");   // el .con
+            _ttPreview.Caption = (tr != null && TtOverride(CurrentTtFile(), tr) != null ? "✎ " : "")   // ✎: tren elegido por el usuario
+                               + (c?.FilePath != null ? SysPath.GetFileNameWithoutExtension(c.FilePath) : (c != null ? c.Name : ""));   // el .con
             _ttPreview.EmptyText = c == null ? (tr == null ? Tr("Elige un tren del panel de salidas") : Tr("Este tren no está en tu contenido")) : null;
             if (c == null) return;
             string eng = c.Locomotive?.FilePath;
@@ -2737,6 +2806,12 @@ namespace SelectOR
         TrainItem ResolveConsist(string ttConsist)
         {
             if (string.IsNullOrWhiteSpace(ttConsist)) return null;
+            // Open Rails da el consist líder ya sin los < > («319-201 Taxi Retales + Tals Caliza (194m)»): si el
+            // nombre entero es un .con del contenido, es ese (antes de partirlo por el «+»).
+            string whole = ttConsist.Trim().Trim('<', '>').Trim();
+            int ws = whole.IndexOf('$'); if (ws > 0) whole = whole.Substring(0, ws).Trim();
+            foreach (var c in _consistsAll)
+                if (string.Equals(SysPath.GetFileNameWithoutExtension(c.FilePath), whole, StringComparison.OrdinalIgnoreCase)) return c;
             // «A+B» une composiciones; un nombre que lleva «+» va entre < > («<UT 447 + 448>»): ahí no se parte.
             string name = ttConsist.Trim();
             if (name.StartsWith("<")) { int gt = name.IndexOf('>'); name = gt > 0 ? name.Substring(1, gt - 1) : name.TrimStart('<'); }
@@ -2792,7 +2867,7 @@ namespace SelectOR
             if (_ttPreviewGeom == null || _ttPreview.Width < 40 || _ttPreview.Height < 40) return;
             int w = Math.Min(1400, Math.Max(128, (_ttPreview.Width - 8) * 2));
             int h = Math.Min(820, Math.Max(96, (_ttPreview.Height - 36) * 2));
-            TeleRedirect(_teleTT);   // el cartel elegido en Horarios (Exploración puede tener otro para el mismo tren)
+            TeleRedirect(_teleTT);   // el cartel elegido en Horarios (Conducción libre puede tener otro para el mismo tren)
             var bmp = ShapeRenderer.Render(_ttPreviewGeom, w, h, _ttYaw, _ttPitch, 1, _ttPreviewFlip, _ttPreview.CamDistance());
             if (bmp != null) _ttPreview.Image = bmp;
         }
@@ -2865,7 +2940,7 @@ namespace SelectOR
         float _yaw, _pitch;
         Timer _previewRerender;
 
-        // Preview 3D/2D del tren del timetable (Horarios), independiente del de Exploración.
+        // Preview 3D/2D del tren del timetable (Horarios), independiente del de Conducción libre.
         TrainPreviewPanel _ttPreview;
         ShapeGeom _ttPreviewGeom;
         bool _ttPreviewFlip;
@@ -3120,7 +3195,7 @@ namespace SelectOR
             if (_curRoute == null) { Warn(Tr("Selecciona primero una ruta.")); return; }
             var c = _lstConsists.SelectedItem as TrainItem;
             var p = CurrentPath();
-            if (c == null || p == null) { Warn(Tr("Configura recorrido y tren en «Exploración» antes de conectar.")); return; }
+            if (c == null || p == null) { Warn(Tr("Configura recorrido y tren en «Conducción libre» antes de conectar.")); return; }
 
             // El usuario tiene que cumplir las reglas de Open Rails o la conexión falla.
             if (!MPUserValid(_txtMPUser.Text.Trim()))
@@ -3181,9 +3256,9 @@ namespace SelectOR
             {
                 case 1: // Actividad
                     var a = _lstActivities.SelectedItem as Activity;
-                    if (a == null) { error = Tr("Selecciona una actividad (o usa «Exploración»)."); return null; }
+                    if (a == null) { error = Tr("Selecciona una actividad (o usa «Conducción libre»)."); return null; }
                     return $"-start -activity \"{a.FilePath}\"";
-                case 2: // Exploración
+                case 2: // Conducción libre
                     var c = _lstConsists.SelectedItem as TrainItem;
                     var p = CurrentPath();
                     if (c == null) { error = Tr("Selecciona un tren."); return null; }
@@ -3206,8 +3281,13 @@ namespace SelectOR
                         int season = Math.Max(0, _segTTSeason.SelectedIndex);
                         int weather = Math.Max(0, _segTTWeather.SelectedIndex);
                         // Sin comillas dentro: un nombre con «"» añadiría argumentos al simulador.
-                        string ttName = (tt?.ToString() ?? "").Replace("\"", ""), trName = (tr?.ToString() ?? "").Replace("\"", "");
-                        return $"-start -timetable \"{set.fileName}\" \"{ttName}:{trName}\" {day} {season} {weather}";
+                        // Con trenes elegidos por el usuario se conduce una copia del horario (HorarioTrenes).
+                        string ttFile = TtLaunchSet(set, _cboTT.SelectedIndex, out string ttCopyName, out string ttWarn);
+                        if (ttWarn != null)
+                            ThemedBox.Show(this, Tr("No se ha podido preparar el horario con los trenes que has elegido; se conduce el horario original.") + "\n\n" + ttWarn,
+                                "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        string ttName = (ttCopyName ?? tt?.ToString() ?? "").Replace("\"", ""), trName = (tr?.ToString() ?? "").Replace("\"", "");
+                        return $"-start -timetable \"{ttFile}\" \"{ttName}:{trName}\" {day} {season} {weather}";
                     }
             }
             error = Tr("Modo no soportado.");
@@ -3238,7 +3318,7 @@ namespace SelectOR
                     string head = string.IsNullOrEmpty(why)
                         ? Tr("No se pudo registrar el servicio en la empresa.")
                         : why;
-                    var r = MessageBox.Show(this,
+                    var r = ThemedBox.Show(this,
                         head + "\n\n" + Tr("¿Conducir de todas formas sin registrarlo para la empresa?"),
                         "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
                     if (r != DialogResult.Yes) return;
@@ -3261,6 +3341,7 @@ namespace SelectOR
                     if (svc) SaveServiceJournal(force: true);   // por si se cierra todo de golpe (MainMenuForm.Recuperar.cs)
                     // Horarios: la hoja de ruta sale ya con el recorrido del tren y sus horas de paso.
                     try { _roadTtPlan = args.IndexOf("-timetable", StringComparison.OrdinalIgnoreCase) >= 0 ? BuildTtRoadPlan() : null; } catch { _roadTtPlan = null; }
+                    _launchExplore = args.IndexOf("-explore", StringComparison.OrdinalIgnoreCase) >= 0;   // -explorer / -exploreactivity: su itinerario
                     StartKmTracking(withPax: true); // posición para el mapa y viajeros (en servicio o conducción libre)
                     // Actividad: lo mismo con su recorrido y las paradas del tren del jugador (el .tdb se lee aparte).
                     if (args.IndexOf("-activity", StringComparison.OrdinalIgnoreCase) >= 0 && _lstActivities.SelectedItem is Activity actSel)
@@ -3305,18 +3386,21 @@ namespace SelectOR
 
         void ToggleTrainFavorite()
         {
-            var c = _lstConsists.SelectedItem as TrainItem;
-            if (c == null) return;
-            if (!_prefs.FavoriteTrains.Add(c.FilePath)) _prefs.FavoriteTrains.Remove(c.FilePath);
+            // varios marcados (Ctrl / Mayús): si alguno no lo es, todos a favoritos; si ya lo son todos, se quitan
+            var list = _lstConsists.MarkedCount > 1 ? _lstConsists.SelectedItems.OfType<TrainItem>().ToList()
+                     : _lstConsists.SelectedItem is TrainItem one ? new List<TrainItem> { one } : new List<TrainItem>();
+            if (list.Count == 0) return;
+            bool add = list.Any(c => !_prefs.FavoriteTrains.Contains(c.FilePath));
+            foreach (var c in list) { if (add) _prefs.FavoriteTrains.Add(c.FilePath); else _prefs.FavoriteTrains.Remove(c.FilePath); }
             _prefs.Save();
             _lstConsists.Invalidate();
-            if (_chkTrainFavOnly.Checked) RefreshConsistList();
+            RefreshConsistList();   // el número de la ★
         }
 
         // ============================ Utilidades ============================
         void UpdateStatus()
         {
-            UpdateTrainShortcuts();   // estado del tren + «Comprar este tren» en Exploración/Horarios
+            UpdateTrainShortcuts();   // estado del tren + «Comprar este tren» en Conducción libre/Horarios
             if (_curRoute == null) { _lblStatus.Text = Tr("Selecciona una ruta para empezar."); return; }
             string r = Tr("Ruta") + ": " + _curRoute.Name;
             switch (_activePage)
@@ -3329,7 +3413,7 @@ namespace SelectOR
                     break;
                 case 3:
                     var ttr = _cboTTTrain?.SelectedItem as Orts.Formats.OR.TimetableFileLite.TrainInformation;
-                    string ttc = ttr != null ? (!string.IsNullOrWhiteSpace(ttr.LeadingConsist) ? ttr.LeadingConsist : ttr.Consist) : null;
+                    string ttc = ttr != null ? TtConsistText(ttr) : null;
                     _lblStatus.Text = $"{r}   ·   {Tr("Horario")}: {(_cboTT.SelectedItem?.ToString() ?? "—")}  ·  {Tr("Tren")}: {(_cboTTTrain.SelectedItem?.ToString() ?? "—")}"
                         + TeleSuffix(_teleTT) + EmpSuffix(ResolveConsist(ttc));
                     break;
@@ -3350,7 +3434,7 @@ namespace SelectOR
 
         void SetBusy(string msg) { _lblStatus.Text = "⏳  " + msg; _btnPlay.Enabled = false; UseWaitCursor = true; }
         void SetIdle() { _btnPlay.Enabled = true; UseWaitCursor = false; }
-        void Warn(string m) => MessageBox.Show(m, "Selector de Trenes y Rutas", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        void Warn(string m) => ThemedBox.Show(m, "Selector de Trenes y Rutas", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         static List<T> SafeList<T>(Func<List<T>> f)
         {

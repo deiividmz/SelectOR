@@ -41,7 +41,7 @@ namespace SelectOR
         async void CancelPendingService()
         {
             if (_pendingServiceId == null) return;
-            if (MessageBox.Show(this, Tr("¿Cancelar el servicio en curso? No se registrará: ni ingresos, ni km, ni ranking, y la unidad quedará libre. Las infracciones detectadas sí cuentan."),
+            if (ThemedBox.Show(this, Tr("¿Cancelar el servicio en curso? No se registrará: ni ingresos, ni km, ni ranking, y la unidad quedará libre. Las infracciones detectadas sí cuentan."),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_empHomeMsg, Tr("Cancelando el servicio…"), false);
             var (ok, msg) = await CancelOwnServiceCore();

@@ -709,7 +709,7 @@ namespace SelectOR
             string q = action == "confirm" ? Tr("¿Aprobar la infracción? Los puntos quedan restados al maquinista.")
                      : action == "annul" ? Tr("¿Anular la infracción? Se devolverán los puntos al maquinista.")
                      : Tr("¿Eliminar la infracción? Si restó puntos, se devuelven al maquinista y la infracción se borra para siempre.");
-            if (MessageBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, action == "delete" ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, action == "delete" ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.Yes) return;
             Msg(_revMsg, action == "confirm" ? Tr("Aprobando…") : action == "annul" ? Tr("Anulando…") : Tr("Eliminando…"), false);
             var (_, err) = await Supa.RpcAsync("admin_set_infraction", new { p_id = id, p_action = action });
             if (err != null && err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -740,7 +740,7 @@ namespace SelectOR
             {
                 if (confirm) { Msg(_revMsg, Tr("Las A1, A2 y A3 ya están aplicadas: solo se pueden anular."), true); return; }
                 if (status == "annulled") { Msg(_revMsg, Tr("Esta infracción ya está anulada."), true); return; }
-                if (MessageBox.Show(this, Tr("¿Anular la infracción? Se devolverán los puntos al maquinista. El servicio, que no se registró, no se recupera."),
+                if (ThemedBox.Show(this, Tr("¿Anular la infracción? Se devolverán los puntos al maquinista. El servicio, que no se registró, no se recupera."),
                                     Tr("Revisión"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 Msg(_revMsg, Tr("Anulando…"), false);
                 var (_, errA) = await Supa.RpcAsync("annul_infraction", new { p_id = id });
@@ -758,7 +758,7 @@ namespace SelectOR
             if (status != "pending") { Msg(_revMsg, Tr("Esta infracción ya está revisada."), true); return; }
             string q = confirm ? Tr("¿Confirmar la infracción? Los puntos siguen restados al maquinista.")
                                : Tr("¿Anular la infracción? Se devolverán los puntos al maquinista.");
-            if (ask && MessageBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (ask && ThemedBox.Show(this, q, Tr("Revisión"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             Msg(_revMsg, confirm ? Tr("Confirmando…") : Tr("Anulando…"), false);
             var (_, err) = await Supa.RpcAsync("review_infraction", new { p_id = id, p_confirm = confirm });
             if (err != null) { Msg(_revMsg, Tr("Error: ") + err, true); return; }

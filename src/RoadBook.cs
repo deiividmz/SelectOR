@@ -55,6 +55,71 @@ namespace SelectOR
 
         static double D((double x, double z) a, (double x, double z) b) => Math.Sqrt((a.x - b.x) * (a.x - b.x) + (a.z - b.z) * (a.z - b.z));
 
+        // Posición en el mundo de los desvíos y finales del .tdb.
+        static Dictionary<int, (double x, double z)> NodePositions(TrackNode[] tn)
+        {
+            var nodePos = new Dictionary<int, (double x, double z)>();
+            for (int ni = 0; ni < tn.Length; ni++)
+            {
+                var n = tn[ni];
+                if (n?.UiD != null && (n.TrJunctionNode != null || n.TrEndNode))
+                    nodePos[ni] = (n.UiD.TileX * 2048.0 + n.UiD.X, n.UiD.TileZ * 2048.0 + n.UiD.Z);
+            }
+            return nodePos;
+        }
+
+        // La geometría de un tramo de vía (mundo): sus secciones, alargado hasta sus desvíos y simplificado a 0,75 m; con
+        // la distancia desde el inicio de cada vértice. La misma para el grafo y para la vía de los mapas (TrackLatLon).
+        static bool EdgeGeometry(TrackNode node, TrackSectionsFile tsec, Dictionary<int, (double x, double z)> nodePos,
+            out int a, out int b, out List<(double x, double z)> kp, out List<double> kc, out double len, out double pre)
+        {
+            a = b = -1; kp = null; kc = null; len = 0; pre = 0;
+            var vn = node?.TrVectorNode;
+            if (vn?.TrVectorSections == null || vn.TrVectorSections.Length < 1) return false;
+            var pts = TrackGeometry.NodePolylineD(vn.TrVectorSections, tsec);
+            if (pts.Count == 0) return false;
+            var pins = node.TrPins ?? Array.Empty<TrPin>();
+            // El primer pin del tramo es el nodo de su inicio (el de la primera sección) y el segundo, el del final.
+            a = pins.Length >= 1 ? pins[0].Link : -1; b = pins.Length >= 2 ? pins[1].Link : -1;
+            if (nodePos.TryGetValue(a, out var qa)) { double d = D(qa, pts[0]); if (d > 0.05) { pts.Insert(0, qa); pre = d; } }
+            if (nodePos.TryGetValue(b, out var qb) && D(qb, pts[^1]) > 0.05) pts.Add(qb);
+
+            var cum = new double[pts.Count];
+            for (int i = 1; i < pts.Count; i++) cum[i] = cum[i - 1] + D(pts[i - 1], pts[i]);
+            var keep = RdpKeep(pts, 0.75);
+            kp = new List<(double x, double z)>(); kc = new List<double>();
+            for (int i = 0; i < pts.Count; i++) if (keep[i]) { kp.Add(pts[i]); kc.Add(cum[i]); }
+            len = cum[^1];
+            return true;
+        }
+
+        // Solo la vía (la del mapa del HUD), en lat/lon, sin el resto del grafo: para los mapas que no necesitan más
+        // (Ruta, «Mapa»…), mucho más rápido en las rutas grandes. null si no hay .tdb o no se puede convertir.
+        public static HudMapDetail TrackLatLon(string routeDir)
+        {
+            if (string.IsNullOrEmpty(routeDir) || !Directory.Exists(routeDir) || !OrGeo.Available) return null;
+            var tdbs = Directory.GetFiles(routeDir, "*.tdb");
+            if (tdbs.Length == 0) return null;
+            var tn = new TrackDatabaseFile(tdbs[0]).TrackDB.TrackNodes;
+            var tsec = TrackGeometry.Sections(routeDir);
+            var nodePos = NodePositions(tn);
+            var d = new HudMapDetail();
+            for (int ni = 0; ni < tn.Length; ni++)
+            {
+                if (!EdgeGeometry(tn[ni], tsec, nodePos, out _, out _, out var kp, out _, out _, out _)) continue;
+                if (kp.Count == 1) kp.Add(kp[0]);   // como en el HUD: un tramo de un punto es un trazo de dos iguales
+                var l = new HudMapDetail.Line { Lat = new double[kp.Count], Lon = new double[kp.Count], MinLa = 90, MaxLa = -90, MinLo = 180, MaxLo = -180 };
+                for (int i = 0; i < kp.Count; i++)
+                {
+                    if (!OrGeo.TryLatLon(kp[i].x, kp[i].z, out double la, out double lo)) return null;
+                    l.Lat[i] = la; l.Lon[i] = lo;
+                    l.MinLa = Math.Min(l.MinLa, la); l.MaxLa = Math.Max(l.MaxLa, la); l.MinLo = Math.Min(l.MinLo, lo); l.MaxLo = Math.Max(l.MaxLo, lo);
+                }
+                d.Track.Add(l);
+            }
+            return d.Track.Count > 0 ? d : null;
+        }
+
         // null si la ruta no tiene .tdb o esta versión de Open Rails no trae la conversión a lat/lon.
         public static RouteGraph Build(string routeDir, Func<string, string> cleanName)
         {
@@ -68,13 +133,7 @@ namespace SelectOR
             foreach (var it in items) if (it != null) byId[it.TrItemId] = it;
             var tsec = TrackGeometry.Sections(routeDir);
 
-            var nodePos = new Dictionary<int, (double x, double z)>();
-            for (int ni = 0; ni < tn.Length; ni++)
-            {
-                var n = tn[ni];
-                if (n?.UiD != null && (n.TrJunctionNode != null || n.TrEndNode))
-                    nodePos[ni] = (n.UiD.TileX * 2048.0 + n.UiD.X, n.UiD.TileZ * 2048.0 + n.UiD.Z);
-            }
+            var nodePos = NodePositions(tn);
 
             var g = new RouteGraph();
             var edges = new List<Edge>();
@@ -84,22 +143,8 @@ namespace SelectOR
             {
                 var vn = tn[ni]?.TrVectorNode;
                 if (vn?.TrVectorSections == null || vn.TrVectorSections.Length < 1) continue;
-                var pts = TrackGeometry.NodePolylineD(vn.TrVectorSections, tsec);
-                if (pts.Count == 0) continue;
-                var pins = tn[ni].TrPins ?? Array.Empty<TrPin>();
-                int p0 = pins.Length >= 1 ? pins[0].Link : -1, p1 = pins.Length >= 2 ? pins[1].Link : -1;
-                // El primer pin del tramo es el nodo de su inicio (el de la primera sección) y el segundo, el del final.
-                int a = p0, b = p1;
-                double pre = 0;
-                if (nodePos.TryGetValue(a, out var qa)) { double d = D(qa, pts[0]); if (d > 0.05) { pts.Insert(0, qa); pre = d; } }
-                if (nodePos.TryGetValue(b, out var qb) && D(qb, pts[^1]) > 0.05) pts.Add(qb);
-
-                var cum = new double[pts.Count];
-                for (int i = 1; i < pts.Count; i++) cum[i] = cum[i - 1] + D(pts[i - 1], pts[i]);
-                var keep = RdpKeep(pts, 0.75);
-                var kp = new List<(double x, double z)>(); var kc = new List<double>();
-                for (int i = 0; i < pts.Count; i++) if (keep[i]) { kp.Add(pts[i]); kc.Add(cum[i]); }
-                var e = new Edge { A = a, B = b, Cum = kc.ToArray(), Len = cum[^1] };
+                if (!EdgeGeometry(tn[ni], tsec, nodePos, out int a, out int b, out var kp, out var kc, out double len, out double pre)) continue;
+                var e = new Edge { A = a, B = b, Cum = kc.ToArray(), Len = len };
 
                 if (vn.TrItemRefs != null)
                     foreach (int r in vn.TrItemRefs)
@@ -324,6 +369,33 @@ namespace SelectOR
         }
 
         // Punto de vía más cercano (a menos de maxM metros): tramo y distancia desde su inicio.
+        // Todas las vías a menos de maxM del punto: el punto más cercano de cada tramo (para elegir, en vía doble, la que
+        // da el mejor camino y no solo la que queda más cerca del clic).
+        public List<(int edge, double off, double dist)> NearbyEdges(double lat, double lon, double maxM)
+        {
+            var best = new Dictionary<int, (double off, double d2)>();
+            if (_grid == null) return new List<(int, double, double)>();
+            var (x, y) = Proj(lat, lon);
+            int r = (int)Math.Ceiling(maxM / Cell);
+            int gx = (int)Math.Floor(x / Cell), gy = (int)Math.Floor(y / Cell);
+            double lim = maxM * maxM;
+            for (int cx = gx - r; cx <= gx + r; cx++)
+                for (int cy = gy - r; cy <= gy + r; cy++)
+                {
+                    if (!_grid.TryGetValue(Key(cx, cy), out var l)) continue;
+                    foreach (var (e, i) in l)
+                    {
+                        var E = Edges[e];
+                        double ax = E.X[i], ay = E.Y[i], dx = E.X[i + 1] - ax, dy = E.Y[i + 1] - ay, l2 = dx * dx + dy * dy;
+                        double t = l2 > 0 ? Math.Max(0, Math.Min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+                        double px = ax + t * dx - x, py = ay + t * dy - y, d2 = px * px + py * py;
+                        if (d2 > lim) continue;
+                        if (!best.TryGetValue(e, out var b) || d2 < b.d2) best[e] = (E.Cum[i] + t * (E.Cum[i + 1] - E.Cum[i]), d2);
+                    }
+                }
+            return best.Select(kv => (kv.Key, kv.Value.off, Math.Sqrt(kv.Value.d2))).OrderBy(c => c.Item3).ToList();
+        }
+
         public bool Nearest(double lat, double lon, double maxM, out int edge, out double off, out double distM)
         {
             edge = -1; off = 0; distM = double.MaxValue;
@@ -508,6 +580,7 @@ namespace SelectOR
             public double Lat, Lon; public int Edge; public double Off;
             public bool Guide;   // punto de paso sacado del recorrido (.pat) para seguirlo tramo a tramo: no se dibuja
             public bool Reverse; // el recorrido invierte la marcha aquí: el tramo siguiente sale en sentido contrario
+            public List<(int e, double off)> Alts;   // clic en vía doble: las vías paralelas que también valían (no se guarda)
         }
         public sealed class Stop
         {
@@ -655,12 +728,74 @@ namespace SelectOR
             return true;
         }
 
+        // Vía doble: no hace falta pinchar justo en la vía buena. Las vías paralelas a pocos metros de la más cercana al
+        // clic también valen, y se queda la que da el camino más corto desde el punto anterior (sin rodeos ni cambios de
+        // sentido). Al marcar el segundo punto se revisa también la vía del primero.
+        public const double ParallelM = 12;
         public bool AddPoint(double lat, double lon, double maxM)
         {
-            if (Graph == null || !Graph.Nearest(lat, lon, maxM, out int e, out double off, out _)) return false;
+            if (Graph == null || !Graph.Nearest(lat, lon, maxM, out int e, out double off, out double d)) return false;
+            var alts = Graph.NearbyEdges(lat, lon, Math.Min(maxM, d + ParallelM)).Take(4).Select(c => (c.edge, c.off)).ToList();   // como mucho 4 (en una estación hay muchas vías)
             var (x, y) = Graph.PointAt(e, off); var (la, lo) = Graph.Unproj(x, y);
-            Points.Add(new Waypoint { Lat = la, Lon = lo, Edge = e, Off = off });
+            Points.Add(new Waypoint { Lat = la, Lon = lo, Edge = e, Off = off, Alts = alts.Count > 1 ? alts : null });
+            ChooseParallelTracks();
             return true;
+        }
+
+        void ChooseParallelTracks()
+        {
+            int k = Points.Count - 1;
+            if (k < 1) return;
+            var cur = Points[k]; var prev = Points[k - 1];
+            var curC = cur.Alts ?? new List<(int e, double off)> { (cur.Edge, cur.Off) };
+            // el anterior se revisa si también era un clic con vías paralelas (y aún no se ha recorrido)
+            bool prevFree = prev.Alts != null && !prev.Guide && k - 1 >= ReachedPoints;
+            var prevC = prevFree ? prev.Alts : new List<(int e, double off)> { (prev.Edge, prev.Off) };
+            var before = k >= 2 ? Points[k - 2] : null;
+            double bestLen = double.MaxValue; (int e, double off) bp = (prev.Edge, prev.Off), bc = (cur.Edge, cur.Off);
+            foreach (var pc in prevC)
+            {
+                // llegar al anterior (desde el de antes, si lo hay) y su sentido de llegada
+                double lenIn = 0; var dirs = new List<int> { 0, 1 };
+                if (before != null && prevFree)
+                {
+                    RouteGraph.Leg li = null;
+                    foreach (int d0 in new[] { 0, 1 }) { var l = Graph.Route(before.Edge, before.Off, d0, pc.e, pc.off); if (l != null && (li == null || l.Len < li.Len)) li = l; }
+                    if (li == null) continue;
+                    lenIn = li.Len; dirs = new List<int> { li.EndDir };
+                }
+                foreach (var cc in curC)
+                {
+                    RouteGraph.Leg lo = null;
+                    foreach (int d0 in dirs) { var l = Graph.Route(pc.e, pc.off, d0, cc.e, cc.off); if (l != null && (lo == null || l.Len < lo.Len)) lo = l; }
+                    if (lo == null) continue;
+                    if (lenIn + lo.Len < bestLen - 1) { bestLen = lenIn + lo.Len; bp = pc; bc = cc; }
+                }
+            }
+            if (bestLen == double.MaxValue) return;   // ninguna combinación tiene camino: se deja la más cercana
+            // Se cambia de vía solo si compensa de verdad: si la pinchada no tiene camino o el cambio ahorra un rodeo
+            // (más de 200 m: un escape, un cambio de sentido). Así una vía de apartado pinchada a propósito se respeta.
+            double baseLen = double.MaxValue;
+            {
+                double bIn = 0; var bDirs = new List<int> { 0, 1 }; bool ok = true;
+                if (before != null && prevFree)
+                {
+                    RouteGraph.Leg li = null;
+                    foreach (int d0 in new[] { 0, 1 }) { var l = Graph.Route(before.Edge, before.Off, d0, prev.Edge, prev.Off); if (l != null && (li == null || l.Len < li.Len)) li = l; }
+                    if (li == null) ok = false; else { bIn = li.Len; bDirs = new List<int> { li.EndDir }; }
+                }
+                if (ok)
+                    foreach (int d0 in bDirs) { var l = Graph.Route(prev.Edge, prev.Off, d0, cur.Edge, cur.Off); if (l != null) baseLen = Math.Min(baseLen, bIn + l.Len); }
+            }
+            if (baseLen < double.MaxValue && bestLen > baseLen - 200) return;
+            void Set(Waypoint w, (int e, double off) c)
+            {
+                if (w.Edge == c.e && Math.Abs(w.Off - c.off) < 0.01) return;
+                w.Edge = c.e; w.Off = c.off;
+                var (x, y) = Graph.PointAt(c.e, c.off); (w.Lat, w.Lon) = Graph.Unproj(x, y);
+            }
+            if (prevFree) Set(prev, bp);
+            Set(cur, bc);
         }
 
         public void ClearHaltChoices() => _haltChoice.Clear();   // tren nuevo con horario: mandan sus paradas
@@ -828,6 +963,7 @@ namespace SelectOR
             for (int i = 0; i < _px.Length; i++) (PathLat[i], PathLon[i]) = Graph.Unproj(_px[i], _py[i]);
             Limits.Sort((a, b) => a.d.CompareTo(b.d));
             PointDist = pointDist.ToArray();
+            AddNearbyPlatforms(plats);
 
             // andenes seguidos de la misma estación → una sola parada (a mitad de sus andenes)
             plats.Sort((a, b) => a.d.CompareTo(b.d));
@@ -855,7 +991,8 @@ namespace SelectOR
             Stops.Sort((x, y) => x.Dist.CompareTo(y.Dist));
             // estación término: «Estación · cambio de sentido · Estación» → una sola fila que invierte la marcha
             for (int i = Stops.Count - 3; i >= 0; i--)
-                if (!Stops[i].IsReverse && Stops[i + 1].IsReverse && !Stops[i + 2].IsReverse
+                if (i + 2 < Stops.Count   // tras juntar una, la lista es más corta
+                    && !Stops[i].IsReverse && Stops[i + 1].IsReverse && !Stops[i + 2].IsReverse
                     && string.Equals(Stops[i].Name, Stops[i + 2].Name, StringComparison.OrdinalIgnoreCase) && Stops[i + 2].Dist - Stops[i].Dist < 4000)
                 {
                     Stops[i].IsReverse = true; Stops[i].Halt = true;
@@ -911,6 +1048,56 @@ namespace SelectOR
         }
 
         // ¿Hay un andén de esa estación a menos de maxM metros de ese punto?
+        // Estaciones por las que se pasa aunque su andén no esté en la vía recorrida (vía doble: el tren va por la vía
+        // sin andén, o el andén solo está marcado en una de las dos): los andenes a menos de NearPlatformM del
+        // recorrido cuentan, en el punto del recorrido más cercano a ellos.
+        public const double NearPlatformM = 18;
+        List<(float x, float y, string name)> _allPlats; RouteGraph _allPlatsOf;
+        void AddNearbyPlatforms(List<(double d, string name)> plats)
+        {
+            if (Graph == null || _px.Length < 2) return;
+            if (_allPlatsOf != Graph)
+            {
+                _allPlats = new List<(float, float, string)>();
+                for (int e = 0; e < Graph.Edges.Length; e++)
+                    foreach (var (o, name) in Graph.Edges[e].Platforms)
+                    {
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+                        var (x, y) = Graph.PointAt(e, o); _allPlats.Add(((float)x, (float)y, name));
+                    }
+                _allPlatsOf = Graph;
+            }
+            if (_allPlats.Count == 0) return;
+            float minX = _px.Min() - 40, maxX = _px.Max() + 40, minY = _py.Min() - 40, maxY = _py.Max() + 40;
+            double lim = NearPlatformM * NearPlatformM;
+            var found = new List<(double d, string name, double dist)>();
+            foreach (var (x, y, name) in _allPlats)
+            {
+                if (x < minX || x > maxX || y < minY || y > maxY) continue;
+                double best = lim, bd = -1;
+                for (int i = 0; i + 1 < _px.Length; i++)
+                {
+                    double ax = _px[i], ay = _py[i], dx = _px[i + 1] - ax, dy = _py[i + 1] - ay;
+                    if (Math.Min(ax, ax + dx) - NearPlatformM > x || Math.Max(ax, ax + dx) + NearPlatformM < x ||
+                        Math.Min(ay, ay + dy) - NearPlatformM > y || Math.Max(ay, ay + dy) + NearPlatformM < y) continue;
+                    double l2 = dx * dx + dy * dy;
+                    double t = l2 > 0 ? Math.Max(0, Math.Min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+                    double px = ax + t * dx - x, py = ay + t * dy - y, d2 = px * px + py * py;
+                    if (d2 < best) { best = d2; bd = _pc[i] + t * (_pc[i + 1] - _pc[i]); }
+                }
+                if (bd >= 0) found.Add((bd, name, best));
+            }
+            // El más pegado al recorrido primero. Un andén de otra vía solo cuenta si en ese punto (±150 m) no hay ya
+            // otra estación: hay rutas que ponen un nombre por vía («Villabona I», «Villabona III»…) y saldría repetida.
+            // Y la misma estación, una vez (sus andenes seguidos se juntan después en una sola parada).
+            foreach (var (bd, name, _) in found.OrderBy(c => c.dist))
+            {
+                if (plats.Any(p => Math.Abs(p.d - bd) < 150)) continue;
+                if (plats.Any(p => string.Equals(p.name, name, StringComparison.OrdinalIgnoreCase) && Math.Abs(p.d - bd) < 800)) continue;
+                plats.Add((bd, name));
+            }
+        }
+
         bool PlatformNear(string station, double lat, double lon, double maxM)
         {
             if (Graph == null) return false;

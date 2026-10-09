@@ -23,13 +23,15 @@ namespace SelectOR
         public bool Freight, Automotor, Known;
     }
 
-    // ------------------------------------------------------------------ trenes (Exploración)
+    // ------------------------------------------------------------------ trenes (Conducción libre)
     public class TrainCardGrid : CardListBase
     {
         public Func<object, string> PathOf, KeyOf;              // .eng de la cabeza · clave del tren (su .con)
         public Func<object, Task<TrainSpec>> SpecOf;
         public Func<object, bool> FavOf;
         public Func<object, List<string>> CompaniesOf;
+        public Func<object, string> PriceOf, BadgeOf;   // Compra: precio del tren y «Tienes 2»
+        public Func<object, string> WarnOf;             // aviso en naranja (p. ej. «⚠ Falta: …»)
         public VehicleThumbs Thumbs;
         public string LblPax = "VIAJEROS", LblFreight = "MERCANCÍAS", LblCars = "{0} coches", LblSeats = "plazas", LblLoading = "Calculando…";
         readonly Dictionary<string, TrainSpec> _spec = new Dictionary<string, TrainSpec>(StringComparer.OrdinalIgnoreCase);
@@ -44,7 +46,7 @@ namespace SelectOR
         public bool ListMode { get => _list; set { if (_list == value) return; _list = value; Relayout(); Invalidate(); } }
         protected override int MinCardW => Theme.Px(230);
         protected override int MaxCols => _list ? 1 : 99;
-        protected override int CardH => _list ? Theme.Px(40) : Theme.Px(148);
+        protected override int CardH => _list ? Theme.Px(40) : Theme.Px(PriceOf != null ? 172 : 148);   // Compra: una fila más (precio)
         protected override int Gap => _list ? Theme.Px(4) : base.Gap;
 
         public TrainSpec CachedSpec(object it) { string k = KeyOf?.Invoke(it); return k != null && _spec.TryGetValue(k, out var s) ? s : null; }
@@ -96,13 +98,22 @@ namespace SelectOR
                 foreach (var p in parts) Pill(g, ref cx, y, x + w, p, _fS, Theme.Subtle, CardPaint.Rail, Theme.Px(20));
             }
             y += Theme.Px(26);
-            // empresas que lo tienen
+            // lo que le falta (si es incompleto), las empresas que lo tienen y, en Compra, precio y distintivo
+            cx = x;
+            string warn = WarnOf?.Invoke(it);
+            if (!string.IsNullOrEmpty(warn)) Pill(g, ref cx, y, x + w, warn, _fCo, Color.FromArgb(251, 146, 60), Color.FromArgb(55, 251, 146, 60), Theme.Px(18));
             var cos = CompaniesOf?.Invoke(it);
-            if (cos != null && cos.Count > 0)
-            {
-                cx = x;
-                foreach (var co in cos) Pill(g, ref cx, y, x + w, "🏢 " + co, _fCo, Theme.AccentHi, Color.FromArgb(40, 76, 175, 80), Theme.Px(18));
-            }
+            if (cos != null) foreach (var co in cos) Pill(g, ref cx, y, x + w, "🏢 " + co, _fCo, Theme.AccentHi, Color.FromArgb(40, 76, 175, 80), Theme.Px(18));
+            PriceAndBadge(g, it, cx, y, x + w);
+        }
+
+        // Compra: el precio del tren y, si la empresa ya lo tiene, cuántos.
+        void PriceAndBadge(Graphics g, object it, int x, int y, int right)
+        {
+            string price = PriceOf?.Invoke(it), badge = BadgeOf?.Invoke(it);
+            int cx = x;
+            if (!string.IsNullOrEmpty(price)) Pill(g, ref cx, y, right, price, _fCo, Theme.Text, CardPaint.Rail, Theme.Px(18));
+            if (!string.IsNullOrEmpty(badge)) Pill(g, ref cx, y, right, badge, _fCo, Theme.AccentHi, Color.FromArgb(40, 76, 175, 80), Theme.Px(18));
         }
 
         // Modo lista (sin vistas 2D, más ligera): ★ · nombre · tipo · datos · empresas
@@ -139,8 +150,11 @@ namespace SelectOR
             if (!sp.Freight && sp.Capacity > 0) parts.Add(sp.Capacity.ToString("N0", es) + " " + LblSeats);
             else if (sp.Cars > 0) parts.Add(string.Format(LblCars, sp.Cars));
             foreach (var p in parts) Pill(g, ref cx, cy, right, p, _fS, Theme.Subtle, CardPaint.Rail, Theme.Px(20));
+            string warnL = WarnOf?.Invoke(it);
+            if (!string.IsNullOrEmpty(warnL)) Pill(g, ref cx, cy + Theme.Px(1), right, warnL, _fCo, Color.FromArgb(251, 146, 60), Color.FromArgb(55, 251, 146, 60), Theme.Px(18));
             var cos = CompaniesOf?.Invoke(it);
             if (cos != null) foreach (var co in cos) Pill(g, ref cx, cy + Theme.Px(1), right, "🏢 " + co, _fCo, Theme.AccentHi, Color.FromArgb(40, 76, 175, 80), Theme.Px(18));
+            PriceAndBadge(g, it, cx, cy + Theme.Px(1), right);
         }
 
         protected override void AfterPaint(Graphics g, int first, int last)
@@ -256,6 +270,7 @@ namespace SelectOR
     public class SpecTiles : Control
     {
         public List<(string cap, string val)> Items = new List<(string, string)>();
+        public Dictionary<int, Color> ValueColors = new Dictionary<int, Color>();   // color del valor de alguna casilla (p. ej. el estado)
         public int Columns = 3;
         readonly Font _fC = Theme.Font(7.5f, FontStyle.Bold), _fV = Theme.Font(10.5f, FontStyle.Bold);
         public SpecTiles() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
@@ -272,7 +287,7 @@ namespace SelectOR
                 var r = new Rectangle((i % Columns) * (cw + gap), (i / Columns) * (ch + gap), cw, ch);
                 g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, r, Theme.Px(9), Color.FromArgb(52, 56, 60)); g.SmoothingMode = SmoothingMode.None;
                 TextRenderer.DrawText(g, Items[i].cap, _fC, new Rectangle(r.X + Theme.Px(10), r.Y + Theme.Px(6), r.Width - Theme.Px(14), Theme.Px(14)), Theme.Subtle, L);
-                TextRenderer.DrawText(g, Items[i].val, _fV, new Rectangle(r.X + Theme.Px(10), r.Y + Theme.Px(21), r.Width - Theme.Px(14), Theme.Px(20)), Theme.Text, L);
+                TextRenderer.DrawText(g, Items[i].val, _fV, new Rectangle(r.X + Theme.Px(10), r.Y + Theme.Px(21), r.Width - Theme.Px(14), Theme.Px(20)), ValueColors.TryGetValue(i, out var vc) ? vc : Theme.Text, L);
             }
         }
     }

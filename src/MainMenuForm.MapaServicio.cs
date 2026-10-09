@@ -76,7 +76,7 @@ namespace SelectOR
             if (_hudDetailCache.TryGetValue(dir, out var d)) return d;
             try
             {
-                var job = Task.Run(async () => { var g = await RouteGraphFor(dir); return g == null ? null : HudMapDetail.From(g); });
+                var job = RouteDetailAsync(dir);
                 if (await Task.WhenAny(job, Task.Delay(6000)) == job && job.Result != null) { _hudDetailCache[dir] = job.Result; return job.Result; }
             }
             catch { }

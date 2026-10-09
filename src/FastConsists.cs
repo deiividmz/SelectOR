@@ -45,8 +45,10 @@ namespace SelectOR
 
     public static class FastConsists
     {
-        /// <summary>Trenes de una carpeta de contenido, ordenados por nombre. Lista vacía si no hay CONSISTS.</summary>
-        public static List<TrainItem> Load(string folderPath)
+        /// <summary>Trenes de una carpeta de contenido, ordenados por nombre. Lista vacía si no hay CONSISTS.
+        /// rescan: el contenido ha cambiado con SelectOR abierto (Editor, archivos copiados): la lista del índice se pone
+        /// al día con la carpeta (los .con nuevos y los de «changed» se leen; los que ya no están, fuera).</summary>
+        public static List<TrainItem> Load(string folderPath, IEnumerable<string> changed = null, bool rescan = false)
         {
             var list = new List<TrainItem>();
             try
@@ -57,6 +59,9 @@ namespace SelectOR
                 ContentIndex.Open(folderPath);
                 if (ContentIndex.Loaded && ContentIndex.Consists.Count > 0)
                 {
+                    // Antes, el índice se quedaba con la lista del arranque: un tren creado en el Editor no salía en
+                    // Conducción libre hasta reiniciar SelectOR.
+                    if (rescan) Rescan(folderPath, changed);
                     foreach (var (name, conPath, leadPath) in ContentIndex.Consists)
                         list.Add(new TrainItem
                         {
@@ -86,6 +91,32 @@ namespace SelectOR
             }
             catch { }
             return list;
+        }
+
+        // La lista del índice al día con la carpeta CONSISTS: solo se leen los .con nuevos y los que han cambiado.
+        static void Rescan(string folderPath, IEnumerable<string> changed)
+        {
+            string dir = Path.Combine(folderPath, "TRAINS", "CONSISTS");
+            static string Key(string p) { try { return Path.GetFullPath(p); } catch { return p ?? ""; } }
+            var onDisk = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (Directory.Exists(dir)) foreach (var f in Directory.GetFiles(dir, "*.con")) onDisk[Key(f)] = f;
+            var redo = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in changed ?? Enumerable.Empty<string>()) if (!string.IsNullOrEmpty(p)) redo.Add(Key(p));
+
+            var rows = new List<(string name, string conPath, string leadPath)>();
+            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var r in ContentIndex.Consists)
+            {
+                string k = Key(r.conPath);
+                known.Add(k);
+                if (onDisk.ContainsKey(k) && !redo.Contains(k)) rows.Add(r);   // los borrados y los cambiados, fuera
+            }
+            var leer = new List<string>();
+            foreach (var kv in onDisk) if (!known.Contains(kv.Key) || redo.Contains(kv.Key)) leer.Add(kv.Value);
+            var items = new TrainItem[leer.Count];
+            Parallel.For(0, leer.Count, i => { items[i] = Parse(leer[i], folderPath); });
+            foreach (var t in items) if (t != null) rows.Add((t.Name, t.FilePath, t.Locomotive?.FilePath));
+            ContentIndex.ReplaceConsists(rows.OrderBy(r => r.name).ToList());
         }
 
         // ---------- un .con ----------

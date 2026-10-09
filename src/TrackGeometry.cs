@@ -1,4 +1,4 @@
-// Geometría real de la vía para los mapas (Ruta, Exploración, Horarios, mini-mapa y mapa grande).
+// Geometría real de la vía para los mapas (Ruta, Conducción libre, Horarios, mini-mapa y mapa grande).
 // El .tdb solo guarda el PUNTO DE INICIO de cada sección de vía; uniendo esos puntos con rectas,
 // las curvas y los desvíos salen quebrados. Cada sección apunta a su definición en tsection.dat
 // (radio y ángulo si es curva), así que aquí se reconstruye el arco entero con puntos cada ~2°.

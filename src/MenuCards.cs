@@ -226,7 +226,19 @@ namespace SelectOR
                 case Keys.Enter: if (SelectedItem != null) ItemActivated?.Invoke(SelectedItem); e.Handled = true; return;
                 default: return;
             }
-            e.Handled = true; ClearMarks(); _anchor = i; SelectedIndex = i;
+            e.Handled = true;
+            if (MultiSelect && e.Shift)
+            {
+                // Mayús + flechas (o Inicio/Fin): se amplía el tramo desde donde empezó
+                int a = _anchor >= 0 && _anchor < Items.Count ? _anchor : Math.Max(0, _sel);
+                if (_anchor < 0) _anchor = a;
+                _marked.Clear();
+                for (int k = Math.Min(a, i); k <= Math.Max(a, i); k++) _marked.Add(Items[k]);
+                MarksChanged?.Invoke(this, EventArgs.Empty);
+                SelectedIndex = i; Invalidate();
+                return;
+            }
+            ClearMarks(); _anchor = i; SelectedIndex = i;
         }
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }

@@ -1,4 +1,4 @@
-// Cabecera «TU VIAJE» de Exploración, en forma de BILLETE: salida y llegada unidas por la línea del recorrido (con
+// Cabecera «TU VIAJE» de Conducción libre, en forma de BILLETE: salida y llegada unidas por la línea del recorrido (con
 // el tren, los km y cuántos recorridos hay entre las dos), un botón para intercambiarlas y otro para el mapa; debajo,
 // una fila de chips con la hora, la estación del año, el clima y el modo actividad. Un clic en un chip abre su selector.
 
@@ -82,7 +82,7 @@ namespace SelectOR
             _chipSeason.Click += (s, e) => ShowSegPicker(_chipSeason, _segSeason, 380);
             _chipWeather.Click += (s, e) => ShowSegPicker(_chipWeather, _segWeather, 290);
             _chipActivity.Click += (s, e) => { _chkExploreActivity.Checked = !_chkExploreActivity.Checked; UpdateTripChips(); };
-            chips.Controls.AddRange(new Control[] { _chipHour, _chipSeason, _chipWeather, _chipActivity });
+            chips.Controls.AddRange(new Control[] { _chipHour, _chipSeason, _chipWeather, _chipActivity, BuildItineraryChip(tip) });   // + itinerario (ItinerarioExplora)
             var hint = new Label
             {
                 Text = Tr("Clic en hora, estación o clima para cambiarlos"), Dock = DockStyle.Right, AutoSize = false, Width = 330,
@@ -91,7 +91,9 @@ namespace SelectOR
             var condRow = new Panel { Dock = DockStyle.Top, Height = 32, BackColor = TripFill, Margin = new Padding(0) };
             condRow.Controls.Add(chips); condRow.Controls.Add(hint);
             // con la ventana estrecha, el texto de ayuda deja sitio a los chips
-            condRow.Resize += (s, e) => hint.Visible = condRow.Width - 330 > chips.Controls.Cast<Control>().Sum(c => c.Width + c.Margin.Horizontal) + 30;
+            void FitHint() => hint.Visible = condRow.Width - 330 > chips.Controls.Cast<Control>().Sum(c => c.Width + c.Margin.Horizontal) + 30;
+            condRow.Resize += (s, e) => FitHint();
+            _chipItin.SizeChanged += (s, e) => FitHint();   // el chip del itinerario crece con su nombre
             var gap = new Panel { Dock = DockStyle.Top, Height = 4, BackColor = TripFill };
 
             top.Controls.Add(condRow); top.Controls.Add(gap); top.Controls.Add(od); top.Controls.Add(_tripCap);
@@ -99,7 +101,7 @@ namespace SelectOR
             return top;
         }
 
-        // ---------------- Horarios: estación y clima con los mismos chips que Exploración ----------------
+        // ---------------- Horarios: estación y clima con los mismos chips que Conducción libre ----------------
         TripChip _chipTTSeason, _chipTTWeather;
 
         Control BuildTTCondChips()
@@ -152,6 +154,7 @@ namespace SelectOR
         // La línea del billete: km del recorrido elegido, cuántos hay entre las dos estaciones y si hay vuelta.
         void UpdateTripLine()
         {
+            UpdateItineraryChip();   // el itinerario elegido es de cada ruta
             if (_tripLine == null) return;
             var p = CurrentPath();
             string st = _cboStart?.SelectedItem as string ?? "", en = _cboEnd?.SelectedItem as string ?? "";

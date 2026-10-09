@@ -231,11 +231,11 @@ namespace SelectOR
         // que la reutilice.
         Panel _buyPanel; Label _buyMsg;
         ListBox _fleetConsistList; RoundedInput _fleetConsistSearch;
-        RoundButton _fleetBuyBtn, _fleetRentBtn, _fleetCompBtn, _fleetRemoveBtn, _fleetServiceBtn, _fleetPlateBtn; TrainPreviewPanel _fleetPreview;
+        RoundButton _fleetBuyBtn, _fleetRentBtn, _fleetCompBtn, _fleetRemoveBtn, _fleetPlateBtn; TrainPreviewPanel _fleetPreview;
         readonly List<string> _fleetPlates = new();   // matrícula de cada fila de la flota ("" = sin matrícula)
         // Ficha técnica del showroom (Comprar/Alquilar): título de tipo, chips de specs y precios.
         Label _fleetHeaderLbl, _fleetSpecType, _vPower, _vSpeed, _vPlazas, _vConfort, _vMasa, _vFreno, _vDensity, _vBuy, _vRent, _fleetOwnedBadge;
-        // Estado del render 3D rotatable del preview de Flota (igual que el de Exploración).
+        // Estado del render 3D rotatable del preview de Flota (igual que el de Conducción libre).
         ShapeGeom _fleetGeom; float _fleetYaw, _fleetPitch; bool _fleetFlip; string _fleetPrevEngPath;
         System.Windows.Forms.Timer _fleetRerender;
         System.Windows.Forms.Timer _fleetOwnRerender;   // vehículo de la flota: render tras cambiar de tamaño
@@ -250,7 +250,7 @@ namespace SelectOR
         readonly List<string> _fleetIds = new();
         readonly List<string> _fleetStatus = new();   // estado de cada fila (available/maintenance_due)
         readonly HashSet<string> _fleetOwnedNames = new(StringComparer.OrdinalIgnoreCase);   // carpeta|.eng que la empresa YA tiene (cualquier estado)
-        // Trenes que pertenecen a una empresa DE LA QUE SOY SOCIO (para la etiqueta en Exploración/Horarios).
+        // Trenes que pertenecen a una empresa DE LA QUE SOY SOCIO (para la etiqueta en Conducción libre/Horarios).
         readonly Dictionary<string, List<string>> _companyVehNames = new(StringComparer.OrdinalIgnoreCase);  // carpeta|.eng comprado → empresas que lo tienen
         readonly Dictionary<string, List<string>> _companyEngs = new(StringComparer.OrdinalIgnoreCase);      // + coches de la unidad → empresas
         List<(string name, string folder, string path, string kind)> _fleetEngs = new();   // .eng del contenido: name → path (para tasar)
@@ -774,13 +774,30 @@ namespace SelectOR
                 LoadServices(_empSel);
                 LoadMembers(_empSel);    // para saber mi rol y habilitar acciones
                 FillTariffFields();
-                if (_empSubtab == 1) LoadLedger();
-                if (_empSubtab == 4) LoadRankTab();
-                if (_empSubtab == 11) OnMegafoniaShown();   // otra empresa → otros audios
-                if (_empSubtab == ChatSubtab) OnChatShown();  // otra empresa → otro chat
-                if (_empSubtab == RutasSubtab) LoadCoRoutes();   // otra empresa → otras rutas
+                ReloadSectionForCompany();   // la sección abierta, con los datos de la empresa nueva
+                _ = MatchLocalTrainsAsync();  // sus trenes en tu contenido (y sus plazas fijadas), para todos los socios
             }
             else { _myRole = null; UpdateRoleUi(); }
+        }
+
+        // Al cambiar de empresa, la sección que está abierta se pone al momento con los datos de la nueva (lo mismo que
+        // carga al abrirla). Servicios, Socios y Ajustes ya los recarga OnCompanySelected; las de administración
+        // (Revisión, Usuarios, Administración, Préstamos y Catálogo) y Mi perfil no dependen de la empresa elegida.
+        void ReloadSectionForCompany()
+        {
+            if (_empSel == null) return;
+            switch (_empSubtab)
+            {
+                case 1: LoadLedger(); if (_loansPage != null && _loansPage.Visible) LoadLoans(); break;   // Banca: movimientos y préstamos
+                case 4: LoadRankTab(); break;                              // Ranking (los maquinistas de la empresa)
+                case 9: LoadFleet(); break;                                // Flota: los trenes de la empresa
+                case 10: LoadFleet(); LoadPurchaseRequests(); break;       // Compra: trenes y solicitudes de la empresa
+                case 11: OnMegafoniaShown(); break;                        // Megafonía: otros audios
+                case ChatSubtab: OnChatShown(); break;                     // Chat: otro chat
+                case NormasSubtab: UpdateRuleButtons(); LoadRules(); break; // Normas
+                case RutasSubtab: LoadCoRoutes(); break;                   // Rutas: las de la empresa
+            }
+            UpdateCompanyKpis();   // la tira de la empresa (tesorería, socios…) de la nueva
         }
 
         // Acciones de empresa bajo el selector del menú lateral: crear / unirse (por diálogo) y,
@@ -1237,6 +1254,7 @@ namespace SelectOR
             _fsSaveBtn = EmpButton(Tr("Guardar economía de flota"), primary: true); _fsSaveBtn.Width = 240;
             _fsSaveBtn.Click += (s, e) => SaveFleetSettings();
             fsInner.Controls.Add(_fsSaveBtn);
+            fsInner.Controls.Add(BuildTrainModeRow());   // trenes de empresa: no se comprueba / aviso / obligatorio
             _fleetSettingsRow.Controls.Add(fsInner);
             pFs.Controls.Add(_fleetSettingsRow);
 
@@ -1511,6 +1529,8 @@ namespace SelectOR
             if (_loansAdminPanel != null && !(i == PrestamosSubtab)) _loansAdminPanel.Visible = false;
             if (_coRoutesPanel != null && !(i == RutasSubtab)) _coRoutesPanel.Visible = false;
             if (_catPanel != null && !(i == CatalogoSubtab)) _catPanel.Visible = false;
+            ApplyCompanyKpisVisibility();   // el hueco ya con su tamaño definitivo (la tira se rellena al final)
+            _pageEmpresas?.PerformLayout();
             if (i == 0) ShowFast(_svcPanel, true);
             if (i == 1) ShowFast(_bankPanel, true);
             if (i == 2) ShowFast(_memberPanel, true);
@@ -1531,7 +1551,9 @@ namespace SelectOR
             if (i == CatalogoSubtab) ShowFast(_catPanel, true);
             __vis.Dispose();
             var __load = Perf.T("ShowSubtab " + i + " · carga");
-            // Cada subpestaña recarga sus datos al abrirse (ya no hay botón "Actualizar").
+            // Cada subpestaña recarga sus datos al abrirse (ya no hay botón "Actualizar"); en la precarga visual de la
+            // pantalla de inicio, no (los datos ya los ha traído PreloadEmpresas).
+            if (_warmingEmp) { __load.Dispose(); return; }
             if (i == 0 && _empSel != null) LoadServices(_empSel);
             if (i == 1) OnBankShown();
             if (i == 2 && _empSel != null) LoadMembers(_empSel);
@@ -1559,6 +1581,7 @@ namespace SelectOR
         {
             RefreshEmpresasView();
             AjustarNav();   // al hacerse visible ya se conoce el alto real del menú lateral
+            if (_warmingEmp) return;   // precarga visual: sin pedir nada al servidor
             if (Supa.IsSuperadmin) { LoadReview(onlyCount: true); LoadLoansAdmin(onlyCount: true); LoadCatalog(onlyCount: true); }   // «Revisión (n)», «Préstamos (n)» y «Catálogo de rutas (n)»
             if (Supa.IsLoggedIn && !_empLoaded) LoadCompanies();
             else if (!Supa.IsLoggedIn) TryAutoLogin();
@@ -1883,7 +1906,7 @@ namespace SelectOR
             _ledgerAll.Clear(); RefreshBank();
             _svcRows.Clear();
             // Al cerrar sesión ya no perteneces a ninguna empresa → quitar los filtros por empresa
-            // de Exploración/Horarios (repuebla vacío y oculta) y actualizar KPIs.
+            // de Conducción libre/Horarios (repuebla vacío y oculta) y actualizar KPIs.
             _companyVehNames.Clear();
             RebuildCompanyEngs();
             UpdateCompanyKpis();
@@ -1958,7 +1981,7 @@ namespace SelectOR
             if (_empCoCombo.SelectedIndex == sel) OnCompanySelected();   // mismo índice: forzar recarga
             else _empCoCombo.SelectedIndex = sel;                        // dispara OnCompanySelected
             UpdateDutyHostVisible();
-            LoadCompanyVehNames();          // .eng de mis empresas → etiqueta en Exploración/Horarios
+            LoadCompanyVehNames();          // .eng de mis empresas → etiqueta en Conducción libre/Horarios
             if (!_leagueChecked) { _leagueChecked = true; _ = CheckLeagueAwards(); }   // ¿premios de la liga?
             if (first) _ = RecoverInterruptedServiceAsync();   // ¿quedó un servicio a medias?
         }
@@ -2208,7 +2231,7 @@ namespace SelectOR
             if (!Supa.IsSuperadmin || _svcCards == null) return;
             int i = SelectedServiceIndex();
             if (i < 0 || i >= _svcRows.Count) { Msg(_empHomeMsg, Tr("Selecciona un servicio de la lista."), true); return; }
-            if (MessageBox.Show(this, Tr("¿Eliminar este servicio? Se revertirán también sus apuntes de banca."), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, Tr("¿Eliminar este servicio? Se revertirán también sus apuntes de banca."), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_empHomeMsg, Tr("Eliminando servicio…"), false);
             var (_, err) = await Supa.RpcAsync("delete_service", new { p_service = _svcRows[i].Id });
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
@@ -2223,7 +2246,7 @@ namespace SelectOR
             if (!Supa.IsSuperadmin || _bankStmt == null) return;
             string id = _bankStmt.SelectedId;
             if (string.IsNullOrEmpty(id)) { Msg(_empHomeMsg, Tr("Selecciona un movimiento de la lista."), true); return; }
-            if (MessageBox.Show(this, Tr("¿Eliminar este movimiento de banca? Se ajustará el saldo."), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, Tr("¿Eliminar este movimiento de banca? Se ajustará el saldo."), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_empHomeMsg, Tr("Eliminando movimiento…"), false);
             var (_, err) = await Supa.RpcAsync("delete_ledger_entry", new { p_ledger = id });
             if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
@@ -2501,7 +2524,7 @@ namespace SelectOR
             var c = _empSel;
             if (c == null) { Msg(_empHomeMsg, Tr("Selecciona una empresa de la lista."), true); return; }
             if (!CanDeleteCompany()) { Msg(_empHomeMsg, Tr("Solo el gerente de la empresa puede eliminarla."), true); return; }
-            if (MessageBox.Show(this,
+            if (ThemedBox.Show(this,
                     string.Format(Tr("¿Eliminar la empresa «{0}» y TODOS sus datos? Se borran sus socios, su flota, todos sus servicios (también los que estén en marcha), su banca, sus solicitudes y su megafonía. Esta acción no se puede deshacer."), c.Name),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             using (var d = new TextPromptDialog(Tr("Eliminar empresa"), string.Format(Tr("Para confirmar, escribe el nombre de la empresa: {0}"), c.Name), "", "", Tr("Eliminar")))
@@ -2548,12 +2571,21 @@ namespace SelectOR
 
         static string Plural(int n, string one, string many) => string.Format(Tr(n == 1 ? one : many), n.ToString("N0", EsEs));
 
+        // La tira de cifras de la empresa, a la vista u oculta según la sección. ShowSubtab lo hace ANTES de enseñar la
+        // sección: así su panel se enseña ya con el hueco definitivo (si no, se maquetaba dos veces: en Mi perfil, 140 ms).
+        bool ApplyCompanyKpisVisibility()
+        {
+            if (_empStatsCard == null) return false;
+            bool show = _empSel != null && SubtabShowsCompanyKpis(_empSubtab);
+            if (_empStatsCard.Visible != show) _empStatsCard.Visible = show;   // sin empresa (o fuera de la empresa) no hay KPIs que mostrar
+            if (_empStatsGap != null && _empStatsGap.Visible != show) _empStatsGap.Visible = show;
+            return show;
+        }
+
         void UpdateCompanyKpis()
         {
             if (_empStatsCard == null) return;
-            bool show = _empSel != null && SubtabShowsCompanyKpis(_empSubtab);
-            _empStatsCard.Visible = show;   // sin empresa (o fuera de la empresa) no hay KPIs que mostrar
-            if (_empStatsGap != null) _empStatsGap.Visible = show;
+            bool show = ApplyCompanyKpisVisibility();
             // Orden de anclado fijo: título → KPIs → hueco. Si el hueco quedaba por delante, los KPIs bajaban
             // 12 px y se pegaban a las pestañas de la sección.
             var par = _empStatsCard.Parent;
@@ -3016,7 +3048,7 @@ namespace SelectOR
             }
         }
 
-        // Prepara el mini-mapa. Fondo = LÍNEAS de vía del TDB (como el mapa de Exploración) + estaciones
+        // Prepara el mini-mapa. Fondo = LÍNEAS de vía del TDB (como el mapa de Conducción libre) + estaciones
         // agrupadas por nombre, convertidas a lat/lon con un ajuste calculado emparejando las estaciones
         // (presentes en el TDB en coords de mundo y en la API en lat/lon). Si el TDB o el emparejado
         // fallan, cae a la nube de puntos + estaciones de la API. La posición del tren siempre va en lat/lon.
@@ -3175,9 +3207,9 @@ namespace SelectOR
         }
 
         // Lee el TDB de la ruta: cada nodo de vía → polilínea (mundo); andenes agrupados por estación.
-        // IMPORTANTE: igual que el mapa de Exploración, EXTIENDE cada tramo hasta la posición real de sus
+        // IMPORTANTE: igual que el mapa de Conducción libre, EXTIENDE cada tramo hasta la posición real de sus
         // empalmes/finales (el .tdb solo guarda el INICIO de cada sección → sin esto quedan huecos en los desvíos).
-        static void ReadTdbWorld(string routeDir, out List<PointF[]> net, out Dictionary<string, (double sx, double sz, int n)> stWorld)
+        static void ReadTdbWorld(string routeDir, out List<PointF[]> net, out Dictionary<string, (double sx, double sz, int n)> stWorld, bool withNet = true)
         {
             net = new List<PointF[]>();
             stWorld = new Dictionary<string, (double, double, int)>(StringComparer.OrdinalIgnoreCase);
@@ -3186,11 +3218,11 @@ namespace SelectOR
             if (tdb.Length == 0) return;
             var db = new Orts.Formats.Msts.TrackDatabaseFile(tdb[0]);
             var tnodes = db.TrackDB.TrackNodes;
-            var tsec = TrackGeometry.Sections(routeDir);   // curvas y desvíos como arcos (tsection.dat)
+            var tsec = withNet ? TrackGeometry.Sections(routeDir) : null;   // curvas y desvíos como arcos (tsection.dat)
 
             var edges = new List<(int a, int b, PointF[] pts)>();
             var nodePos = new Dictionary<int, PointF>();   // posición de empalmes/finales (vértices compartidos)
-            for (int ni = 0; ni < tnodes.Length; ni++)
+            for (int ni = 0; withNet && ni < tnodes.Length; ni++)
             {
                 var tn = tnodes[ni]; if (tn == null) continue;
                 if (tn.UiD != null && (tn.TrJunctionNode != null || tn.TrEndNode))
@@ -3303,7 +3335,8 @@ namespace SelectOR
                 _empStartFailReason = Tr("El tren seleccionado no tiene una máquina de tracción reconocible. Elige un tren con locomotora o automotor.");
                 return null;
             }
-            var (vehicleId, reason) = await ResolveCompanyUnitReason(_empOnDutyCompany.Id, engNames);
+            // Un ejemplar libre de ese tren de la empresa (o, según el modo, otro con la misma cabeza, o una máquina anterior).
+            var (vehicleId, reason) = await ResolveServiceUnitAsync(_empOnDutyCompany.Id, CurrentDrivenConsist(), engNames);
             if (vehicleId == null) { _empStartFailReason = reason; return null; }   // no es de la flota / no disponible
             // Ruta autorizada (rutas-autorizadas.sql): en modo obligatorio, sin ella no hay servicio.
             string routeBlock = await RouteGateAsync(_empOnDutyCompany.Id);
@@ -3315,13 +3348,14 @@ namespace SelectOR
                 _empStartFailReason = err != null ? (Tr("No se pudo abrir el servicio: ") + err) : null;
                 return null;
             }
+            string sid = json.Trim().Trim('"');
             try
             {
                 using var d = JsonDocument.Parse(json);
-                if (d.RootElement.ValueKind == JsonValueKind.String) return d.RootElement.GetString();
+                if (d.RootElement.ValueKind == JsonValueKind.String) sid = d.RootElement.GetString();
             }
             catch { }
-            return json.Trim().Trim('"');
+            return sid;
         }
 
         // Nombre del .eng líder (máquina de tracción) del tren seleccionado en la pestaña activa.
@@ -3545,6 +3579,22 @@ namespace SelectOR
         {
             try
             {
+                // máquinas y coches/vagones en servicio (vagones-servicio.sql); sin ese SQL, las máquinas de los servicios abiertos
+                var (rj, re) = await Supa.RpcAsync("open_service_units", new { p_company = companyId });
+                if (re == null && !string.IsNullOrWhiteSpace(rj))
+                {
+                    var all = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using var rd = JsonDocument.Parse(rj);
+                    if (rd.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var e in rd.RootElement.EnumerateArray())
+                        {
+                            string id = e.ValueKind == JsonValueKind.String ? e.GetString() : Str(e, "open_service_units");
+                            if (!string.IsNullOrEmpty(id)) all.Add(id);
+                        }
+                        return all;
+                    }
+                }
                 var (json, err) = await Supa.SelectAsync($"services?select=vehicle_id&company_id=eq.{Uri.EscapeDataString(companyId)}&status=eq.open&vehicle_id=not.is.null");
                 if (err != null || string.IsNullOrWhiteSpace(json)) return null;
                 var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -3557,12 +3607,13 @@ namespace SelectOR
 
         // Estado real de una unidad. La marca «in_use» del servidor se queda puesta si alguien cierra el
         // simulador sin terminar el servicio (el servidor la libera cuando otro se pone de servicio): solo está
-        // en servicio si tiene un servicio abierto. Y va al taller en cuanto cumple sus km, aunque aún no la
-        // haya marcado el servidor.
+        // en servicio si tiene un servicio abierto. El taller lo marca solo el servidor: es automático
+        // (taller-automatico.sql) y la unidad pasa por él al cerrar el servicio en que cumple sus km. Antes se daba por
+        // «en taller» en cuanto los km pasaban del intervalo y, sin el botón «Llevar al taller», se quedaba bloqueada.
         static string RealUnitStatus(string status, string id, HashSet<string> open, double kmSinceMaint, double maintInterval)
         {
             if (open != null ? open.Contains(id ?? "") : status == "in_use") return "in_use";
-            if (status == "maintenance_due" || (maintInterval > 0 && kmSinceMaint >= maintInterval)) return "maintenance_due";
+            if (status == "maintenance_due") return "maintenance_due";
             return "available";
         }
 
@@ -3575,7 +3626,7 @@ namespace SelectOR
             foreach (var en in engs) { esc.Add(PgInItem(en.name)); folderOf[en.name] = en.folder ?? ""; }
             string inList = string.Join(",", esc);
             _lastUnitPlate = "";
-            string vq = $"&company_id=eq.{Uri.EscapeDataString(companyId)}&name=in.({inList})&order=created_at.asc";
+            string vq = $"&company_id=eq.{Uri.EscapeDataString(companyId)}&name=in.({inList})&or=(kind.is.null,kind.neq.train)&order=created_at.asc";
             var tOpen = OpenServiceUnits(companyId);
             var (json, err) = await SelectVehicles("id,status,plate,name,folder,km_since_maint,maint_interval_km", vq);
             if (err != null && err.IndexOf("plate", StringComparison.OrdinalIgnoreCase) >= 0)   // aún sin columna de matrícula
@@ -3645,11 +3696,11 @@ namespace SelectOR
             if (anyInUse && !anyMaint)
                 return (null, string.Format(Tr("Tren no operativo: {0} está(n) en servicio con otro maquinista. Espera a que termine o compra otra unidad."), cuantas));
             if (anyMaint && !anyInUse)
-                return (null, string.Format(Tr("Tren no operativo: {0} está(n) pendiente(s) de mantenimiento. Un gestor debe llevarla al taller antes de usarla."), cuantas));
+                return (null, string.Format(Tr("Tren no operativo: {0} está(n) pasando por el taller, que es automático al cumplir sus km. Vuelve a intentarlo en unos minutos."), cuantas));
             return (null, string.Format(Tr("Tren no operativo: {0} no está(n) disponible(s): {1} en servicio y {2} en mantenimiento."), cuantas, enUso, enTaller));
         }
 
-        // Tren seleccionado en la pestaña activa (Actividad / Exploración / Horarios / Multijugador).
+        // Tren seleccionado en la pestaña activa (Actividad / Conducción libre / Horarios / Multijugador).
         string CurrentConsistLabel()
         {
             string s = _activePage switch
@@ -3665,7 +3716,7 @@ namespace SelectOR
 
         string CurrentPathLabel() => DrivenPath()?.Name ?? "";
 
-        // Recorrido que se va a conducir: en Actividad, el de la actividad; si no, el elegido en Exploración.
+        // Recorrido que se va a conducir: en Actividad, el de la actividad; si no, el elegido en Conducción libre.
         OrPath DrivenPath() => _activePage == 1 && _lstActivities.SelectedItem is Activity a && a.Path != null ? a.Path : CurrentPath();
 
         // Llamado cuando OR se cierra tras un lanzamiento con servicio abierto.
@@ -3912,7 +3963,7 @@ namespace SelectOR
             string paxRouteDir = _curRoute?.Path;
             _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0; _paxBusy = false; _paxWanted = true;
             _pHavePrev = _pHaveDir = false; _paxNextName = null; _paxLastEvent = null; _paxHourUtc = DateTime.MinValue;            _paxSeed = Environment.TickCount;
-            // Estación del año y clima elegidos para el viaje (Exploración / Horarios; en Actividad, neutros).
+            // Estación del año y clima elegidos para el viaje (Conducción libre / Horarios; en Actividad, neutros).
             try
             {
                 if (_activePage == 2) { _paxSeason = _segSeason?.SelectedIndex ?? -1; _paxWeather = _segWeather?.SelectedIndex ?? 0; }
@@ -4756,6 +4807,7 @@ namespace SelectOR
                 catch { }
             }
 
+            var __pf = Perf.T("Mi perfil · cifras");
             // KPIs
             double hours = totalS / 3600.0;
             double avg = totalS > 0 ? totalKm / hours : 0;
@@ -4765,8 +4817,11 @@ namespace SelectOR
             SetKpi(_profSpeedVal, avg.ToString("N0", EsEs) + " km/h");
             SetKpi(_profPaxVal, totalPax.ToString("N0", EsEs));
 
+            __pf.Dispose();
             try { await tLic; } catch { }
+            using (Perf.T("Mi perfil · rango e insignias"))
             UpdateRankAndBadges(totalKm, trips, hours, invalid, routeCount.Count, totalPax, trainCount.Count, avg);
+            var __pt = Perf.T("Mi perfil · trenes y rutas");
 
             // Trenes más usados (con la vista 2D de su máquina, si la tienes) y rutas más recorridas
             var tops = new List<KeyValuePair<string, double>>(trainCount);
@@ -4792,6 +4847,7 @@ namespace SelectOR
                 routes.Add((kv.Key, kv.Value.ToString("N0", EsEs) + " km  ·  " + string.Format(Tr(n == 1 ? "{0} viaje" : "{0} viajes"), n), kv.Value / maxKm));
             }
             _profRoutes?.SetItems(routes);
+            __pt.Dispose();
         }
 
         // Escala de rangos por km VÁLIDOS conducidos.
@@ -5008,6 +5064,11 @@ namespace SelectOR
                     {
                         Index = _userIds.Count - 1, Id = uid, Name = user, Email = Str(e, "email"), Key = key, Self = self,
                         Companies = (int)Num(e, "company_count"),
+                        // usuarios-carne-empresas.sql: puntos del carné y nombres de sus empresas (sin el SQL, no salen)
+                        Points = e.TryGetProperty("license_points", out var lp) && lp.ValueKind == JsonValueKind.Number ? lp.GetInt32() : -1,
+                        SuspendedUntil = DateTime.TryParse(Str(e, "suspended_until"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var su) ? su : null,
+                        CompanyNames = e.TryGetProperty("company_names", out var cn) && cn.ValueKind == JsonValueKind.Array
+                            ? System.Linq.Enumerable.ToList(System.Linq.Enumerable.Where(System.Linq.Enumerable.Select(cn.EnumerateArray(), x => x.GetString() ?? ""), x => x.Length > 0)) : new List<string>(),
                         Created = DateTimeOffset.TryParse(Str(e, "created_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var ca) ? ca.LocalDateTime : DateTime.MinValue
                     });
                 }
@@ -5038,7 +5099,7 @@ namespace SelectOR
             int i = SelectedUserIndex();
             if (i < 0 || i >= _userIds.Count) { Msg(_usersMsg, Tr("Selecciona un usuario de la lista."), true); return; }
             if (i < _userIsSelf.Count && _userIsSelf[i]) { Msg(_usersMsg, Tr("No puedes eliminar tu propio acceso."), true); return; }
-            if (MessageBox.Show(this,
+            if (ThemedBox.Show(this,
                     Tr("¿Eliminar el acceso de este usuario? Se borrará su cuenta, su perfil, sus membresías, solicitudes y servicios. Esta acción no se puede deshacer."),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_usersMsg, Tr("Eliminando acceso…"), false);
@@ -5135,7 +5196,7 @@ namespace SelectOR
             if (i < 0 || i >= _allCompIds.Count) { Msg(_allCompMsg, Tr("Selecciona una empresa de la lista."), true); return; }
             string id = _allCompIds[i];
             string name = _empCompanies.Find(c => c.Id == id)?.Name ?? "—";
-            if (MessageBox.Show(this,
+            if (ThemedBox.Show(this,
                     string.Format(Tr("¿Eliminar la empresa «{0}» y TODOS sus datos (socios, servicios y banca)? Esta acción no se puede deshacer."), name),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_allCompMsg, Tr("Eliminando empresa…"), false);
@@ -5152,52 +5213,48 @@ namespace SelectOR
         // alquilar vive aparte, en BuildBuySubpanel, para que ninguna de las dos vaya apretada.
         Panel BuildFleetSubpanel()
         {
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Bg };
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Theme.Bg };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // cabecera
-            t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // filtro + tabla + acciones — todo el espacio libre
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // msg
+            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));     // rótulo · estados · buscador
+            t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));     // los trenes
+            t.RowStyles.Add(new RowStyle(SizeType.Absolute, 260));    // el elegido
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // msg
 
-            _fleetHeaderLbl = EmpHeader("FLOTA DE LA EMPRESA");
-            t.Controls.Add(_fleetHeaderLbl);
+            // ---- arriba, como en Conducción libre: rótulo, pastillas de estado y buscador ----
+            var bar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            _fleetHeaderLbl = new Label { Text = Tr("TRENES DE LA EMPRESA"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 0, 12, 0) };
+            _fleetTabs = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 4, 0, 0) };
+            string[] states = { "Todos", "Disponibles", "En servicio" };   // sin «En taller»: el taller es automático
+            for (int k = 0; k < states.Length; k++)
+            {
+                int idx = k;
+                var b = BankChip(Tr(states[k]), k == 0);
+                b.Click += (s2, e2) => { SetChipActive(_fleetTabs, idx); _fleetCards.StateFilter = idx - 1; };
+                _fleetTabs.Controls.Add(b);
+            }
+            var fleetSearch = new RoundedInput(I18n.T("🔎  Matrícula o tren…")) { Width = 240, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 5, 0, 5) };
+            fleetSearch.Box.TextChanged += (s2, e2) => _fleetCards.Filter(fleetSearch.Box.Text);
+            bar.Controls.Add(_fleetHeaderLbl, 0, 0); bar.Controls.Add(_fleetTabs, 1, 0); bar.Controls.Add(fleetSearch, 2, 0);
+            t.Controls.Add(bar, 0, 0);
 
-            var fleetCard = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, BorderColor = Blend(Theme.Surface, Theme.Bg, 0.5f), Radius = 12, Padding = new Padding(10, 10, 10, 10), Margin = new Padding(2, 2, 2, 4) };
-
-            // DOS COLUMNAS (como Compra): IZQUIERDA buscador + tabla de la flota · DERECHA vista 3D + ficha + acciones.
-            var fmain = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface };
-            fmain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
-            fmain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-
-            // --- IZQUIERDA: estados + buscador + tarjetas (una por modelo, con sus unidades) ---
-            var fleetGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0, 0, 12, 0) };
-            fleetGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            fleetGrid.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // estados + filtro
-            fleetGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tarjetas
-
+            // ---- la lista: una línea por tren, con su composición ----
             _thumbs ??= new VehicleThumbs(this);
-            _fleetCards = new FleetCardList { Dock = DockStyle.Fill, Thumbs = _thumbs, Margin = new Padding(0) };
+            _fleetCards = new FleetCardList { Dock = DockStyle.Fill, Thumbs = _thumbs, BackColor = Theme.Bg, Margin = new Padding(0, 4, 0, 0) };
             _fleetCards.SelectionChanged += OnFleetVehicleSelected;
-            var ftop = new TableLayoutPanel { Dock = DockStyle.Top, Height = 44, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0, 0, 0, 6) };
-            ftop.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            ftop.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            _fleetTabs = MakeSubTabs(new[] { "Todas", "Disponibles", "En servicio", "En taller" }, i => _fleetCards.StateFilter = i - 1);
-            _fleetTabs.Dock = DockStyle.Fill; _fleetTabs.Margin = new Padding(0); _fleetTabs.BackColor = Theme.Surface;
-            var fleetSearch = new RoundedInput(I18n.T("🔎  Matrícula o modelo…")) { Width = 240, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
-            fleetSearch.Box.TextChanged += (s, e) => _fleetCards.Filter(fleetSearch.Box.Text);
-            ftop.Controls.Add(_fleetTabs, 0, 0); ftop.Controls.Add(fleetSearch, 1, 0);
-            fleetGrid.Controls.Add(ftop, 0, 0);
-            fleetGrid.Controls.Add(_fleetCards, 0, 1);
-            fmain.Controls.Add(fleetGrid, 0, 0);
+            _fleetCards.MarksChanged += OnFleetVehicleSelected;   // varios a la vez (Ctrl / Mayús)
+            _fleetCards.InfoClicked += m => ShowFleetTrainBreakdown(m);
+            t.Controls.Add(_fleetCards, 0, 1);
 
-            // --- DERECHA: vista 3D + ficha del vehículo + acciones ---
-            var fright = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Theme.Surface };
-            fright.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            fright.RowStyles.Add(new RowStyle(SizeType.Percent, 100));    // vista 3D (se queda todo el hueco)
-            fright.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // título
-            fright.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // ficha (chips)
-            fright.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // acciones
-
-            var fviewport = new Card { Dock = DockStyle.Fill, Fill = Theme.Bg, BorderColor = Blend(Theme.Surface, Theme.Bg, 0.35f), Radius = 10, Padding = new Padding(4), Margin = new Padding(0, 0, 0, 8) };
+            // ---- abajo: el tren elegido (vista 3D · composición 2D · casillas y acciones) ----
+            var sel = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(10, 8, 14, 10), Margin = new Padding(0, 10, 0, 0) };
+            var selGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0) };
+            selGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 330));
+            selGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            selGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             _fleetOwnPreview = new TrainPreviewPanel { Dock = DockStyle.Fill };
             _fleetOwnPreview.ViewerSource = () => _fleetOwnGeom == null ? null : new ShapeViewSource
                 { Geom = _fleetOwnGeom, Flip = _fleetOwnFlip, BaseDistance = FleetOwnCamDistance, Yaw = _fleetOwnYaw, Pitch = _fleetOwnPitch, Caption = _fleetOwnPreview.Caption };
@@ -5205,53 +5262,109 @@ namespace SelectOR
             _fleetOwnPreview.ResetRequested += OnFleetOwnReset;
             _fleetOwnPreview.Zoomed += () => { if (_fleetOwnGeom != null) RenderFleetOwnLive(); };
             _fleetOwnRerender = new System.Windows.Forms.Timer { Interval = 140 };
-            _fleetOwnRerender.Tick += (s, e) => { _fleetOwnRerender.Stop(); RenderFleetOwnLive(); };
-            _fleetOwnPreview.Resize += (s, e) => { if (_fleetOwnGeom != null) { _fleetOwnRerender.Stop(); _fleetOwnRerender.Start(); } };
-            // Vista 2D al momento; el 3D, solo con «Ver en 3D»
-            _fleetOwnView = new VehicleViewport(_fleetOwnPreview) { Dock = DockStyle.Fill, Thumbs = _thumbs };
+            _fleetOwnRerender.Tick += (s2, e2) => { _fleetOwnRerender.Stop(); RenderFleetOwnLive(); };
+            _fleetOwnPreview.Resize += (s2, e2) => { if (_fleetOwnGeom != null) { _fleetOwnRerender.Stop(); _fleetOwnRerender.Start(); } };
+            _fleetOwnView = new VehicleViewport(_fleetOwnPreview) { Dock = DockStyle.Fill, Thumbs = _thumbs, Margin = new Padding(0, 0, 14, 0) };
             _fleetOwnView.ModeChanged += on => { if (on) RenderFleetOwn(_fleetOwnEngPath); };
-            fviewport.Controls.Add(_fleetOwnView);
-            fright.Controls.Add(fviewport, 0, 0);
+            _fleetOwnView.Set3D(true); _fleetOwnView.ToggleShown = false;   // como en Conducción libre: la máquina de cabeza en 3D
+            selGrid.Controls.Add(_fleetOwnView, 0, 0);
 
-            _fleetOwnTitle = new Label { Text = Tr("Elige un vehículo"), AutoSize = true, ForeColor = Theme.Accent, Font = Theme.Font(12.5f, FontStyle.Bold), Margin = new Padding(1, 0, 0, 6) };
-            fright.Controls.Add(_fleetOwnTitle, 0, 1);
+            var info = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
+            // cabecera: TREN ELEGIDO · nombre (estado) y, a la derecha, las acciones
+            var headRow = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Theme.Surface };
+            var lblSel = new Label { Text = Tr("TREN ELEGIDO"), Dock = DockStyle.Left, AutoSize = false, Width = 120, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold) };
+            lblSel.Width = TextRenderer.MeasureText(lblSel.Text, lblSel.Font).Width + 12;
+            _fleetOwnTitle = new OneLineLabel { Text = Tr("Elige un tren"), Dock = DockStyle.Fill, AutoSize = false, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.Accent, Font = Theme.Font(11f, FontStyle.Bold) };
+            var acts = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = Theme.Surface, Padding = new Padding(0, 3, 0, 0) };
+            RoundButton Act(string text, bool primary = false)
+            {
+                var b = EmpButton(Tr(text), primary); b.Height = 32; b.Margin = new Padding(8, 0, 0, 0);
+                using var fb = Theme.Font(9.5f, FontStyle.Bold); b.Width = TextRenderer.MeasureText(b.Text, fb).Width + 36;
+                return b;
+            }
+            _fleetRemoveBtn = Act("Dar de baja"); _fleetRemoveBtn.BaseColor = Theme.Surface2; _fleetRemoveBtn.HoverColor = Color.FromArgb(150, 60, 60); _fleetRemoveBtn.TextColor = RedC;
+            _fleetRemoveBtn.Click += (s2, e2) => RemoveVehicle();
+            _fleetPlateBtn = Act("Asignar matrícula"); _fleetPlateBtn.BaseColor = Theme.Surface2; _fleetPlateBtn.HoverColor = Theme.SurfaceHi; _fleetPlateBtn.TextColor = Theme.Text;
+            _fleetPlateBtn.Click += (s2, e2) => AssignPlateUi();
+            // sin «Llevar al taller»: el mantenimiento se hace solo al cumplir los km (taller-automatico.sql)
+            _fleetAddConBtn = Act("Añadir a mi contenido"); _fleetAddConBtn.Visible = false; _fleetAddConBtn.Click += (s2, e2) => AddFleetTrainToContent();
+            _fleetSeatsBtn = Act("Plazas…"); _fleetSeatsBtn.Visible = false; _fleetSeatsBtn.Click += (s2, e2) => SetTrainSeatsUi();
+            _fleetInfoBtn = Act("ⓘ  Desglose del precio"); _fleetInfoBtn.Visible = false;
+            _fleetInfoBtn.Click += (s2, e2) => { int i = FleetSelectedRow(); if (i >= 0 && i < _fleetRowTrain.Count && _fleetTrainModels.TryGetValue(_fleetRowTrain[i], out var m)) ShowFleetTrainBreakdown(m); };
+            acts.Controls.AddRange(new Control[] { _fleetRemoveBtn, _fleetPlateBtn, _fleetSeatsBtn, _fleetAddConBtn, _fleetInfoBtn });
+            headRow.Controls.Add(_fleetOwnTitle); headRow.Controls.Add(acts); headRow.Controls.Add(lblSel);
+            // lo que lleva el tren; debajo, todos los datos útiles del ejemplar (dos filas de seis casillas)
+            _fleetOwnSub = new Label { Dock = DockStyle.Top, Height = 24, ForeColor = Theme.Subtle, Font = Theme.Font(9f), TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
+            // casillas: las mismas que en Compra (SpecTiles); cada valor se guarda en su etiqueta y se pinta desde ellas
+            (string cap, Label lbl)[] tiles =
+            {
+                ("TIPO", _voKind = new Label()), ("ESTADO", _voEstado = new Label()), ("PROPIEDAD", _voProp = new Label()), ("VALOR", _voValue = new Label()),
+                ("PRÓXIMO TALLER", _voMaint = new Label()), ("KM TOTALES", _voKm = new Label()), ("PLAZAS", _voCap = new Label()), ("CONFORT", _voComfort = new Label()),
+                ("TRACCIÓN", _voTraction = new Label()), ("POTENCIA", _voPower = new Label()), ("VEL. MÁXIMA", _voSpeed = new Label()), ("MASA", _voMass = new Label()),
+            };
+            _fleetSpecs = new SpecTiles { Dock = DockStyle.Top, Height = 0, Columns = 6 };
+            void Repaint() { _fleetSpecs.ValueColors.Clear(); _fleetSpecs.ValueColors[1] = _voEstado.ForeColor; var items = new List<(string, string)>(); foreach (var x in tiles) items.Add((Tr(x.cap), string.IsNullOrEmpty(x.lbl.Text) ? "—" : x.lbl.Text)); _fleetSpecs.SetItems(items); }
+            foreach (var (_, lbl) in tiles) { lbl.Text = "—"; lbl.ForeColor = Theme.Text; lbl.TextChanged += (s2, e2) => Repaint(); lbl.ForeColorChanged += (s2, e2) => Repaint(); }
+            Repaint();
+            info.Controls.Add(_fleetSpecs);
+            info.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 4, BackColor = Theme.Surface });
+            info.Controls.Add(_fleetOwnSub);
+            info.Controls.Add(headRow);
+            selGrid.Controls.Add(info, 1, 0);
+            sel.Controls.Add(selGrid);
+            t.Controls.Add(sel, 0, 2);
 
-            var fchips = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 3, BackColor = Theme.Surface };
-            fchips.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            fchips.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            fchips.Controls.Add(FleetChip("TIPO", out _voKind), 0, 0);
-            fchips.Controls.Add(FleetChip("ESTADO", out _voEstado), 1, 0);
-            fchips.Controls.Add(FleetChip("PROPIEDAD", out _voProp), 0, 1);
-            fchips.Controls.Add(FleetChip("MANTENIMIENTO", out _voMaint), 1, 1);
-            // Las plazas salen aparte: así TIPO es corto y se lee al mismo tamaño que los demás.
-            fchips.Controls.Add(FleetChip("PLAZAS", out _voCap), 0, 2);
-            fchips.Controls.Add(FleetChip("TRACCIÓN", out _voTraction), 1, 2);
-            var fchipsHost = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Surface };
-            fchipsHost.Controls.Add(fchips);
-            fright.Controls.Add(fchipsHost, 0, 2);
-
-            var fbtns = new TableLayoutPanel { Dock = DockStyle.Fill, Height = 44, ColumnCount = 3, RowCount = 1, BackColor = Theme.Surface, Margin = new Padding(0, 8, 0, 0) };
-            fbtns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
-            fbtns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-            fbtns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            _fleetServiceBtn = EmpButton(Tr("Llevar al taller"), primary: true); _fleetServiceBtn.Dock = DockStyle.Fill; _fleetServiceBtn.Height = 44; _fleetServiceBtn.Margin = new Padding(0, 0, 6, 0);
-            _fleetServiceBtn.Click += (s, e) => ServiceVehicleUi();
-            // Matrícula de la unidad (solo gerente / gestor / superadmin).
-            _fleetPlateBtn = EmpButton(Tr("Asignar matrícula")); _fleetPlateBtn.Dock = DockStyle.Fill; _fleetPlateBtn.Height = 44; _fleetPlateBtn.Margin = new Padding(6, 0, 6, 0);
-            _fleetPlateBtn.BaseColor = Theme.Surface2; _fleetPlateBtn.HoverColor = Theme.SurfaceHi; _fleetPlateBtn.TextColor = Theme.Text;
-            _fleetPlateBtn.Click += (s, e) => AssignPlateUi();
-            _fleetRemoveBtn = EmpButton(Tr("Dar de baja")); _fleetRemoveBtn.Dock = DockStyle.Fill; _fleetRemoveBtn.Height = 44; _fleetRemoveBtn.Margin = new Padding(6, 0, 0, 0);
-            _fleetRemoveBtn.BaseColor = Theme.Surface2; _fleetRemoveBtn.HoverColor = Color.FromArgb(150, 60, 60); _fleetRemoveBtn.TextColor = RedC;
-            _fleetRemoveBtn.Click += (s, e) => RemoveVehicle();
-            fbtns.Controls.Add(_fleetServiceBtn, 0, 0); fbtns.Controls.Add(_fleetPlateBtn, 1, 0); fbtns.Controls.Add(_fleetRemoveBtn, 2, 0);
-            fright.Controls.Add(fbtns, 0, 3);
-
-            fmain.Controls.Add(fright, 1, 0);
-            fleetCard.Controls.Add(fmain);
-            t.Controls.Add(fleetCard);
-
-            _fleetMsg = EmpMsg(); t.Controls.Add(_fleetMsg);
+            _fleetMsg = EmpMsg(); t.Controls.Add(_fleetMsg, 0, 3);
             return t;
+        }
+
+
+        // Las casillas de más de la ficha de Flota (las de siempre siguen en _voKind…_voTraction).
+        RoundButton _fleetInfoBtn, _fleetSeatsBtn;
+        SpecTiles _fleetSpecs;
+        Label _fleetOwnSub, _voValue, _voKm, _voComfort, _voPower, _voSpeed, _voMass;
+
+        static string[] JoinDetail(params string[][] parts) { var l = new List<string>(); foreach (var x in parts) l.AddRange(x); return l.ToArray(); }
+
+        // Los datos de más de una fila de la flota: valor, km totales, confort, potencia, velocidad y masa.
+        static string[] FleetExtraDetail(JsonElement e)
+        {
+            double price = Num(e, "price"), km = Num(e, "km_total"), comfort = Num(e, "comfort"), kw = Num(e, "power_kw"), kmh = Num(e, "max_speed_kmh"), mass = Num(e, "mass_t");
+            return new[]
+            {
+                price > 0 ? price.ToString("N0", EsEs) + " €" : "—", km.ToString("N0", EsEs) + " km", comfort > 0 ? comfort.ToString("N0", EsEs) + "/100" : "—",
+                kw > 0 ? kw.ToString("N0", EsEs) + " kW" : "—", kmh > 0 ? kmh.ToString("N0", EsEs) + " km/h" : "—", mass > 0 ? mass.ToString("N0", EsEs) + " t" : "—"
+            };
+        }
+
+        // Varios ejemplares elegidos: cuántos y de qué trenes; taller, baja y «Añadir a mi contenido» actúan sobre todos.
+        void ShowFleetMulti()
+        {
+            var ids = _fleetCards.SelectedIds;
+            var rows = new List<int>(); foreach (var id in ids) { int r = _fleetIds.IndexOf(id); if (r >= 0) rows.Add(r); }
+            var trains = new HashSet<string>(); int inUse = 0, due = 0;
+            foreach (var r in rows)
+            {
+                if (r < _fleetRowTrain.Count && _fleetRowTrain[r].Length > 0) trains.Add(_fleetRowTrain[r]);
+                if (r < _fleetStatus.Count) { if (_fleetStatus[r] == "in_use") inUse++; else if (_fleetStatus[r] == "maintenance_due") due++; }
+            }
+            _fleetOwnTitle.Text = string.Format(Tr("{0} ejemplares elegidos"), rows.Count);
+            if (_fleetOwnSub != null) _fleetOwnSub.Text = Tr("«Dar de baja» y «Añadir a mi contenido» actúan sobre todos  ·  Esc: quitar la selección");
+            if (_voKind != null) _voKind.Text = string.Format(trains.Count == 1 ? Tr("{0} tren") : Tr("{0} trenes"), trains.Count);
+            if (_voEstado != null) { _voEstado.Text = string.Format(Tr("{0} libres"), rows.Count - inUse - due); _voEstado.ForeColor = Theme.Accent; }
+            if (_voProp != null) _voProp.Text = string.Format(Tr("{0} en servicio"), inUse);
+            if (_voMaint != null) _voMaint.Text = "—";
+            foreach (var l in new[] { _voCap, _voTraction, _voValue, _voKm, _voComfort, _voPower, _voSpeed, _voMass }) if (l != null) l.Text = "—";
+            foreach (var b in new[] { _fleetPlateBtn, _fleetSeatsBtn, _fleetInfoBtn }) if (b != null) { b.Enabled = false; b.Invalidate(); }
+            if (_fleetAddConBtn != null) { bool falta = false; foreach (var t in trains) if (!_trainCon.ContainsKey(t)) falta = true; _fleetAddConBtn.Visible = falta; }
+        }
+
+        // Los elegidos en Flota (uno o varios): (fila, id).
+        List<(int row, string id)> FleetSelection()
+        {
+            var l = new List<(int, string)>();
+            foreach (var id in _fleetCards?.SelectedIds ?? new List<string>()) { int r = _fleetIds.IndexOf(id); if (r >= 0) l.Add((r, id)); }
+            return l;
         }
 
         // ============================ Compra / alquiler (showroom) ============================
@@ -5405,8 +5518,10 @@ namespace SelectOR
 
             main.Controls.Add(right, 1, 0);
             shop.Controls.Add(main);
-            t.Controls.Add(shop);
-
+            // El escaparate es de TRENES (MainMenuForm.CompraTrenes.cs). El de máquinas ya no se enseña, pero se sigue
+            // creando (lo usan la tasación y las solicitudes antiguas); su visor pasa al de trenes.
+            right.Controls.Remove(viewport);
+            t.Controls.Add(BuildTrainShop(viewport));
             _buyMsg = EmpMsg(); t.Controls.Add(_buyMsg);
 
             // Pestañas «Comprar» (el escaparate) y «Solicitudes» (lo que piden los maquinistas).
@@ -5523,17 +5638,24 @@ namespace SelectOR
             LoadFleetScale();          // escala de precio para tasar en el cliente
             PopulateFleetConsistList(); // consists comprables del contenido actual
             PopulateBuyMachines();      // máquinas (.eng) comprables del contenido actual
-            if (_empSel == null) { _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetPlates.Clear(); _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); _fleetCards.EmptyText = Tr("Selecciona una empresa."); _fleetCards.SetModels(new List<FleetModel>()); OnFleetVehicleSelected(); UpdateFleetTabCounts(); return; }
+            if (_empSel == null) { _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetPlates.Clear(); _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); _fleetRowTrain.Clear(); _fleetRow2D.Clear(); _fleetCards.EmptyText = Tr("Selecciona una empresa."); _fleetCards.SetModels(new List<FleetModel>()); OnFleetVehicleSelected(); UpdateFleetTabCounts(); return; }
             if (_fleetIds.Count == 0) { _fleetCards.EmptyText = Tr("Cargando…"); _fleetCards.Invalidate(); }
-            const string fleetCols = "id,name,folder,kind,engine_type,km_total,km_since_maint,maint_interval_km,ownership,status,rental_per_service,capacity,comfort";
+            const string fleetCols = "id,name,folder,kind,engine_type,km_total,km_since_maint,maint_interval_km,ownership,status,rental_per_service,capacity,comfort,price,power_kw,max_speed_kmh,mass_t";
+            var fleetCo = _empSel;
             string fleetFilter = $"&company_id=eq.{Uri.EscapeDataString(_empSel.Id)}&order=name.asc,created_at.asc";
             var tOpen = OpenServiceUnits(_empSel.Id);   // a la vez que las unidades
-            var (json, err) = await SelectVehicles(fleetCols + ",plate", fleetFilter);
+            var tTrains = LoadCoTrainsAsync(_empSel.Id, force: true);  // y que los trenes de la empresa (otro gestor puede haber comprado)
+            var (json, err) = await SelectVehicles(fleetCols + ",plate,train_id,lead_eng", fleetFilter);
+            if (err != null && (err.IndexOf("train_id", StringComparison.OrdinalIgnoreCase) >= 0 || err.IndexOf("lead_eng", StringComparison.OrdinalIgnoreCase) >= 0))
+                (json, err) = await SelectVehicles(fleetCols + ",plate", fleetFilter);   // servidor sin trenes-por-con.sql
             if (err != null && err.IndexOf("plate", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor aún sin matrículas
                 (json, err) = await SelectVehicles(fleetCols, fleetFilter);
             var openUnits = await tOpen;
+            await tTrains;
+            if (_empSel != fleetCo) return;   // se cambió de empresa mientras se consultaba: manda la carga de la nueva
             _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetOwnedCount.Clear(); _fleetPlates.Clear();
-            _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear();
+            _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); _fleetRowTrain.Clear(); _fleetRow2D.Clear();
+            _trainCopyCount.Clear(); _fleetTrainModels.Clear();
             if (err != null) { _fleetCards.EmptyText = Tr("Error: ") + err; _fleetCards.SetModels(new List<FleetModel>()); return; }
             _fleetCards.EmptyText = null;
             var models = new List<FleetModel>();
@@ -5555,6 +5677,14 @@ namespace SelectOR
                     string status = Str(e, "status"); _fleetStatus.Add(status);
                     string rawName = Str(e, "name");
                     string rawFolder = Str(e, "folder");
+                    // Un ejemplar de un tren (trenes-por-con.sql): una tarjeta por tren, con sus ejemplares.
+                    string trainId = Str(e, "train_id");
+                    if (trainId.Length > 0 || Str(e, "kind") == "train")
+                    {
+                        AddFleetTrainRow(e, trainId, models, modelOf, engPath, openUnits);
+                        continue;
+                    }
+                    _fleetRowTrain.Add(""); _fleetRow2D.Add("");
                     if (rawName.Length > 0)
                     {
                         // Cada unidad cuenta para SU librea (carpeta). Las compradas antes de guardarla
@@ -5600,7 +5730,7 @@ namespace SelectOR
                     if (declared.Length == 0) declared = "—";
                     string traction = TractionName(Str(e, "engine_type"));
                     string plazas = cap > 0 ? cap.ToString("N0", EsEs) : "—";
-                    _fleetRowDetail.Add(new[] { plate.Length > 0 ? plate + "  ·  " + name : name, declared, prop, maint, estado, plazas, traction });
+                    _fleetRowDetail.Add(JoinDetail(new[] { plate.Length > 0 ? plate + "  ·  " + name : name, declared, prop, maint, estado, plazas, traction }, FleetExtraDetail(e), new[] { model }));
                     _fleetRowEstColor.Add(estadoColor);
                     // Tarjeta del modelo (carpeta + .eng) con esta unidad como chip de color
                     string mkey = ModelKey(rawFolder, name);
@@ -5611,7 +5741,8 @@ namespace SelectOR
                         if (traction != "—") sub.Add(traction);
                         if (cap > 0) sub.Add(cap.ToString("N0", EsEs) + " " + Tr("plazas"));
                         sub.Add(hasLocal ? model : Tr("(no lo tienes en local)"));
-                        fm = new FleetModel { Key = mkey, Title = name, Sub = string.Join("  ·  ", sub), Path = _fleetRowEng[_fleetRowEng.Count - 1] };
+                        fm = new FleetModel { Key = mkey, Title = name, Sub = string.Join("  ·  ", sub), Path = _fleetRowEng[_fleetRowEng.Count - 1],
+                                              Group = Tr("MÁQUINAS ANTERIORES  ·  valen como cabeza de cualquier tren que las lleve; ya no se compran, solo se venden") };
                         modelOf[mkey] = fm; models.Add(fm);
                     }
                     fm.Units.Add(new FleetUnit
@@ -5623,27 +5754,75 @@ namespace SelectOR
                 }
             }
             catch { }
+            models = System.Linq.Enumerable.ToList(System.Linq.Enumerable.OrderBy(models, m => string.IsNullOrEmpty(m.Group) ? 0 : 1));   // primero los trenes; después, las máquinas anteriores
             _fleetCards.SetModels(models);
             if (_fleetCards.SelectedId == null && models.Count > 0 && models[0].Units.Count > 0) _fleetCards.Select(models[0].Units[0].Id, false);
             UpdateFleetTabCounts();
             UpdateCompanyKpis();
-            if (_fleetHeaderLbl != null) _fleetHeaderLbl.Text = Tr("FLOTA DE LA EMPRESA") + (n > 0 ? "  ·  " + n : "");
+            if (_fleetHeaderLbl != null) _fleetHeaderLbl.Text = Tr("TRENES DE LA EMPRESA") + (n > 0 ? "  ·  " + n : "");
             EnsureOwnedMachinesListed();   // lo que ya tienes se ve siempre en Compra, con su distintivo
             // La lista solo se rehace si han cambiado las unidades de la empresa (rehacerla cuesta).
             int ownedStamp = 0;
             foreach (var kv in _fleetOwnedCount) ownedStamp = ownedStamp * 31 + kv.Key.GetHashCode() + kv.Value;
             if (ownedStamp != _fleetOwnedStamp) { _fleetOwnedStamp = ownedStamp; FilterBuyList(); }
             else _fleetEngList?.Invalidate();
+            FilterShop();                 // el escaparate de trenes (con lo que ya tiene la empresa)
+            _ = MatchLocalTrainsAsync();  // qué trenes de la empresa tienes en tu contenido
             OnFleetVehicleSelected();  // refresca la ficha/vista del vehículo seleccionado
             UpdateRoleUi();
             UpdateFleetValuation();   // recalcula el desglose del consist elegido (la propiedad puede haber cambiado)
         }
 
+        // Un ejemplar de un tren en Flota: su tarjeta es la del tren (composición 2D si lo tienes; si no, su máquina de cabeza).
+        readonly List<string> _fleetRowTrain = new(), _fleetRow2D = new();   // por fila: el tren y la vista 2D
+        RoundButton _fleetAddConBtn;
+        void AddFleetTrainRow(JsonElement e, string trainId, List<FleetModel> models, Dictionary<string, FleetModel> modelOf,
+                              Dictionary<string, string> engPath, HashSet<string> openUnits)
+        {
+            var t = _coTrains.Find(x => x.Id == trainId);
+            string name = Str(e, "name").Length > 0 ? Str(e, "name") : t?.Name ?? "—", lead = Str(e, "lead_eng");
+            string status = Str(e, "status"), plate = Str(e, "plate"), ownership = Str(e, "ownership");
+            double since = Num(e, "km_since_maint"), interval = Num(e, "maint_interval_km"), cap = Num(e, "capacity"), rent = Num(e, "rental_per_service");
+            double remaining = Math.Max(0, interval - since);
+            string real = RealUnitStatus(status, Str(e, "id"), openUnits, since, interval);
+            bool inUse = real == "in_use", due = real == "maintenance_due", soon = !due && !inUse && interval > 0 && remaining <= interval * 0.1;
+            int state = due ? 2 : inUse ? 1 : soon ? 3 : 0;
+            string estado = due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
+            string prop = ownership == "rented" ? Tr("Alquilado") + " · " + rent.ToString("N0", EsEs) + " €/serv." : Tr("Comprado");
+            string leadPath = lead.Length > 0 && engPath.TryGetValue(lead, out var lp) ? lp : "";
+            bool local = trainId.Length > 0 && _trainCon.TryGetValue(trainId, out _);
+            string saved = trainId.Length > 0 ? SavedImageFile("tren", trainId) : "";
+            string view = local ? _trainCon[trainId] : System.IO.File.Exists(saved) ? saved : "";
+            if (trainId.Length > 0) _trainCopyCount[trainId] = TrainCopies(trainId) + 1;
+            _fleetPlates.Add(plate);
+            _fleetRowEng.Add(leadPath);
+            _fleetRowTrain.Add(trainId); _fleetRow2D.Add(view);
+            string kindTxt = t == null ? Tr("Tren") : TrainCarriesPassengers(t.Vehicles) ? Tr("Viajeros") : Tr("Mercancías");
+            string seatsTxt = cap > 0 ? cap.ToString("N0", EsEs) + (t?.Seats != null ? " · " + Tr("fijadas") : "") : "—";
+            _fleetRowDetail.Add(JoinDetail(new[] { plate.Length > 0 ? plate + "  ·  " + name : name, kindTxt, prop, interval > 0 ? remaining.ToString("N0", EsEs) + " km" : "—",
+                                        estado, seatsTxt, TractionName(Str(e, "engine_type")) }
+                                , FleetExtraDetail(e), new[] { t != null ? TrainSummary(t.Vehicles) : "" }));
+            _fleetRowEstColor.Add(FleetCardList.StateColors[state]);
+            string mkey = "train:" + (trainId.Length > 0 ? trainId : name);
+            if (!modelOf.TryGetValue(mkey, out var fm))
+            {
+                fm = new FleetModel { Key = mkey, Title = name, Sub = FleetTrainSub(t, local), Path = view, Info = t != null };
+                modelOf[mkey] = fm; models.Add(fm);
+                if (trainId.Length > 0) _fleetTrainModels[trainId] = fm;
+            }
+            fm.Units.Add(new FleetUnit
+            {
+                Row = _fleetIds.Count - 1, Id = _fleetIds[_fleetIds.Count - 1],
+                Label = plate.Length > 0 ? plate : string.Format(Tr("Nº {0}"), fm.Units.Count + 1), State = state
+            });
+        }
+
         // Carga los .eng de las unidades de las empresas DE LAS QUE SOY SOCIO (para la etiqueta
-        // "pertenece a tu empresa" en Exploración/Horarios). Superadmin: solo sus empresas de socio.
+        // "pertenece a tu empresa" en Conducción libre/Horarios). Superadmin: solo sus empresas de socio.
         async void LoadCompanyVehNames()
         {
             _companyVehNames.Clear();
+            _companyTrainCons = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 if (!Supa.IsLoggedIn || string.IsNullOrEmpty(Supa.UserId)) { RebuildCompanyEngs(); return; }
@@ -5654,16 +5833,22 @@ namespace SelectOR
                 try { using var d = JsonDocument.Parse(mj); foreach (var e in d.RootElement.EnumerateArray()) { var id = Str(e, "company_id"); if (id.Length > 0) mine.Add(id); } } catch { }
                 if (mine.Count == 0) { RebuildCompanyEngs(); return; }
                 var byId = new Dictionary<string, string>();
+                var trainCos = new HashSet<string>();   // empresas con trenes (ejemplares): sus etiquetas, por composición
                 foreach (var c in _empCompanies) if (mine.Contains(c.Id)) byId[c.Id] = c.Name;
                 string inList = string.Join(",", mine);
-                var (vj, ve) = await SelectVehicles("name,folder,company_id", $"&company_id=in.({Uri.EscapeDataString(inList)})");
+                var (vj, ve) = await SelectVehicles("name,folder,company_id,lead_eng", $"&company_id=in.({Uri.EscapeDataString(inList)})");
+                if (ve != null && ve.IndexOf("lead_eng", StringComparison.OrdinalIgnoreCase) >= 0)   // servidor sin trenes-por-con.sql
+                    (vj, ve) = await SelectVehicles("name,folder,company_id", $"&company_id=in.({Uri.EscapeDataString(inList)})");
                 if (ve == null)
                     try
                     {
                         using var d = JsonDocument.Parse(vj);
                         foreach (var e in d.RootElement.EnumerateArray())
                         {
-                            string name = Str(e, "name"), cid = Str(e, "company_id");
+                            string cid = Str(e, "company_id");
+                            // un ejemplar de un tren: su etiqueta va por su composición exacta (LoadCompanyTrainTagsAsync)
+                            if (Str(e, "lead_eng").Length > 0) { trainCos.Add(cid); continue; }
+                            string name = Str(e, "name");
                             if (name.Length == 0) continue;
                             string cn = byId.TryGetValue(cid, out var n) ? n : "";
                             if (cn.Length == 0) continue;
@@ -5673,10 +5858,13 @@ namespace SelectOR
                         }
                     }
                     catch { }
+                await LoadCompanyTrainTagsAsync(trainCos, byId);   // los trenes, por su composición exacta
             }
             catch { }
             RebuildCompanyEngs();
         }
+
+        bool _trainTagsShown;
 
         // Expande cada .eng comprado a TODOS los coches motrices de su unidad (mirando los consists),
         // para que la etiqueta reconozca también los consists invertidos u otras variantes del mismo tren.
@@ -5684,7 +5872,8 @@ namespace SelectOR
         {
             // Sin trenes de ninguna empresa antes ni ahora (lo normal al arrancar, antes de iniciar sesión):
             // no cambia nada, así que no se rehace la lista de trenes (con miles de trenes, se nota).
-            bool nada = _companyVehNames.Count == 0 && _companyEngs.Count == 0;
+            bool nada = _companyVehNames.Count == 0 && _companyEngs.Count == 0 && _companyTrainCons.Count == 0 && !_trainTagsShown;
+            _trainTagsShown = _companyTrainCons.Count > 0;
             _companyEngs.Clear();
             if (nada) { try { PopulateCompanyFilters(); } catch { } return; }
             foreach (var kv in _companyVehNames) _companyEngs[kv.Key] = new List<string>(kv.Value);
@@ -5739,6 +5928,17 @@ namespace SelectOR
         static readonly List<string> _noCompanies = new();
         List<string> ConsistCompanies(TrainItem c)
         {
+            if (c == null) return _noCompanies;
+            var byTrain = c.FilePath != null && _companyTrainCons.TryGetValue(c.FilePath, out var t) ? t : null;   // sus trenes (composición exacta)
+            var byEng = ConsistCompaniesByEngine(c);                                                                  // sus máquinas anteriores
+            if (byTrain == null) return byEng;
+            if (byEng.Count == 0) return byTrain;
+            var l = new List<string>(byEng); foreach (var x in byTrain) if (!HasCo(l, x)) l.Add(x);
+            return l;
+        }
+
+        List<string> ConsistCompaniesByEngine(TrainItem c)
+        {
             if (_companyEngs.Count == 0 || c == null) return _noCompanies;
             var fp = c.Locomotive?.FilePath;
             if (string.IsNullOrEmpty(fp)) return _noCompanies;
@@ -5749,12 +5949,15 @@ namespace SelectOR
             return _noCompanies;
         }
 
-        // ---- Filtro de trenes por empresa (Exploración / Horarios) ----
+        // ---- Filtro de trenes por empresa (Conducción libre / Horarios) ----
         // Nombres de empresa (de socio) que tienen al menos un tren en el contenido actual, ordenados.
         List<string> AllFleetCompanies()
         {
             var set = new SortedSet<string>(StringComparer.CurrentCultureIgnoreCase);
             foreach (var kv in _companyEngs)
+                foreach (var co in kv.Value)
+                    if (!string.IsNullOrWhiteSpace(co)) set.Add(co);
+            foreach (var kv in _companyTrainCons)
                 foreach (var co in kv.Value)
                     if (!string.IsNullOrWhiteSpace(co)) set.Add(co);
             return new List<string>(set);
@@ -5777,7 +5980,7 @@ namespace SelectOR
         }
 
         // Rellena ambos combos de filtro con "Todas las empresas" + las empresas con trenes.
-        // Se oculta el de Exploración si no hay ninguna (no aporta nada sin empresas).
+        // Se oculta el de Conducción libre si no hay ninguna (no aporta nada sin empresas).
         void PopulateCompanyFilters()
         {
             var cos = AllFleetCompanies();
@@ -5801,7 +6004,7 @@ namespace SelectOR
             finally { _companyFilterLoading = false; }
             // Solo se muestran los filtros si el usuario pertenece a alguna empresa con trenes.
             bool has = cos.Count > 0;
-            if (_trainCompanyHost != null) _trainCompanyHost.Visible = has;   // Exploración
+            if (_trainCompanyHost != null) _trainCompanyHost.Visible = has;   // Conducción libre
             SetTTCompanyVisible(has);                                          // Horarios (colapsa la fila)
         }
 
@@ -5895,14 +6098,13 @@ namespace SelectOR
         TrainItem CurrentTTConsist()
         {
             var ttr = _cboTTTrain?.SelectedItem as Orts.Formats.OR.TimetableFileLite.TrainInformation;
-            string ttc = ttr != null ? (!string.IsNullOrWhiteSpace(ttr.LeadingConsist) ? ttr.LeadingConsist : ttr.Consist) : null;
-            return ResolveConsist(ttc);
+            return ResolveConsist(ttr != null ? TtConsistText(ttr) : null);   // la elegida por el usuario, si la hay
         }
 
         // «Comprar este tren»: SOLO gerente/gestor de la empresa seleccionada o superadmin.
         bool CanBuyTrains() => Supa.IsLoggedIn && _empSel != null && (Supa.IsSuperadmin || CanManage());
 
-        // Refresca el ID visible y el botón «Comprar este tren» de Exploración y Horarios.
+        // Refresca el ID visible y el botón «Comprar este tren» de Conducción libre y Horarios.
         void UpdateTrainShortcuts()
         {
             // Gerente/gestor: «Comprar este tren». Maquinista: «Solicitar compra» (se lo pide a ellos).
@@ -5933,7 +6135,7 @@ namespace SelectOR
             return (hdr, status);
         }
 
-        // ---- «Operativo / No operativo» del tren seleccionado (Exploración y Horarios) ----
+        // ---- «Operativo / No operativo» del tren seleccionado (Conducción libre y Horarios) ----
         readonly Dictionary<string, (DateTime at, string code)> _fleetStatusCache = new();
 
         // code: ok · inuse · maint · none (no es de la flota)
@@ -5948,7 +6150,7 @@ namespace SelectOR
             }
             var keyParts = new List<string>();
             foreach (var en in names) keyParts.Add(en.folder + "/" + en.name);
-            string key = co.Id + "|" + string.Join(",", keyParts);
+            string key = co.Id + "|" + string.Join(",", keyParts) + "|" + c.FilePath;
             lbl.Tag = key;
             string code;
             if (_fleetStatusCache.TryGetValue(key, out var hit) && (DateTime.UtcNow - hit.at).TotalSeconds < 20) code = hit.code;
@@ -5959,7 +6161,7 @@ namespace SelectOR
                 foreach (var en in names) { esc.Add(PgInItem(en.name)); folderOf[en.name] = en.folder ?? ""; }
                 var tOpen = OpenServiceUnits(co.Id);
                 var (json, err) = await SelectVehicles("id,status,name,folder,km_since_maint,maint_interval_km",
-                    $"&company_id=eq.{Uri.EscapeDataString(co.Id)}&name=in.({string.Join(",", esc)})");
+                    $"&company_id=eq.{Uri.EscapeDataString(co.Id)}&name=in.({string.Join(",", esc)})&or=(kind.is.null,kind.neq.train)");
                 var openUnits = await tOpen;
                 if (err != null) { if (lbl.Tag as string == key) lbl.Text = ""; return; }
                 bool ok = false, inUse = false, maint = false, any = false;
@@ -5979,6 +6181,9 @@ namespace SelectOR
                 }
                 catch { }
                 code = !any ? "none" : ok ? "ok" : inUse && !maint ? "inuse" : maint && !inUse ? "maint" : "unavail";
+                // los ejemplares de ese tren (trenes-por-con.sql) mandan si la máquina anterior no está libre
+                string tcode = await TrainStatusCodeAsync(co.Id, c);
+                if (code != "ok" && tcode != "none" && (tcode == "ok" || code == "none")) code = tcode;
                 _fleetStatusCache[key] = (DateTime.UtcNow, code);
             }
             if (lbl.Tag as string != key) return;   // la selección cambió mientras se consultaba
@@ -6008,7 +6213,7 @@ namespace SelectOR
                 BaseColor = Color.FromArgb(40, 70, 44), HoverColor = Theme.Accent, TextColor = Theme.AccentHi,
                 FontSize = 9.5f, FontStyle = FontStyle.Bold
             };
-            b.Click += (s, e) => { if (CanBuyTrains()) BuyThisTrain(getConsist()); else RequestPurchase(getConsist()); };
+            b.Click += (s, e) => { if (CanBuyTrains()) BuyLocalTrain(getConsist()); else RequestLocalTrain(getConsist()); };   // trenes completos (TrenesEmpresa)
             wrap.Controls.Add(b);
             return wrap;
         }
@@ -6304,17 +6509,17 @@ namespace SelectOR
         void RenderBuyMachinePreview()
         {
             if (!_buyByMachine) return;
-            if (_fleetPreview == null || _fleetEngList == null) return;
-            var m = _fleetEngList.SelectedItem as BuyMachine;
-            _buyView?.Show(m?.Path, m?.Name, Tr("Elige una máquina"));
+            if (_fleetPreview == null) return;
+            // El visor es el del escaparate de trenes: en 2D, la composición entera (OnShopSelected); en 3D, su máquina de cabeza.
+            var c = _shopRows?.SelectedItem as TrainItem;
             if (_buyView != null && !_buyView.Is3D) { _fleetPrevEngPath = null; return; }
             _fleetPreview.Image = null; _fleetPreview.Rotatable = false;
             _fleetGeom = null; _fleetYaw = 0; _fleetPitch = 0; _fleetFlip = false;
-            string engPath = m?.Path;
-            _fleetPreview.EmptyText = string.IsNullOrEmpty(engPath) ? Tr("Elige una máquina") : null;
+            string engPath = c?.Locomotive?.FilePath;
+            _fleetPreview.EmptyText = string.IsNullOrEmpty(engPath) ? Tr("Elige un tren") : null;
             if (string.IsNullOrEmpty(engPath)) { _fleetPrevEngPath = null; _fleetPreview.Caption = ""; _fleetPreview.Invalidate(); return; }
             _fleetPrevEngPath = engPath;
-            _fleetPreview.Caption = m.Name;
+            _fleetPreview.Caption = c.Name;
             _fleetPreview.Invalidate();
             lock (_fleetRenderingShapes) { if (!_fleetRenderingShapes.Add(engPath)) return; }
             Task.Run(() =>
@@ -6454,9 +6659,9 @@ namespace SelectOR
             var analysis = rep != null ? AnalyzeComposition(rep, kmh) : new CompositionAnalysis { ServiceType = Tr("Mercancías"), Freight = true };
             var (automotor, cars) = ShapeForService(DetectUnitShape(m.Path), analysis.Freight, m.Path);
             var (mass, brake) = AnalyzeUnitPhysics(m.Path, automotor);
-            // Igual que en la compra por tren: el precio simula la COMPOSICIÓN. Aquí no hay diálogo
-            // (compra masiva o máquina sin elección), así que se usa la composición representativa.
-            if (rep != null)
+            // Un automotor se tasa con su formación (la composición representativa); una locomotora, con sus propios
+            // datos (los coches y vagones se compran aparte).
+            if (rep != null && automotor)
             {
                 var tot = ConsistTotals(rep);
                 if (tot.cars > 0) { cars = tot.cars; mass = tot.mass; brake = tot.brake; }
@@ -6497,7 +6702,7 @@ namespace SelectOR
                                    + "Cada unidad extra deja conducir a un maquinista más a la vez con ese modelo. Se descontará su valor de la tesorería y puedes detenerlo en cualquier momento." + "\n\n"
                                    + "¿Continuar?"),
                                   pend.Count.ToString("N0", EsEs), _empSel.Name);
-            if (MessageBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
             _buyingAll = true; _buyAllCancel = false;
             string textoOriginal = _fleetBuyAllBtn.Text;
@@ -6649,6 +6854,7 @@ namespace SelectOR
                 }
             }
             catch { }
+            if (SeatsOverride(c) is int seats) cap = seats;   // las plazas que ha fijado la empresa
             return (cars, mass, brake, cap);
         }
 
@@ -6664,15 +6870,20 @@ namespace SelectOR
                 string q = string.Format(rent
                         ? Tr("Ya tienes {0} unidad(es) de esta máquina. Cada unidad deja conducir a un maquinista a la vez. ¿Alquilar otra?")
                         : Tr("Ya tienes {0} unidad(es) de esta máquina. Cada unidad deja conducir a un maquinista a la vez. ¿Comprar otra?"), owned);
-                if (MessageBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+                if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
             }
 
-            // Se compra la MÁQUINA, pero el precio simula el de un tren completo: el gestor elige
-            // con qué composición se tasa.
+            // Se compra la MÁQUINA y se tasa con sus propios datos: los coches y vagones se compran aparte (trenes
+            // completos). Solo un automotor se tasa con su formación (sus coches son parte de la unidad): el gestor
+            // elige con qué composición.
             var sp = BuySpecsOf(m);
             int cars = sp.cars; double mass = sp.mass, brake = sp.brake, capacity = sp.capacity;
-            Msg(_buyMsg, Tr("Buscando composiciones de esta máquina…"), false);
-            var ops = await Task.Run(() => { int d; var l = ConsistOptionsFor(m, out d); return (l, d); });
+            var ops = (l: new List<ConsistPriceDialog.Opcion>(), d: 0);
+            if (sp.automotor)
+            {
+                Msg(_buyMsg, Tr("Buscando composiciones de esta máquina…"), false);
+                ops = await Task.Run(() => { int d; var l = ConsistOptionsFor(m, out d); return (l, d); });
+            }
             if (ops.l.Count > 0)
             {
                 using var dlg = new ConsistPriceDialog(m.Name, ops.l, ops.d);
@@ -7547,29 +7758,31 @@ namespace SelectOR
         void UpdateFleetTabCounts()
         {
             if (_fleetTabs == null || _fleetCards == null) return;
-            string[] names = { "Todas", "Disponibles", "En servicio", "En taller" };
-            using var f = Theme.Font(9.75f, FontStyle.Bold);
+            string[] names = { "Todos", "Disponibles", "En servicio", "En taller" };
+            using var f = Theme.Font(9f, FontStyle.Bold);   // las pastillas, como las de Conducción libre
             for (int k = 0; k < names.Length && k < _fleetTabs.Controls.Count; k++)
             {
                 if (_fleetTabs.Controls[k] is not RoundButton b) continue;
                 int n = _fleetCards.Count(k - 1);
                 b.Text = Tr(names[k]) + (_fleetIds.Count > 0 ? "  " + n.ToString("N0", EsEs) : "");
-                b.Width = TextRenderer.MeasureText(b.Text, f).Width + 34;
+                b.Width = TextRenderer.MeasureText(b.Text, f).Width + 28;
                 b.Invalidate();
             }
         }
 
         // Visor de Flota: la vista 2D al momento; el 3D solo si está abierto.
-        void ShowFleetOwn(string engPath)
+        void ShowFleetOwn(string engPath, string viewPath = null)
         {
             _fleetOwnEngPath = engPath;
-            _fleetOwnView?.Show(engPath, _fleetOwnTitle?.Text ?? "", Tr("Elige un vehículo"));
+            _fleetOwnView?.Show(viewPath ?? engPath, _fleetOwnTitle?.Text ?? "", Tr("Elige un vehículo"));
             if (_fleetOwnView == null || _fleetOwnView.Is3D) RenderFleetOwn(engPath);
         }
 
         void OnFleetVehicleSelected()
         {
             if (_fleetOwnTitle == null) return;
+            if (_fleetCards != null && _fleetCards.MarkedCount > 1) { ShowFleetMulti(); return; }
+            foreach (var b in new[] { _fleetPlateBtn, _fleetSeatsBtn, _fleetInfoBtn }) if (b != null) b.Enabled = true;
             int i = FleetSelectedRow();
             if (i < 0 || i >= _fleetRowDetail.Count)
             {
@@ -7577,7 +7790,10 @@ namespace SelectOR
                 if (_voKind != null) _voKind.Text = "—"; if (_voProp != null) _voProp.Text = "—";
                 if (_voMaint != null) _voMaint.Text = "—"; if (_voEstado != null) { _voEstado.Text = "—"; _voEstado.ForeColor = Theme.Text; }
                 if (_voCap != null) _voCap.Text = "—"; if (_voTraction != null) _voTraction.Text = "—";
+                foreach (var l in new[] { _voValue, _voKm, _voComfort, _voPower, _voSpeed, _voMass }) if (l != null) l.Text = "—";
+                if (_fleetOwnSub != null) _fleetOwnSub.Text = "";
                 ShowFleetOwn(null);
+                UpdateFleetTrainButtons(-1);
                 return;
             }
             var det = _fleetRowDetail[i];
@@ -7588,13 +7804,72 @@ namespace SelectOR
             if (_voEstado != null) { _voEstado.Text = det[4]; _voEstado.ForeColor = i < _fleetRowEstColor.Count ? _fleetRowEstColor[i] : Theme.Text; }
             if (_voCap != null) _voCap.Text = det.Length > 5 && det[5].Length > 0 ? det[5] : "—";
             if (_voTraction != null) _voTraction.Text = det.Length > 6 && det[6].Length > 0 ? det[6] : "—";
-            ShowFleetOwn(_fleetRowEng[i]);
+            // la tarjeta ya enseña el tren entero: aquí, su máquina de cabeza (o, si no la tienes, la composición guardada)
+            ShowFleetOwn(_fleetRowEng[i], _fleetRowEng[i].Length == 0 && i < _fleetRow2D.Count && _fleetRow2D[i].Length > 0 ? _fleetRow2D[i] : null);
+            var extra = new[] { _voValue, _voKm, _voComfort, _voPower, _voSpeed, _voMass };
+            for (int k = 0; k < extra.Length; k++) if (extra[k] != null) extra[k].Text = det.Length > 7 + k && det[7 + k].Length > 0 ? det[7 + k] : "—";
+            if (_fleetOwnSub != null) _fleetOwnSub.Text = det.Length > 13 ? det[13] : "";
+            UpdateFleetTrainButtons(i);
+        }
+
+        // «Añadir a mi contenido»: un ejemplar de un tren que no tienes en tu contenido (cualquier socio).
+        void UpdateFleetTrainButtons(int i)
+        {
+            if (_fleetAddConBtn == null) return;
+            string tid = i >= 0 && i < _fleetRowTrain.Count ? _fleetRowTrain[i] : "";
+            _fleetAddConBtn.Visible = tid.Length > 0 && !_trainCon.ContainsKey(tid);
+            if (_fleetInfoBtn != null) _fleetInfoBtn.Visible = tid.Length > 0 && _fleetTrainModels.ContainsKey(tid) && _fleetTrainModels[tid].Info;
+            if (_fleetSeatsBtn != null) _fleetSeatsBtn.Visible = tid.Length > 0 && (CanManage() || Supa.IsSuperadmin) && _coTrains.Exists(x => x.Id == tid);
+        }
+
+        // Tras reconocer los trenes de tu contenido: cada tarjeta de tren con su composición y lo que te falta.
+        readonly Dictionary<string, FleetModel> _fleetTrainModels = new(StringComparer.OrdinalIgnoreCase);
+        void UpdateFleetTrainViews()
+        {
+            if (_fleetCards == null) return;
+            foreach (var kv in _fleetTrainModels)
+            {
+                var t = _coTrains.Find(x => x.Id == kv.Key);
+                bool local = _trainCon.TryGetValue(kv.Key, out var con);
+                if (local) kv.Value.Path = con;
+                kv.Value.Sub = FleetTrainSub(t, local);
+            }
+            for (int i = 0; i < _fleetRowTrain.Count && i < _fleetRow2D.Count; i++)
+                if (_fleetRowTrain[i].Length > 0 && _trainCon.TryGetValue(_fleetRowTrain[i], out var con)) _fleetRow2D[i] = con;
+            _fleetCards.Invalidate();
+            OnFleetVehicleSelected();
+            FetchFleetTrainImages();
+        }
+
+        // Los trenes que no tienes en tu contenido: su composición guardada en la empresa (se descarga una vez).
+        async void FetchFleetTrainImages()
+        {
+            var co = _empSel; if (co == null) return;
+            foreach (var kv in new List<KeyValuePair<string, FleetModel>>(_fleetTrainModels))
+            {
+                if (_trainCon.ContainsKey(kv.Key) || (kv.Value.Path ?? "").Length > 0) continue;
+                var t = _coTrains.Find(x => x.Id == kv.Key);
+                string file = await CoTrainImageFileAsync(co.Id, t);
+                if (file == null || co != _empSel) continue;
+                kv.Value.Path = file;
+                for (int i = 0; i < _fleetRowTrain.Count && i < _fleetRow2D.Count; i++) if (_fleetRowTrain[i] == kv.Key) _fleetRow2D[i] = file;
+                _fleetCards?.ForgetImage(file);
+                OnFleetVehicleSelected();
+            }
+        }
+
+        string FleetTrainSub(CoTrain t, bool local)
+        {
+            var sub = new List<string>();
+            if (t != null) { sub.Add(TrainCarriesPassengers(t.Vehicles) ? Tr("Viajeros") : Tr("Mercancías")); sub.Add(TrainSummary(t.Vehicles)); }
+            if (!local) sub.Add(Tr("(no lo tienes en tu contenido)"));
+            return string.Join("  ·  ", sub);
         }
 
         void RenderFleetOwn(string engPath)
         {
             if (_fleetOwnPreview == null) return;
-            // Misma perspectiva que los visores de Exploración, Horarios y Compra (vista de costado).
+            // Misma perspectiva que los visores de Conducción libre, Horarios y Compra (vista de costado).
             _fleetOwnGeom = null; _fleetOwnYaw = 0; _fleetOwnPitch = 0; _fleetOwnFlip = false; _fleetOwnEngPath = engPath;
             _fleetOwnPreview.Image = null; _fleetOwnPreview.Rotatable = false;
             _fleetOwnPreview.EmptyText = string.IsNullOrEmpty(engPath) ? Tr("Elige un vehículo") : null;
@@ -7924,22 +8199,32 @@ namespace SelectOR
         // (.wag incluidos). SOLO cuentan los coches que declaran PassengerCapacity: basta con que UNO
         // del consist lo tenga para que sea tren de viajeros (suban y bajen). Si ninguno lo declara,
         // se clasifica como mercancías.
-        CompositionAnalysis AnalyzeComposition(TrainItem c, double leadSpeedKmh)
+        // ignoreSeats: las plazas de los archivos aunque la empresa haya fijado otras (para enseñarlas al fijarlas).
+        CompositionAnalysis AnalyzeComposition(TrainItem c, double leadSpeedKmh, bool ignoreSeats = false)
         {
             var result = new CompositionAnalysis();
-            double capSum = 0, areaSum = 0; bool anyTilting = false;
+            double capSum = 0, areaSum = 0, areaAll = 0; bool anyTilting = false;
             if (c?.FilePath != null)
             {
                 foreach (var r in ConsistCarRefs(c.FilePath))
                 {
                     var v = Veh(ResolveCarFile(r.name, r.folder));
-                    if (v == null || v.Capacity <= 0) continue;   // sin PassengerCapacity declarado: no cuenta
+                    if (v == null) continue;
+                    if (!r.isEngine || v.Capacity > 0) areaAll += (v.Width > 0 && v.Length > 0) ? v.Width * v.Length : 0;
+                    if (v.Capacity <= 0) continue;   // sin PassengerCapacity declarado: no cuenta
                     capSum += v.Capacity;
                     areaSum += (v.Width > 0 && v.Length > 0) ? v.Width * v.Length : 0;
                     if (v.Tilting) anyTilting = true;
                 }
             }
-            result.DeclaredPax = ConsistCarriesPeople(c);
+            // Plazas fijadas por la empresa para este tren (trenes-plazas.sql): valen para todos, en vez del
+            // PassengerCapacity de los archivos de cada uno. La superficie, la de los coches que las tenían (o todos).
+            if (!ignoreSeats && SeatsOverride(c) is int seats)
+            {
+                if (capSum <= 0) areaSum = areaAll;
+                capSum = seats;
+            }
+            result.DeclaredPax = ConsistCarriesPeople(c) || (!ignoreSeats && SeatsOverride(c) != null);
             if (capSum <= 0)
             {
                 // Sin plazas declaradas: si los archivos dicen que son coches de viajeros, es un tren
@@ -8100,7 +8385,7 @@ namespace SelectOR
                 string q = string.Format(rent
                         ? Tr("Ya tienes este tren en la flota ({0} unidad(es)). ¿Alquilar otra unidad más?")
                         : Tr("Ya tienes este tren en la flota ({0} unidad(es)). ¿Comprar otra unidad más?"), have);
-                if (MessageBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 pending.AddRange(units);
             }
             Msg(_buyMsg, rent ? Tr("Alquilando…") : Tr("Comprando…"), false);
@@ -8150,19 +8435,6 @@ namespace SelectOR
         }
 
         // Llevar al taller la unidad seleccionada (paga el mantenimiento y resetea el contador de km).
-        async void ServiceVehicleUi()
-        {
-            if (!CanManage() && !Supa.IsSuperadmin) { Msg(_fleetMsg, Tr("Solo el dueño o un gestor pueden gestionar la flota."), true); return; }
-            int i = FleetSelectedRow();
-            if (i < 0 || i >= _fleetIds.Count) { Msg(_fleetMsg, Tr("Selecciona un vehículo de la lista."), true); return; }
-            Msg(_fleetMsg, Tr("Llevando al taller…"), false);
-            var (_, err) = await Supa.RpcAsync("service_vehicle", new { p_vehicle = _fleetIds[i] });
-            if (err != null) { Msg(_fleetMsg, Tr("Error: ") + err, true); return; }
-            Msg(_fleetMsg, Tr("Mantenimiento realizado."), false);
-            LoadCompanies();
-            LoadFleet();
-        }
-
         // Asignar / cambiar la matrícula de la unidad seleccionada (SOLO gerente, gestor o superadmin;
         // el servidor lo vuelve a comprobar). Única dentro de la empresa. Vacía = quitar matrícula.
         async void AssignPlateUi()
@@ -8195,14 +8467,21 @@ namespace SelectOR
         async void RemoveVehicle()
         {
             if (!CanManage() && !Supa.IsSuperadmin) { Msg(_fleetMsg, Tr("Solo el dueño o un gestor pueden gestionar la flota."), true); return; }
-            int i = FleetSelectedRow();
-            if (i < 0 || i >= _fleetIds.Count) { Msg(_fleetMsg, Tr("Selecciona un vehículo de la lista."), true); return; }
-            if (MessageBox.Show(this, Tr("¿Dar de baja esta unidad? Si es propia se reembolsa parte de su valor; si es alquilada, se devuelve."),
-                    "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            var sel = FleetSelection();
+            if (sel.Count == 0) { Msg(_fleetMsg, Tr("Selecciona un vehículo de la lista."), true); return; }
+            string q = sel.Count == 1 ? Tr("¿Dar de baja esta unidad? Si es propia se reembolsa parte de su valor; si es alquilada, se devuelve.")
+                                      : string.Format(Tr("¿Dar de baja los {0} ejemplares elegidos? Los propios reembolsan parte de su valor; los alquilados se devuelven."), sel.Count);
+            if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_fleetMsg, Tr("Dando de baja…"), false);
-            var (_, err) = await Supa.RpcAsync("retire_vehicle", new { p_vehicle = _fleetIds[i] });
-            if (err != null) { Msg(_fleetMsg, Tr("Error: ") + err, true); return; }
-            Msg(_fleetMsg, Tr("Unidad dada de baja."), false);
+            string err = null; int done = 0;
+            foreach (var (_, id) in sel)
+            {
+                var (_, e) = await Supa.RpcAsync("retire_vehicle", new { p_vehicle = id });
+                if (e != null) err ??= e; else done++;
+            }
+            if (err != null && done == 0) { Msg(_fleetMsg, Tr("Error: ") + err, true); return; }
+            Msg(_fleetMsg, sel.Count == 1 ? Tr("Unidad dada de baja.") : string.Format(Tr("{0} de {1} dados de baja."), done, sel.Count) + (err != null ? "  " + Tr("Error: ") + err : ""), err != null);
+            _fleetCards?.ClearMarks();
             LoadCompanies();
             LoadFleet();
         }
@@ -8793,11 +9072,10 @@ namespace SelectOR
             if (_fleetBuyBtn != null) _fleetBuyBtn.Visible = fleetManage;
             if (_fleetRentBtn != null) _fleetRentBtn.Visible = fleetManage;
             if (_fleetRemoveBtn != null) _fleetRemoveBtn.Visible = fleetManage;         // Flota: dar de baja
-            if (_fleetServiceBtn != null) _fleetServiceBtn.Visible = fleetManage;       // Flota: llevar al taller
             if (_fleetPlateBtn != null) _fleetPlateBtn.Visible = fleetManage;           // Flota: asignar matrícula
             if (_empLogoPic != null) _empLogoPic.Cursor = manage ? Cursors.Hand : Cursors.Default;   // cambiar logotipo: solo gestión
             if (_empLogoTip != null && _empLogoPic != null) _empLogoTip.SetToolTip(_empLogoPic, manage ? Tr("Cambiar logotipo") : "");
-            UpdateTrainShortcuts();   // «Comprar este tren» en Exploración/Horarios según el rol
+            UpdateTrainShortcuts();   // «Comprar este tren» en Conducción libre/Horarios según el rol
             UpdateCoRouteButtons();   // Rutas: «Solicitar autorización» solo para gerente y gestores
             UpdateSubtabVisibility();
         }
@@ -8823,6 +9101,7 @@ namespace SelectOR
             bool[] show = hasCompany
                 ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true, true, su, su || _routeMode != "collect", su }   // Compra: solo gestión · Revisión, Préstamos y Catálogo de rutas: superadmin · Rutas: no en «solo recopilar»
                 : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false, false, su, false, su };
+            _empSubShow = show;   // (con la ventana oculta, Visible siempre dice false: la precarga mira esto)
             for (int k = 0; k < _empSubtabs.Length && k < show.Length; k++)
                 if (_empSubtabs[k] != null) _empSubtabs[k].Visible = show[k];
             UpdateNavGroupHeaders();   // oculta el encabezado de un grupo si ninguna de sus secciones se ve
@@ -8981,6 +9260,7 @@ namespace SelectOR
         {
             if (_fsScale == null || !Supa.IsSuperadmin) return;
             LoadFareFormula();
+            LoadTrainMode();
             var (json, err) = await Supa.RpcAsync("get_fleet_settings", new { });
             if (err != null) return;
             try
@@ -9083,10 +9363,10 @@ namespace SelectOR
             }
             // Lo que se publica debería ser lo firmado por SignPath: si no, se avisa (los antivirus desconfían).
             var sinFirma = Updater.UnsignedPackageFiles();
-            if (sinFirma.Count > 0 && MessageBox.Show(this,
+            if (sinFirma.Count > 0 && ThemedBox.Show(this,
                     string.Format(Tr("Estos archivos NO están firmados: {0}.\n\nSin firma, los antivirus pueden avisar al descargar o instalar SelectOR. Instala primero los firmados (flujo «Compilar y firmar» de GitHub y tools\\instalar-firmado.ps1).\n\n¿Publicar igualmente sin firmar?"), string.Join(", ", sinFirma)),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
-            if (MessageBox.Show(this, string.Format(Tr("¿Publicar SelectOR {0}? Todos los usuarios recibirán el aviso de actualización."), cur),
+            if (ThemedBox.Show(this, string.Format(Tr("¿Publicar SelectOR {0}? Todos los usuarios recibirán el aviso de actualización."), cur),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _updPublishBtn.Enabled = false;
             try
@@ -9348,7 +9628,7 @@ namespace SelectOR
             if (i < 0 || i >= _members.Count) { Msg(_memberMsg, Tr("Selecciona un socio de la lista."), true); return; }
             var m = _members[i];
             if (m.Role == "owner") { Msg(_memberMsg, Tr("No se puede quitar al gerente."), true); return; }
-            if (MessageBox.Show(this, string.Format(Tr("¿Quitar a «{0}» de la empresa?"), m.Username), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (ThemedBox.Show(this, string.Format(Tr("¿Quitar a «{0}» de la empresa?"), m.Username), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             var (_, err) = await Supa.RpcAsync("remove_member", new { p_company = _empSel.Id, p_user = m.UserId });
             if (err != null) { Msg(_memberMsg, Tr("Error: ") + err, true); return; }
             Msg(_memberMsg, Tr("Socio quitado."), false);
@@ -9558,6 +9838,8 @@ namespace SelectOR
         {
             lock (_vehStats) _vehStats.Clear();
             lock (_conRefs) _conRefs.Clear();
+            lock (_trainVehCache) _trainVehCache.Clear();   // vehículos de cada .con (trenes de empresa)
+            lock (_missingCache) _missingCache.Clear();     // lo que le falta a cada .con (trenes incompletos)
             lock (_vehHead) _vehHead.Clear();
             FastConsists.ClearCache();
             _allVehicles = null;   // pudo añadirse o borrarse algún vehículo
