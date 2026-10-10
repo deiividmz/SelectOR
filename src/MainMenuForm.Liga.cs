@@ -14,6 +14,10 @@ namespace SelectOR
     public partial class MainMenuForm
     {
         PodiumBoard _leagueBoard; ChampionsBoard _champBoard;
+        FlowLayoutPanel _leagueCats;
+        int _leagueCat;               // 0 = General · 1 = Viajeros · 2 = Mercancías
+        LeagueCfg _leagueCfg; bool _leaguePre;
+        readonly List<LeagueRow> _leagueRows = new();
         Control[] _rankViews;
         FlowLayoutPanel _rankTabBar;
         int _rankTab;                 // 0 = Liga del mes · 1 = Campeones · 2 = Empresas · 3 = Maquinistas
@@ -77,8 +81,23 @@ namespace SelectOR
         {
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
             _leagueBoard = new PodiumBoard { Dock = DockStyle.Fill, MineTag = Tr("tu empresa"), EmptyText = Tr("Cargando…") };
-            host.Controls.Add(_leagueBoard);
+            // Cada categoría con su clasificación: General (beneficio), Viajeros y Mercancías (t·km).
+            _leagueCats = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 42, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Padding = new Padding(0, 0, 0, 4) };
+            string[] cats = { "General", "Viajeros", "Mercancías" };
+            for (int k = 0; k < cats.Length; k++)
+            {
+                int idx = k;
+                var b = BankChip(Tr(cats[k]), k == 0);
+                b.Click += (s, e) => { SetChipActive(_leagueCats, idx); _leagueCat = idx; _leagueBoard.AutoScrollPosition = Point.Empty; RenderLeague(); };
+                _leagueCats.Controls.Add(b);
+            }
+            host.Controls.Add(_leagueBoard); host.Controls.Add(_leagueCats);
             return host;
+        }
+
+        sealed class LeagueRow
+        {
+            public string Id = "", Name = "", Logo = ""; public int Serv, Pg, Pv, Pm; public double Net, Pax, Tkm; public bool Ok;
         }
 
         Panel BuildChampionsPage()
@@ -165,69 +184,116 @@ namespace SelectOR
             var (c, err) = await ReadLeagueCfg();
             if (c == null)
             {
+                _leagueCfg = null; _leagueRows.Clear();
                 b.Entries = new List<PodiumBoard.Entry>();
                 b.EmptyText = NoLeagueOnServer(err) ? Tr("El servidor aún no tiene la liga mensual.") : Tr("Error: ") + err;
                 b.Relayout(true); return;
             }
-            bool pre = c.Month < c.Start;
             var (json, err2) = await Supa.RpcAsync("league_standings", new { });
-            if (err2 != null) { b.Entries = new List<PodiumBoard.Entry>(); b.EmptyText = Tr("Error: ") + err2; b.Relayout(true); return; }
-            var mias = new HashSet<string>();
-            foreach (var co in _empCompanies) mias.Add(co.Id);
-            var entries = new List<PodiumBoard.Entry>();
-            var leaders = new List<(string, string, string, string)>();
+            if (err2 != null) { _leagueCfg = null; _leagueRows.Clear(); b.Entries = new List<PodiumBoard.Entry>(); b.EmptyText = Tr("Error: ") + err2; b.Relayout(true); return; }
+            var rows = new List<LeagueRow>();
             try
             {
                 using var d = JsonDocument.Parse(json);
                 foreach (var e in d.RootElement.EnumerateArray())
-                {
-                    string id = Str(e, "company_id"), name = Str(e, "name");
-                    int serv = (int)Num(e, "services"); double net = Num(e, "net"), pax = Num(e, "pax"), tkm = Num(e, "tkm");
-                    bool ok = e.TryGetProperty("eligible", out var el) && el.ValueKind == JsonValueKind.True;
-                    int pg = (int)Num(e, "pos_general"), pv = (int)Num(e, "pos_viajeros"), pm = (int)Num(e, "pos_mercancias");
-                    if (serv == 0 && !mias.Contains(id)) continue;   // sin servicios este mes: no ocupa sitio
-                    double premio = 0;
-                    if (ok && !pre && c.Enabled)
+                    rows.Add(new LeagueRow
                     {
-                        premio += c.GeneralPrize(pg) + c.Participacion;
-                        if (pv == 1) premio += c.Viajeros;
-                        if (pm == 1) premio += c.Mercancias;
-                    }
-                    if (pv == 1) leaders.Add(("🧍", Tr("LÍDER EN VIAJEROS"), name, string.Format(Tr("{0} viajeros"), pax.ToString("N0", EsEs))));
-                    if (pm == 1) leaders.Add(("⚖", Tr("LÍDER EN MERCANCÍAS"), name, string.Format(Tr("{0} t·km"), tkm.ToString("N0", EsEs))));
-                    Image logo = null;
-                    try { logo = LogoFor(id, Str(e, "logo")); } catch { }
-                    var parts = new List<string> { string.Format(Tr("{0} servicios"), serv.ToString("N0", EsEs)) };
-                    if (pax > 0) parts.Add(string.Format(Tr("{0} viajeros"), pax.ToString("N0", EsEs)));
-                    if (tkm > 0) parts.Add(string.Format(Tr("{0} t·km"), tkm.ToString("N0", EsEs)));
-                    int faltan = Math.Max(0, c.Min - serv);
-                    entries.Add(new PodiumBoard.Entry
-                    {
-                        Id = id, Name = name, Logo = logo, Pos = ok ? pg : 0, Out = !ok, Mine = mias.Contains(id),
-                        Value = Eur(net), ValueColor = net < 0 ? RedC : (Color?)null, Detail = string.Join(" · ", parts),
-                        Prize = premio > 0 ? Tr("premio") + " " + Eur(premio) : "",
-                        OutNote = string.Format(Tr(faltan == 1 ? "le falta {0} servicio para clasificar" : "le faltan {0} servicios para clasificar"), faltan),
-                        OutProgress = !ok && c.Min > 0 ? Math.Min(1, serv / (double)c.Min) : -1,
-                        Cols = new (string, string, Color?)[]
-                        {
-                            (Tr("SERVICIOS"), serv.ToString("N0", EsEs), null), (Tr("BENEFICIO"), Eur(net), net < 0 ? RedC : (Color?)null),
-                            (Tr("VIAJEROS"), pax.ToString("N0", EsEs), null), (Tr("T·KM"), tkm.ToString("N0", EsEs), null)
-                        }
+                        Id = Str(e, "company_id"), Name = Str(e, "name"), Logo = Str(e, "logo"),
+                        Serv = (int)Num(e, "services"), Net = Num(e, "net"), Pax = Num(e, "pax"), Tkm = Num(e, "tkm"),
+                        Ok = e.TryGetProperty("eligible", out var el) && el.ValueKind == JsonValueKind.True,
+                        Pg = (int)Num(e, "pos_general"), Pv = (int)Num(e, "pos_viajeros"), Pm = (int)Num(e, "pos_mercancias")
                     });
-                }
             }
             catch { }
+            _leagueCfg = c; _leaguePre = c.Month < c.Start;
+            _leagueRows.Clear(); _leagueRows.AddRange(rows);
+            RenderLeague();
+        }
+
+        // La clasificación de la categoría elegida, con lo ya descargado (cambiar de pestaña no consulta al servidor).
+        void RenderLeague()
+        {
+            var b = _leagueBoard; var c = _leagueCfg;
+            if (b == null || c == null) return;
+            bool pre = _leaguePre, prizes = c.Enabled && !pre;
+            int cat = _leagueCat;
+            var mias = new HashSet<string>();
+            foreach (var co in _empCompanies) mias.Add(co.Id);
+            int PosOf(LeagueRow r) => cat == 1 ? r.Pv : cat == 2 ? r.Pm : r.Pg;
+            double ValOf(LeagueRow r) => cat == 1 ? r.Pax : cat == 2 ? r.Tkm : r.Net;
+            var list = new List<LeagueRow>();
+            foreach (var r in _leagueRows)
+            {
+                bool mine = mias.Contains(r.Id);
+                if (cat == 0 ? r.Serv == 0 && !mine : ValOf(r) <= 0 && !mine) continue;   // sin servicios (o sin viajeros / mercancías): no ocupa sitio
+                list.Add(r);
+            }
+            if (cat != 0)   // por su puesto en la categoría; los que no clasifican, detrás, por su cifra
+                list.Sort((x, y) => { int px = PosOf(x) > 0 ? PosOf(x) : int.MaxValue, py = PosOf(y) > 0 ? PosOf(y) : int.MaxValue;
+                                      return px != py ? px.CompareTo(py) : ValOf(y).CompareTo(ValOf(x)); });
+            var entries = new List<PodiumBoard.Entry>();
+            var leaders = new List<(string, string, string, string)>();
+            foreach (var r in list)
+            {
+                int pos = PosOf(r);
+                double premio = 0;
+                if (r.Ok && prizes)
+                {
+                    if (cat == 0)
+                    {
+                        premio += c.GeneralPrize(r.Pg) + c.Participacion;
+                        if (r.Pv == 1) premio += c.Viajeros;
+                        if (r.Pm == 1) premio += c.Mercancias;
+                    }
+                    else if (pos == 1) premio = cat == 1 ? c.Viajeros : c.Mercancias;
+                }
+                if (cat == 0 && r.Pv == 1) leaders.Add(("🧍", Tr("LÍDER EN VIAJEROS"), r.Name, string.Format(Tr("{0} viajeros"), r.Pax.ToString("N0", EsEs))));
+                if (cat == 0 && r.Pm == 1) leaders.Add(("⚖", Tr("LÍDER EN MERCANCÍAS"), r.Name, string.Format(Tr("{0} t·km"), r.Tkm.ToString("N0", EsEs))));
+                Image logo = null;
+                try { logo = LogoFor(r.Id, r.Logo); } catch { }
+                var parts = new List<string> { string.Format(Tr("{0} servicios"), r.Serv.ToString("N0", EsEs)) };
+                if (cat != 0) parts.Add(Eur(r.Net));
+                if (cat == 0 && r.Pax > 0) parts.Add(string.Format(Tr("{0} viajeros"), r.Pax.ToString("N0", EsEs)));
+                if (cat == 0 && r.Tkm > 0) parts.Add(string.Format(Tr("{0} t·km"), r.Tkm.ToString("N0", EsEs)));
+                int faltan = Math.Max(0, c.Min - r.Serv);
+                bool sinCifra = cat != 0 && r.Ok && ValOf(r) <= 0;   // tu empresa clasifica, pero sin viajeros / mercancías este mes
+                bool fuera = !r.Ok || sinCifra;
+                Color? key = Theme.AccentHi;
+                entries.Add(new PodiumBoard.Entry
+                {
+                    Id = r.Id, Name = r.Name, Logo = logo, Pos = fuera ? 0 : pos, Out = fuera, Mine = mias.Contains(r.Id),
+                    Value = cat == 1 ? string.Format(Tr("{0} viajeros"), r.Pax.ToString("N0", EsEs))
+                          : cat == 2 ? string.Format(Tr("{0} t·km"), r.Tkm.ToString("N0", EsEs)) : Eur(r.Net),
+                    ValueColor = cat == 0 && r.Net < 0 ? RedC : (Color?)null, Detail = string.Join(" · ", parts),
+                    Prize = premio > 0 ? Tr("premio") + " " + Eur(premio) : "",
+                    OutNote = sinCifra ? Tr(cat == 1 ? "sin viajeros este mes" : "sin mercancías este mes")
+                            : string.Format(Tr(faltan == 1 ? "le falta {0} servicio para clasificar" : "le faltan {0} servicios para clasificar"), faltan),
+                    OutProgress = !r.Ok && c.Min > 0 ? Math.Min(1, r.Serv / (double)c.Min) : -1,
+                    Cols = new (string, string, Color?)[]
+                    {
+                        (Tr("SERVICIOS"), r.Serv.ToString("N0", EsEs), null),
+                        (Tr("BENEFICIO"), Eur(r.Net), r.Net < 0 ? RedC : cat == 0 && !fuera ? key : null),
+                        (Tr("VIAJEROS"), r.Pax.ToString("N0", EsEs), cat == 1 && !fuera ? key : null),
+                        (Tr("T·KM"), r.Tkm.ToString("N0", EsEs), cat == 2 && !fuera ? key : null)
+                    }
+                });
+            }
             b.Title = !c.Enabled ? Tr("La liga mensual está desactivada.")
                     : pre ? string.Format(Tr("Pretemporada · la liga empieza en {0}. Esta clasificación es de prueba: no reparte premios."), MonthName(c.Start))
                     : "🏆  " + string.Format(Tr("Liga de {0}"), MonthName(c.Month));
             b.Pills = new List<string>();
-            if (c.Enabled && !pre) b.Pills.Add("⏱  " + Countdown(c.EndsUtc));
+            if (prizes) b.Pills.Add("⏱  " + Countdown(c.EndsUtc));
             b.Pills.Add(string.Format(Tr("hasta {0} servicios por maquinista y día · mínimo {1} para clasificar"), c.Cap, c.Min));
-            b.Prizes = c.Enabled && !pre ? PrizeChips(c) : new List<(string, string)>();
+            b.Prizes = !prizes ? new List<(string, string)>()
+                     : cat == 1 ? (c.Viajeros > 0 ? new List<(string, string)> { (Eur(c.Viajeros), Tr("Líder en viajeros")) } : new List<(string, string)>())
+                     : cat == 2 ? (c.Mercancias > 0 ? new List<(string, string)> { (Eur(c.Mercancias), Tr("Líder en mercancías")) } : new List<(string, string)>())
+                     : PrizeChips(c);
             b.Leaders = leaders;
             b.Entries = entries;
             b.EmptyText = null;
-            b.Footnote = entries.Count == 0 ? Tr("Aún no hay servicios este mes.") : "";
+            b.Footnote = entries.Count == 0 ? Tr(cat == 1 ? "Aún no hay viajeros este mes." : cat == 2 ? "Aún no hay mercancías este mes." : "Aún no hay servicios este mes.")
+                       : cat == 1 ? Tr("Cuentan los viajeros transportados en los servicios del mes.")
+                       : cat == 2 ? Tr("Cuentan las toneladas·km de los trenes de mercancías (masa × km), con un tope de masa por tren.") : "";
             b.Relayout(true);
         }
 

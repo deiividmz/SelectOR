@@ -1,3 +1,3 @@
-1.2.55
-Faster Fleet|Train images load as they appear on screen, not all at once when it opens.
-Less waiting in Companies|The company's train list is only downloaded again when it changes.
+1.2.56
+League by category|In the Monthly league, the Overall, Passengers and Freight tabs show the standings of each category, with its podium and prize.
+Fairer freight|In the league, each freight train's mass counts up to a cap: very heavy trains no longer skyrocket in tonne-km.

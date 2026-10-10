@@ -1,3 +1,3 @@
-1.2.55
-Flota más rápida|Las imágenes de los trenes se cargan a medida que aparecen en pantalla, no todas al abrir.
-Menos esperas en Empresas|La lista de trenes de la empresa solo se vuelve a descargar cuando cambia.
+1.2.56
+Liga por categorías|En la Liga del mes, las pestañas General, Viajeros y Mercancías muestran la clasificación de cada categoría, con su podio y su premio.
+Mercancías más justas|En la liga, la masa de cada tren de mercancías cuenta hasta un tope: los trenes muy pesados ya no se disparan en toneladas·km.
