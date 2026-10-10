@@ -1,5 +1,5 @@
-1.2.53
-Trenes de empresa|La empresa compra trenes completos (.con); Flota y Compra los enseñan con su 2D.
-Plazas de la empresa|El gerente fija las plazas de cada tren de la flota y valen para todos los socios.
-Taller automático|Cada tren pasa por el taller solo al cumplir sus kilómetros.
-Conducción libre|Antes Exploración: filtros ★ y ⚠ y los trenes nuevos salen al momento.
+1.2.54
+Premio de bienvenida|Cada empresa recibe 5.000.000 € para empezar; sale en Banca como «Premio».
+Flota sin límite|Ya no hay tope de 500 unidades ni de 300 trenes por empresa.
+Trenes muy largos|Se compran y se piden trenes con más de 100 coches o con muchos vehículos distintos.
+Ventanas centradas|Comprar este tren, Solicitar compra y Plazas se abren en el centro de la pantalla.

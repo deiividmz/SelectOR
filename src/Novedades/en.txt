@@ -1,5 +1,5 @@
-1.2.53
-Company trains|Companies buy complete trains (.con); Fleet and Purchase show them in 2D.
-Company seats|The manager sets the seats of each fleet train and they apply to every member.
-Automatic workshop|Each train goes through the workshop on its own when it reaches its km.
-Free driving|Formerly Explore: ★ and ⚠ filters, and new trains appear at once.
+1.2.54
+Welcome prize|Every company gets €5,000,000 to start with; it shows in Bank as «Prize».
+Unlimited fleet|There is no longer a cap of 500 units or 300 trains per company.
+Very long trains|Trains with more than 100 cars or many different vehicles can be bought and requested.
+Centred windows|Buy this train, Request purchase and Seats open in the middle of the screen.

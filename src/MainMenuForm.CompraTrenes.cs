@@ -23,7 +23,7 @@ namespace SelectOR
         int _shopKind;
         Label _shopTitle, _shopOwned, _shopBuyPrice, _shopRentPrice, _shopSub;
         SpecTiles _shopSpecs;
-        RoundButton _shopBuyBtn, _shopRentBtn, _shopInfoBtn;
+        RoundButton _shopBuyBtn, _shopRentBtn, _shopInfoBtn, _shopGrantBtn;
         static readonly string[] ShopKindNames = { "Todos", "Viajeros", "Mercancías", "Automotores", "En tu flota", "⚠ Incompletos" };
         // por .con: el precio del tren y lo que lleva (se calculan al aparecer en pantalla)
         readonly Dictionary<string, (double price, string summary)> _shopInfo = new(StringComparer.OrdinalIgnoreCase);
@@ -38,9 +38,10 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));     // los trenes
             t.RowStyles.Add(new RowStyle(SizeType.Absolute, 260));    // el elegido
 
-            var bar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            var bar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var lblT = new Label { Text = Tr("ELIGE TU TREN"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 0, 12, 0) };
@@ -56,7 +57,13 @@ namespace SelectOR
             var wait = new System.Windows.Forms.Timer { Interval = 220 };   // con miles de trenes, se filtra al dejar de escribir
             wait.Tick += (s, e) => { wait.Stop(); FilterShop(); };
             _shopSearch.Box.TextChanged += (s, e) => { wait.Stop(); wait.Start(); };
-            bar.Controls.Add(lblT, 0, 0); bar.Controls.Add(_shopTabs, 1, 0); bar.Controls.Add(_shopSearch, 2, 0);
+            // administrador: ceder a la empresa, sin coste, un ejemplar de cada tren de la lista (con sus filtros y búsqueda)
+            _shopGrantBtn = EmpButton(Tr("★ Ceder los trenes de la lista"));
+            _shopGrantBtn.Height = 34; _shopGrantBtn.Anchor = AnchorStyles.Right; _shopGrantBtn.Margin = new Padding(10, 5, 0, 5);
+            using (var fg = Theme.Font(9.5f, FontStyle.Bold)) _shopGrantBtn.Width = TextRenderer.MeasureText(_shopGrantBtn.Text, fg).Width + 36;
+            _shopGrantBtn.Visible = Supa.IsSuperadmin;
+            _shopGrantBtn.Click += async (s, e) => await GrantShopListAsync();
+            bar.Controls.Add(lblT, 0, 0); bar.Controls.Add(_shopTabs, 1, 0); bar.Controls.Add(_shopGrantBtn, 2, 0); bar.Controls.Add(_shopSearch, 3, 0);
             t.Controls.Add(bar, 0, 0);
 
             _thumbs ??= new VehicleThumbs(this);
@@ -129,6 +136,7 @@ namespace SelectOR
         void FilterShop()
         {
             if (_shopRows == null) return;
+            if (_shopGrantBtn != null && _shopGrantBtn.Visible != Supa.IsSuperadmin) _shopGrantBtn.Visible = Supa.IsSuperadmin;   // (la sesión puede llegar después)
             string q = (_shopSearch?.Box.Text ?? "").Trim();
             var prev = _shopRows.SelectedItem as TrainItem;
             var shown = new List<object>();
@@ -318,6 +326,87 @@ namespace SelectOR
             }
             Msg(_buyMsg, string.Format(rent ? Tr("{0} de {1} trenes alquilados: ya están en Flota.") : Tr("{0} de {1} trenes comprados: ya están en Flota."), ok, all.Count) + (err != null ? "  " + err : ""), err != null);
             _shopRows.ClearMarks();
+        }
+
+        // Administrador: un ejemplar de cada tren de la lista, sin coste (admin_grant_train, trenes-cesion-admin.sql). Se salta
+        // los que la empresa ya tiene (por composición), los repetidos de la lista, los incompletos y los que no llevan
+        // máquina. Se para al primer error.
+        async Task GrantShopListAsync()
+        {
+            var co = _empSel;
+            if (co == null || !Supa.IsSuperadmin || _shopRows == null) return;
+            var items = _shopRows.Items.OfType<TrainItem>().Where(c => c?.FilePath != null).ToList();
+            if (items.Count == 0) { Msg(_buyMsg, Tr("La lista está vacía."), true); return; }
+            Msg(_buyMsg, Tr("Preparando la lista…"), false);
+            await LoadCoTrainsAsync(co.Id, force: true);
+            var have = new HashSet<string>(_coTrains.Select(t => TrainKey(t.Vehicles)));
+            var todo = await Task.Run(() =>
+            {
+                var l = new List<(TrainItem c, List<TrainVeh> vs)>();
+                var seen = new HashSet<string>(have);
+                foreach (var c in items)
+                {
+                    try
+                    {
+                        if (MissingParts(c).Length > 0) continue;   // incompleto (⚠)
+                        var vs = TrainVehiclesOfCached(c);
+                        if (!vs.Any(v => !v.Wagon)) continue;
+                        if (seen.Add(TrainKey(vs))) l.Add((c, vs));
+                    }
+                    catch { }
+                }
+                return l;
+            });
+            int skip = items.Count - todo.Count;
+            if (todo.Count == 0) { Msg(_buyMsg, Tr("La empresa ya tiene todos los trenes de la lista (o no se pueden ceder)."), false); return; }
+            string q = string.Format(Tr("¿Ceder a «{0}» un ejemplar de cada uno de los {1} trenes de la lista, sin coste?"), co.Name, todo.Count)
+                     + (skip > 0 ? "\n\n" + string.Format(Tr("Se saltan {0}: los que la empresa ya tiene, los repetidos, los incompletos (⚠) y los que no llevan máquina."), skip) : "");
+            if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) { Msg(_buyMsg, "", false); return; }
+            _shopGrantBtn.Enabled = false;
+            // Un tren que el servidor no admite (p. ej. una lista de vehículos demasiado larga) se salta y se sigue con los
+            // demás; solo se para si el fallo es de todos (falta el SQL, no es administrador, sin conexión…).
+            int ok = 0, idx = 0, seguidos = 0; string err = null;
+            var fallos = new List<(string name, string why)>();
+            try
+            {
+                foreach (var (c, vs) in todo)
+                {
+                    idx++;
+                    if (co != _empSel) { err = Tr("Se ha cambiado de empresa."); break; }
+                    Msg(_buyMsg, string.Format(Tr("Cediendo {0} de {1}: {2}…"), idx, todo.Count, c.Name), false);
+                    string conText = null;
+                    try { conText = ConsistDoc.ReadText(c.FilePath); } catch { }
+                    if (string.IsNullOrEmpty(conText)) { fallos.Add((c.Name, Tr("no se ha podido leer el .con"))); continue; }
+                    string img;
+                    using (var bmp = await ConsistStripAsync(c)) img = ImageToB64(bmp);
+                    var (_, e2) = await Supa.RpcAsync("admin_grant_train", new
+                    {
+                        p_company = co.Id, p_name = c.Name, p_con_file = System.IO.Path.GetFileNameWithoutExtension(c.FilePath), p_con_text = conText,
+                        p_vehicles = vs.Select(v => v.ToJson(v.Count)).ToArray(), p_image = img
+                    });
+                    if (e2 != null)
+                    {
+                        if (e2.Contains("PGRST202") || e2.Contains("Could not find")) { err = Tr("Falta ejecutar trenes-cesion-admin.sql en el servidor."); break; }
+                        if (e2.Contains("administrador") || e2.Contains("JWT") || ++seguidos >= 5) { err = e2; break; }   // falla con todos
+                        fallos.Add((c.Name, e2));
+                        continue;
+                    }
+                    seguidos = 0; ok++;
+                }
+            }
+            finally { _shopGrantBtn.Enabled = true; }
+            _coTrainsCompany = null;
+            lock (_fleetStatusCache) _fleetStatusCache.Clear();
+            string res = string.Format(Tr("{0} de {1} trenes cedidos a «{2}»: ya están en Flota."), ok, todo.Count, co.Name);
+            if (fallos.Count > 0) res += "  " + (fallos.Count == 1 ? Tr("1 no se ha podido ceder.") : string.Format(Tr("{0} no se han podido ceder."), fallos.Count));
+            Msg(_buyMsg, res + (err != null ? "  " + Tr("Error: ") + err : ""), err != null || fallos.Count > 0);
+            if (fallos.Count > 0)
+                ThemedBox.Show(this, (fallos.Count == 1 ? Tr("Un tren no se ha podido ceder:") : string.Format(Tr("{0} trenes no se han podido ceder:"), fallos.Count)) + "\n\n"
+                    + string.Join("\n", fallos.Take(15).Select(x => "• " + x.name + " — " + x.why))
+                    + (fallos.Count > 15 ? "\n" + string.Format(Tr("…y {0} más."), fallos.Count - 15) : ""),
+                    "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            LoadCompanies(); LoadFleet();
+            _ = MatchLocalTrainsAsync();
         }
 
         void UpdateShopOwned(TrainItem c)

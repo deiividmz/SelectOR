@@ -275,6 +275,45 @@ namespace SelectOR
             return (sb.ToString(), null);
         }
 
+        // ---- RPC que devuelve una tabla, COMPLETA (por páginas con ?limit=&offset=, que PostgREST admite en las funciones
+        // que devuelven filas). Para las que no reciben p_limit/p_offset (p. ej. train_list, con miles de trenes). La
+        // función tiene que devolver las filas siempre en el mismo orden.
+        public static async Task<(string json, string err)> RpcPagedAsync(string fn, object args, int page = 1000, int maxRows = 200000)
+        {
+            var sb = new StringBuilder("[");
+            int offset = 0; bool primero = true;
+            string body = JsonSerializer.Serialize(args ?? new { });
+            while (true)
+            {
+                string json, err;
+                try
+                {
+                    var (ok, txt, status) = await SendCore(HttpMethod.Post, "/rest/v1/rpc/" + fn + "?limit=" + page + "&offset=" + offset, body, true);
+                    json = ok ? txt : null; err = ok ? null : Err(status, txt);
+                }
+                catch (Exception e) { return (null, e.Message); }
+                if (err != null) return (null, err);
+                int n = 0;
+                try
+                {
+                    using var d = JsonDocument.Parse(json);
+                    if (d.RootElement.ValueKind != JsonValueKind.Array) return (json, null);
+                    foreach (var e in d.RootElement.EnumerateArray())
+                    {
+                        if (!primero) sb.Append(',');
+                        sb.Append(e.GetRawText());
+                        primero = false; n++;
+                    }
+                }
+                catch { return (json, null); }
+                if (n < page) break;
+                offset += page;
+                if (offset >= maxRows) break;
+            }
+            sb.Append(']');
+            return (sb.ToString(), null);
+        }
+
         // ---- SELECT COMPLETO (por páginas) ----
         // La API de Supabase devuelve como mucho 1.000 filas por respuesta (límite de PostgREST), así
         // que una flota de miles de unidades llegaba recortada. Aquí se piden páginas sucesivas hasta

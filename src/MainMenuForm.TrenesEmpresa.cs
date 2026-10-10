@@ -162,7 +162,7 @@ namespace SelectOR
         {
             if (companyId == null) return false;
             if (!force && _coTrainsCompany == companyId) return true;
-            var (json, err) = await Supa.RpcAsync("train_list", new { p_company = companyId });
+            var (json, err) = await Supa.RpcPagedAsync("train_list", new { p_company = companyId });
             if (err != null) { _trainsOnServer = !(err.Contains("PGRST202") || err.Contains("Could not find")); return false; }
             _trainsOnServer = true;
             var list = new List<CoTrain>();
@@ -284,7 +284,7 @@ namespace SelectOR
             bFiles.Click += (s, e) => Save(null);
             bCancel.Click += (s, e) => f.Close();
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); };
+            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); CenterOnScreen(f); };
             _seatsOpen = f;
             DialogResult res;
             try { res = f.ShowDialog(this); } finally { _seatsOpen = null; }
@@ -447,6 +447,15 @@ namespace SelectOR
             ThemedBox.Show(this, lbl.Text, "SelectOR", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
 
+        // Las ventanas de compra, solicitud y plazas se maquetan al cargarse (crecen hacia abajo desde la altura provisional):
+        // ya con su tamaño final, se centran en la pantalla de SelectOR.
+        void CenterOnScreen(Form f)
+        {
+            var wa = Screen.FromControl(this).WorkingArea;
+            f.StartPosition = FormStartPosition.Manual;
+            f.Location = new Point(wa.X + Math.Max(0, (wa.Width - f.Width) / 2), wa.Y + Math.Max(0, (wa.Height - f.Height) / 2));
+        }
+
         // Ventana de compra: la composición, el desglose del precio vehículo por vehículo y lo que cuesta a la empresa.
         // 0 cancelar · 1 comprar · 2 alquilar.
         int ShowTrainBuyConfirm(string title, List<TrainVeh> vs, Bitmap image, double price, int have)
@@ -509,7 +518,7 @@ namespace SelectOR
             bRent.Click += (s, e) => { result = 2; f.Close(); };
             bCancel.Click += (s, e) => f.Close();
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); };
+            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); CenterOnScreen(f); };
             _trainBuyOpen = f;
             try { f.ShowDialog(this); } finally { _trainBuyOpen = null; }
             return result;
@@ -605,7 +614,7 @@ namespace SelectOR
                 }
                 f.DialogResult = DialogResult.OK; f.Close();
             };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); };
+            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); CenterOnScreen(f); };
             _trainReqOpen = f;
             DialogResult res;
             try { res = f.ShowDialog(this); } finally { _trainReqOpen = null; }

@@ -2418,7 +2418,7 @@ namespace SelectOR
             "purchase" => Tr("Compra"),
             "loan" => Tr("Préstamo"),
             "other" => Tr("Otro"),
-            "prize" => Tr("Premio de la liga"),
+            "prize" => Tr("Premio"),   // los de la liga y el de bienvenida: la descripción dice cuál
             "adjustment" => Tr("Ajuste de saldo"),
             _ => c
         };

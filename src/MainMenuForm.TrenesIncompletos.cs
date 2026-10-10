@@ -81,7 +81,7 @@ namespace SelectOR
             var leads = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var cid in companyIds.Distinct())
             {
-                var (json, err) = await Supa.RpcAsync("train_list", new { p_company = cid });
+                var (json, err) = await Supa.RpcPagedAsync("train_list", new { p_company = cid });
                 if (err != null || !nameOf.TryGetValue(cid, out var cn)) continue;
                 try
                 {
