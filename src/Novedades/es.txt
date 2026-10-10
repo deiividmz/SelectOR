@@ -1,5 +1,3 @@
-1.2.54
-Premio de bienvenida|Cada empresa recibe 5.000.000 € para empezar; sale en Banca como «Premio».
-Flota sin límite|Ya no hay tope de 500 unidades ni de 300 trenes por empresa.
-Trenes muy largos|Se compran y se piden trenes con más de 100 coches o con muchos vehículos distintos.
-Ventanas centradas|Comprar este tren, Solicitar compra y Plazas se abren en el centro de la pantalla.
+1.2.55
+Flota más rápida|Las imágenes de los trenes se cargan a medida que aparecen en pantalla, no todas al abrir.
+Menos esperas en Empresas|La lista de trenes de la empresa solo se vuelve a descargar cuando cambia.

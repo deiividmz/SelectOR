@@ -275,6 +275,8 @@ namespace SelectOR
         public VehicleThumbs Thumbs;
         readonly ThumbMemory _mem = new ThumbMemory(60);
         public event Action<FleetModel> InfoClicked;
+        // Una tarjeta a la vista (o a punto de estarlo) sin imagen: quien la tenga guardada en otro sitio, que la traiga.
+        public event Action<FleetModel> NeedImage;
         FleetModel _infoHover;
         public string SelectedId { get; private set; }
         public event Action SelectionChanged;
@@ -414,14 +416,17 @@ namespace SelectOR
             foreach (var (text, gy) in _groups)
                 if (gy + Theme.Px(24) >= top && gy <= bottom)
                     TextRenderer.DrawText(g, text, _fCnt, new Rectangle(Theme.Px(6), gy - top, ClientSize.Width - Theme.Px(12), Theme.Px(22)), Theme.Subtle, CardPaint.Line);
+            List<FleetModel> need = null;
             foreach (var c in _cards)
             {
                 if (c.Y + c.H < top - Theme.Px(200) || c.Y > bottom + Theme.Px(200)) continue;   // y las de al lado, para que lleguen antes
                 visible.Add(c.M.Path ?? "");
+                if (string.IsNullOrEmpty(c.M.Path)) (need ??= new()).Add(c.M);
                 if (c.Y + c.H >= top && c.Y <= bottom) Paint1(g, c, top);
             }
             foreach (var p in visible)
                 _mem.Request(Thumbs, p, StripPaint.ImageH, 0, () => Invalidate(), k => visible.Contains(k));
+            if (need != null && NeedImage != null) foreach (var m in need) NeedImage(m);
         }
 
         Rectangle InfoRect(Card c, int top) => new Rectangle(_layoutW - Theme.Px(12) - InfoW, c.Y - top + (c.H - InfoW) / 2, InfoW, InfoW);

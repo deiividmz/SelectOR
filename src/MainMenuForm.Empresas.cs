@@ -5247,6 +5247,7 @@ namespace SelectOR
             _fleetCards.SelectionChanged += OnFleetVehicleSelected;
             _fleetCards.MarksChanged += OnFleetVehicleSelected;   // varios a la vez (Ctrl / Mayús)
             _fleetCards.InfoClicked += m => ShowFleetTrainBreakdown(m);
+            _fleetCards.NeedImage += OnFleetNeedImage;
             t.Controls.Add(_fleetCards, 0, 1);
 
             // ---- abajo: el tren elegido (vista 3D · composición 2D · casillas y acciones) ----
@@ -5655,7 +5656,7 @@ namespace SelectOR
             if (_empSel != fleetCo) return;   // se cambió de empresa mientras se consultaba: manda la carga de la nueva
             _fleetIds.Clear(); _fleetStatus.Clear(); _fleetOwnedNames.Clear(); _fleetOwnedCount.Clear(); _fleetPlates.Clear();
             _fleetRowEng.Clear(); _fleetRowDetail.Clear(); _fleetRowEstColor.Clear(); _fleetRowTrain.Clear(); _fleetRow2D.Clear();
-            _trainCopyCount.Clear(); _fleetTrainModels.Clear();
+            _trainCopyCount.Clear(); _fleetTrainModels.Clear(); _fleetImgAsked.Clear(); _fleetImgQueue.Clear();
             if (err != null) { _fleetCards.EmptyText = Tr("Error: ") + err; _fleetCards.SetModels(new List<FleetModel>()); return; }
             _fleetCards.EmptyText = null;
             var models = new List<FleetModel>();
@@ -7838,24 +7839,48 @@ namespace SelectOR
                 if (_fleetRowTrain[i].Length > 0 && _trainCon.TryGetValue(_fleetRowTrain[i], out var con)) _fleetRow2D[i] = con;
             _fleetCards.Invalidate();
             OnFleetVehicleSelected();
-            FetchFleetTrainImages();
         }
 
-        // Los trenes que no tienes en tu contenido: su composición guardada en la empresa (se descarga una vez).
-        async void FetchFleetTrainImages()
+        // Los trenes que no tienes en tu contenido: su composición guardada en la empresa (se descarga una vez y queda en
+        // disco). Solo las de las tarjetas que se ven (NeedImage), 3 a la vez y las últimas pedidas primero: con miles de
+        // trenes, descargarlas todas al abrir Flota saturaba la conexión.
+        readonly HashSet<string> _fleetImgAsked = new(StringComparer.OrdinalIgnoreCase);
+        readonly Stack<string> _fleetImgQueue = new();
+        int _fleetImgBusy;
+
+        void OnFleetNeedImage(FleetModel m)
         {
-            var co = _empSel; if (co == null) return;
-            foreach (var kv in new List<KeyValuePair<string, FleetModel>>(_fleetTrainModels))
+            if (m?.Key == null || !m.Key.StartsWith("train:")) return;
+            string id = m.Key.Substring(6);
+            if (!_fleetTrainModels.ContainsKey(id) || _trainCon.ContainsKey(id)) return;
+            var t = _coTrains.Find(x => x.Id == id);
+            if (t == null || !t.HasImage) return;   // sin la lista de trenes todavía, o sin imagen guardada: nada que traer
+            if (!_fleetImgAsked.Add(id)) return;
+            _fleetImgQueue.Push(id);
+            PumpFleetImages();
+        }
+
+        void PumpFleetImages()
+        {
+            while (_fleetImgBusy < 3 && _fleetImgQueue.Count > 0) { _fleetImgBusy++; FetchFleetImage(_fleetImgQueue.Pop()); }
+        }
+
+        async void FetchFleetImage(string id)
+        {
+            var co = _empSel;
+            try
             {
-                if (_trainCon.ContainsKey(kv.Key) || (kv.Value.Path ?? "").Length > 0) continue;
-                var t = _coTrains.Find(x => x.Id == kv.Key);
-                string file = await CoTrainImageFileAsync(co.Id, t);
-                if (file == null || co != _empSel) continue;
-                kv.Value.Path = file;
-                for (int i = 0; i < _fleetRowTrain.Count && i < _fleetRow2D.Count; i++) if (_fleetRowTrain[i] == kv.Key) _fleetRow2D[i] = file;
+                var t = _coTrains.Find(x => x.Id == id);
+                string file = co == null ? null : await CoTrainImageFileAsync(co.Id, t);
+                if (file == null || co != _empSel || !_fleetTrainModels.TryGetValue(id, out var m) || (m.Path ?? "").Length > 0) return;
+                m.Path = file;
+                for (int i = 0; i < _fleetRowTrain.Count && i < _fleetRow2D.Count; i++) if (_fleetRowTrain[i] == id) _fleetRow2D[i] = file;
                 _fleetCards?.ForgetImage(file);
-                OnFleetVehicleSelected();
+                int r = FleetSelectedRow();
+                if (r >= 0 && r < _fleetRowTrain.Count && _fleetRowTrain[r] == id) OnFleetVehicleSelected();   // la ficha de abajo, solo si es la suya
             }
+            catch { }
+            finally { _fleetImgBusy--; PumpFleetImages(); }
         }
 
         string FleetTrainSub(CoTrain t, bool local)

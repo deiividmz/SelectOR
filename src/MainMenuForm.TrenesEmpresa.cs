@@ -64,7 +64,7 @@ namespace SelectOR
         }
 
         readonly List<CoTrain> _coTrains = new();
-        string _coTrainsCompany, _trainMode = "warn";
+        string _coTrainsCompany, _coTrainsStamp, _trainMode = "warn";
         bool _trainsOnServer = true;   // false: falta trenes-empresa.sql
 
         // Clave de un tren: sus vehículos por modelo (nombre del .eng/.wag, sin la carpeta: las libreas cuentan igual).
@@ -158,13 +158,50 @@ namespace SelectOR
 
         static string TEur(double v) => v.ToString("N0", EsEs) + " €";
 
+        // La lista de trenes de cada empresa (train_list), guardada con su huella (train_list_stamp, trenes-lista-ligera.sql):
+        // solo se vuelve a descargar si la huella cambia (un tren nuevo, unas plazas…). Con miles de trenes eran varios MB
+        // en cada sección. stamp: la huella de la lista devuelta (vacía sin el SQL: entonces se descarga siempre).
+        readonly Dictionary<string, (string stamp, string json)> _trainListCache = new(StringComparer.OrdinalIgnoreCase);
+        bool _trainStampOnServer = true;
+
+        readonly Dictionary<string, Task<(string json, string err, string stamp)>> _trainListBusy = new(StringComparer.OrdinalIgnoreCase);
+
+        // Si ya se está pidiendo la de esa empresa (Flota y los distintivos a la vez, p. ej.), se espera a esa misma.
+        Task<(string json, string err, string stamp)> TrainListJsonAsync(string companyId)
+        {
+            if (_trainListBusy.TryGetValue(companyId, out var busy)) return busy;
+            var task = TrainListJsonCoreAsync(companyId);
+            if (task.IsCompleted) return task;
+            _trainListBusy[companyId] = task;
+            _ = task.ContinueWith(_ => { if (_trainListBusy.TryGetValue(companyId, out var b) && b == task) _trainListBusy.Remove(companyId); },
+                                  TaskScheduler.FromCurrentSynchronizationContext());
+            return task;
+        }
+
+        async Task<(string json, string err, string stamp)> TrainListJsonCoreAsync(string companyId)
+        {
+            string stamp = null;
+            if (_trainStampOnServer)
+            {
+                var (js, es) = await Supa.RpcAsync("train_list_stamp", new { p_company = companyId });
+                if (es == null) stamp = JsonText(js);
+                else if (es.Contains("PGRST202") || es.Contains("Could not find")) _trainStampOnServer = false;
+            }
+            lock (_trainListCache)
+                if (!string.IsNullOrEmpty(stamp) && _trainListCache.TryGetValue(companyId, out var c) && c.stamp == stamp) return (c.json, null, stamp);
+            var (json, err) = await Supa.RpcPagedAsync("train_list", new { p_company = companyId });
+            if (err == null && !string.IsNullOrEmpty(stamp)) lock (_trainListCache) _trainListCache[companyId] = (stamp, json);
+            return (json, err, err == null ? stamp : null);
+        }
+
         async Task<bool> LoadCoTrainsAsync(string companyId, bool force = false)
         {
             if (companyId == null) return false;
             if (!force && _coTrainsCompany == companyId) return true;
-            var (json, err) = await Supa.RpcPagedAsync("train_list", new { p_company = companyId });
+            var (json, err, stamp) = await TrainListJsonAsync(companyId);
             if (err != null) { _trainsOnServer = !(err.Contains("PGRST202") || err.Contains("Could not find")); return false; }
             _trainsOnServer = true;
+            if (!string.IsNullOrEmpty(stamp) && _coTrainsCompany == companyId && _coTrainsStamp == stamp) return true;   // no ha cambiado: la que ya hay vale
             var list = new List<CoTrain>();
             try
             {
@@ -181,7 +218,7 @@ namespace SelectOR
                 if (list.Count == 0) { var (jm, em) = await Supa.RpcAsync("train_mode", new { }); if (em == null) _trainMode = JsonText(jm); }
             }
             catch { }
-            _coTrains.Clear(); _coTrains.AddRange(list); _coTrainsCompany = companyId;
+            _coTrains.Clear(); _coTrains.AddRange(list); _coTrainsCompany = companyId; _coTrainsStamp = stamp;
             var seats = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var t in list) if (t.Seats is int n) seats[t.Id] = n;
             _trainSeats = seats;   // se cambia de una vez: se lee desde otros hilos (AnalyzeComposition)
@@ -322,12 +359,24 @@ namespace SelectOR
             catch { return null; }
         }
 
-        async Task<string> CoTrainImageFileAsync(string companyId, CoTrain t)
+        readonly Dictionary<string, Task<string>> _trainImgBusy = new(StringComparer.OrdinalIgnoreCase);
+
+        Task<string> CoTrainImageFileAsync(string companyId, CoTrain t)
         {
-            if (t == null || !t.HasImage) return null;
+            if (t == null || !t.HasImage) return Task.FromResult<string>(null);
             string file = SavedImageFile("tren", t.Id);
-            if (File.Exists(file)) return file;
-            var (_, _, image) = await CoTrainFiles(companyId, t.Id);
+            if (File.Exists(file)) return Task.FromResult(file);
+            if (_trainImgBusy.TryGetValue(t.Id, out var busy)) return busy;   // ya se está descargando: la misma descarga
+            var task = DownloadCoTrainImageAsync(companyId, t.Id, file);
+            if (task.IsCompleted) return task;
+            _trainImgBusy[t.Id] = task;
+            _ = task.ContinueWith(_ => _trainImgBusy.Remove(t.Id), TaskScheduler.FromCurrentSynchronizationContext());
+            return task;
+        }
+
+        async Task<string> DownloadCoTrainImageAsync(string companyId, string trainId, string file)
+        {
+            var (_, _, image) = await CoTrainFiles(companyId, trainId);
             return await Task.Run(() => SaveB64Image(image, file));
         }
 

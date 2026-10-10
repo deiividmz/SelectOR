@@ -1,5 +1,3 @@
-1.2.54
-Welcome prize|Every company gets €5,000,000 to start with; it shows in Bank as «Prize».
-Unlimited fleet|There is no longer a cap of 500 units or 300 trains per company.
-Very long trains|Trains with more than 100 cars or many different vehicles can be bought and requested.
-Centred windows|Buy this train, Request purchase and Seats open in the middle of the screen.
+1.2.55
+Faster Fleet|Train images load as they appear on screen, not all at once when it opens.
+Less waiting in Companies|The company's train list is only downloaded again when it changes.

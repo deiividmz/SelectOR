@@ -81,7 +81,7 @@ namespace SelectOR
             var leads = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var cid in companyIds.Distinct())
             {
-                var (json, err) = await Supa.RpcPagedAsync("train_list", new { p_company = cid });
+                var (json, err, _) = await TrainListJsonAsync(cid);   // la misma lista guardada que usan Flota y Compra
                 if (err != null || !nameOf.TryGetValue(cid, out var cn)) continue;
                 try
                 {
