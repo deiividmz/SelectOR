@@ -3555,13 +3555,13 @@ namespace SelectOR
                 if (!string.IsNullOrEmpty(lp))
                 {
                     lead = System.IO.Path.GetFileNameWithoutExtension(lp);
-                    if ((Veh(lp)?.PowerKw ?? 0) > 0) return lead;
+                    if (Veh(lp)?.Traction ?? false) return lead;
                 }
                 foreach (var r in ConsistCarRefs(c?.FilePath))
                 {
                     if (!r.isEngine) continue;
                     string path = ResolveCarFile(r.name, r.folder);
-                    if (path != null && (Veh(path)?.PowerKw ?? 0) > 0) return r.name;
+                    if (path != null && (Veh(path)?.Traction ?? false)) return r.name;
                     lead ??= r.name;
                 }
             }
@@ -7587,6 +7587,43 @@ namespace SelectOR
         }
 
         // Principio de un archivo de vehículo (los datos que interesan van arriba y hay miles).
+        // Un .eng hasta 200 KB; si es más largo y en ese trozo no llega su bloque Engine (MaxPower), entero. Hay .eng de
+        // 400 KB con luces y sonidos delante y la potencia al final (594 reformado, Z21500 SNCF): sin esto salían con
+        // 0 kW, como si fueran coches, y el tren se quedaba sin precio en Compra.
+        static string ReadEngText(string path, int maxBytes = 200000)
+        {
+            string t = ReadHead(path, maxBytes);
+            if (string.IsNullOrEmpty(t) || !path.EndsWith(".eng", StringComparison.OrdinalIgnoreCase)) return t;
+            if (t.IndexOf("MaxPower", StringComparison.OrdinalIgnoreCase) >= 0) return t;
+            try { if (new System.IO.FileInfo(path).Length <= maxBytes) return t; } catch { return t; }
+            return ReadHead(path, int.MaxValue);
+        }
+
+        // El texto de un .eng/.wag con el de sus Include detrás (hasta 3 niveles; solo archivos locales). Muchos vehículos
+        // llevan la potencia, la masa o las plazas en un .inc común (los 450 de albertosaurio65, p. ej.).
+        static readonly Dictionary<string, string> _incText = new(StringComparer.OrdinalIgnoreCase);
+        static string VehText(string path, int depth = 0)
+        {
+            string t = ReadEngText(path);
+            if (string.IsNullOrEmpty(t) || depth >= 3) return t;
+            System.Text.StringBuilder sb = null;
+            foreach (System.Text.RegularExpressions.Match i in IncludeRx.Matches(t))
+            {
+                try
+                {
+                    string rel = i.Groups[1].Value.Trim().Replace(@"\\", @"\").Replace('/', System.IO.Path.DirectorySeparatorChar);
+                    string q = System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path) ?? "", rel));
+                    if (!Native.IsLocalFile(q) || !System.IO.File.Exists(q)) continue;
+                    string it;
+                    lock (_incText) _incText.TryGetValue(q, out it);
+                    if (it == null) { it = VehText(q, depth + 1) ?? ""; lock (_incText) _incText[q] = it; }
+                    (sb ??= new System.Text.StringBuilder(t)).Append('\n').Append(it);
+                }
+                catch { }
+            }
+            return sb?.ToString() ?? t;
+        }
+
         static string ReadHead(string path, int maxBytes = 160000)
         {
             try
@@ -7972,11 +8009,19 @@ namespace SelectOR
             return (kw, kmh, type);
         }
 
+        static readonly System.Text.RegularExpressions.Regex MaxPowerRx = new(@"MaxPower\s*\(", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        static readonly System.Text.RegularExpressions.Regex MaximalPowerRx = new(@"MaximalPower\s*\(\s*([\d.]+)\s*([a-zA-Z/]*)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
         static double ExtractPowerKw(string t)
         {
             var m = System.Text.RegularExpressions.Regex.Match(t, @"MaxPower\s*\(\s*([\d.]+)\s*([a-zA-Z/]*)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (!m.Success || !double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)) return 0;
-            string u = m.Groups[2].Value.ToLowerInvariant();
+            return m.Success ? PowerToKw(m.Groups[1].Value, m.Groups[2].Value) : 0;
+        }
+
+        static double PowerToKw(string num, string unit)
+        {
+            if (!double.TryParse(num, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)) return 0;
+            string u = unit.ToLowerInvariant();
             if (u.Contains("kw")) return v;
             if (u.Contains("hp")) return v * 0.7457;
             if (u.Contains("w")) return v / 1000.0;                     // vatios
@@ -9812,7 +9857,11 @@ namespace SelectOR
         {
             public double Capacity, MassT, BrakeKn, Width, Length, PowerKw, SpeedKmh;
             public bool Tilting;
+            public bool PowerDeclared;   // declara MaxPower (o MaximalPower de ORTS) en el archivo o en sus Include
             public string EngineType = "electric";
+            // ¿Tira? Sí si declara potencia, o si no la declara en ningún sitio (Open Rails le pone la de por defecto:
+            // las UT 592 «Camellos», p. ej.). No, si declara MaxPower ( 0 ): un coche con cabina.
+            public bool Traction => PowerKw > 0 || !PowerDeclared;
         }
         static readonly Dictionary<string, VehStats> _vehStats = new(StringComparer.OrdinalIgnoreCase);
         static readonly Dictionary<string, List<(string name, string folder, bool isEngine)>> _conRefs = new(StringComparer.OrdinalIgnoreCase);
@@ -9826,8 +9875,8 @@ namespace SelectOR
             try
             {
                 // Los datos están en los primeros bloques del archivo: no hace falta leer .eng enteros
-                // (los hay de varios MB con sonidos y cabina).
-                string t = ReadHead(path, 200000);
+                // (los hay de varios MB con sonidos y cabina), salvo los que llevan el bloque Engine más allá.
+                string t = VehText(path);
                 if (!string.IsNullOrEmpty(t))
                 {
                     v.Capacity = ExtractCapacity(t);
@@ -9837,6 +9886,14 @@ namespace SelectOR
                     v.Width = w; v.Length = l;
                     v.Tilting = IsTilting(t);
                     v.PowerKw = ExtractPowerKw(t);
+                    v.PowerDeclared = MaxPowerRx.IsMatch(t);
+                    if (!v.PowerDeclared)
+                    {
+                        // Los motores diésel de ORTS: ORTSDieselEngines ( n  Diesel ( … MaximalPower ( 450kW ) … ) … ), sumados.
+                        double sum = 0;
+                        foreach (System.Text.RegularExpressions.Match m in MaximalPowerRx.Matches(t)) sum += PowerToKw(m.Groups[1].Value, m.Groups[2].Value);
+                        if (sum > 0) { v.PowerKw = sum; v.PowerDeclared = true; }
+                    }
                     v.SpeedKmh = ExtractSpeedKmh(t);
                     v.EngineType = EngineTypeOf(t, path);
                 }

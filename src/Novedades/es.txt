@@ -1,3 +1,3 @@
-1.2.56
-Liga por categorías|En la Liga del mes, las pestañas General, Viajeros y Mercancías muestran la clasificación de cada categoría, con su podio y su premio.
-Mercancías más justas|En la liga, la masa de cada tren de mercancías cuenta hasta un tope: los trenes muy pesados ya no se disparan en toneladas·km.
+1.2.57
+Más trenes a la venta|Trenes que salían sin precio en Compra ya se pueden comprar y alquilar: máquinas con archivos muy grandes, con la potencia en un archivo incluido o sin potencia declarada.
+Automotores largos|Un automotor con motrices en los dos extremos cuenta como una sola unidad: ya no se cobra la motriz de cola como una máquina aparte.

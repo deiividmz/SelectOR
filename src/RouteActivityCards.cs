@@ -179,16 +179,61 @@ namespace SelectOR
 
         const TextFormatFlags WrapL = TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.TextBoxControl;
 
-        // Alto de la tarjeta de novedades para un ancho y unas líneas (dos columnas; cada novedad en 2 líneas como mucho).
+        // Una novedad: el título en negrita y el texto detrás; lo que no cabe en la primera línea sigue debajo, ENTERO
+        // (en las líneas que haga falta).
+        (string t, int titW, string first, string rest) SplitNews(Graphics g, int k, int tw)
+        {
+            var (title, text) = News[k];
+            string t = title.Length > 0 ? title + ". " : "";
+            int titW = t.Length > 0 ? TextRenderer.MeasureText(g, t, _fNewsT, Size.Empty, TextFormatFlags.NoPadding).Width : 0;
+            string first = text, rest = "";
+            int avail = tw - titW;
+            if (TextRenderer.MeasureText(g, text, _fNews, Size.Empty, TextFormatFlags.NoPadding).Width > avail)
+            {
+                // corta por palabras lo que cabe en la primera línea
+                var words = text.Split(' ');
+                int n = 0; string acc = "";
+                for (; n < words.Length; n++)
+                {
+                    string next = acc.Length == 0 ? words[n] : acc + " " + words[n];
+                    if (TextRenderer.MeasureText(g, next, _fNews, Size.Empty, TextFormatFlags.NoPadding).Width > avail) break;
+                    acc = next;
+                }
+                first = acc; rest = string.Join(" ", words, n, words.Length - n);
+            }
+            return (t, titW, first, rest);
+        }
+
+        int RestHeight(Graphics g, string rest, int tw) => rest.Length == 0 ? 0 : TextRenderer.MeasureText(g, rest, _fNews, new Size(tw, 9999), WrapL).Height;
+
+        // Alto de cada fila de novedades (la de la novedad más larga de la fila).
+        List<int> NewsRowHeights(Graphics g, int colW, int cols)
+        {
+            var hs = new List<int>();
+            int tw = colW - Theme.Px(14);
+            for (int k = 0; k < News.Count; k += cols)
+            {
+                int h = 0;
+                for (int c = 0; c < cols && k + c < News.Count; c++)
+                {
+                    var (_, _, _, rest) = SplitNews(g, k + c, tw);
+                    h = Math.Max(h, _fNews.Height + Theme.Px(3) + RestHeight(g, rest, tw));
+                }
+                hs.Add(Math.Max(h, Theme.Px(24)) + Theme.Px(12));
+            }
+            return hs;
+        }
+
+        // Alto de la tarjeta de novedades para un ancho y un alto disponible (dos columnas; cada novedad entera).
         int NewsHeight(Graphics g, int w, int maxH, out int rows, out int colW)
         {
             int cols = w > Theme.Px(560) ? 2 : 1, gap = Theme.Px(24);
             colW = (w - Theme.Px(48) - (cols - 1) * gap) / cols;
-            int itemH = Math.Max(TextRenderer.MeasureText(g, "Ag", _fNews).Height * 2, Theme.Px(34)) + Theme.Px(10);
-            int head = Theme.Px(44), pad = Theme.Px(14);
-            int fitRows = Math.Max(0, (maxH - head - pad) / itemH);
-            rows = Math.Min(fitRows, (News.Count + cols - 1) / cols);
-            return rows == 0 ? 0 : head + rows * itemH + pad;
+            int head = Theme.Px(44), pad = Theme.Px(14), y = head + pad;
+            var hs = NewsRowHeights(g, colW, cols);
+            rows = 0;
+            foreach (var h in hs) { if (y + h > maxH) break; y += h; rows++; }
+            return rows == 0 ? 0 : y;
         }
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -293,43 +338,24 @@ namespace SelectOR
             // cabecera: «✨ NOVEDADES DE LA VERSIÓN 1.2.48»
             var hr = new Rectangle(r.X + Theme.Px(24), r.Y + Theme.Px(14), r.Width - Theme.Px(48), Theme.Px(20));
             TextRenderer.DrawText(g, "✨  " + NewsTitle, _fNewsCap, hr, Theme.AccentHi, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            int itemH = Math.Max(TextRenderer.MeasureText(g, "Ag", _fNews).Height * 2, Theme.Px(34)) + Theme.Px(10);
-            int y0 = r.Y + Theme.Px(44);
-            int shown = Math.Min(News.Count, rows * cols);
+            var hs = NewsRowHeights(g, colW, cols);
+            int shown = Math.Min(News.Count, rows * cols), y = r.Y + Theme.Px(44);
+            var col = Color.FromArgb(200, 206, 211);
             for (int k = 0; k < shown; k++)
             {
                 int c = k % cols, row = k / cols;
-                int x = r.X + Theme.Px(24) + c * (colW + gap), y = y0 + row * itemH;
+                if (c == 0 && row > 0) y += hs[row - 1];
+                int x = r.X + Theme.Px(24) + c * (colW + gap);
                 // punto verde
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var b = new SolidBrush(Theme.Accent)) g.FillEllipse(b, x, y + Theme.Px(6), Theme.Px(6), Theme.Px(6));
                 g.SmoothingMode = SmoothingMode.None;
                 int tx = x + Theme.Px(14), tw = colW - Theme.Px(14);
-                var (title, text) = News[k];
-                string t = title.Length > 0 ? title + ". " : "";
-                int titW = t.Length > 0 ? TextRenderer.MeasureText(g, t, _fNewsT, Size.Empty, TextFormatFlags.NoPadding).Width : 0;
-                // título en negrita y, a continuación, el texto (que sigue en la línea de abajo si no cabe)
+                var (t, titW, first, rest) = SplitNews(g, k, tw);
                 TextRenderer.DrawText(g, t, _fNewsT, new Point(tx, y), Theme.Text, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-                string first = text, rest = "";
-                int avail = tw - titW;
-                if (TextRenderer.MeasureText(g, text, _fNews, Size.Empty, TextFormatFlags.NoPadding).Width > avail)
-                {
-                    // corta por palabras lo que cabe en la primera línea
-                    var words = text.Split(' ');
-                    int n = 0; string acc = "";
-                    for (; n < words.Length; n++)
-                    {
-                        string next = acc.Length == 0 ? words[n] : acc + " " + words[n];
-                        if (TextRenderer.MeasureText(g, next, _fNews, Size.Empty, TextFormatFlags.NoPadding).Width > avail) break;
-                        acc = next;
-                    }
-                    first = acc; rest = string.Join(" ", words, n, words.Length - n);
-                }
-                var col = Color.FromArgb(200, 206, 211);
                 if (first.Length > 0) TextRenderer.DrawText(g, first, _fNews, new Point(tx + titW, y + 1), col, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
                 if (rest.Length > 0)
-                    TextRenderer.DrawText(g, rest, _fNews, new Rectangle(tx, y + _fNews.Height + Theme.Px(3), tw, _fNews.Height + 2), col,
-                        TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+                    TextRenderer.DrawText(g, rest, _fNews, new Rectangle(tx, y + _fNews.Height + Theme.Px(3), tw, RestHeight(g, rest, tw)), col, WrapL);
             }
         }
     }

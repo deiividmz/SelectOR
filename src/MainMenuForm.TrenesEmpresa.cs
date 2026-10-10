@@ -68,8 +68,23 @@ namespace SelectOR
         bool _trainsOnServer = true;   // false: falta trenes-empresa.sql
 
         // Clave de un tren: sus vehículos por modelo (nombre del .eng/.wag, sin la carpeta: las libreas cuentan igual).
+        // Con la unidad completa (UnitVehicles): un tren comprado antes de la 1.2.57 con la motriz de cola de un automotor
+        // largo en su lista se sigue reconociendo con el mismo .con.
         static string TrainKey(IEnumerable<TrainVeh> vs)
-            => string.Join("|", vs.GroupBy(v => v.Name.Trim().ToLowerInvariant()).OrderBy(g => g.Key).Select(g => g.Key + "×" + g.Sum(x => x.Count)));
+            => string.Join("|", UnitVehicles(vs).GroupBy(v => v.Name.Trim().ToLowerInvariant()).OrderBy(g => g.Key).Select(g => g.Key + "×" + g.Sum(x => x.Count)));
+
+        // Un tren encabezado por un automotor: las demás motrices de su misma carpeta con otro nombre son partes de esa
+        // unidad (la de cola de un 450, la otra cabeza de un AVE…), no máquinas aparte. Las cabezas iguales (dos unidades
+        // acopladas) sí cuentan. Es la regla de TrainVehiclesOf, aplicada a una lista ya hecha (las guardadas en el servidor).
+        static List<TrainVeh> UnitVehicles(IEnumerable<TrainVeh> vs)
+        {
+            var l = vs.ToList();
+            var head = l.FirstOrDefault(v => !v.Wagon);
+            if (head == null || !head.Automotor) return l;
+            return l.Where(v => v.Wagon || ReferenceEquals(v, head)
+                              || string.Equals(v.Name, head.Name, StringComparison.OrdinalIgnoreCase)
+                              || !string.Equals(v.Folder ?? "", head.Folder ?? "", StringComparison.OrdinalIgnoreCase)).ToList();
+        }
 
         // Los vehículos de un tren del contenido, por modelo, con sus datos de tasación. Las motrices internas de un
         // automotor no cuentan (se tasa la formación por su cabeza), ni los remolques de un automotor (van en ella).
@@ -87,14 +102,20 @@ namespace SelectOR
             var (_, leadKmh, _) = leadPath != null ? ReadEngineSpecs(leadPath) : (0, 0, "");
             var analysis = AnalyzeComposition(c, leadKmh);
             bool leadAuto = leadPath != null && ShapeForService(DetectUnitShape(leadPath), analysis.Freight, leadPath).automotor;
+            string leadFolder = null;
+            foreach (var car in doc.Cars) if (car.IsEngine && string.Equals(car.Name, lead, StringComparison.OrdinalIgnoreCase)) { leadFolder = car.Folder ?? ""; break; }
             var byKey = new Dictionary<string, TrainVeh>(StringComparer.OrdinalIgnoreCase);
             foreach (var car in doc.Cars)
             {
                 string path = ResolveCarFile(car.Name, car.Folder);
                 var st = Veh(path);
-                bool traction = car.IsEngine && (st?.PowerKw ?? 0) > 0;
+                bool traction = car.IsEngine && (st?.Traction ?? false);   // con potencia, o sin declararla (Open Rails pone la suya)
                 if (car.IsEngine && hidden.Contains(car.Name) && !(path != null && IsUnitHead(path))) continue;   // motriz interna de una formación
                 if (!traction && leadAuto) continue;                                                // remolque del automotor
+                // otra motriz de la misma unidad (misma carpeta, otro nombre): la de cola de un automotor largo, como un 450
+                // de 6 coches con las dos motrices en los extremos. Va en el precio del automotor, no como máquina aparte.
+                if (traction && leadAuto && !string.Equals(car.Name, lead, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(car.Folder ?? "", leadFolder ?? "", StringComparison.OrdinalIgnoreCase)) continue;
                 string key = car.Name + "|" + (car.Folder ?? "");
                 if (byKey.TryGetValue(key, out var have)) { have.Count++; continue; }
                 var v = new TrainVeh { Name = car.Name, Folder = car.Folder ?? "", Path = path, Wagon = !traction };
@@ -141,7 +162,7 @@ namespace SelectOR
 
         string TrainSummary(IEnumerable<TrainVeh> vs)
         {
-            var l = vs.ToList();
+            var l = UnitVehicles(vs);
             // un automotor se dice con sus coches («automotor de 3 coches»)
             var autos = l.Where(v => !v.Wagon && v.Automotor).ToList();
             int locos = l.Where(v => !v.Wagon && !v.Automotor).Sum(v => v.Count), wag = l.Where(v => v.Wagon && v.Type == "freight").Sum(v => v.Count),

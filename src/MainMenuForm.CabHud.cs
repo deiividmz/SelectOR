@@ -267,7 +267,7 @@ namespace SelectOR
         static string EngFind(string file, string pattern, int depth)
         {
             if (string.IsNullOrEmpty(file) || depth > 3 || !File.Exists(file)) return null;
-            string t = ReadHead(file, 200000);
+            string t = ReadEngText(file);
             if (string.IsNullOrEmpty(t)) return null;
             var m = Regex.Match(t, pattern, RegexOptions.IgnoreCase);
             if (m.Success) return m.Groups.Count > 1 && m.Groups[1].Success ? m.Groups[1].Value : m.Value;
@@ -291,7 +291,7 @@ namespace SelectOR
         static string EngTraction(string file, int depth)
         {
             if (string.IsNullOrEmpty(file) || depth > 3 || !File.Exists(file)) return null;
-            string t = ReadHead(file, 200000);
+            string t = ReadEngText(file);
             if (string.IsNullOrEmpty(t)) return null;
             var m = Regex.Match(t, @"\bType\s*\(\s*""?(Diesel|Electric|Steam)\b", RegexOptions.IgnoreCase);
             if (m.Success) return m.Groups[1].Value.ToLowerInvariant();
