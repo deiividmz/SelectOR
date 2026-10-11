@@ -389,7 +389,7 @@ namespace SelectOR
         Point _downScreen, _formAtDown; Size _sizeAtDown;
         int _unread; long _seenId;
         Rectangle _hitCo, _hitCollapse, _hitClose, _hitCompose, _hitGrip;
-        HudListPicker _picker;
+        PaLinePicker _picker;   // la misma lista que la de líneas de megafonía (se desplaza si hay muchas empresas)
         int _hoverZone = -1;
 
         const int HdrH = 32, FootH = 30, MinW = 250, MinH = 150, MaxW = 900, MaxH = 900;
@@ -582,12 +582,13 @@ namespace SelectOR
 
         void OpenPicker()
         {
-            try { _picker?.Close(); } catch { }
+            // pulsar otra vez sobre la empresa cierra la lista (como la de megafonía)
+            if (_picker != null && !_picker.IsDisposed && _picker.Visible) { try { _picker.Close(); } catch { } _picker = null; return; }
             List<(string id, string name)> list = null;
             try { list = Companies?.Invoke(); } catch { }
             if (list == null || list.Count == 0) return;
             string cur = null; try { cur = CurrentId?.Invoke(); } catch { }
-            _picker = new HudListPicker(list, cur, id => Pick?.Invoke(id));
+            _picker = new PaLinePicker(list, cur, id => Pick?.Invoke(id), closeOnOutsideClick: true);
             var p = PointToScreen(new Point(_hitCo.Left, _hitCo.Bottom + 2));
             _picker.ShowAt(p.X, p.Y, _hitCo.Width);
         }
@@ -666,89 +667,6 @@ namespace SelectOR
             try { _picker?.Close(); } catch { }
             SavePos();
             try { Close(); } catch { }
-        }
-    }
-
-    // ---------------------------------------------------------------- desplegable (sin robar el foco)
-    public class HudListPicker : Form
-    {
-        readonly List<(string id, string name)> _items;
-        readonly string _current;
-        readonly Action<string> _pick;
-        int _hover = -1;
-        const int RowH = 26, PadV = 6;
-
-        public HudListPicker(List<(string id, string name)> items, string currentId, Action<string> pick)
-        {
-            _items = items; _current = currentId; _pick = pick;
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false; TopMost = true;
-            StartPosition = FormStartPosition.Manual;
-            BackColor = Theme.Surface;
-            DoubleBuffered = true;
-            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
-            Opacity = 0.96;
-            // Se cierra al pulsar fuera.
-            var t = new System.Windows.Forms.Timer { Interval = 120 };
-            t.Tick += (s, e) =>
-            {
-                if (IsDisposed) { t.Dispose(); return; }
-                if ((MouseButtons & (MouseButtons.Left | MouseButtons.Right)) != 0 && !Bounds.Contains(Cursor.Position)) { t.Dispose(); Close(); }
-            };
-            t.Start();
-        }
-
-        protected override bool ShowWithoutActivation => true;
-        protected override CreateParams CreateParams
-        {
-            get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x00000080; return cp; }
-        }
-
-        // above ≥ 0: abrir HACIA ARRIBA terminando en esa y de pantalla (el HUD está abajo).
-        public void ShowAt(int x, int y, int minWidth, int above = -1)
-        {
-            int w = Math.Max(minWidth, 200);
-            using (var f = Theme.Font(9.5f, FontStyle.Bold))
-                foreach (var it in _items) w = Math.Max(w, TextRenderer.MeasureText(it.name, f).Width + 40);
-            int h = _items.Count * RowH + PadV * 2;
-            if (above >= 0) y = above - h - 4;
-            var wa = Screen.FromPoint(new Point(x, y)).WorkingArea;
-            if (y + h > wa.Bottom) y = Math.Max(wa.Top, wa.Bottom - h - 4);
-            if (y < wa.Top) y = wa.Top;
-            if (x + w > wa.Right) x = Math.Max(wa.Left, wa.Right - w - 4);
-            Bounds = new Rectangle(x, y, w, h);
-            using (var p = Theme.Round(new Rectangle(0, 0, w, h), 10)) Region = new Region(p);
-            Show();
-        }
-
-        int IndexAt(Point p) { int i = (p.Y - PadV) / RowH; return p.Y < PadV || i < 0 || i >= _items.Count ? -1 : i; }
-
-        protected override void OnMouseMove(MouseEventArgs e) { int i = IndexAt(e.Location); if (i != _hover) { _hover = i; Invalidate(); } base.OnMouseMove(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = -1; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            int i = IndexAt(e.Location);
-            if (i >= 0) try { _pick?.Invoke(_items[i].id); } catch { }
-            Close();
-            base.OnMouseUp(e);
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var bg = new SolidBrush(Theme.Surface)) g.FillRectangle(bg, ClientRectangle);
-            using (var pen = new Pen(Color.FromArgb(70, 76, 82))) using (var path = Theme.Round(new Rectangle(0, 0, Width - 1, Height - 1), 10)) g.DrawPath(pen, path);
-            for (int i = 0; i < _items.Count; i++)
-            {
-                var r = new Rectangle(4, PadV + i * RowH, Width - 8, RowH);
-                bool sel = _items[i].id == _current;
-                if (i == _hover) using (var hb = new SolidBrush(Color.FromArgb(52, 58, 64))) using (var p = Theme.Round(r, 7)) g.FillPath(hb, p);
-                if (sel) using (var mb = new SolidBrush(Color.FromArgb(94, 190, 155))) g.FillRectangle(mb, r.Left + 2, r.Top + 7, 3, r.Height - 14);
-                TextRenderer.DrawText(g, _items[i].name, Theme.Font(9.5f, sel ? FontStyle.Bold : FontStyle.Regular),
-                    new Rectangle(r.Left + 12, r.Top, r.Width - 16, r.Height), sel ? Color.FromArgb(224, 232, 228) : Theme.Text,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-            }
         }
     }
 

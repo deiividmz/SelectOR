@@ -104,18 +104,61 @@ namespace SelectOR
             bool leadAuto = leadPath != null && ShapeForService(DetectUnitShape(leadPath), analysis.Freight, leadPath).automotor;
             string leadFolder = null;
             foreach (var car in doc.Cars) if (car.IsEngine && string.Equals(car.Name, lead, StringComparison.OrdinalIgnoreCase)) { leadFolder = car.Folder ?? ""; break; }
+            var list0 = BuildTrainVehicles(doc, analysis, hidden, lead, leadAuto, leadFolder, null);
+            if (list0.Any(v => !v.Wagon)) return list0;
+            // Sin ninguna máquina que tire: la cabeza de su formación (elegida con TODO el contenido) no va en este tren, o va
+            // pero no tira (un coche con cabina) y la que tira estaba oculta como «miembro». Cada formación se representa
+            // entonces por la motriz que SÍ va aquí y tira (la cabeza si cumple). Solo cambia los trenes que se quedaban sin
+            // precio: los demás conservan su lista, su precio y su clave. Una motriz oculta sin formación conocida se agrupa
+            // con las de su misma carpeta (Feve 2600: aa + ba + aa + ba → «2 × automotor»).
+            var repOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var car in doc.Cars)
+            {
+                if (!car.IsEngine) continue;
+                string g = FormationGroup(car, hidden);
+                if (g == null) continue;
+                if (!(Veh(ResolveCarFile(car.Name, car.Folder))?.Traction ?? false)) continue;
+                var u = UnitOfEng(car.Name);
+                if (!repOf.TryGetValue(g, out var cur)) repOf[g] = car.Name;
+                else if (u != null && string.Equals(car.Name, u.Head, StringComparison.OrdinalIgnoreCase) && !string.Equals(cur, u.Head, StringComparison.OrdinalIgnoreCase)) repOf[g] = car.Name;
+            }
+            return repOf.Count == 0 ? list0 : BuildTrainVehicles(doc, analysis, hidden, lead, leadAuto, leadFolder, repOf);
+        }
+
+        // Grupo de formación de una motriz: su formación (si se conoce) o, si está oculta como miembro sin formación conocida,
+        // su carpeta. null: va suelta.
+        string FormationGroup(ConsistCar car, HashSet<string> hidden)
+        {
+            var u = UnitOfEng(car.Name);
+            if (u != null && (u.Members.Count > 1 || u.Cars > 1)) return "u:" + u.Head;
+            return hidden.Contains(car.Name) ? "f:" + (car.Folder ?? "").Trim() : null;
+        }
+
+        List<TrainVeh> BuildTrainVehicles(ConsistDoc doc, CompositionAnalysis analysis, HashSet<string> hidden, string lead, bool leadAuto, string leadFolder,
+                                          Dictionary<string, string> repOf)
+        {
+            var list = new List<TrainVeh>();
             var byKey = new Dictionary<string, TrainVeh>(StringComparer.OrdinalIgnoreCase);
+            ConsistCar first = null;   // la primera motriz que se cuenta (la cabeza de verdad del automotor)
             foreach (var car in doc.Cars)
             {
                 string path = ResolveCarFile(car.Name, car.Folder);
                 var st = Veh(path);
                 bool traction = car.IsEngine && (st?.Traction ?? false);   // con potencia, o sin declararla (Open Rails pone la suya)
-                if (car.IsEngine && hidden.Contains(car.Name) && !(path != null && IsUnitHead(path))) continue;   // motriz interna de una formación
+                string grp = car.IsEngine && repOf != null ? FormationGroup(car, hidden) : null;
+                if (grp != null && repOf.TryGetValue(grp, out var rep))
+                {
+                    if (!string.Equals(car.Name, rep, StringComparison.OrdinalIgnoreCase)) continue;   // otra motriz de su formación
+                }
+                else if (car.IsEngine && hidden.Contains(car.Name) && !(path != null && IsUnitHead(path))) continue;   // motriz interna de una formación
                 if (!traction && leadAuto) continue;                                                // remolque del automotor
                 // otra motriz de la misma unidad (misma carpeta, otro nombre): la de cola de un automotor largo, como un 450
                 // de 6 coches con las dos motrices en los extremos. Va en el precio del automotor, no como máquina aparte.
-                if (traction && leadAuto && !string.Equals(car.Name, lead, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(car.Folder ?? "", leadFolder ?? "", StringComparison.OrdinalIgnoreCase)) continue;
+                // Se compara con la primera motriz CONTADA, no con la primera del tren: en una 440 la primera (8-440) va
+                // oculta en su formación y la que cuenta es la otra (9-440), que si no se quedaba fuera y el tren sin precio.
+                if (traction && leadAuto && first != null && !string.Equals(car.Name, first.Name, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(car.Folder ?? "", first.Folder ?? "", StringComparison.OrdinalIgnoreCase)) continue;
+                if (traction) first ??= car;
                 string key = car.Name + "|" + (car.Folder ?? "");
                 if (byKey.TryGetValue(key, out var have)) { have.Count++; continue; }
                 var v = new TrainVeh { Name = car.Name, Folder = car.Folder ?? "", Path = path, Wagon = !traction };

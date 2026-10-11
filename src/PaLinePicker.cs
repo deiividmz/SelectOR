@@ -1,4 +1,5 @@
-// Lista de líneas de megafonía que sale del HUD al pulsar sobre la línea actual.
+// Lista de líneas de megafonía que sale del HUD al pulsar sobre la línea actual. La misma lista elige la empresa del
+// chat del HUD (sin «Sin línea» ni «Desconectar», por id y cerrándose al pulsar fuera): hay quien tiene muchas empresas.
 // Es una ventana propia, sin bordes y con WS_EX_NOACTIVATE, para NO robarle el foco a Open Rails:
 // se puede pulsar una línea mientras el simulador sigue teniendo el teclado.
 // Con muchas líneas no cabe en la pantalla: la lista se desplaza (rueda o barra a la derecha) y «Desconectar
@@ -17,6 +18,7 @@ namespace SelectOR
     {
         readonly List<(string id, string name)> _items = new List<(string, string)>();   // la lista (sin «Desconectar»)
         readonly string _current;
+        readonly bool _byId;             // la elegida se reconoce por su id (empresas del chat), no por el nombre
         readonly Action<string> _pick;
         readonly Action _off;            // desconectar la megafonía del todo
         int _hoverIdx = -1;              // fila bajo el ratón (−1 ninguna; FooterIdx = «Desconectar»)
@@ -38,6 +40,31 @@ namespace SelectOR
             DoubleBuffered = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
             Opacity = 0.95;
+        }
+
+        // Lista sencilla (las empresas del chat del HUD): sin «Sin línea (voz base)» ni pie; la elegida, por su id; se
+        // cierra al pulsar fuera de ella.
+        public PaLinePicker(List<(string id, string name)> items, string currentId, Action<string> pick, bool closeOnOutsideClick)
+        {
+            _current = currentId; _pick = pick; _byId = true;
+            if (items != null) _items.AddRange(items);
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false; TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Surface;
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
+            Opacity = 0.95;
+            if (closeOnOutsideClick)
+            {
+                var t = new Timer { Interval = 120 };
+                t.Tick += (s, e) =>
+                {
+                    if (IsDisposed) { t.Dispose(); return; }
+                    if ((MouseButtons & (MouseButtons.Left | MouseButtons.Right)) != 0 && !Bounds.Contains(Cursor.Position)) { t.Dispose(); Close(); }
+                };
+                t.Start();
+            }
         }
 
         protected override void Dispose(bool disposing) { if (disposing) { _f.Dispose(); _fB.Dispose(); } base.Dispose(disposing); }
@@ -93,7 +120,8 @@ namespace SelectOR
         int SelectedIndex()
         {
             for (int i = 0; i < _items.Count; i++)
-                if (string.Equals(_items[i].name, _current, StringComparison.Ordinal) || (i == 0 && string.IsNullOrEmpty(_current))) return i;
+                if (_byId ? string.Equals(_items[i].id, _current, StringComparison.OrdinalIgnoreCase)
+                          : string.Equals(_items[i].name, _current, StringComparison.Ordinal) || (i == 0 && string.IsNullOrEmpty(_current))) return i;
             return -1;
         }
 

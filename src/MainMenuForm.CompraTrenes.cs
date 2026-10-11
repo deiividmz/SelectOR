@@ -242,12 +242,28 @@ namespace SelectOR
             _shopInfo[c.FilePath] = (price, TrainSummary(vs));
             int? fixedSeats = SeatsOverride(c);
             _shopSub.Text = string.Join("  ·  ", new[] { vs.Count > 0 ? TrainSummary(vs) : null, an.ServiceType, fixedSeats != null ? Tr("plazas fijadas por la empresa") : null }.Where(x => !string.IsNullOrEmpty(x)));
+            if (price <= 0) _shopSub.Text = await Task.Run(() => ShopNoPriceReason(c));   // por qué no se puede comprar
             _shopSpecs.SetItems(ShopSpecItems(sp, vs, an, tot, ShopCopies(c)));
             _shopBuyPrice.Text = price > 0 ? TEur(price) : "—";
             _shopRentPrice.Text = price > 0 ? string.Format(Tr("alquiler {0} por servicio"), TEur(price * _fleetRentPct)) : "";
             _shopBuyBtn.Enabled = _shopRentBtn.Enabled = price > 0;
             _shopBuyBtn.Invalidate(); _shopRentBtn.Invalidate();
             _shopRows.Invalidate();
+        }
+
+        // Un tren sin precio: el motivo, en vez de un «—» sin más.
+        string ShopNoPriceReason(TrainItem c)
+        {
+            try
+            {
+                var missing = MissingParts(c);
+                if (missing.Length > 0) return string.Format(Tr("No se puede comprar: te falta material ({0})."), string.Join(", ", missing.Take(3)) + (missing.Length > 3 ? "…" : ""));
+                var doc = ConsistDoc.Load(c.FilePath);
+                if ((doc?.Cars.Count ?? 0) == 0 && ConsistCarRefs(c.FilePath).Count > 0)
+                    return Tr("No se puede comprar: el archivo .con está incompleto o dañado (le faltan paréntesis de cierre).");
+            }
+            catch { }
+            return Tr("No se puede comprar: el tren no lleva ninguna máquina con tracción.");
         }
 
         // Todos los datos útiles del tren (dos filas de seis casillas).
