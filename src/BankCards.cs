@@ -231,7 +231,7 @@ namespace SelectOR
             "income" => ("🎫", Theme.Accent), "canon" => ("🛤", Color.FromArgb(251, 146, 60)), "energy" => ("⚡", Color.FromArgb(167, 139, 250)),
             "salary" => ("👷", Color.FromArgb(45, 212, 191)), "maintenance" => ("🔧", Color.FromArgb(120, 144, 226)), "purchase" => ("🚆", Theme.Accent),
             "other" => ("🔑", Color.FromArgb(120, 144, 226)), "prize" => ("🏆", Color.FromArgb(240, 196, 90)), "loan" => ("🏦", Color.FromArgb(170, 176, 181)),
-            "adjustment" => ("⚙", Color.FromArgb(170, 176, 181)), _ => ("•", Color.FromArgb(170, 176, 181))
+            "adjustment" => ("⚙", Color.FromArgb(170, 176, 181)), "sched_bonus" => ("🗓", Color.FromArgb(240, 196, 90)), _ => ("•", Color.FromArgb(170, 176, 181))
         };
 
         protected override int DoLayout(int w)

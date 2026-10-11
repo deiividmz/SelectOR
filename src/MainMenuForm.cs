@@ -215,6 +215,7 @@ namespace SelectOR
             SizeChanged += (s, e) => OnWindowSizeChanged();   // columna RUTAS y textos adaptables
             Layout += (s, e) => LayoutBottomBar();
             Shown += (s, e) => { ApplyResponsiveChrome(); ApplyAdaptiveTexts(); ApplyTabIcons(); LayoutBottomBar(); };
+            Shown += (s, e) => StartPresence();      // usuarios conectados en la portada (MainMenuForm.Conectados.cs)
             Shown += (s, e) => StartUpdateChecks();   // aviso de nueva versión (al arrancar y cada 3 h)            LayoutBottomBar();
         }
 
@@ -823,6 +824,11 @@ namespace SelectOR
             // Novedades de esta versión, en el idioma de SelectOR
             var notes = ReleaseNotes.Load(I18n.English);
             _rutaWelcome.News = notes.Items;
+            _rutaWelcome.LblOnline1 = Tr("{0} usuario conectado"); _rutaWelcome.LblOnlineN = Tr("{0} usuarios conectados");
+            _rutaWelcome.LblDriving = Tr("{0} conduciendo ahora"); _rutaWelcome.LblLive = Tr("EN DIRECTO");
+            _rutaWelcome.LblWeb = Tr("Web de SelectOR"); _rutaWelcome.LblDiscord = Tr("Discord"); _rutaWelcome.LblDiscordSub = Tr("Únete a la comunidad");
+            _rutaWelcome.WebUrl = I18n.English ? "https://www.select-or.app/en/" : "https://www.select-or.app/";
+            _rutaWelcome.LinkClicked += OpenLink;
             _rutaWelcome.NewsTitle = string.Format(Tr("NOVEDADES DE LA VERSIÓN {0}"), notes.Version.Length > 0 ? notes.Version : Updater.CurrentVersionText);
             _lblVersion.TextChanged += (s, e) => { _rutaWelcome.Footer = "SelectOR " + Updater.CurrentVersionText + (_lblVersion.Text.Length > 0 ? "   ·   " + _lblVersion.Text.Replace("  ", " ") : ""); _rutaWelcome.Invalidate(); };
             page.Controls.Add(_rutaWelcome);
@@ -1894,13 +1900,16 @@ namespace SelectOR
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            _lblServers = new Label { Text = Tr("Servidores públicos"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Text, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 0, 14, 0) };
+            _lblServers = new Label { Text = Tr("Servidores públicos"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Text, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 0, 14, 0), Visible = false };
+            // Secciones: las salas oficiales de SelectOR (MainMenuForm.Salas.cs) y los servidores públicos de siempre.
+            _mpSections = MakeSubTabs(new[] { "🖥  Servidores SelectOR", "🌐  Servidores públicos" }, i => SetMpSection(i));
+            _mpSections.Dock = DockStyle.None; _mpSections.AutoSize = true; _mpSections.Margin = new Padding(0, 0, 18, 0); _mpSections.Anchor = AnchorStyles.Left;
             _srvTabs = MakeSubTabs(new[] { "Todos", "Con jugadores", "Rutas que tengo" }, i => { _srvFilter = i; FillServerCards(); });
             _srvTabs.Dock = DockStyle.Fill; _srvTabs.Margin = new Padding(0);
             _srvAge = new Label { AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Text = "", Margin = new Padding(10, 0, 10, 0) };
             var btnRefresh = new RoundButton { Text = Tr("Actualizar"), Icon = "⟲", Width = 120, Height = 30, Radius = 8, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9f, Anchor = AnchorStyles.Right };
-            btnRefresh.Click += (s, e) => LoadServers();
-            bar.Controls.Add(_lblServers, 0, 0); bar.Controls.Add(_srvTabs, 1, 0); bar.Controls.Add(_srvAge, 2, 0); bar.Controls.Add(btnRefresh, 3, 0);
+            btnRefresh.Click += (s, e) => { if (_mpSection == 0) LoadRooms(); else LoadServers(); };
+            bar.Controls.Add(_mpSections, 0, 0); bar.Controls.Add(_srvTabs, 1, 0); bar.Controls.Add(_srvAge, 2, 0); bar.Controls.Add(btnRefresh, 3, 0);
             // Si no caben las pestañas enteras, fuera la hora de la lista (las pestañas no se cortan).
             bar.SizeChanged += (s, e) => FitServerBar(bar, btnRefresh);
             _srvBar = bar; _srvRefreshBtn = btnRefresh;
@@ -1923,16 +1932,20 @@ namespace SelectOR
             _srvGrid.Join += it => { SelectServer(it.S); PlayMultiplayer(); };
             var srvHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 6, 0, 0) };
             srvHost.Controls.Add(_srvGrid);
+            var listHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
+            srvHost.Dock = DockStyle.Fill; srvHost.Visible = false;
+            listHost.Controls.Add(srvHost); listHost.Controls.Add(BuildRoomPage());
 
             // Se actualiza solo cada 30 s mientras la página está a la vista (lista + candados, de una vez y sin
             // repintar si nada ha cambiado); el contador «hace X s» corre cada segundo.
             _mpStatusTimer = new Timer { Interval = 30000 };
-            _mpStatusTimer.Tick += (s, e) => { if (page.Visible && !IsMinimizedNow()) LoadServers(); };
+            _mpStatusTimer.Tick += (s, e) => { if (page.Visible && !IsMinimizedNow()) { if (_mpSection == 0) LoadRooms(); else LoadServers(); } };
             var ageTimer = new Timer { Interval = 1000 };
             ageTimer.Tick += (s, e) => UpdateServerAge();
-            page.VisibleChanged += (s, e) => { if (page.Visible) { _mpStatusTimer.Start(); ageTimer.Start(); LayoutMpTop(); } else { _mpStatusTimer.Stop(); ageTimer.Stop(); } };
+            page.VisibleChanged += (s, e) => { if (page.Visible) { _mpStatusTimer.Start(); ageTimer.Start(); LayoutMpTop(); if (_mpSection == 0) LoadRooms(); } else { _mpStatusTimer.Stop(); ageTimer.Stop(); } };
+            SetMpSection(0);
 
-            page.Controls.Add(srvHost);
+            page.Controls.Add(listHost);
             page.Controls.Add(bar);
             page.Controls.Add(top);
             return page;
@@ -1958,11 +1971,11 @@ namespace SelectOR
 
         void FitServerBar(Control bar, Control btn)
         {
-            if (_srvTabs == null || _lblServers == null || _srvAge == null) return;
+            if (_srvTabs == null || _mpSections == null || _srvAge == null) return;
             int tabsW = 0; foreach (Control c in _srvTabs.Controls) tabsW += c.Width + c.Margin.Horizontal;
             int ageW = TextRenderer.MeasureText(_srvAge.Text.Length > 0 ? _srvAge.Text : "actualizado hace 59 s", _srvAge.Font).Width + _srvAge.Margin.Horizontal;
-            int free = bar.Width - _lblServers.Width - _lblServers.Margin.Horizontal - btn.Width - btn.Margin.Horizontal - tabsW;
-            bool show = free >= ageW;
+            int free = bar.Width - _mpSections.Width - _mpSections.Margin.Horizontal - btn.Width - btn.Margin.Horizontal - tabsW;
+            bool show = free >= ageW && _mpSection == 1;
             _srvAge.Visible = show;   // siempre: con la pestaña oculta, Visible devuelve false
         }
 
@@ -2528,6 +2541,7 @@ namespace SelectOR
                     LoadLog("ruta: actividades, recorridos y horarios leídos; llenando listas…");
                     _activitiesAll = acts; _pathsAll = paths; _timetablesAll = tts.Where(t => !IsTtDerived(t.fileName)).ToList();   // sin las copias de SelectOR
                     RefreshActivityList(); RefreshPathList(); RefreshTimetableSets();
+                    _routeLoadedToken = token;   // «Preparar» un turno espera a esto
                     UpdateRouteOverview();
                     SetIdle(); UpdateStatus();
                     LoadLog("ruta: listas llenas");
@@ -3241,7 +3255,7 @@ namespace SelectOR
             string flag = _rbServer.Checked ? "-multiplayerserver" : "-multiplayerclient";
             var args = $"{flag} -explorer \"{p.FilePath}\" \"{c.FilePath}\" {time} {season} {weather}";
             // Servidor PÚBLICO: la contraseña la gestiona SelectOR (el primero la pone; los demás la escriben).
-            if (_rbClient.Checked)
+            if (_rbClient.Checked && _roomPending == null)   // (en una sala de SelectOR ya lo ha comprobado el servidor)
             {
                 var pub = PublicServerFor(host, port.ToString());
                 if (pub != null && !await MpGate(pub)) return;
@@ -3334,6 +3348,7 @@ namespace SelectOR
                 {
                     bool svc = serviceId != null;   // servicio de empresa (con tiempo/viajeros) o conducción normal
                     _mpClientRun = args.IndexOf("-multiplayerclient", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (_mpClientRun) RoomLaunched(); else _roomPending = null;   // servidores SelectOR: avisos mientras se juega
                     _pendingServiceId = serviceId;
                     _svcOpenedUtc = svc ? DateTime.UtcNow : (DateTime?)null;
                     if (!svc) _driveStartUtc = DateTime.UtcNow;

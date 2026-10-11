@@ -416,31 +416,35 @@ namespace SelectOR
 
         TableLayoutPanel BuildLeagueSettingsPage()
         {
-            var page = FormPage(false);
-            // Como «Economía de flota»: columna interior de ancho propio (los campos no se estiran).
-            var p = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
-            page.Controls.Add(p);
+            // Dos columnas, sin barras: la liga a la izquierda (premios en rejilla) y la prima de los turnos a la derecha.
+            var (page, p, r) = TwoColPage();
             p.Controls.Add(EmpHeader("LIGA MENSUAL DE EMPRESAS (GLOBAL, ADMINISTRADOR)"));
-            p.Controls.Add(EmpIntro("Cada mes natural es una temporada. Al terminar, el servidor ingresa los premios en la tesorería de las empresas ganadoras y los apunta en su Banca."));
+            var intro = EmpNote(Tr("Cada mes natural es una temporada. Al terminar, el servidor ingresa los premios en la tesorería de las empresas ganadoras y los apunta en su Banca."));
+            intro.MaximumSize = new Size(576, 0); p.Controls.Add(intro);
             _lgEnabled = ParamCheck(Tr("Liga activada")); _lgEnabled.Checked = true; p.Controls.Add(_lgEnabled);
-            RoundedInput Campo(string etiqueta, string ph) { p.Controls.Add(EmpFieldLabel(etiqueta)); var i = EmpInput(ph); i.Width = 240; i.Anchor = AnchorStyles.Left; p.Controls.Add(i); return i; }
-            _lgG1 = Campo(Tr("Premio general · 1.º puesto (€)"), "1000000");
-            _lgG2 = Campo(Tr("Premio general · 2.º puesto (€)"), "500000");
-            _lgG3 = Campo(Tr("Premio general · 3.º puesto (€)"), "250000");
-            _lgPax = Campo(Tr("Premio de viajeros (€)"), "400000");
-            _lgFreight = Campo(Tr("Premio de mercancías (€)"), "400000");
-            _lgPart = Campo(Tr("Premio de participación, por empresa (€)"), "50000");
-            _lgCap = Campo(Tr("Servicios que puntúan por maquinista y día"), "8");
-            _lgMin = Campo(Tr("Servicios mínimos para clasificar"), "10");
+            p.Controls.Add(EmpHeader("PREMIOS (€)"));
+            p.Controls.Add(FieldGrid(3, 180,
+                (Tr("General · 1.º puesto"), _lgG1 = EmpInput("1000000")),
+                (Tr("General · 2.º puesto"), _lgG2 = EmpInput("500000")),
+                (Tr("General · 3.º puesto"), _lgG3 = EmpInput("250000")),
+                (Tr("Viajeros"), _lgPax = EmpInput("400000")),
+                (Tr("Mercancías"), _lgFreight = EmpInput("400000")),
+                (Tr("Participación, por empresa"), _lgPart = EmpInput("50000"))));
+            p.Controls.Add(EmpHeader("PUNTUACIÓN"));
+            p.Controls.Add(FieldGrid(2, 279,
+                (Tr("Servicios que puntúan por maquinista y día"), _lgCap = EmpInput("8")),
+                (Tr("Servicios mínimos para clasificar"), _lgMin = EmpInput("10"))));
             var save = EmpButton(Tr("Guardar liga"), primary: true); save.Width = 240;
             save.Click += (s, e) => SaveLeagueSettings();
             p.Controls.Add(save);
+            AddSchedSettings(r);   // prima de los servicios programados (MainMenuForm.Programados.cs)
             return page;
         }
 
         async void LoadLeagueSettings()
         {
             if (_lgG1 == null || !Supa.IsSuperadmin) return;
+            LoadSchedSettings();
             var (c, err) = await ReadLeagueCfg();
             if (c == null) { if (NoLeagueOnServer(err)) Msg(_tariffMsg, Tr("El servidor aún no tiene la liga mensual."), true); return; }
             _lgEnabled.Checked = c.Enabled;

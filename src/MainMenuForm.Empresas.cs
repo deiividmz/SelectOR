@@ -1030,15 +1030,23 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // Los viajes fallidos o no válidos ya no se guardan (el servidor los borra al cerrarlos).
-            var tabs = MakeSubTabs(new[] { "Todos", "En conducción", "Completados" }, i => _svcCards.StatusFilter = i);
+            // «Programados»: los turnos de la empresa (MainMenuForm.Programados.cs), en lugar de la lista y el calendario.
+            Panel mid = null; FlowLayoutPanel svcBtns = null; RoundedInput search = null; Control sched = null;
+            var tabs = MakeSubTabs(new[] { "Todos", "En conducción", "Completados", "Programados" }, i =>
+            {
+                bool sch = i == 3;
+                if (!sch) _svcCards.StatusFilter = i;
+                mid.Visible = !sch; svcBtns.Visible = !sch; search.Visible = !sch; sched.Visible = sch;
+                if (sch) LoadSched();
+            });
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             _svcTabs = tabs;
-            var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 260, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
+            search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 260, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
             search.Box.TextChanged += (s, e) => _svcCards.Filter(search.Box.Text);
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
             // Lista y, a la derecha, el calendario (un clic en un día lleva la lista a ese día).
-            var mid = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
+            mid = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
             var calHost = new Panel { Dock = DockStyle.Right, Width = Theme.Px(250), BackColor = Theme.Bg, Padding = new Padding(Theme.Px(10), Theme.Px(4), 0, 0) };
             _svcCal = new ServiceCalendar { Dock = DockStyle.Top };
             calHost.Controls.Add(_svcCal);
@@ -1049,10 +1057,13 @@ namespace SelectOR
             _svcCards.LblAnnulled = Tr("ANULADO");
             mid.Controls.Add(_svcCards);
             mid.Controls.Add(calHost);
-            t.Controls.Add(mid);
+            sched = BuildSchedPage();
+            var midHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
+            midHost.Controls.Add(mid); midHost.Controls.Add(sched);
+            t.Controls.Add(midHost);
 
             // Acciones: ver detalle (todos) + borrar servicio (solo superadmin).
-            var svcBtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
+            svcBtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
             var detailBtn = EmpButton(Tr("Ver detalle del servicio"), primary: true); detailBtn.Width = 230;
             detailBtn.Click += (s, e) => OpenServiceDetail(SelectedServiceIndex());
             svcBtns.Controls.Add(detailBtn);
@@ -1077,6 +1088,7 @@ namespace SelectOR
         {
             _svcRows.Clear(); _svcLastJson = _svcLastTrenJson = null; _svcCardsCompany = null; _svcStats = null;
             _svcCards?.SetItems(Array.Empty<ServiceCardList.Item>());
+            ClearSched();
             UpdateServiceTabCounts();
         }
 
@@ -1084,11 +1096,17 @@ namespace SelectOR
         void UpdateServiceTabCounts()
         {
             if (_svcTabs == null) return;
-            string[] names = { "Todos", "En conducción", "Completados" };
+            string[] names = { "Todos", "En conducción", "Completados", "Programados" };
             using var f = Theme.Font(9.75f, FontStyle.Bold);
             for (int k = 0; k < names.Length && k < _svcTabs.Controls.Count; k++)
             {
                 if (_svcTabs.Controls[k] is not RoundButton b) continue;
+                if (k == 3)   // turnos por hacer (libres y reservados)
+                {
+                    b.Text = Tr(names[k]) + (_schedPending > 0 ? "  " + _schedPending.ToString("N0", EsEs) : "");
+                    b.Width = TextRenderer.MeasureText(b.Text, f).Width + 34; b.Invalidate();
+                    continue;
+                }
                 long n = System.Linq.Enumerable.Count(_svcRows, r => k == 0 || (k == 1 ? r.Status == "open" : r.Status != "open"));
                 if (_svcStats is { } st) n = k == 0 ? st.total : k == 1 ? st.open : st.total - st.open;   // los del servidor, sin límite
                 b.Text = Tr(names[k]) + (_svcRows.Count > 0 || n > 0 ? "  " + n.ToString("N0", EsEs) : "");
@@ -1187,6 +1205,40 @@ namespace SelectOR
             return p;
         }
 
+        // Rejilla de campos (rótulo encima y campo debajo, «cols» por fila, todos del mismo ancho): así los Ajustes
+        // caben sin barras de desplazamiento.
+        static TableLayoutPanel FieldGrid(int cols, int fieldW, params (string label, RoundedInput input)[] fields)
+        {
+            var g = new TableLayoutPanel { AutoSize = true, ColumnCount = cols, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
+            for (int c = 0; c < cols; c++) g.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            // los rótulos de una fila, todos de la altura del más alto (si uno ocupa dos líneas, los campos siguen alineados)
+            var rowH = new int[(fields.Length + cols - 1) / cols];
+            using (var f = Theme.Font(9f))
+                for (int i = 0; i < fields.Length; i++)
+                    rowH[i / cols] = Math.Max(rowH[i / cols], TextRenderer.MeasureText(fields[i].label, f, new Size(fieldW, 0), TextFormatFlags.WordBreak).Height);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                var cell = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, i % cols == cols - 1 ? 0 : 18, 0) };
+                var l = EmpFieldLabel(fields[i].label); l.MaximumSize = new Size(fieldW, 0); l.MinimumSize = new Size(0, rowH[i / cols]);
+                var inp = fields[i].input; inp.Anchor = AnchorStyles.Left; inp.Width = fieldW;
+                cell.Controls.Add(l); cell.Controls.Add(inp);
+                g.Controls.Add(cell, i % cols, i / cols);
+            }
+            return g;
+        }
+
+        // Página de Ajustes a dos columnas (izquierda y derecha, cada una con su ancho).
+        static (TableLayoutPanel page, TableLayoutPanel left, TableLayoutPanel right) TwoColPage()
+        {
+            var page = FormPage(false);
+            page.Dock = DockStyle.Fill; page.ColumnCount = 2;
+            page.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            var L = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
+            var R = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(40, 0, 0, 0) };
+            page.Controls.Add(L, 0, 0); page.Controls.Add(R, 1, 0);
+            return (page, L, R);
+        }
+
         // AJUSTES (superadmin): sub-pestañas «Tarifas», «Saldos» y «Economía de flota».
         Panel BuildTariffSubpanel()
         {
@@ -1236,27 +1288,27 @@ namespace SelectOR
             pBal.Controls.Add(_defBalanceRow);
 
             // --- Economía de flota (global) ---
-            var pFs = FormPage(false);
+            // Dos columnas, sin barras: a la izquierda precios y billete; a la derecha, los trenes de empresa.
+            var (pFs, fsL, fsR) = TwoColPage();
             _fleetSettingsRow = new Panel { AutoSize = true, BackColor = Theme.Bg, Margin = new Padding(0) };
-            var fsInner = new TableLayoutPanel { AutoSize = true, ColumnCount = 1 };
+            var fsInner = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
             fsInner.Controls.Add(EmpHeader("ECONOMÍA DE FLOTA (GLOBAL, ADMINISTRADOR)"));
-            fsInner.Controls.Add(EmpFieldLabel(Tr("Escala de precio (1 = precios reales en millones)")));
-            _fsScale = EmpInput("1"); _fsScale.Width = 240; fsInner.Controls.Add(_fsScale);
-            fsInner.Controls.Add(EmpFieldLabel(Tr("Alquiler por servicio (fracción del valor, p. ej. 0,00008)")));
-            _fsRentPct = EmpInput("0,00008"); _fsRentPct.Width = 240; fsInner.Controls.Add(_fsRentPct);
-            fsInner.Controls.Add(EmpFieldLabel(Tr("Mantenimiento por taller (fracción del valor, p. ej. 0,0015)")));
-            _fsMaintPct = EmpInput("0,0015"); _fsMaintPct.Width = 240; fsInner.Controls.Add(_fsMaintPct);
-            _fsFareLbl = EmpFieldLabel(FareFormulaText(0.02, 0.005));   // con los coeficientes del servidor al cargar (LoadFleetSettings)
+            fsInner.Controls.Add(FieldGrid(3, 180,
+                (Tr("Escala de precio (1 = reales)"), _fsScale = EmpInput("1")),
+                (Tr("Alquiler por servicio (× valor)"), _fsRentPct = EmpInput("0,00008")),
+                (Tr("Mantenimiento (× valor)"), _fsMaintPct = EmpInput("0,0015"))));
+            fsInner.Controls.Add(EmpHeader("BILLETE DE VIAJEROS"));
+            _fsFareLbl = EmpNote(FareFormulaText(0.02, 0.005)); _fsFareLbl.MaximumSize = new Size(576, 0);   // con los coeficientes del servidor (LoadFareFormula)
             fsInner.Controls.Add(_fsFareLbl);
-            _fsFareBase = EmpInput("1,5"); _fsFareBase.Width = 240; fsInner.Controls.Add(_fsFareBase);
-            fsInner.Controls.Add(EmpFieldLabel(Tr("Billete por km (€ por viajero y km a bordo, p. ej. 0,08)")));
-            _fsFareKm = EmpInput("0,08"); _fsFareKm.Width = 240; fsInner.Controls.Add(_fsFareKm);
+            fsInner.Controls.Add(FieldGrid(3, 180,
+                (Tr("Billete base (€)"), _fsFareBase = EmpInput("1,5")),
+                (Tr("Billete por km (€/viajero·km)"), _fsFareKm = EmpInput("0,08"))));
             _fsSaveBtn = EmpButton(Tr("Guardar economía de flota"), primary: true); _fsSaveBtn.Width = 240;
             _fsSaveBtn.Click += (s, e) => SaveFleetSettings();
             fsInner.Controls.Add(_fsSaveBtn);
-            fsInner.Controls.Add(BuildTrainModeRow());   // trenes de empresa: no se comprueba / aviso / obligatorio
             _fleetSettingsRow.Controls.Add(fsInner);
-            pFs.Controls.Add(_fleetSettingsRow);
+            fsL.Controls.Add(_fleetSettingsRow);
+            fsR.Controls.Add(BuildTrainModeRow());   // trenes de empresa: no se comprueba / aviso / obligatorio
 
             // --- Viajeros (modelo de demanda, global) ---
             // Dos columnas para que todo quepa sin barras de desplazamiento:
@@ -1416,6 +1468,7 @@ namespace SelectOR
             kpis.Controls.Add(KpiTile(Tr("TIEMPO TOTAL"), out _profTimeVal, "⏱", ColViolet));
             kpis.Controls.Add(KpiTile(Tr("VEL. MEDIA"), out _profSpeedVal, "🚄", ColOrange));
             kpis.Controls.Add(KpiTile(Tr("VIAJEROS"), out _profPaxVal, "🧍", ColTeal));
+            kpis.Controls.Add(KpiTile(Tr("TURNOS CUMPLIDOS"), out _profSchedVal, "🗓", ColGold));
             t.Controls.Add(kpis);
 
             _badgesHeader = EmpHeader("INSIGNIAS");
@@ -1994,6 +2047,8 @@ namespace SelectOR
             if (c == null) return;
             int seq = ++_svcLoadSeq;
             if (_svcCardsCompany != c.Id) { _svcCardsCompany = c.Id; _svcLastJson = _svcLastTrenJson = null; _svcCards?.ShowMessage(Tr("Cargando…")); }
+            if (_schedCompany != c.Id || (_schedPage != null && _schedPage.Visible) || DateTime.UtcNow - _schedLoadedUtc > TimeSpan.FromMinutes(1))
+                LoadSched(c);   // turnos (y su número en la pestaña)
             // Todo el historial, por páginas de 1000 (servicios-anulados.sql); un servidor sin ese archivo
             // devuelve los 200 últimos con la función de antes.
             async Task<(string, string)> lista()
@@ -2183,6 +2238,7 @@ namespace SelectOR
                             case "salary": data.Salary = amt; break;
                             case "other": data.Rental = amt; break;   // alquiler de la unidad
                             case "maintenance": data.Maintenance = amt; break;
+                            case "sched_bonus": data.SchedBonus += Num(e, "amount"); data.SchedDone = true; break;   // servicios-programados.sql
                         }
                     }
                 }
@@ -2291,7 +2347,7 @@ namespace SelectOR
         // Grupo de cada concepto para los filtros del extracto (1 ingresos · 2 cánon · 3 energía · 4 salarios · 5 flota · 6 otros).
         static int BankGroup(BankStatement.Move m) => m.Concept switch
         {
-            "income" or "prize" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
+            "income" or "prize" or "sched_bonus" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
         };
 
         DateTime BankPeriodStart() => _bankPeriod switch
@@ -2419,6 +2475,7 @@ namespace SelectOR
             "loan" => Tr("Préstamo"),
             "other" => Tr("Otro"),
             "prize" => Tr("Premio"),   // los de la liga y el de bienvenida: la descripción dice cuál
+            "sched_bonus" => Tr("Prima de servicio programado"),
             "adjustment" => Tr("Ajuste de saldo"),
             _ => c
         };
@@ -2478,8 +2535,7 @@ namespace SelectOR
                 FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false,
                 ClientSize = new Size(440, 168)
             };
-            try { dlg.Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
-            var stripe = new LiveryStripe { Dock = DockStyle.Top };
+            DialogKit.Dress(dlg, false);
             var lbl = new Label { Text = I18n.T("Elige la empresa a la que quieres unirte:"), Location = new Point(18, 22), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(10f) };
             var combo = new ThemeCombo { DropDownStyle = ComboBoxStyle.DropDownList, Width = 404, Location = new Point(18, 52) };
             StyleCombo(combo);
@@ -2489,7 +2545,8 @@ namespace SelectOR
             ok.Click += (s, e) => { dlg.DialogResult = DialogResult.OK; dlg.Close(); };
             var cancel = new RoundButton { Text = I18n.T("Cancelar"), Size = new Size(110, 40), Location = new Point(124, 108), Radius = 10, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 10f };
             cancel.Click += (s, e) => { dlg.DialogResult = DialogResult.Cancel; dlg.Close(); };
-            dlg.Controls.Add(combo); dlg.Controls.Add(lbl); dlg.Controls.Add(ok); dlg.Controls.Add(cancel); dlg.Controls.Add(stripe);
+            dlg.Controls.Add(combo); dlg.Controls.Add(lbl); dlg.Controls.Add(ok); dlg.Controls.Add(cancel);
+            DialogKit.Crown(dlg, dlg.Text, null, "🤝");
             dlg.AcceptButton = null;
             return dlg.ShowDialog(this) == DialogResult.OK ? combo.SelectedItem as string : null;
         }
@@ -3355,6 +3412,7 @@ namespace SelectOR
                 if (d.RootElement.ValueKind == JsonValueKind.String) sid = d.RootElement.GetString();
             }
             catch { }
+            await SchedBeforeLaunchAsync(_empOnDutyCompany.Id, _curRoute?.Name ?? "", CurrentPathLabel());   // ¿es su turno programado? (su itinerario, a la hoja de ruta)
             return sid;
         }
 
@@ -4158,6 +4216,17 @@ namespace SelectOR
 
         // Viajeros que esperan en una estación a una hora dada. La base es un % de las plazas del tren: un
         // tren grande encuentra más gente que un automotor pequeño, y una estación grande más que un apeadero.
+        // Redondeo al azar en proporción a los decimales (0,35 → 1 una de cada tres veces; 7,6 → 8 seis de cada diez):
+        // de media sale lo mismo que el cálculo y los apeaderos no se quedan siempre a cero. El azar es fijo para cada
+        // estación y visita, así que el aviso de la próxima parada y la parada dan la misma cifra.
+        int PaxRound(double d, string norm, int salt)
+        {
+            if (!(d > 0)) return 0;
+            double fl = Math.Floor(d), frac = d - fl;
+            double u = PaxJitter(norm, salt, 1.0) / 2.0;   // (PaxJitter con margen 1 da 0..2)
+            return (int)fl + (u < frac ? 1 : 0);
+        }
+
         int PaxDemandAt(string norm, int hour)
         {
             double weight = _paxMeta.TryGetValue(norm, out var m) ? m.weight : 1.0;
@@ -4167,7 +4236,7 @@ namespace SelectOR
             double d = basePax * weight * PaxProfileFactor(_paxProfile) * curve[((hour % 24) + 24) % 24]
                      * PaxSeasonFactor(_paxProfile, _paxSeason) * PaxWeatherFactor(_paxProfile, _paxWeather)
                      * PaxJitter(norm, visit, PaxCfg.Jitter);
-            return Math.Max(0, (int)Math.Round(d));
+            return Math.Max(0, PaxRound(d, norm, visit + 303));
         }
 
         // Longitud del tren (suma de sus coches) y cuánto va por delante del centro de la locomotora
@@ -4312,12 +4381,15 @@ namespace SelectOR
                         stop = hasDoors ? !open : (_stoppedSinceUtc == null);
                     }
                 }
-                catch { }
+                catch { stop = false; }   // una lectura que falla no corta el intercambio
                 _paxAnimDoorCheck = false;
-                if (stop) { PausePaxAnimation(); return; }
+                // dos lecturas seguidas de «cerradas» (una sola puede ser un fallo de lectura)
+                _paxAnimClosedReads = stop ? _paxAnimClosedReads + 1 : 0;
+                if (_paxAnimClosedReads >= 2) { _paxAnimClosedReads = 0; PausePaxAnimation(); return; }
             }
-            // Flujo irregular: a veces nadie, a veces un grupo.
+            // Flujo irregular: a veces nadie, a veces un grupo (en el primer movimiento, al menos uno).
             int n = _paxRnd.Next(0, 2 * _paxAnimStep + 1);
+            if (n == 0 && _paxAnimAlighted + _paxAnimBoarded == 0) n = 1;
             if (_paxAnimAlightLeft > 0)          // primero bajan…
             {
                 n = Math.Min(n, _paxAnimAlightLeft);
@@ -4333,8 +4405,17 @@ namespace SelectOR
                 _paxAnimBoardLeft -= n; _paxAnimBoarded += n;
                 _paxOnboard += n; _paxBoarded += n;
             }
-            else EndPaxAnimation();
+            else { EndPaxAnimation(); return; }
+            PaxStopRecUpdate();   // la parada, al día en cada movimiento (si se registra el servicio a mitad, ya lleva sus cifras)
         }
+
+        // Las cifras de la parada en curso, en su anotación del servicio.
+        void PaxStopRecUpdate()
+        {
+            if (_svcStopsLog.Count > 0 && _svcStopsLog[^1].Station == _paxAnimStation)
+            { _svcStopsLog[^1].Board = _paxAnimBoarded; _svcStopsLog[^1].Alight = _paxAnimAlighted; }
+        }
+        int _paxAnimClosedReads;
 
         void PausePaxAnimation()
         {
@@ -4358,8 +4439,9 @@ namespace SelectOR
             _paxAnimating = false; _paxPaused = false;
             _paxLastEvent = $"{_paxAnimStation}:  +{_paxAnimBoarded} / −{_paxAnimAlighted}";
             _paxLastEventUtc = DateTime.UtcNow;
-            if (_svcStopsLog.Count > 0 && _svcStopsLog[^1].Station == _paxAnimStation)
-            { _svcStopsLog[^1].Board = _paxAnimBoarded; _svcStopsLog[^1].Alight = _paxAnimAlighted; }
+            _paxAnimClosedReads = 0;
+            PaxStopRecUpdate();
+            if (_pendingServiceId != null) { try { SaveServiceJournal(force: true); } catch { } }   // por si se cierra todo de golpe
         }
 
         // En cada sondeo: rumbo, reembarque, próxima parada y, si el tren está PARADO con PUERTAS
@@ -4461,7 +4543,7 @@ namespace SelectOR
                 // Bajan: fracción del perfil, más en estaciones grandes (±15 %).
                 bool big = weight >= PaxCfg.StationWeights[2];
                 double frac = PaxAlightFraction(_paxProfile) * (big ? PaxCfg.BigStationAlight : 1.0) * PaxJitter(bestNorm, visit + 101, PaxCfg.Jitter);
-                int alight = (int)Math.Floor(_paxOnboard * Math.Min(0.9, Math.Max(0, frac)));
+                int alight = Math.Min(_paxOnboard, PaxRound(_paxOnboard * Math.Min(0.9, Math.Max(0, frac)), bestNorm, visit + 202));
                 // Suben: los que esperan, hasta el aforo. El aforo es el PassengerCapacity sumado de
                 // toda la composición: no se admiten más viajeros a bordo que plazas declara el tren.
                 int board = Math.Max(0, Math.Min(PaxDemandAt(bestNorm, hour), _paxCapacity - (_paxOnboard - alight)));
@@ -4481,13 +4563,19 @@ namespace SelectOR
             finally { _paxBusy = false; }
         }
 
+        // ¿Es la estación donde termina el trayecto (ahí solo bajan)? Con el nombre EXACTO (no «Medina» por «Medina del
+        // Campo») y solo al final: en un trayecto de ida y vuelta (A → B → A) la estación de salida no es la final.
         bool IsFinalStation(string station)
         {
-            string fin = _road.FinalStation();
+            var fs = _road.FinalStop();
+            string fin = fs?.Name;
             if (string.IsNullOrEmpty(fin) || string.IsNullOrEmpty(station)) return false;
             string a = RoadBook.NormName(CleanStation(fin)), b = RoadBook.NormName(CleanStation(station));
-            if (a.Length < 3 || b.Length < 3) return a == b && a.Length > 0;
-            return a == b || a.Contains(b) || b.Contains(a);
+            if (a.Length == 0 || a != b) return false;
+            // la hoja de ruta sigue al tren: hay que estar cerca del final del trayecto
+            if (!_road.OffRoute && _road.Progress > 0 && fs.Dist > 0) return _road.Progress >= fs.Dist - 1500;
+            // sin saber por dónde va: no en la primera parada ni con el tren vacío (sería la de salida)
+            return _paxOnboard > 0 && _svcStopsLog.Count > 0;
         }
 
         async Task<double> FetchSpeedKmh()
@@ -4790,6 +4878,7 @@ namespace SelectOR
             }
 
             var tLic = LoadLicense();   // carné por puntos (a la vez que los servicios)
+            var tSched = LoadSchedMeritAsync();   // turnos cumplidos (servicios programados)
             LoadMyPhoto();
             // Servicios de empresa donde soy el maquinista
             var (sj, se) = await Supa.SelectAsync(
@@ -4819,6 +4908,7 @@ namespace SelectOR
 
             __pf.Dispose();
             try { await tLic; } catch { }
+            try { await tSched; } catch { }
             using (Perf.T("Mi perfil · rango e insignias"))
             UpdateRankAndBadges(totalKm, trips, hours, invalid, routeCount.Count, totalPax, trainCount.Count, avg);
             var __pt = Perf.T("Mi perfil · trenes y rutas");
@@ -4945,6 +5035,10 @@ namespace SelectOR
                 Badge("✅", Tr("Conducción limpia"), trips >= 5 && invalid == 0, Theme.Accent);
                 Badge("🛡", Tr("Impecable (50 servicios)"), trips >= 50 && invalid == 0, Theme.Accent);
                 Badge("⚡", Tr("Alta velocidad (media 100 km/h)"), trips >= 10 && avgKmh >= 100, ColOrange);
+                // Turnos (servicios programados cumplidos)
+                Badge("🗓", Tr("Primer turno cumplido"), _profSchedDone >= 1, ColGold, _profSchedDone / 1.0);
+                Badge("📋", Tr("10 turnos cumplidos"), _profSchedDone >= 10, ColGold, _profSchedDone / 10.0);
+                Badge("🎗", Tr("50 turnos cumplidos"), _profSchedDone >= 50, ColOrange, _profSchedDone / 50.0);
                 var firma = new System.Text.StringBuilder();
                 foreach (var x in lista) firma.Append(x.text).Append(x.earned ? '1' : '0').Append('|');
                 foreach (var x in lista) firma.Append(((int)(x.prog * 20)).ToString());
@@ -5289,7 +5383,7 @@ namespace SelectOR
             _fleetPlateBtn.Click += (s2, e2) => AssignPlateUi();
             // sin «Llevar al taller»: el mantenimiento se hace solo al cumplir los km (taller-automatico.sql)
             _fleetAddConBtn = Act("Añadir a mi contenido"); _fleetAddConBtn.Visible = false; _fleetAddConBtn.Click += (s2, e2) => AddFleetTrainToContent();
-            _fleetSeatsBtn = Act("Plazas…"); _fleetSeatsBtn.Visible = false; _fleetSeatsBtn.Click += (s2, e2) => SetTrainSeatsUi();
+            _fleetSeatsBtn = Act("Tipo y plazas…"); _fleetSeatsBtn.Visible = false; _fleetSeatsBtn.Click += (s2, e2) => SetTrainSeatsUi();
             _fleetInfoBtn = Act("ⓘ  Desglose del precio"); _fleetInfoBtn.Visible = false;
             _fleetInfoBtn.Click += (s2, e2) => { int i = FleetSelectedRow(); if (i >= 0 && i < _fleetRowTrain.Count && _fleetTrainModels.TryGetValue(_fleetRowTrain[i], out var m)) ShowFleetTrainBreakdown(m); };
             acts.Controls.AddRange(new Control[] { _fleetRemoveBtn, _fleetPlateBtn, _fleetSeatsBtn, _fleetAddConBtn, _fleetInfoBtn });
@@ -5798,8 +5892,8 @@ namespace SelectOR
             _fleetPlates.Add(plate);
             _fleetRowEng.Add(leadPath);
             _fleetRowTrain.Add(trainId); _fleetRow2D.Add(view);
-            string kindTxt = t == null ? Tr("Tren") : TrainCarriesPassengers(t.Vehicles) ? Tr("Viajeros") : Tr("Mercancías");
-            string seatsTxt = cap > 0 ? cap.ToString("N0", EsEs) + (t?.Seats != null ? " · " + Tr("fijadas") : "") : "—";
+            string kindTxt = t == null ? Tr("Tren") : (t.CarriesPax ? Tr("Viajeros") : Tr("Mercancías")) + (t.Kind != null ? " · " + Tr("fijado") : "");
+            string seatsTxt = cap > 0 && t?.Kind != "freight" ? cap.ToString("N0", EsEs) + (t?.Seats != null ? " · " + Tr("fijadas") : "") : "—";
             _fleetRowDetail.Add(JoinDetail(new[] { plate.Length > 0 ? plate + "  ·  " + name : name, kindTxt, prop, interval > 0 ? remaining.ToString("N0", EsEs) + " km" : "—",
                                         estado, seatsTxt, TractionName(Str(e, "engine_type")) }
                                 , FleetExtraDetail(e), new[] { t != null ? TrainSummary(t.Vehicles) : "" }));
@@ -6856,6 +6950,7 @@ namespace SelectOR
             }
             catch { }
             if (SeatsOverride(c) is int seats) cap = seats;   // las plazas que ha fijado la empresa
+            if (KindOverride(c) == "freight") cap = 0;         // de mercancías para la empresa: sin plazas
             return (cars, mass, brake, cap);
         }
 
@@ -7923,7 +8018,7 @@ namespace SelectOR
         string FleetTrainSub(CoTrain t, bool local)
         {
             var sub = new List<string>();
-            if (t != null) { sub.Add(TrainCarriesPassengers(t.Vehicles) ? Tr("Viajeros") : Tr("Mercancías")); sub.Add(TrainSummary(t.Vehicles)); }
+            if (t != null) { sub.Add(t.CarriesPax ? Tr("Viajeros") : Tr("Mercancías")); sub.Add(TrainSummary(t.Vehicles)); }
             if (!local) sub.Add(Tr("(no lo tienes en tu contenido)"));
             return string.Join("  ·  ", sub);
         }
@@ -8273,6 +8368,9 @@ namespace SelectOR
         CompositionAnalysis AnalyzeComposition(TrainItem c, double leadSpeedKmh, bool ignoreSeats = false)
         {
             var result = new CompositionAnalysis();
+            // Tipo fijado por la empresa (tipo-tren.sql): de mercancías, sin plazas ni confort aunque sus archivos las traigan.
+            string kind = ignoreSeats ? null : KindOverride(c);
+            if (kind == "freight") { result.ServiceType = Tr("Mercancías"); result.Freight = true; return result; }
             double capSum = 0, areaSum = 0, areaAll = 0; bool anyTilting = false;
             if (c?.FilePath != null)
             {
@@ -8294,14 +8392,14 @@ namespace SelectOR
                 if (capSum <= 0) areaSum = areaAll;
                 capSum = seats;
             }
-            result.DeclaredPax = ConsistCarriesPeople(c) || (!ignoreSeats && SeatsOverride(c) != null);
+            result.DeclaredPax = ConsistCarriesPeople(c) || (!ignoreSeats && SeatsOverride(c) != null) || kind == "pax";
             if (capSum <= 0)
             {
                 // Sin plazas declaradas: si los archivos dicen que son coches de viajeros, es un tren
                 // de viajeros aunque nadie haya puesto PassengerCapacity (solo cambia la etiqueta; el
                 // embarque de viajeros sigue necesitando PassengerCapacity).
                 result.ServiceType = result.DeclaredPax ? ClassifyServiceType(leadSpeedKmh, 0) : Tr("Mercancías");
-                result.Freight = true;
+                result.Freight = kind != "pax";
                 return result;   // Capacity=Comfort=Density=0
             }
 
@@ -8750,6 +8848,7 @@ namespace SelectOR
             catch { }
 
             _estimatedKm = 0;
+            if (r.Valid) (r.SchedDone, r.SchedBonus) = await SchedOfServiceAsync(svc);   // turno cumplido y prima del servidor
             if (showDialog) r.Map = await BuildTripMap(openedUtc);
             if (!r.Valid) return ShowNotRegistered(r, showDialog);
             Msg(_empHomeMsg, Tr("Servicio registrado."), false);
@@ -8766,6 +8865,7 @@ namespace SelectOR
                 dlg.ShowDialog(this);
             }
             string sum = string.Format(Tr("Servicio registrado · {0} km · neto {1}"), r.Km.ToString("0.0", EsEs), r.Net.ToString("+#,##0.00 €;-#,##0.00 €", EsEs));
+            if (r.SchedDone) sum += " · " + (r.SchedBonus > 0 ? string.Format(Tr("turno cumplido, prima {0}"), r.SchedBonus.ToString("+#,##0.00 €", EsEs)) : Tr("turno cumplido"));
             return (true, sum);
         }
 
@@ -9353,7 +9453,7 @@ namespace SelectOR
         // del viaje por sus coeficientes (app_settings.fare_comfort_k / fare_speed_k, 0,02 y 0,005 por defecto).
         Label _fsFareLbl;
         string FareFormulaText(double kComfort, double kSpeed)
-            => string.Format(Tr("Billete base (€) — viajeros: billete = base + confort × {0} + velocidad media × {1} + €/km × km a bordo"),
+            => string.Format(Tr("Billete = base + confort × {0} + velocidad media × {1} + €/km × km a bordo."),
                              kComfort.ToString("0.####", EsEs), kSpeed.ToString("0.####", EsEs));
 
         async void LoadFareFormula()

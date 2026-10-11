@@ -480,22 +480,21 @@ namespace SelectOR
                 Text = Tr("Desglose del precio"), BackColor = Theme.Bg, ForeColor = Theme.Text, StartPosition = FormStartPosition.CenterParent,
                 MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, KeyPreview = true, Font = Theme.Font(9.5f), FormBorderStyle = FormBorderStyle.FixedDialog,
             };
-            try { f.Icon = Icon; } catch { }
+            DialogKit.Dress(f, false);
             int W = Theme.Px(1000);
             f.ClientSize = new Size(W + Theme.Px(40), 200);
             var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoSize = true, BackColor = Theme.Bg, Padding = new Padding(20, 14, 20, 16) };
-            stack.Controls.Add(new Label { Text = Tr("DESGLOSE DEL PRECIO"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) });
-            stack.Controls.Add(new Label { Text = title, AutoSize = true, MaximumSize = new Size(W, 0), ForeColor = Theme.Accent, Font = Theme.Font(14f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) });
             stack.Controls.Add(new Label { Text = TrainSummary(vs) + (note != null ? "  ·  " + note : ""), AutoSize = true, MaximumSize = new Size(W, 0), ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 10) });
             stack.Controls.Add(BuildBreakdownTable(vs, W, out double total));
             stack.Controls.Add(new Label { Text = string.Format(Tr("Total del tren: {0}  ·  alquiler: {1} por servicio"), TEur(total), TEur(total * _fleetRentPct)), AutoSize = true, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 10, 0, 4) });
             if (Math.Abs(_fleetScale - 1) > 0.001)
                 stack.Controls.Add(new Label { Text = string.Format(Tr("Incluye la escala de precios de la flota (× {0})."), _fleetScale.ToString("0.##", EsEs)), AutoSize = true, ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 4) });
-            var ok = EmpButton(Tr("Cerrar"), primary: true); ok.Width = Theme.Px(140); ok.Margin = new Padding(0, 10, 0, 0); ok.Click += (s, e) => f.Close();
+            var ok = EmpButton(Tr("Cerrar"), primary: true); ok.Width = Theme.Px(140); ok.Margin = new Padding(0, 10, 0, 0); ok.GradientTo = Theme.Accent2; ok.Radius = 10; ok.Anchor = AnchorStyles.Right; ok.Click += (s, e) => f.Close();
             stack.Controls.Add(ok);
             f.Controls.Add(stack);
+            int crownH = DialogKit.Crown(f, Tr("Desglose del precio"), title, "💶").Height + 3;   // franja y cabecera (como las demás ventanas)
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter) f.Close(); };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); };
+            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); };
             _breakdownOpen = f;
             try { f.ShowDialog(this); } finally { _breakdownOpen = null; }
         }

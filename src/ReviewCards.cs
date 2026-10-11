@@ -57,14 +57,14 @@ namespace SelectOR
             Fill(g, rc, Theme.Px(10), selected || hover ? Color.FromArgb(50, 54, 57) : Theme.Surface);
             if (selected) Stroke(g, rc, Theme.Px(10), Theme.Accent);
             // Franja: ámbar pendiente, gris anulada, rojo aplicada
-            var stripe = pending ? Amber : annulled ? Theme.Subtle : Carne.Red;
+            var stripe = it.Code == "train_kind" ? Blue : pending ? Amber : annulled ? Theme.Subtle : Carne.Red;
             using (var sb = new SolidBrush(stripe)) g.FillRectangle(sb, rc.X, rc.Y + Theme.Px(12), Theme.Px(3), rc.Height - Theme.Px(24));
 
             int pad = Theme.Px(14), x = rc.X + pad + Theme.Px(2), y = rc.Y + Theme.Px(12);
             // Código (A1…B7) en su cuadro
             bool isA = it.Code is "jump" or "speed_avg" or "time_accel" or "autopilot";
             var codeR = new Rectangle(x, y + Theme.Px(2), Theme.Px(46), Theme.Px(46));
-            var codeC = isA ? Carne.Red : Amber;
+            var codeC = it.Code == "train_kind" ? Blue : isA ? Carne.Red : Amber;
             Fill(g, codeR, Theme.Px(8), Color.FromArgb(annulled ? 30 : 45, codeC));
             Stroke(g, codeR, Theme.Px(8), Color.FromArgb(annulled ? 90 : 200, codeC), 1.2f);
             TextRenderer.DrawText(g, Carne.Code(it.Code), _fCode, codeR, annulled ? Theme.Subtle : codeC, C1);
@@ -73,7 +73,8 @@ namespace SelectOR
             // Derecha: puntos y estado
             int rightW = Theme.Px(190), right = rc.Right - rightW;
             var pr = new Rectangle(right, y - Theme.Px(2), rightW - pad, Theme.Px(30));
-            TextRenderer.DrawText(g, Carne.PointsText(it.Points), _fPts, pr, annulled ? Theme.Subtle : Carne.Red, R1);
+            if (it.Code != "train_kind")   // el aviso de tipo cambiado no resta puntos
+                TextRenderer.DrawText(g, Carne.PointsText(it.Points), _fPts, pr, annulled ? Theme.Subtle : Carne.Red, R1);
             string st = Carne.StatusName(it.Status);
             int pw = TW(st, _fPill) + Theme.Px(20), ph = Theme.Px(22);
             var pill = new Rectangle(rc.Right - pad - pw, pr.Bottom + Theme.Px(4), pw, ph);

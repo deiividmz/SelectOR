@@ -311,6 +311,13 @@ namespace SelectOR
         {
             if (_roadPlanWaiting != null) ApplyRoadPlan(_roadPlanWaiting);
             if (_roadHudWaiting) { _roadHudWaiting = false; if (_road.Points.Count > 0) ShowRoadHud(); }
+            // Itinerario guardado (o el de un turno) y el tren ya está dentro de él (cada maquinista sale desde su
+            // propio recorrido): la hoja de ruta se calcula desde donde está el tren y no lo manda al principio.
+            if (_road.Points.Count > 0 && !_road.FromPlan && _road.Schedule == null && _road.ReachedPoints == 0 && _road.Graph != null)
+            {
+                var t = RoadTrain();
+                if (t.has && _road.SkipReachedFrom(true, t.lat, t.lon) > 0) RoadReplan();
+            }
         }
 
         void ShowRoadHud(bool force = false)

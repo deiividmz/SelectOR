@@ -44,10 +44,10 @@ namespace SelectOR
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(900, 500);
             MinimumSize = new Size(700, 420);
-            try { Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
+            DialogKit.Dress(this);
 
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var header = new Label { Text = "  " + I18n.T("Partidas guardadas"), Dock = DockStyle.Top, Height = 42, Font = Theme.Font(13f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+            var header = new DialogKit.Header(I18n.T("Partidas guardadas"), null, "💾");
 
             _list = new BufferedListBox
             {
@@ -78,6 +78,8 @@ namespace SelectOR
             grid.Controls.Add(infoCard, 1, 0);
 
             var buttons = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Theme.Bg, Padding = new Padding(14, 8, 14, 12) };
+
+            DialogKit.StyleFooter(buttons);
             var btnResume = new RoundButton { Text = I18n.T("Reanudar"), Icon = "▶", Width = 150, Height = 40, Radius = 10, BaseColor = Theme.Accent, HoverColor = Theme.AccentHi, GradientTo = Theme.Accent2, TextColor = Color.White, FontSize = 11f, FontStyle = FontStyle.Bold, Dock = DockStyle.Right };
             _btnReplay = new RoundButton { Text = I18n.T("Repetir"), Icon = "⟳", Width = 130, Height = 40, Radius = 10, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 11f, Dock = DockStyle.Right };
             var spacer = new Panel { Width = 10, Dock = DockStyle.Right };
@@ -86,9 +88,9 @@ namespace SelectOR
             btnResume.Click += (s, e) => Accept("-resume");
             _btnReplay.Click += (s, e) => Accept("-replay");
             buttons.Controls.Add(hint);
-            buttons.Controls.Add(btnResume);
+            buttons.Controls.Add(_btnReplay);   // (el principal, a la derecha, como en las demás ventanas)
             buttons.Controls.Add(spacer);
-            buttons.Controls.Add(_btnReplay);
+            buttons.Controls.Add(btnResume);
 
             Controls.Add(grid);
             Controls.Add(buttons);

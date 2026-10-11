@@ -1034,16 +1034,18 @@ namespace SelectOR
         // Estación de destino final del itinerario (actividad, horario o el que crea el usuario): la última fila que
         // es una estación. Si el recorrido sigue un poco más allá (una vía de apartado…), la última estación por la
         // que pasa. null = sin itinerario.
-        public string FinalStation()
+        public string FinalStation() => FinalStop()?.Name;
+
+        public Stop FinalStop()
         {
             if (!HasPlan || Stops == null) return null;
             // Con horario o actividad: la última estación donde PARA (el recorrido puede seguir pasando por otras
             // hasta una vía de apartado o un depósito; ahí ya no hay viajeros).
             if (Schedule != null)
                 for (int i = Stops.Count - 1; i >= 0; i--)
-                    if (Stops[i].Halt && !Stops[i].Synthetic && !string.IsNullOrWhiteSpace(Stops[i].Name)) return Stops[i].Name;
+                    if (Stops[i].Halt && !Stops[i].Synthetic && !string.IsNullOrWhiteSpace(Stops[i].Name)) return Stops[i];
             for (int i = Stops.Count - 1; i >= 0; i--)
-                if (!Stops[i].Synthetic && !string.IsNullOrWhiteSpace(Stops[i].Name)) return Stops[i].Name;
+                if (!Stops[i].Synthetic && !string.IsNullOrWhiteSpace(Stops[i].Name)) return Stops[i];
             return null;
         }
 

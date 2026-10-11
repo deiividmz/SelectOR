@@ -63,6 +63,9 @@ namespace SelectOR
             public DateTime? SuspendedUntil;
             // Mapa del recorrido real (solo al volver de conducir; null = sin rastro)
             public TripMap Map;
+            // Servicio programado (servicios-programados.sql): turno cumplido y prima que paga el servidor (no está en el neto)
+            public bool SchedDone;
+            public double SchedBonus;
         }
 
         static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-ES");
@@ -81,7 +84,7 @@ namespace SelectOR
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
-            try { Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
+            DialogKit.Dress(this, false);
 
             var body = new FlowLayoutPanel
             {
@@ -463,6 +466,26 @@ namespace SelectOR
                 string calc = string.Format(I18n.T("Neto = ingreso {0} − gastos {1}"), _d.Income.ToString("N2", Es) + " €", _costs.ToString("N2", Es) + " €");
                 if (g != null) TextRenderer.DrawText(g, calc, _fS, new Rectangle(x, y, iw, Theme.Px(16)), Faint, TextFormatFlags.NoPadding);
                 y += Theme.Px(18);
+                if (_d.SchedDone)
+                {
+                    // la prima del turno: aparte del neto (la paga el servidor)
+                    y += Theme.Px(4); DashLine(g, x, y, iw); y += Theme.Px(8);
+                    string lbl = I18n.T("Prima de servicio programado");
+                    string amt = _d.SchedBonus > 0 ? "+" + _d.SchedBonus.ToString("N2", Es) + " €" : "0,00 €";
+                    int aw = TextRenderer.MeasureText(amt, _fL, Size.Empty, TextFormatFlags.NoPadding).Width;
+                    if (g != null)
+                    {
+                        TextRenderer.DrawText(g, lbl, _fL, new Rectangle(x, y, iw - aw - 8, Theme.Px(18)), Ink, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                        TextRenderer.DrawText(g, amt, _fL, new Rectangle(x + iw - aw, y, aw, Theme.Px(18)), PosC, TextFormatFlags.NoPadding);
+                    }
+                    y += Theme.Px(19);
+                    string why = _d.SchedBonus > 0
+                        ? I18n.T("Turno cumplido. La paga el servidor a la tesorería de la empresa: no cuenta en el neto del viaje ni en la liga.")
+                        : I18n.T("Turno cumplido, sin prima: la empresa ya ha cobrado hoy todas las primas que se pagan al día.");
+                    int h2 = TextRenderer.MeasureText(why, _fS, new Size(iw, 0), Wrap).Height;
+                    if (g != null) TextRenderer.DrawText(g, why, _fS, new Rectangle(x, y, iw, h2), Faint, Wrap);
+                    y += h2 + Theme.Px(6);
+                }
                 if (!_hasDetail)
                 {
                     string old = I18n.T("Este servicio se registró antes de que se guardara el detalle del cálculo: solo se puede mostrar lo que equivale cada importe por km.");

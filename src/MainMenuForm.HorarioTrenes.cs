@@ -142,12 +142,12 @@ namespace SelectOR
                 Text = title, BackColor = Theme.Bg, ForeColor = Theme.Text, StartPosition = FormStartPosition.CenterParent,
                 MinimizeBox = false, ShowInTaskbar = false, KeyPreview = true, Font = Theme.Font(9.5f),
             };
-            try { f.Icon = Icon; } catch { }
+            DialogKit.Dress(f);
             var wa = Screen.FromControl(this).WorkingArea;
             f.ClientSize = new Size(Math.Min(Theme.Px(1100), wa.Width - 80), Math.Min(Theme.Px(720), wa.Height - 80));
             f.MinimumSize = new Size(640, 420);
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var head = new Label { Text = "  " + title, Dock = DockStyle.Top, Height = 42, Font = Theme.Font(13f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+            var head = new DialogKit.Header(title, null, "🚆");
             var top = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Bg, Padding = new Padding(16, 10, 16, 6) };
             var search = new RoundedInput(Tr("Buscar tren…")) { Dock = DockStyle.Left, Width = Theme.Px(320), Height = 34 };
             var hint = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Subtle, TextAlign = ContentAlignment.MiddleRight, Text = Tr("Doble clic o «Elegir» para ponerlo en la línea del horario.") };
@@ -165,10 +165,11 @@ namespace SelectOR
             var gridHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(16, 4, 16, 4) };
             gridHost.Controls.Add(grid);
             var buttons = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Theme.Bg, Padding = new Padding(16, 10, 16, 12) };
+            DialogKit.StyleFooter(buttons);
             var ok = new RoundButton { Text = Tr("Elegir"), Width = 160, Height = 38, Radius = 10, BaseColor = Theme.Accent, HoverColor = Theme.AccentHi, GradientTo = Theme.Accent2, TextColor = Color.White, FontSize = 10.5f, FontStyle = FontStyle.Bold, Dock = DockStyle.Right };
             var cancel = new RoundButton { Text = Tr("Cancelar"), Width = 120, Height = 38, Radius = 10, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 10.5f, Dock = DockStyle.Right };
             var gap = new Panel { Width = 10, Dock = DockStyle.Right };
-            buttons.Controls.Add(ok); buttons.Controls.Add(gap); buttons.Controls.Add(cancel);
+            buttons.Controls.Add(cancel); buttons.Controls.Add(gap); buttons.Controls.Add(ok);   // (el principal, a la derecha)
             f.Controls.Add(gridHost); f.Controls.Add(buttons); f.Controls.Add(top); f.Controls.Add(head); f.Controls.Add(stripe);
 
             // favoritos primero; después por nombre

@@ -34,6 +34,7 @@ namespace SelectOR
     {
         public string LastFolder { get; set; }
         public string LastRoute { get; set; }
+        public string InstallId { get; set; }   // identificador al azar de esta instalación (usuarios conectados; no es personal)
         public string LastConsist { get; set; }
         public int LastTab { get; set; }
         // Empresas (Supabase): URL del proyecto + clave anon (pública). El email se recuerda para el login.

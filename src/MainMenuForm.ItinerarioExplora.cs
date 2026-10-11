@@ -62,10 +62,14 @@ namespace SelectOR
         }
 
         // ============================ el planificador ============================
-        void OpenItineraryPlanner()
+        // Sin parámetros: el itinerario de Conducción libre («Usar al conducir»). Para un servicio programado
+        // (forSched): la ruta del turno, su itinerario si ya lo tiene, y «Usar en el turno» devuelve el elegido.
+        void OpenItineraryPlanner() => OpenItineraryPlanner(null, null, false);
+        SavedItinerary OpenItineraryPlanner(ORTS.Menu.Route forRoute, SavedItinerary preset, bool forSched)
         {
-            var route = _curRoute;
-            if (route == null) return;
+            var route = forRoute ?? _curRoute;
+            if (route == null) return null;
+            SavedItinerary picked = null;
             string dir = route.Path, key = RouteKey(dir);
             var rb = new RoadBook(); rb.Reset(dir);
             string loadedId = null; bool dirty = false;
@@ -75,12 +79,13 @@ namespace SelectOR
                 Text = Tr("Itinerario") + " · " + route.Name, BackColor = Theme.Bg, ForeColor = Theme.Text, StartPosition = FormStartPosition.CenterParent,
                 MinimizeBox = false, ShowInTaskbar = false, KeyPreview = true, Font = Theme.Font(9.5f),
             };
-            try { f.Icon = Icon; } catch { }
+            DialogKit.Dress(f);
             var wa = Screen.FromControl(this).WorkingArea;
             f.ClientSize = new Size(Math.Min(Theme.Px(1360), wa.Width - 60), Math.Min(Theme.Px(860), wa.Height - 60));
             f.MinimumSize = new Size(900, 560);
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var head = new Label { Text = "  " + string.Format(Tr("Itinerario en {0}"), route.Name), Dock = DockStyle.Top, Height = 42, Font = Theme.Font(13f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+            var head = new DialogKit.Header(string.Format(Tr("Itinerario en {0}"), route.Name),
+                forSched ? Tr("Para el servicio programado: el maquinista lo tendrá en su hoja de ruta al conducir.") : null, "🧭");
 
             var view = new RoutePlanView { Dock = DockStyle.Fill, Expandable = false, Hint = Tr("Clic en la vía: añadir un punto · rueda: acercar · arrastrar: mover") };
             view.SetPlan(null, Tr("Preparando el esquema de vías…"));
@@ -118,6 +123,7 @@ namespace SelectOR
 
             // abajo: botones
             var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 64, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Padding = new Padding(14, 10, 14, 10) };
+            DialogKit.StyleFooter(bar);
             RoundButton Btn(string t, bool primary = false, int w = 150)
             {
                 var b = new RoundButton
@@ -134,11 +140,12 @@ namespace SelectOR
             var bClear = Btn(Tr("Borrar"), w: 110);
             var bAll = Btn(Tr("Ver toda la ruta"), w: 160);
             var bSave = Btn(Tr("Guardar…"), w: 130);
-            var bUse = Btn(Tr("Usar al conducir"), primary: true, w: 190);
+            var bUse = Btn(forSched ? Tr("Usar en el turno") : Tr("Usar al conducir"), primary: true, w: 190);
             var bRemove = Btn(Tr("Quitar"), w: 110); bRemove.TextColor = Color.FromArgb(229, 115, 115);
             var bClose = Btn(Tr("Cerrar"), w: 110);
             bar.Controls.AddRange(new Control[] { bFollow, bUndo, bClear, bAll, bSave, bUse, bRemove, bClose });
-            bFollow.Enabled = CurrentPath()?.FilePath != null;
+            bool sameRoute = _curRoute != null && _curRoute.Path == route.Path;   // «Seguir el recorrido» usa el elegido en Conducción libre
+            bFollow.Enabled = sameRoute && CurrentPath()?.FilePath != null;
 
             f.Controls.Add(mapHost); f.Controls.Add(side); f.Controls.Add(bar); f.Controls.Add(head); f.Controls.Add(stripe);
 
@@ -190,7 +197,7 @@ namespace SelectOR
                 stops.EndUpdate();
                 bUndo.Enabled = rb.Points.Count > 0; bClear.Enabled = rb.Points.Count > 0;
                 bSave.Enabled = bUse.Enabled = rb.Points.Count >= 2 && rb.HasPlan;
-                bRemove.Visible = ExploreItineraryFor(dir) != null;
+                bRemove.Visible = !forSched && ExploreItineraryFor(dir) != null;
                 foreach (var b in new[] { bUndo, bClear, bSave, bUse }) b.Invalidate();
                 view.Redraw();
             }
@@ -302,6 +309,12 @@ namespace SelectOR
             {
                 var id = SaveFromPlanner(loadedId == null || dirty);
                 if (id == null) return;
+                if (forSched)
+                {
+                    picked = _prefs.SavedItineraries.FirstOrDefault(x => x.Id == id) ?? (preset?.Id == id ? preset : null);
+                    f.DialogResult = DialogResult.OK; f.Close();
+                    return;
+                }
                 _prefs.ExploreItinerary[key] = id;
                 try { _prefs.Save(); } catch { }
                 f.DialogResult = DialogResult.OK; f.Close();
@@ -333,7 +346,7 @@ namespace SelectOR
                 }
                 rb.Graph = g;
                 view.SetPlan(plan);
-                var cur = ExploreItineraryFor(dir);
+                var cur = forSched ? preset : ExploreItineraryFor(dir);
                 if (cur != null) { Load(cur); loading = true; FillSaved(cur.Id); loading = false; }
                 else Refresh();
                 view.Focus();
@@ -343,6 +356,7 @@ namespace SelectOR
             finally { _itinPlannerOpen = null; }
             UpdateItineraryChip();
             UpdateStatus();
+            return picked;
         }
     }
 }

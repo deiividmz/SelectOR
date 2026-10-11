@@ -329,7 +329,7 @@ namespace SelectOR
             };
             var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
             f.ClientSize = new Size(Math.Min(1300, wa.Width - 80), Math.Min(860, wa.Height - 80));
-            try { f.Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? AppContext.BaseDirectory); } catch { }
+            DialogKit.Dress(f, false);
             var v = new RoutePlanView { Dock = DockStyle.Fill, Expandable = false };
             v.SetPlan(_plan, _empty);
             f.Controls.Add(v);

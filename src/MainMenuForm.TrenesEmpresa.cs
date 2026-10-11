@@ -58,6 +58,8 @@ namespace SelectOR
         {
             public string Id, Name, ConFile, By, At; public bool HasImage;
             public int? Seats;                                   // plazas fijadas por la empresa (null: las de los archivos)
+            public string Kind;                                  // tipo fijado por la empresa: "pax", "freight" o null (según los archivos)
+            public bool CarriesPax => Kind == "pax" || (Kind != "freight" && TrainCarriesPassengers(Vehicles));
             public List<TrainVeh> Vehicles = new();
             public double FileSeats => Vehicles.Sum(v => Math.Max(0, v.Capacity) * Math.Max(1, v.Count));   // las de sus vehículos al darlo de alta
             public string Lead => Vehicles.FirstOrDefault(v => !v.Wagon)?.Name ?? "";   // la máquina de cabeza
@@ -276,6 +278,7 @@ namespace SelectOR
                                           HasImage = e.TryGetProperty("has_image", out var hi) && hi.ValueKind == JsonValueKind.True };
                     if (e.TryGetProperty("vehicles", out var vs) && vs.ValueKind == JsonValueKind.Array) foreach (var v in vs.EnumerateArray()) t.Vehicles.Add(TrainVeh.FromJson(v));
                     if (e.TryGetProperty("seats", out var se) && se.ValueKind == JsonValueKind.Number && se.GetInt32() > 0) t.Seats = se.GetInt32();
+                    string kd = Str(e, "kind"); t.Kind = kd == "pax" || kd == "freight" ? kd : null;   // tipo-tren.sql
                     _trainMode = Str(e, "mode").Length > 0 ? Str(e, "mode") : _trainMode;
                     list.Add(t);
                 }
@@ -286,6 +289,9 @@ namespace SelectOR
             var seats = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var t in list) if (t.Seats is int n) seats[t.Id] = n;
             _trainSeats = seats;   // se cambia de una vez: se lee desde otros hilos (AnalyzeComposition)
+            var kinds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in list) if (t.Kind != null) kinds[t.Id] = t.Kind;
+            _trainKinds = kinds;
             return true;
         }
 
@@ -300,25 +306,40 @@ namespace SelectOR
             return ct.TryGetValue(c.FilePath, out var id) && ts.TryGetValue(id, out var n) && n > 0 ? n : null;
         }
 
-        // Los datos de un tren con las plazas de la empresa, si las ha fijado (la caché de datos guarda las de los archivos).
+        // ============================ tipo fijado por la empresa (tipo-tren.sql) ============================
+        Dictionary<string, string> _trainKinds = new(StringComparer.OrdinalIgnoreCase);   // tren → "pax" / "freight"
+
+        // El tipo que la empresa ha fijado para este .con (si es uno de sus trenes); null: según sus archivos.
+        string KindOverride(TrainItem c)
+        {
+            if (c?.FilePath == null) return null;
+            var ct = _conTrain; var tk = _trainKinds;
+            return ct.TryGetValue(c.FilePath, out var id) && tk.TryGetValue(id, out var k) ? k : null;
+        }
+
+        // Los datos con el tipo y las plazas de la empresa: de mercancías, sin plazas; con plazas fijadas o de viajeros, de viajeros.
+        TrainSpec WithCompanyKind(TrainSpec sp, string kind, int? seats, string service)
+            => new TrainSpec { Traction = sp.Traction, Service = kind == "freight" ? Tr("Mercancías") : service ?? sp.Service, Kw = sp.Kw, Kmh = sp.Kmh,
+                               Capacity = kind == "freight" ? 0 : seats ?? sp.Capacity, MassT = sp.MassT, LengthM = sp.LengthM, Cars = sp.Cars, Engines = sp.Engines,
+                               Freight = kind == "freight" || (kind == null && seats == null && sp.Freight), Automotor = sp.Automotor, Known = sp.Known };
+
+        // Los datos de un tren con el tipo y las plazas de la empresa, si los ha fijado (la caché guarda los de los archivos).
         async Task<TrainSpec> TrainSpecSeatsAsync(TrainItem c)
         {
             var sp = await TrainSpecAsync(c);
-            int? seats = SeatsOverride(c);
-            if (sp == null || seats == null) return sp;
+            int? seats = SeatsOverride(c); string kind = KindOverride(c);
+            if (sp == null || (seats == null && kind == null)) return sp;
             string service = await Task.Run(() => AnalyzeComposition(c, sp.Kmh).ServiceType);   // con las plazas fijadas (densidad)
-            return new TrainSpec { Traction = sp.Traction, Service = service, Kw = sp.Kw, Kmh = sp.Kmh, Capacity = seats.Value, MassT = sp.MassT, LengthM = sp.LengthM,
-                                   Cars = sp.Cars, Engines = sp.Engines, Freight = false, Automotor = sp.Automotor, Known = sp.Known };
+            return WithCompanyKind(sp, kind, seats, service);
         }
 
-        // Lo mismo, con lo ya calculado (filtros de Conducción libre y Compra): con plazas fijadas, es de viajeros.
+        // Lo mismo, con lo ya calculado (filtros de Conducción libre y Compra).
         TrainSpec KnownSpecSeats(TrainItem c)
         {
             var sp = KnownSpec(c);
-            int? seats = sp == null ? null : SeatsOverride(c);
-            if (seats == null) return sp;
-            return new TrainSpec { Traction = sp.Traction, Service = sp.Service, Kw = sp.Kw, Kmh = sp.Kmh, Capacity = seats.Value, MassT = sp.MassT, LengthM = sp.LengthM,
-                                   Cars = sp.Cars, Engines = sp.Engines, Freight = false, Automotor = sp.Automotor, Known = sp.Known };
+            if (sp == null) return sp;
+            int? seats = SeatsOverride(c); string kind = KindOverride(c);
+            return seats == null && kind == null ? sp : WithCompanyKind(sp, kind, seats, null);
         }
 
         // Las tarjetas y fichas de los trenes de la empresa se vuelven a calcular (han cambiado sus plazas o cuáles son).
@@ -345,16 +366,26 @@ namespace SelectOR
             }
             using var f = new Form
             {
-                Text = Tr("Plazas del tren"), BackColor = Theme.Bg, ForeColor = Theme.Text, StartPosition = FormStartPosition.CenterParent,
+                Text = Tr("Tipo y plazas del tren"), BackColor = Theme.Bg, ForeColor = Theme.Text, StartPosition = FormStartPosition.CenterParent,
                 MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, KeyPreview = true, Font = Theme.Font(9.5f), FormBorderStyle = FormBorderStyle.FixedDialog,
             };
-            try { f.Icon = Icon; } catch { }
+            DialogKit.Dress(f, false);
+            int crownH = 0;   // alto de la franja y la cabecera (se ponen al final)
             f.ClientSize = new Size(Theme.Px(560), 200);
             var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoSize = true, BackColor = Theme.Bg, Padding = new Padding(18, 12, 18, 14) };
-            stack.Controls.Add(new Label { Text = t.Name, AutoSize = true, MaximumSize = new Size(Theme.Px(520), 0), Font = Theme.Font(13f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 4) });
-            stack.Controls.Add(new Label { Text = Tr("Las plazas que fijes valen para todos los socios que conduzcan este tren: los viajeros que suben, el ingreso del servicio y el tope del servidor. No se cambia ningún archivo .eng ni .wag. Si no las fijas, cada maquinista usa las de sus archivos (PassengerCapacity)."),
+            stack.Controls.Add(new Label { Text = Tr("El tipo y las plazas que fijes valen para todos los socios que conduzcan este tren: los viajeros que suben, el confort, el ingreso del servicio y el tope del servidor. No se cambia ningún archivo .eng ni .wag. Si no los fijas, cada maquinista usa lo de sus archivos (PassengerCapacity)."),
                                          AutoSize = true, MaximumSize = new Size(Theme.Px(520), 0), ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 10) });
-            stack.Controls.Add(new Label { Text = string.Format(Tr("Plazas de los archivos: {0}"), files > 0 ? files.ToString("N0", EsEs) : Tr("ninguna (sin PassengerCapacity)")), AutoSize = true, Margin = new Padding(0, 0, 0, 6) });
+            // Tipo: según sus archivos · Viajeros · Mercancías
+            string kind = t.Kind;
+            var kinds = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 8) };
+            kinds.Controls.Add(new Label { Text = Tr("Tipo:"), AutoSize = true, Margin = new Padding(0, 9, 8, 0) });
+            string[] kindIds = { null, "pax", "freight" };
+            string[] kindNames = { Tr("Según sus archivos"), Tr("Viajeros"), Tr("Mercancías") };
+            var kindNote = new Label { AutoSize = true, MaximumSize = new Size(Theme.Px(520), 0), ForeColor = Color.FromArgb(232, 178, 80), Margin = new Padding(0, 0, 0, 8) };
+            stack.Controls.Add(kinds);
+            stack.Controls.Add(kindNote);
+            var filesLbl = new Label { Text = string.Format(Tr("Plazas de los archivos: {0}"), files > 0 ? files.ToString("N0", EsEs) : Tr("ninguna (sin PassengerCapacity)")), AutoSize = true, Margin = new Padding(0, 0, 0, 6) };
+            stack.Controls.Add(filesLbl);
             var row = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
             row.Controls.Add(new Label { Text = Tr("Plazas para la empresa:"), AutoSize = true, Margin = new Padding(0, 6, 8, 0) });
             var num = new NumericUpDown { Minimum = 1, Maximum = 5000, Value = Math.Max(1, Math.Min(5000, t.Seats ?? (int)Math.Round(files > 0 ? files : 100))), Width = Theme.Px(110), BackColor = Theme.Surface2, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, TextAlign = HorizontalAlignment.Right, Font = Theme.Font(11f, FontStyle.Bold) };
@@ -365,18 +396,54 @@ namespace SelectOR
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg };
             var bSave = EmpButton(Tr("Guardar"), primary: true); bSave.Width = Theme.Px(140);
             var bFiles = EmpButton(Tr("Usar las de los archivos")); bFiles.Width = Theme.Px(220); bFiles.Margin = new Padding(8, 10, 2, 2); bFiles.Visible = t.Seats != null;
+            // Lo que se ve según el tipo: de mercancías, sin plazas; de viajeros sin plazas en sus archivos, hay que fijarlas.
+            void ShowKind()
+            {
+                for (int k = 0; k < kinds.Controls.Count - 1; k++)
+                    if (kinds.Controls[k + 1] is RoundButton kb) { kb.Active = kindIds[k] == kind; kb.Invalidate(); }
+                bool freight = kind == "freight";
+                filesLbl.Visible = row.Visible = !freight;
+                bFiles.Visible = !freight && t.Seats != null && !(kind == "pax" && files <= 0);
+                kindNote.Text = freight && files > 0 ? Tr("Este tren lleva plazas en sus archivos: cada servicio con él como mercancías quedará anotado y el administrador lo verá en Revisión.")
+                              : kind == "pax" && files <= 0 ? Tr("Este tren no declara plazas en sus archivos: para ponerlo como de viajeros, fija cuántas tiene.")
+                              : "";
+                kindNote.Visible = kindNote.Text.Length > 0;
+                if (f.IsHandleCreated) { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(f.ClientSize.Width, ps.Height + 4 + crownH); }
+            }
+            for (int k = 0; k < kindIds.Length; k++)
+            {
+                int idx = k;
+                var kb = BankChip(kindNames[k], kindIds[k] == kind);
+                kb.Click += (s, e) => { kind = kindIds[idx]; ShowKind(); };
+                kinds.Controls.Add(kb);
+            }
             var bCancel = EmpButton(Tr("Cancelar")); bCancel.Width = Theme.Px(120); bCancel.Margin = new Padding(8, 10, 2, 2);
             btns.Controls.Add(bSave); btns.Controls.Add(bFiles); btns.Controls.Add(bCancel);
             stack.Controls.Add(btns);
             f.Controls.Add(stack);
+            crownH = DialogKit.Crown(f, Tr("Tipo y plazas del tren"), t.Name, "🚆").Height + 3;   // franja y cabecera (como las demás ventanas)
             async void Save(int? seats)
             {
+                if (kind == "freight") seats = null;   // de mercancías: sin plazas
                 bSave.Enabled = bFiles.Enabled = false; msg.ForeColor = Theme.Subtle; msg.Text = Tr("Guardando…");
-                var (_, err) = await Supa.RpcAsync("train_set_seats", new { p_company = co.Id, p_train = t.Id, p_seats = seats });
+                string err = null;
+                // «Usar las de los archivos»: primero se quitan las fijadas (train_set_kind las conserva si no se mandan)
+                if (seats == null && kind != "freight" && t.Seats != null)
+                    (_, err) = await Supa.RpcAsync("train_set_seats", new { p_company = co.Id, p_train = t.Id, p_seats = (int?)null });
+                if (err == null)
+                {
+                    (_, err) = await Supa.RpcAsync("train_set_kind", new { p_company = co.Id, p_train = t.Id, p_kind = kind ?? "auto", p_seats = seats });
+                    // servidor sin tipo-tren.sql: con el tipo «según sus archivos», como antes (solo las plazas)
+                    if (err != null && (err.Contains("PGRST202") || err.Contains("Could not find")) && kind == null)
+                        (_, err) = await Supa.RpcAsync("train_set_seats", new { p_company = co.Id, p_train = t.Id, p_seats = seats });
+                    else if (err != null && (err.Contains("PGRST202") || err.Contains("Could not find")))
+                        err = Tr("El servidor aún no admite fijar el tipo del tren (falta tipo-tren.sql).");
+                }
                 if (err != null)
                 {
                     bSave.Enabled = bFiles.Enabled = true; msg.ForeColor = RedC;
-                    msg.Text = err.Contains("PGRST202") || err.Contains("Could not find") ? Tr("El servidor aún no admite fijar las plazas (falta trenes-plazas.sql).") : Tr("Error: ") + err;
+                    msg.Text = err.Contains("PGRST202") || err.Contains("Could not find") ? Tr("El servidor aún no admite fijar las plazas (falta trenes-plazas.sql).")
+                             : err.StartsWith(Tr("El servidor")) ? err : Tr("Error: ") + err;
                     return;
                 }
                 f.DialogResult = DialogResult.OK; f.Close();
@@ -385,12 +452,13 @@ namespace SelectOR
             bFiles.Click += (s, e) => Save(null);
             bCancel.Click += (s, e) => f.Close();
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); CenterOnScreen(f); };
+            ShowKind();
+            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); CenterOnScreen(f); };
             _seatsOpen = f;
             DialogResult res;
             try { res = f.ShowDialog(this); } finally { _seatsOpen = null; }
             if (res != DialogResult.OK) return;
-            Msg(_fleetMsg, string.Format(Tr("Plazas de «{0}» guardadas: valen para todos los socios."), t.Name), false);
+            Msg(_fleetMsg, string.Format(Tr("Tipo y plazas de «{0}» guardados: valen para todos los socios."), t.Name), false);
             await LoadCoTrainsAsync(co.Id, force: true);
             ForgetTrainSpecs(_conTrain.Where(kv => kv.Value == t.Id).Select(kv => kv.Key));
             LoadFleet();
@@ -578,7 +646,7 @@ namespace SelectOR
                 Text = Tr("Comprar este tren"), BackColor = Theme.Bg, ForeColor = Theme.Text, StartPosition = FormStartPosition.CenterParent,
                 MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, KeyPreview = true, Font = Theme.Font(9.5f), FormBorderStyle = FormBorderStyle.FixedDialog,
             };
-            try { f.Icon = Icon; } catch { }
+            DialogKit.Dress(f, false);
             int W = Theme.Px(1040);
             f.ClientSize = new Size(W + Theme.Px(40), 200);
             var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoSize = true, BackColor = Theme.Bg, Padding = new Padding(20, 14, 20, 16) };
@@ -586,11 +654,9 @@ namespace SelectOR
             var head = new TableLayoutPanel { AutoSize = false, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 8), Width = W };
             head.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); head.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             var names = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
-            names.Controls.Add(new Label { Text = Tr("COMPRAR ESTE TREN"), AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) });
-            names.Controls.Add(new Label { Text = title, AutoSize = true, MaximumSize = new Size(W - Theme.Px(260), 0), ForeColor = Theme.Accent, Font = Theme.Font(15f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) });
             names.Controls.Add(new Label { Text = TrainSummary(vs), AutoSize = true, ForeColor = Theme.Subtle, Margin = new Padding(0) });
             head.Controls.Add(names, 0, 0);
-            head.Height = names.GetPreferredSize(new Size(W - Theme.Px(260), 0)).Height + 4;
+            head.Height = Math.Max(names.GetPreferredSize(new Size(W - Theme.Px(260), 0)).Height + 4, Theme.Px(40));   // (que quepa la etiqueta de «ya tiene»)
             if (have > 0)
                 head.Controls.Add(new Label { Text = "✓ " + string.Format(have == 1 ? Tr("La empresa ya tiene {0} ejemplar") : Tr("La empresa ya tiene {0} ejemplares"), have), AutoSize = true, ForeColor = Theme.AccentHi, BackColor = Blend(Theme.Bg, Theme.Accent, 0.18f), Font = Theme.Font(9f, FontStyle.Bold), Padding = new Padding(10, 6, 10, 6), Anchor = AnchorStyles.Right | AnchorStyles.Top, Margin = new Padding(8, 4, 0, 0) }, 1, 0);
             stack.Controls.Add(head);
@@ -619,19 +685,20 @@ namespace SelectOR
                 stack.Controls.Add(new Label { Text = Tr("La tesorería no llega para comprarlo; se puede alquilar."), AutoSize = true, ForeColor = RedC, Margin = new Padding(0, 2, 0, 0) });
             // botones, a la derecha
             var btns = new FlowLayoutPanel { AutoSize = false, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = Theme.Bg, Width = W, Height = Theme.Px(56), Margin = new Padding(0, 8, 0, 0) };
-            var bBuy = EmpButton(have > 0 ? Tr("Comprar otro") : Tr("Comprar"), primary: true); bBuy.Width = Theme.Px(190); bBuy.Height = 40; bBuy.Enabled = price <= bal;
+            var bBuy = EmpButton(have > 0 ? Tr("Comprar otro") : Tr("Comprar"), primary: true); bBuy.Width = Theme.Px(190); bBuy.Height = 40; bBuy.Enabled = price <= bal; bBuy.GradientTo = Theme.Accent2; bBuy.Radius = 10;
             var bRent = EmpButton(Tr("Alquilar")); bRent.Width = Theme.Px(150); bRent.Height = 40; bRent.Margin = new Padding(8, 10, 2, 2);
             var bCancel = EmpButton(Tr("Cancelar")); bCancel.Width = Theme.Px(130); bCancel.Height = 40; bCancel.Margin = new Padding(8, 10, 2, 2);
             bCancel.BaseColor = Theme.Surface2; bCancel.TextColor = Theme.Subtle;
             btns.Controls.Add(bBuy); btns.Controls.Add(bRent); btns.Controls.Add(bCancel);
             stack.Controls.Add(btns);
             f.Controls.Add(stack);
+            int crownH = DialogKit.Crown(f, Tr("Comprar este tren"), title, "🛒").Height + 3;   // franja y cabecera (como las demás ventanas)
             int result = 0;
             bBuy.Click += (s, e) => { result = 1; f.Close(); };
             bRent.Click += (s, e) => { result = 2; f.Close(); };
             bCancel.Click += (s, e) => f.Close();
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); CenterOnScreen(f); };
+            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); CenterOnScreen(f); };
             _trainBuyOpen = f;
             try { f.ShowDialog(this); } finally { _trainBuyOpen = null; }
             return result;
@@ -688,10 +755,9 @@ namespace SelectOR
                 Text = Tr("Solicitar compra"), BackColor = Theme.Bg, ForeColor = Theme.Text, StartPosition = FormStartPosition.CenterParent,
                 MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, KeyPreview = true, Font = Theme.Font(9.5f), FormBorderStyle = FormBorderStyle.FixedDialog,
             };
-            try { f.Icon = Icon; } catch { }
+            DialogKit.Dress(f, false);
             f.ClientSize = new Size(Theme.Px(700), 200);
             var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoSize = true, BackColor = Theme.Bg, Padding = new Padding(16, 10, 16, 12) };
-            stack.Controls.Add(new Label { Text = string.Format(Tr("Solicitar a {0}"), co.Name), AutoSize = true, Font = Theme.Font(13f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) });
             stack.Controls.Add(new Label { Text = c.Name + "  ·  " + TrainSummary(vehicles), AutoSize = true, MaximumSize = new Size(Theme.Px(660), 0), ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 8) });
             if (img != null) stack.Controls.Add(new PictureBox { Image = img, SizeMode = PictureBoxSizeMode.Zoom, Width = Theme.Px(664), Height = Math.Min(Theme.Px(80), (int)(Theme.Px(664) * (double)img.Height / Math.Max(1, img.Width))) + 4, BackColor = Theme.Surface, Margin = new Padding(0, 0, 0, 8) });
             stack.Controls.Add(new Label { Text = Tr("Se envían su .con y su composición. Si el gerente o un gestor lo compran, el tren queda en la empresa y te lo puedes añadir desde Flota."), AutoSize = true, MaximumSize = new Size(Theme.Px(660), 0), ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 6) });
@@ -700,10 +766,11 @@ namespace SelectOR
             var msg = new Label { AutoSize = true, ForeColor = RedC, Margin = new Padding(0, 2, 0, 2) };
             stack.Controls.Add(msg);
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg };
-            var bSend = EmpButton(Tr("Enviar solicitud"), primary: true); bSend.Width = Theme.Px(200);
+            var bSend = EmpButton(Tr("Enviar solicitud"), primary: true); bSend.Width = Theme.Px(200); bSend.GradientTo = Theme.Accent2; bSend.Radius = 10;
             var bCancel = EmpButton(Tr("Cancelar")); bCancel.Width = Theme.Px(130); bCancel.Margin = new Padding(8, 10, 2, 2);
             btns.Controls.Add(bSend); btns.Controls.Add(bCancel); stack.Controls.Add(btns);
             f.Controls.Add(stack);
+            int crownH = DialogKit.Crown(f, string.Format(Tr("Solicitar a {0}"), co.Name), c.Name, "📨").Height + 3;   // franja y cabecera (como las demás ventanas)
             bCancel.Click += (s, e) => f.Close();
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
             string conText = null;
@@ -727,7 +794,7 @@ namespace SelectOR
                 }
                 f.DialogResult = DialogResult.OK; f.Close();
             };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4); CenterOnScreen(f); };
+            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); CenterOnScreen(f); };
             _trainReqOpen = f;
             DialogResult res;
             try { res = f.ShowDialog(this); } finally { _trainReqOpen = null; }
@@ -947,9 +1014,10 @@ namespace SelectOR
         FlowLayoutPanel _trainModeBar;
         Control BuildTrainModeRow()
         {
-            var box = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 8, 0, 0) };
+            var box = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
             box.Controls.Add(EmpHeader("TRENES DE EMPRESA (GLOBAL, ADMINISTRADOR)"));
-            box.Controls.Add(EmpFieldLabel(Tr("Al ponerse de servicio con un .con que no es un tren de la empresa (o sin ejemplar libre): «Aviso» deja usar un ejemplar de otro tren con la misma máquina de cabeza y lo avisa; «Obligatorio», no. Las máquinas anteriores valen siempre como cabeza.")));
+            var note = EmpNote(Tr("Al ponerse de servicio con un .con que no es un tren de la empresa (o sin ejemplar libre): «Aviso» deja usar un ejemplar de otro tren con la misma máquina de cabeza y lo avisa; «Obligatorio», no. Las máquinas anteriores valen siempre como cabeza."));
+            note.MaximumSize = new Size(380, 0); box.Controls.Add(note);
             _trainModeBar = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 4, 0, 0) };
             string[] modes = { "off", "warn", "enforce" }; string[] names = { "No se comprueba", "Aviso", "Obligatorio" };
             for (int k = 0; k < modes.Length; k++) { string m = modes[k]; var b = BankChip(Tr(names[k]), k == 1); b.Click += (s, e) => SetTrainMode(m); _trainModeBar.Controls.Add(b); }

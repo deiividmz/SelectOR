@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace SelectOR
@@ -56,32 +55,22 @@ namespace SelectOR
                     _ => (Theme.Accent, "i"),
                 };
                 Text = title;
-                BackColor = Theme.Bg; ForeColor = Theme.Text; Font = Theme.Font(10f);
+                Font = Theme.Font(10f);
                 StartPosition = FormStartPosition.CenterParent;
                 FormBorderStyle = FormBorderStyle.FixedDialog;
                 MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false; KeyPreview = true;
-                try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? AppContext.BaseDirectory); } catch { }
+                DialogKit.Dress(this);
 
+                // cabecera con el icono del tipo de mensaje (como el resto de ventanas)
                 var stripe = new LiveryStripe { Dock = DockStyle.Top };
-                var header = new Label { Text = "  " + title, Dock = DockStyle.Top, Height = 42, Font = Theme.Font(13f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
-                // cuerpo: el icono y el texto
-                var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Padding = new Padding(20, 18, 22, 8) };
-                body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 56)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-                var ic = new Panel { Width = 40, Height = 40, BackColor = Theme.Bg, Margin = new Padding(0, 2, 0, 0) };
-                ic.Paint += (s, e) =>
-                {
-                    var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-                    using (var b = new SolidBrush(Color.FromArgb(55, _iconColor))) g.FillEllipse(b, 0, 0, 39, 39);
-                    using (var p = new Pen(_iconColor, 2f)) g.DrawEllipse(p, 1, 1, 37, 37);
-                    using var fi = Theme.Font(15f, FontStyle.Bold);
-                    TextRenderer.DrawText(g, _glyph, fi, new Rectangle(0, 0, 40, 40), _iconColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                };
-                body.Controls.Add(ic, 0, 0);
-                var msg = new Label { Text = text, AutoSize = true, MaximumSize = new Size(Theme.Px(470), 0), ForeColor = Theme.Text, Font = Theme.Font(10.25f), Margin = new Padding(0, 4, 0, 0), UseMnemonic = false };
-                body.Controls.Add(msg, 1, 0);
+                var header = new DialogKit.Header(title, null, _glyph, _iconColor) { Glyph = true };
+                // cuerpo: el texto
+                var body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(26), Theme.Px(18), Theme.Px(26), Theme.Px(12)) };
+                var msg = new Label { Text = text, AutoSize = true, MaximumSize = new Size(Theme.Px(500), 0), ForeColor = Theme.Text, Font = Theme.Font(10.25f), Location = new Point(Theme.Px(26), Theme.Px(18)), UseMnemonic = false };
+                body.Controls.Add(msg);
 
-                // botones, a la derecha (el primero, el principal)
-                var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 62, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = Theme.Bg, Padding = new Padding(18, 8, 18, 14) };
+                // botones, a la derecha (el primero, el principal; rojo si confirma algo delicado)
+                var bar = new DialogKit.Footer();
                 var list = buttons switch
                 {
                     MessageBoxButtons.OKCancel => new[] { (I18n.T("Aceptar"), DialogResult.OK), (I18n.T("Cancelar"), DialogResult.Cancel) },
@@ -92,22 +81,15 @@ namespace SelectOR
                     _ => new[] { (I18n.T("Aceptar"), DialogResult.OK) },
                 };
                 var made = new List<RoundButton>();
+                bool danger = icon == MessageBoxIcon.Warning && buttons != MessageBoxButtons.OK;
                 for (int k = 0; k < list.Length; k++)
                 {
                     var (t, r) = list[k];
-                    bool primary = k == 0;
-                    var b = new RoundButton
-                    {
-                        Text = t, Height = 38, Radius = 10, FontSize = 10.5f, FontStyle = primary ? FontStyle.Bold : FontStyle.Regular,
-                        BaseColor = primary ? (icon == MessageBoxIcon.Warning && buttons != MessageBoxButtons.OK ? Color.FromArgb(150, 60, 60) : Theme.Accent) : Theme.Surface2,
-                        HoverColor = primary ? (icon == MessageBoxIcon.Warning && buttons != MessageBoxButtons.OK ? Color.FromArgb(180, 72, 72) : Theme.AccentHi) : Theme.SurfaceHi,
-                        TextColor = primary ? Color.White : Theme.Text, Margin = new Padding(10, 0, 0, 0)
-                    };
-                    using (var fb = Theme.Font(10.5f, FontStyle.Bold)) b.Width = Math.Max(110, TextRenderer.MeasureText(t, fb).Width + 44);
+                    var b = DialogKit.Fit(k > 0 ? DialogKit.Secondary(t) : danger ? DialogKit.Danger(t) : DialogKit.Primary(t));
                     b.Click += (s, e) => { DialogResult = r; Close(); };
                     made.Add(b);
                 }
-                for (int k = made.Count - 1; k >= 0; k--) bar.Controls.Add(made[k]);   // de derecha a izquierda: el principal a la derecha
+                bar.AddRight(made.ToArray());
                 Controls.Add(body); Controls.Add(bar); Controls.Add(header); Controls.Add(stripe);
 
                 // teclado: Intro, el botón por defecto; Esc, cancelar (o «No», o «Aceptar» si es el único)
@@ -122,10 +104,11 @@ namespace SelectOR
                 };
                 Shown += (s, e) => def.Focus();
 
-                // a la medida del texto
-                int w = Math.Max(Theme.Px(420), Math.Min(Theme.Px(600), msg.PreferredSize.Width + 56 + 42 + 20));
-                int bodyH = Math.Max(40, msg.GetPreferredSize(new Size(Theme.Px(470), 0)).Height) + 26 + 10;
-                ClientSize = new Size(w, 6 + 42 + bodyH + 62);
+                // a la medida del texto (y de los botones)
+                int btnW = 0; foreach (var b in made) btnW += b.Width + Theme.Px(10);
+                int w = Math.Max(Math.Max(Theme.Px(440), btnW + Theme.Px(48)), Math.Min(Theme.Px(580), msg.PreferredSize.Width + Theme.Px(52)));
+                int bodyH = msg.GetPreferredSize(new Size(Theme.Px(500), 0)).Height + Theme.Px(30);
+                ClientSize = new Size(w, stripe.Height + header.Height + bodyH + bar.Height);
             }
         }
     }

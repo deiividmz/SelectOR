@@ -19,7 +19,7 @@ namespace SelectOR
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(560, 452);
-            try { Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
+            DialogKit.Dress(this, false);
 
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
             var logo = new SelectorLogo { Location = new Point(24, 20), Width = 220, Height = 44 };

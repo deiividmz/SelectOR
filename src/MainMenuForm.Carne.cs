@@ -40,7 +40,7 @@ namespace SelectOR
         public static string Code(string code) => code switch
         {
             "jump" => "A1", "speed_avg" => "A2", "time_accel" => "A3", "autopilot" => "A4",
-            "overspeed" => "B6", "overspeed_grave" => "B7", "recovery" => "+1", _ => "—"
+            "overspeed" => "B6", "overspeed_grave" => "B7", "recovery" => "+1", "train_kind" => "T", _ => "—"
         };
 
         public static string Name(string code) => I18n.T(code switch
@@ -52,6 +52,7 @@ namespace SelectOR
             "overspeed" => "Exceso de velocidad",
             "overspeed_grave" => "Exceso de velocidad grave",
             "recovery" => "Recuperación de un punto",
+            "train_kind" => "Tren de viajeros como mercancías",
             _ => "Infracción"
         });
 
@@ -62,12 +63,13 @@ namespace SelectOR
             "applied" => "Aplicada",
             "pending" => "Pendiente de revisión",
             "annulled" => "Anulada",
+            "noted" => "Anotado",
             _ => "—"
         });
 
         public static Color StatusColor(string status) => status switch
         {
-            "applied" => Red, "pending" => Gold, "annulled" => Color.FromArgb(150, 156, 160), _ => Color.Gray
+            "applied" => Red, "pending" => Gold, "annulled" => Color.FromArgb(150, 156, 160), "noted" => Blue, _ => Color.Gray
         };
 
         public static Color PointsColor(int pts) => pts >= WarnBelow ? Green : pts >= PenaltyBelow ? Gold : Red;
@@ -564,8 +566,9 @@ namespace SelectOR
         double RankKm(double validKm) => double.IsNaN(_licFrozenKm) ? validKm : Math.Min(validKm, _licFrozenKm);
 
         // ---------------------------------------------------------------- Revisión (gerente / gestores)
-        ReviewCardList _revList; Label _revMsg;
-        readonly List<ReviewItem> _revAll = new();
+        ReviewCardList _revList; Label _revMsg; Control _revBtns;
+        readonly List<ReviewItem> _revAll = new(), _revKinds = new();   // _revKinds: «Tipo cambiado» (tipo-tren.sql)
+        string _revKindsErr;
         int _revTab; string _revQuery = "";
         static bool IsCodeA(string code) => code == "jump" || code == "speed_avg" || code == "time_accel" || code == "autopilot";
 
@@ -589,7 +592,8 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7
-            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7" }, i => { _revTab = i; FillReviewCards(); });
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "Tipo cambiado" }, i => { _revTab = i; if (i == 4) LoadKindOverrides(); FillReviewCards(); });
+            // «Tipo cambiado» son avisos, no infracciones: sin Aprobar, Anular ni Eliminar
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 260, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
             search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); };
@@ -606,6 +610,7 @@ namespace SelectOR
             del.BaseColor = Color.FromArgb(60, 44, 44); del.HoverColor = Color.FromArgb(150, 60, 60); del.TextColor = Color.FromArgb(229, 115, 115);
             del.Click += (s, e) => AdminInfraction("delete");
             btns.Controls.Add(ok); btns.Controls.Add(no); btns.Controls.Add(del);
+            _revBtns = btns;
             _revMsg = EmpMsg(); _revMsg.Margin = new Padding(12, 20, 2, 2); _revMsg.MaximumSize = new Size(600, 0);
             btns.Controls.Add(_revMsg);
             t.Controls.Add(btns);
@@ -668,14 +673,19 @@ namespace SelectOR
             var words = _revQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _revList.BeginUpdate();
             _revList.Items.Clear();
-            foreach (var r in _revAll)
+            if (_revTab == 4)
+                _revList.EmptyText = _revKindsErr ?? Tr("Ningún servicio con un tren de viajeros puesto como mercancías.");
+            else _revList.EmptyText = Tr("No hay infracciones.");
+            if (_revBtns != null)
+                foreach (Control c in _revBtns.Controls) if (c is RoundButton) c.Visible = _revTab != 4;
+            foreach (var r in _revTab == 4 ? _revKinds : _revAll)
             {
                 bool tabOk = _revTab switch
                 {
                     1 => r.Status == "pending",
                     2 => IsCodeA(r.Code),
                     3 => !IsCodeA(r.Code),
-                    _ => true
+                    _ => true   // 0 (todas) y 4 (tipo cambiado: su propia lista)
                 };
                 if (!tabOk) continue;
                 bool ok = true;
@@ -688,6 +698,42 @@ namespace SelectOR
         }
 
         ReviewItem SelectedReview() => _revList?.SelectedItem as ReviewItem;
+
+        // Revisión → «Tipo cambiado»: servicios con un tren que lleva plazas en sus archivos puesto como mercancías por su
+        // empresa (list_kind_overrides, tipo-tren.sql). No restan puntos: es para que el administrador lo vea.
+        async void LoadKindOverrides()
+        {
+            if (!Supa.IsSuperadmin) return;
+            var (json, err) = await Supa.RpcAsync("list_kind_overrides", new { p_limit = 1000 });
+            var rows = new List<ReviewItem>();
+            _revKindsErr = null;
+            if (err != null)
+                _revKindsErr = err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 || err.IndexOf("Could not find", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? Tr("El servidor aún no anota el tipo de los trenes (falta tipo-tren.sql).") : Tr("Error: ") + err;
+            else
+            {
+                try
+                {
+                    using var d = JsonDocument.Parse(json);
+                    foreach (var e in d.RootElement.EnumerateArray())
+                    {
+                        string who = Str(e, "username"), co = Str(e, "company_name"), train = Str(e, "train_name"), con = Str(e, "consist");
+                        double seats = Num(e, "seats"), km = Num(e, "km"), net = Num(e, "net");
+                        rows.Add(new ReviewItem
+                        {
+                            Id = Str(e, "id"), Status = "noted", Code = "train_kind", Driver = who.Length > 0 ? who : "—", Company = co.Length > 0 ? co : "—",
+                            When = FmtDate(Str(e, "started_at")), Train = train.Length > 0 ? train + (con.Length > 0 && con != train ? " (" + con + ")" : "") : con,
+                            Route = Str(e, "route"),
+                            Detail = string.Format(Tr("{0} plazas en sus archivos"), seats.ToString("N0", EsEs)) + (km > 0 ? " · " + km.ToString("N1", EsEs) + " km" : "")
+                                     + " · " + Tr("neto") + " " + net.ToString("N0", EsEs) + " €"
+                        });
+                    }
+                }
+                catch { }
+            }
+            _revKinds.Clear(); _revKinds.AddRange(rows);
+            if (_revTab == 4) FillReviewCards();
+        }
 
         void SetReviewCount(int n)
         {
@@ -703,6 +749,7 @@ namespace SelectOR
             if (_revList == null || !Supa.IsSuperadmin) return;
             var sel = SelectedReview();
             if (sel == null) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
+            if (sel.Code == "train_kind") { Msg(_revMsg, Tr("Es solo un aviso, no resta puntos: si el servicio no es correcto, anúlalo desde Servicios."), true); return; }
             var (id, status, driver, code) = (sel.Id, sel.Status, sel.DriverId, sel.Code);
             if (action == "confirm" && status == "applied") { Msg(_revMsg, Tr("Esta infracción ya está aprobada."), true); return; }
             if (action == "annul" && status == "annulled") { Msg(_revMsg, Tr("Esta infracción ya está anulada."), true); return; }

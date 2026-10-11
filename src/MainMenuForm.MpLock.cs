@@ -101,6 +101,7 @@ namespace SelectOR
         // Al cerrar Open Rails: el servidor queda libre.
         async void MpRelease()
         {
+            RoomLeave();   // servidores SelectOR: fuera de la sala
             var key = _mpOwnedServer;
             _mpOwnedServer = null; _mpBeat?.Stop();
             if (key != null) { try { await Supa.RpcAsync("mp_release", new { p_server = key }); } catch { } }

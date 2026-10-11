@@ -48,7 +48,7 @@ namespace SelectOR
             Text = I18n.T("Vista 3D") + (string.IsNullOrWhiteSpace(src.Caption) ? "" : " · " + src.Caption);
             BackColor = Theme.Bg; ForeColor = Theme.Text; Font = Theme.Font(9.5f);
             StartPosition = FormStartPosition.CenterScreen; KeyPreview = true; ShowInTaskbar = true;
-            try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? AppContext.BaseDirectory); } catch { }
+            DialogKit.Dress(this, false);
             var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
             Size = new Size(Math.Max(900, wa.Width * 85 / 100), Math.Max(600, wa.Height * 85 / 100));
             MinimumSize = new Size(640, 420);

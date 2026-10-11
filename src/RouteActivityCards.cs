@@ -163,19 +163,124 @@ namespace SelectOR
 
     // ------------------------------------------------------------------ bienvenida (sin ruta elegida)
     // Tarjeta centrada con el logotipo de SelectOR, «Elige una ruta para empezar», una flecha hacia la lista de
-    // la izquierda y unas cifras del contenido.
+    // la izquierda, unas cifras del contenido, los usuarios conectados ahora (en directo) y los accesos a la web y a
+    // Discord.
     public class RouteWelcome : Control
     {
         public string Title = "Elige una ruta para empezar", Sub = "", Arrow = "", Footer = "", Copyright = "";
+        // En directo: SelectOR abiertos ahora y servicios en marcha (−1 = no se sabe: no se enseña)
+        public int Online = -1, Driving = -1;
+        public string LblOnline1 = "{0} usuario conectado", LblOnlineN = "{0} usuarios conectados", LblDriving = "{0} conduciendo ahora", LblLive = "EN DIRECTO";
+        // Accesos directos (se abren en el navegador)
+        public string LblWeb = "Web de SelectOR", LblWebSub = "select-or.app", LblDiscord = "Discord", LblDiscordSub = "Únete a la comunidad";
+        public string WebUrl = "https://www.select-or.app/", DiscordUrl = "https://discord.gg/zP7bg2Vn3c";
+        public event Action<string> LinkClicked;
+        Rectangle _webR, _discR, _liveDot; int _hoverLink;   // 1 web · 2 Discord
+        readonly System.Windows.Forms.Timer _pulse = new System.Windows.Forms.Timer { Interval = 90 };
+        int _pulseT;
         public List<string> Chips = new List<string>();
         // Novedades de esta versión (debajo, en su propia tarjeta)
         public string NewsTitle = "";
         public List<(string title, string text)> News = new List<(string, string)>();
         readonly Font _fLogo = Theme.Font(30f, FontStyle.Bold), _fT = Theme.Font(17f, FontStyle.Bold), _fS = Theme.Font(10f), _fA = Theme.Font(9.5f, FontStyle.Bold), _fC = Theme.Font(9f, FontStyle.Bold),
                       _fNewsCap = Theme.Font(8.5f, FontStyle.Bold), _fNewsT = Theme.Font(9.25f, FontStyle.Bold), _fNews = Theme.Font(9f),
-                      _fFoot = Theme.Font(10f, FontStyle.Bold), _fCopy = Theme.Font(8.25f);
-        public RouteWelcome() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); BackColor = Theme.Bg; }
-        protected override void Dispose(bool disposing) { if (disposing) foreach (var f in new[] { _fLogo, _fT, _fS, _fA, _fC, _fNewsCap, _fNewsT, _fNews, _fFoot, _fCopy }) f.Dispose(); base.Dispose(disposing); }
+                      _fFoot = Theme.Font(10f, FontStyle.Bold), _fCopy = Theme.Font(8.25f),
+                      _fLive = Theme.Font(9.5f, FontStyle.Bold), _fLiveCap = Theme.Font(7.5f, FontStyle.Bold), _fLinkT = Theme.Font(10f, FontStyle.Bold), _fLinkS = Theme.Font(8.25f),
+                      _fLinkI = EmojiPicker.EmojiFont(15f);
+        public RouteWelcome()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); BackColor = Theme.Bg;
+            // el punto verde «en directo» late (solo se repinta él)
+            _pulse.Tick += (s, e) => { _pulseT++; if (!_liveDot.IsEmpty) Invalidate(Rectangle.Inflate(_liveDot, Theme.Px(8), Theme.Px(8))); };
+        }
+        protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); _pulse.Enabled = Visible && Online >= 0; }
+        public void SetLive(int online, int driving)
+        {
+            Online = online; Driving = driving;
+            _pulse.Enabled = Visible && Online >= 0;
+            Invalidate();
+        }
+        protected override void Dispose(bool disposing) { if (disposing) { _pulse.Dispose(); foreach (var f in new[] { _fLogo, _fT, _fS, _fA, _fC, _fNewsCap, _fNewsT, _fNews, _fFoot, _fCopy, _fLive, _fLiveCap, _fLinkT, _fLinkS, _fLinkI }) f.Dispose(); } base.Dispose(disposing); }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int h = _webR.Contains(e.Location) ? 1 : _discR.Contains(e.Location) ? 2 : 0;
+            if (h != _hoverLink) { _hoverLink = h; Cursor = h > 0 ? Cursors.Hand : Cursors.Default; Invalidate(Rectangle.Union(_webR, _discR)); }
+        }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (_hoverLink != 0) { _hoverLink = 0; Cursor = Cursors.Default; Invalidate(Rectangle.Union(_webR, _discR)); } }
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (e.Button != MouseButtons.Left) return;
+            if (_webR.Contains(e.Location)) LinkClicked?.Invoke(WebUrl);
+            else if (_discR.Contains(e.Location)) LinkClicked?.Invoke(DiscordUrl);
+        }
+
+        // Fila «en directo»: punto verde que late, «EN DIRECTO» y las cifras.
+        int PaintLive(Graphics g, Rectangle card, int y)
+        {
+            if (Online < 0) { _liveDot = Rectangle.Empty; return y; }
+            var ci = I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : System.Globalization.CultureInfo.GetCultureInfo("es-ES");
+            string t1 = string.Format(Online == 1 ? LblOnline1 : LblOnlineN, Online.ToString("N0", ci));
+            string t2 = Driving > 0 ? string.Format(LblDriving, Driving.ToString("N0", ci)) : "";
+            int capW = TextRenderer.MeasureText(g, LblLive, _fLiveCap, Size.Empty, TextFormatFlags.NoPadding).Width;
+            int w1 = TextRenderer.MeasureText(g, t1, _fLive, Size.Empty, TextFormatFlags.NoPadding).Width;
+            int w2 = t2.Length > 0 ? TextRenderer.MeasureText(g, t2, _fLive, Size.Empty, TextFormatFlags.NoPadding).Width : 0;
+            int dot = Theme.Px(9), gap = Theme.Px(10), sep = t2.Length > 0 ? Theme.Px(22) : 0;
+            int pw = Theme.Px(16) + dot + Theme.Px(8) + capW + gap + w1 + sep + w2 + Theme.Px(18), ph = Theme.Px(32);
+            var r = new Rectangle(card.X + (card.Width - pw) / 2, y, pw, ph);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Theme.FillRound(g, r, ph / 2, Color.FromArgb(150, 12, 20, 14));
+            Theme.DrawRoundBorder(g, r, ph / 2, Color.FromArgb(90, 102, 197, 106), 1f);
+            int x = r.X + Theme.Px(16), cy = r.Y + ph / 2;
+            // punto que late
+            double ph1 = (Math.Sin(_pulseT * 0.35) + 1) / 2;
+            int halo = dot + (int)(Theme.Px(8) * ph1);
+            using (var b = new SolidBrush(Color.FromArgb((int)(90 * (1 - ph1)), 102, 197, 106))) g.FillEllipse(b, x + dot / 2 - halo / 2, cy - halo / 2, halo, halo);
+            using (var b = new SolidBrush(Color.FromArgb(120, 220, 120))) g.FillEllipse(b, x, cy - dot / 2, dot, dot);
+            _liveDot = new Rectangle(x, cy - dot / 2, dot, dot);
+            g.SmoothingMode = SmoothingMode.None;
+            x += dot + Theme.Px(8);
+            TextRenderer.DrawText(g, LblLive, _fLiveCap, new Rectangle(x, r.Y, capW + 2, ph), Color.FromArgb(120, 220, 120), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            x += capW + gap;
+            TextRenderer.DrawText(g, t1, _fLive, new Rectangle(x, r.Y, w1 + 2, ph), Color.White, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            x += w1;
+            if (t2.Length > 0)
+            {
+                using (var b = new SolidBrush(Color.FromArgb(110, 255, 255, 255))) g.FillEllipse(b, x + sep / 2 - Theme.Px(2), cy - Theme.Px(2), Theme.Px(4), Theme.Px(4));
+                x += sep;
+                TextRenderer.DrawText(g, t2, _fLive, new Rectangle(x, r.Y, w2 + 2, ph), Color.FromArgb(150, 190, 255), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+            return y + ph;
+        }
+
+        // Accesos directos: la web y Discord, como dos botones con su icono, título y subtítulo.
+        int PaintLinks(Graphics g, Rectangle card, int y)
+        {
+            int bw = Theme.Px(230), bh = Theme.Px(50), gap = Theme.Px(14);
+            int x0 = card.X + (card.Width - (2 * bw + gap)) / 2;
+            _webR = new Rectangle(x0, y, bw, bh); _discR = new Rectangle(x0 + bw + gap, y, bw, bh);
+            LinkButton(g, _webR, "🌐", LblWeb, LblWebSub, Theme.Accent, _hoverLink == 1);
+            LinkButton(g, _discR, "💬", LblDiscord, LblDiscordSub, Color.FromArgb(88, 101, 242), _hoverLink == 2);
+            return y + bh;
+        }
+
+        void LinkButton(Graphics g, Rectangle r, string icon, string title, string sub, Color c, bool hover)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Theme.FillRound(g, r, Theme.Px(12), hover ? Color.FromArgb(70, c) : Color.FromArgb(40, c));
+            Theme.DrawRoundBorder(g, r, Theme.Px(12), Color.FromArgb(hover ? 230 : 140, c), hover ? 1.6f : 1.1f);
+            int d = Theme.Px(34), ix = r.X + Theme.Px(10), iy = r.Y + (r.Height - d) / 2;
+            using (var b = new SolidBrush(c)) g.FillEllipse(b, ix, iy, d, d);
+            g.SmoothingMode = SmoothingMode.None;
+            TextRenderer.DrawText(g, icon, _fLinkI, new Rectangle(ix, iy, d, d), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            int tx = ix + d + Theme.Px(10), tw = r.Right - tx - Theme.Px(28);
+            TextRenderer.DrawText(g, title, _fLinkT, new Rectangle(tx, r.Y + Theme.Px(8), tw, Theme.Px(18)), Color.White, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(g, sub, _fLinkS, new Rectangle(tx, r.Y + Theme.Px(27), tw, Theme.Px(16)), Color.FromArgb(200, 205, 210), TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+            // flecha «sale fuera»
+            TextRenderer.DrawText(g, "↗", _fLinkT, new Rectangle(r.Right - Theme.Px(26), r.Y, Theme.Px(20), r.Height), hover ? Color.White : Color.FromArgb(170, 175, 180), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
 
         const TextFormatFlags WrapL = TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.TextBoxControl;
 
@@ -240,13 +345,15 @@ namespace SelectOR
             var g = e.Graphics;
             g.Clear(BackColor);
             const TextFormatFlags C = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix;
-            int cw = Math.Min(Width - Theme.Px(40), Theme.Px(640)), ch = Math.Min(Height - Theme.Px(120), Theme.Px(420));
+            int cw = Math.Min(Width - Theme.Px(40), Theme.Px(640)), ch = Math.Min(Height - Theme.Px(120), Theme.Px(460));
+            int liveH = Online >= 0 ? Theme.Px(46) : 0;   // la línea «en directo», encima de la tarjeta
             if (cw < 50 || ch < 50) return;
             // Debajo, las novedades de la versión, en lo que quepa (el conjunto va centrado en vertical).
             int nw = Math.Min(Width - Theme.Px(40), Theme.Px(820)), nGap = Theme.Px(16);
-            int nh = News.Count == 0 ? 0 : NewsHeight(g, nw, Height - Theme.Px(70) - ch - nGap - Theme.Px(20), out _, out _);
-            int groupH = ch + (nh > 0 ? nGap + nh : 0);
-            var card = new Rectangle((Width - cw) / 2, Math.Max(Theme.Px(10), (Height - Theme.Px(60) - groupH) / 2), cw, ch);   // (deja sitio abajo para la versión)
+            int nh = News.Count == 0 ? 0 : NewsHeight(g, nw, Height - Theme.Px(70) - liveH - ch - nGap - Theme.Px(20), out _, out _);
+            int groupH = liveH + ch + (nh > 0 ? nGap + nh : 0);
+            var card = new Rectangle((Width - cw) / 2, Math.Max(Theme.Px(10), (Height - Theme.Px(60) - groupH) / 2) + liveH, cw, ch);   // (deja sitio abajo para la versión)
+            if (liveH > 0) PaintLive(g, card, card.Y - liveH + Theme.Px(2));
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(card, Theme.Px(20)))
             {
@@ -320,7 +427,11 @@ namespace SelectOR
                     ColorText.Draw(g, Chips[k], _fC, new Rectangle(r.X + Theme.Px(11), r.Y + (chH - h) / 2, r.Width, h + 2), Theme.Text);
                     cx += ws[k] + Theme.Px(8);
                 }
+                y += chH;
             }
+            // accesos directos
+            y += Theme.Px(18);
+            PaintLinks(g, card, y);
         }
 
         // Tarjeta de novedades: título con la versión y las novedades en dos columnas (título en negrita y texto).

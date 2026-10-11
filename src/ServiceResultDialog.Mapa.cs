@@ -180,7 +180,7 @@ namespace SelectOR
                 var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
                 ClientSize = new Size(Math.Min(1200, wa.Width - 80), Math.Min(820, wa.Height - 80));
                 MinimizeBox = false; KeyPreview = true;
-                try { Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
+                DialogKit.Dress(this, false);
                 SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
                 KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Close(); };
             }

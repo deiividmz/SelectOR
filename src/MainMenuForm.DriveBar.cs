@@ -233,9 +233,11 @@ namespace SelectOR
                 if (hudWasHidden) _serviceHud.Hide();
                 if (bigWasOpen) _serviceHud.ToggleBigMap();
             }
-            return (true, string.IsNullOrEmpty(plate)
+            string turno = await SchedMidRunAsync(co.Id, _drivenRoute, _drivenPath);   // ¿es su turno programado? (su itinerario, a la hoja de ruta)
+            string ok = string.IsNullOrEmpty(plate)
                 ? string.Format(Tr("De servicio en {0}. ¡Buen viaje!"), co.Name)
-                : string.Format(Tr("De servicio en {0} con la unidad {1}. ¡Buen viaje!"), co.Name, plate));
+                : string.Format(Tr("De servicio en {0} con la unidad {1}. ¡Buen viaje!"), co.Name, plate);
+            return (true, turno == null ? ok : ok + "  " + turno);
         }
 
         // Registrar el servicio sin cerrar OR: se sigue conduciendo en modo libre.

@@ -307,6 +307,9 @@ namespace SelectOR
             var go = new RoundButton { Text = I18n.T("Conectar"), Bounds = new Rectangle(Theme.Px(300), Theme.Px(246), Theme.Px(160), Theme.Px(38)), Radius = 9, FontSize = 10f, FontStyle = FontStyle.Bold, BaseColor = Theme.Accent, HoverColor = Theme.AccentHi, TextColor = Color.White };
             var cancel = new RoundButton { Text = I18n.T("Cancelar"), Bounds = new Rectangle(Theme.Px(184), Theme.Px(246), Theme.Px(108), Theme.Px(38)), Radius = 9, FontSize = 10f, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text };
             Controls.AddRange(new Control[] { info, _pw, _msg, go, cancel });
+            go.GradientTo = Theme.Accent2; go.Radius = cancel.Radius = 10;
+            DialogKit.Dress(this);
+            DialogKit.Crown(this, Text, null, "🔐");
             ShowPw();
             void ShowPw() => _pw.Text = Password ?? I18n.T("sin contraseña");
             copy.Click += (s, e) => { try { if (Password != null) Clipboard.SetText(Password); _msg.Text = I18n.T("Copiada. Pásasela a quien quieras que se una."); } catch { } };
@@ -338,6 +341,9 @@ namespace SelectOR
             var go = new RoundButton { Text = I18n.T("Unirme"), Bounds = new Rectangle(Theme.Px(300), Theme.Px(172), Theme.Px(140), Theme.Px(38)), Radius = 9, FontSize = 10f, FontStyle = FontStyle.Bold, BaseColor = Theme.Accent, HoverColor = Theme.AccentHi, TextColor = Color.White };
             var cancel = new RoundButton { Text = I18n.T("Cancelar"), Bounds = new Rectangle(Theme.Px(184), Theme.Px(172), Theme.Px(108), Theme.Px(38)), Radius = 9, FontSize = 10f, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text };
             Controls.AddRange(new Control[] { info, input, msg, go, cancel });
+            go.GradientTo = Theme.Accent2; go.Radius = cancel.Radius = 10;
+            DialogKit.Dress(this);
+            DialogKit.Crown(this, Text, null, "🔒");
             bool busy = false;
             async void Try()
             {

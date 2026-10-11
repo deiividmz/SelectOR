@@ -38,15 +38,10 @@ namespace SelectOR
             MinimizeBox = false;
             ClientSize = new Size(560, 600);
             MinimumSize = new Size(420, 380);
-            try { Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
+            DialogKit.Dress(this);
 
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var header = new Label
-            {
-                Text = "  " + Text, Dock = DockStyle.Top, Height = 42,
-                Font = Theme.Font(13f, FontStyle.Bold), ForeColor = Theme.Text,
-                TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface
-            };
+            var header = new DialogKit.Header(Text, null, "📢");
 
             var body = new TableLayoutPanel
             {
@@ -90,6 +85,8 @@ namespace SelectOR
             body.Controls.Add(bottom);
 
             var buttons = new Panel { Dock = DockStyle.Bottom, Height = 58, BackColor = Theme.Bg, Padding = new Padding(18, 8, 18, 12) };
+
+            DialogKit.StyleFooter(buttons);
             var ok = new RoundButton { Text = I18n.T("Guardar"), Width = 150, Height = 38, Radius = 10, BaseColor = Theme.Accent, HoverColor = Theme.AccentHi, GradientTo = Theme.Accent2, TextColor = Color.White, FontSize = 10.5f, FontStyle = FontStyle.Bold, Dock = DockStyle.Right };
             var cancel = new RoundButton { Text = I18n.T("Cancelar"), Width = 120, Height = 38, Radius = 10, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 10.5f, Dock = DockStyle.Right };
             ok.Click += (s, e) =>
@@ -99,9 +96,9 @@ namespace SelectOR
                 DialogResult = DialogResult.OK; Close();
             };
             cancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
-            buttons.Controls.Add(ok);
+            buttons.Controls.Add(cancel);   // (el principal, a la derecha, como en las demás ventanas)
             buttons.Controls.Add(new Panel { Width = 10, Dock = DockStyle.Right });
-            buttons.Controls.Add(cancel);
+            buttons.Controls.Add(ok);
 
             Controls.Add(body);
             Controls.Add(buttons);

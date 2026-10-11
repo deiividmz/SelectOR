@@ -20,36 +20,25 @@ namespace SelectOR
         protected AccountDialogBase(string title, string okText, bool danger)
         {
             Text = title;
-            BackColor = Theme.Bg; ForeColor = Theme.Text;
             Font = Theme.Font(9.5f);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
-            ClientSize = new Size(Theme.Px(480), Theme.Px(200));
-            try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? AppContext.BaseDirectory); } catch { }
+            ClientSize = new Size(Theme.Px(500), Theme.Px(220));
+            DialogKit.Dress(this);
 
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var header = new Label
-            {
-                Text = "  " + title, Dock = DockStyle.Top, Height = Theme.Px(42),
-                Font = Theme.Font(13f, FontStyle.Bold), ForeColor = danger ? Color.FromArgb(240, 140, 140) : Theme.Text,
-                TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface
-            };
-            Body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(18), Theme.Px(12), Theme.Px(18), Theme.Px(4)) };
+            var header = _head = new DialogKit.Header(title, null, danger ? "⚠️" : "🔑", danger ? Color.FromArgb(229, 115, 115) : (Color?)null);
+            Body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(24), Theme.Px(14), Theme.Px(24), Theme.Px(4)) };
             Note = new Label { Dock = DockStyle.Bottom, Height = Theme.Px(40), ForeColor = Color.FromArgb(235, 130, 130), BackColor = Theme.Bg,
-                               Padding = new Padding(Theme.Px(18), 0, Theme.Px(18), 0), TextAlign = ContentAlignment.MiddleLeft };
+                               Padding = new Padding(Theme.Px(24), 0, Theme.Px(24), 0), TextAlign = ContentAlignment.MiddleLeft };
 
-            var buttons = new Panel { Dock = DockStyle.Bottom, Height = Theme.Px(58), BackColor = Theme.Bg, Padding = new Padding(Theme.Px(18), Theme.Px(8), Theme.Px(18), Theme.Px(12)) };
-            Ok = new RoundButton
-            {
-                Text = okText, Width = Theme.Px(200), Height = Theme.Px(38), Radius = 10, TextColor = Color.White, FontSize = 10.5f, FontStyle = FontStyle.Bold, Dock = DockStyle.Right,
-                BaseColor = danger ? Color.FromArgb(170, 55, 55) : Theme.Accent, HoverColor = danger ? Color.FromArgb(200, 70, 70) : Theme.AccentHi,
-                GradientTo = danger ? Color.FromArgb(150, 45, 45) : Theme.Accent2
-            };
-            Cancel = new RoundButton { Text = I18n.T("Cancelar"), Width = Theme.Px(120), Height = Theme.Px(38), Radius = 10, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 10.5f, Dock = DockStyle.Right };
+            var buttons = _foot = new DialogKit.Footer();
+            Ok = DialogKit.Fit(danger ? DialogKit.Danger(okText, 200) : DialogKit.Primary(okText, 200), 200);
+            Cancel = DialogKit.Secondary(I18n.T("Cancelar"));
             Ok.Click += async (s, e) => await Submit();
             Cancel.Click += (s, e) => { if (!_busy) { DialogResult = DialogResult.Cancel; Close(); } };
-            buttons.Controls.Add(Ok); buttons.Controls.Add(new Panel { Width = Theme.Px(10), Dock = DockStyle.Right }); buttons.Controls.Add(Cancel);
+            buttons.AddRight(Ok, Cancel);
 
             Controls.Add(Body);
             Controls.Add(Note);
@@ -97,7 +86,8 @@ namespace SelectOR
         }
 
         // Ajusta el alto de la ventana a lo añadido.
-        protected void FitHeight() => ClientSize = new Size(ClientSize.Width, Theme.Px(4) + Theme.Px(42) + Theme.Px(12) + _y + Theme.Px(4) + Theme.Px(40) + Theme.Px(58));
+        protected void FitHeight() => ClientSize = new Size(ClientSize.Width, Theme.Px(3) + _head.Height + Body.Padding.Vertical + _y + Note.Height + _foot.Height);
+        readonly DialogKit.Header _head; readonly DialogKit.Footer _foot;
 
         protected virtual Task<string> Run() => Task.FromResult<string>(null);
 

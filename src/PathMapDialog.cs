@@ -37,10 +37,10 @@ namespace SelectOR
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(900, 720);
             MinimumSize = new Size(560, 480);
-            try { Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
+            DialogKit.Dress(this);
 
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var header = new Label { Text = "  " + I18n.T("Esquema de vías") + (string.IsNullOrEmpty(_end) ? "" : "  ·  " + _start + "  →  " + _end), Dock = DockStyle.Top, Height = 42, Font = Theme.Font(12f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+            var header = new DialogKit.Header(I18n.T("Esquema de vías") + (string.IsNullOrEmpty(_end) ? "" : "  ·  " + _start + "  →  " + _end), null, "🗺️");
             _status = new Label { Dock = DockStyle.Bottom, Height = 26, ForeColor = Theme.Subtle, Padding = new Padding(14, 2, 0, 0), Text = I18n.T("Cargando esquema de vías…") };
             _map = new MapPanel { Dock = DockStyle.Fill, StartName = _start, EndName = _end, Overview = _overview };
 

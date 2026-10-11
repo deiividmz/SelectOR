@@ -38,20 +38,32 @@ namespace SelectOR
                 var (jm, em) = await Supa.RpcAsync("route_mode", new { });
                 return em == null && JsonText(jm) == "enforce" ? Tr("No se ha podido leer el archivo de vías (.tdb) de la ruta: sin él no se puede comprobar que esté autorizada.") : null;
             }
-            var (json, err) = await Supa.RpcAsync("route_permit", new { p_company = companyId, p_route_id = id.Id, p_hash = id.Hash, p_name = id.Name, p_stats = (object)null });
-            if (err != null) return null;   // servidor sin rutas-autorizadas.sql o sin red: decide start_service
             string mode = "collect", state = "none", reason = ""; bool ok = false, needPlan = false, canReq = false;
-            try
+            async Task<bool> Ask()
             {
-                using var d = JsonDocument.Parse(json);
-                var r = d.RootElement;
-                mode = Str(r, "mode"); state = Str(r, "state"); reason = Str(r, "reason");
-                ok = r.TryGetProperty("ok", out var o) && o.ValueKind == JsonValueKind.True;
-                needPlan = r.TryGetProperty("need_plan", out var n) && n.ValueKind == JsonValueKind.True;
-                canReq = r.TryGetProperty("can_request", out var c) && c.ValueKind == JsonValueKind.True;
+                var (json, err) = await Supa.RpcAsync("route_permit", new { p_company = companyId, p_route_id = id.Id, p_hash = id.Hash, p_name = id.Name, p_stats = (object)null });
+                if (err != null) return false;   // servidor sin rutas-autorizadas.sql o sin red: decide start_service
+                try
+                {
+                    using var d = JsonDocument.Parse(json);
+                    var r = d.RootElement;
+                    mode = Str(r, "mode"); state = Str(r, "state"); reason = Str(r, "reason");
+                    ok = r.TryGetProperty("ok", out var o) && o.ValueKind == JsonValueKind.True;
+                    needPlan = r.TryGetProperty("need_plan", out var n) && n.ValueKind == JsonValueKind.True;
+                    canReq = r.TryGetProperty("can_request", out var c) && c.ValueKind == JsonValueKind.True;
+                    return true;
+                }
+                catch { return false; }
             }
-            catch { return null; }
-            if (needPlan) _ = UploadRoutePlanAsync(id);
+            if (!await Ask()) return null;
+            if (needPlan && state == "version_pending" && mode != "collect")
+            {
+                // Versión nueva de una ruta autorizada: con su ficha, el servidor la aprueba sola si es casi igual a una
+                // autorizada (rutas-versiones-auto.sql). Se sube ya y se vuelve a preguntar, para no esperar al siguiente intento.
+                await UploadRoutePlanAsync(id);
+                if (!await Ask()) return null;
+            }
+            else if (needPlan) _ = UploadRoutePlanAsync(id);
             if (ok || mode == "collect") return null;
             string msg = RouteBlockText(id.Name, state, reason, canReq);
             if (mode == "warn")
@@ -454,7 +466,7 @@ namespace SelectOR
             };
             var wa = Screen.FromControl(this).WorkingArea;
             f.ClientSize = new Size(Math.Min(1300, wa.Width - 80), Math.Min(860, wa.Height - 80));
-            try { f.Icon = Icon; } catch { }
+            DialogKit.Dress(f, false);
             var v = new RoutePlanView { Dock = DockStyle.Fill, Expandable = false };
             v.SetPlan(plan, Tr("No se ha podido leer el plano de esta ruta."));
             f.Controls.Add(v);

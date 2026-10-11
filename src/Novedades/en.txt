@@ -1,3 +1,8 @@
-1.2.58
-Even more trains for sale|Multiple units that had no price in Purchase can now be bought and rented (Feve 2600, Civia, Alaris, Alvia, 440, 447 and many more). If a train cannot be bought, the shop tells you why.
-HUD chat with many companies|The list for choosing the chat's company works like the PA one: it scrolls and keeps the company you are in visible.
+1.2.59
+Scheduled services|The owner or a manager schedules shifts with a route, itinerary, train and departure window. Members reserve them and, with «Prepare», the itinerary is loaded into the road book. When it is done, the company gets a bonus and the driver adds completed shifts to their profile.
+SelectOR servers|Multiplayer has official rooms: join with one click, with the route, server and password already set. Each room shows how many players it has and who can join.
+Users online|The home screen shows live how many users are online and how many are driving, with links to the SelectOR website and Discord.
+Train type in Fleet|With «Type and seats…» the company decides whether a train carries passengers or freight, and its seats.
+New windows|Notices, forms and dialogs with a more polished design, with their icon, and a dark title bar.
+Stops without passengers|Fixed the stops where sometimes nobody got on or off.
+Authorised routes|A version of a route that is almost the same as one already authorised is authorised automatically.

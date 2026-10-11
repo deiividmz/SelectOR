@@ -38,10 +38,10 @@ namespace SelectOR
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(1180, 420);
             MinimumSize = new Size(700, 320);
-            try { Icon = Icon.ExtractAssociatedIcon((Environment.ProcessPath ?? AppContext.BaseDirectory)); } catch { }
+            DialogKit.Dress(this);
 
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var header = new Label { Text = "  " + (_title ?? "Composición"), Dock = DockStyle.Top, Height = 40, Font = Theme.Font(13f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, BackColor = Theme.Surface };
+            var header = new DialogKit.Header((_title ?? "Composición"), null, "🚆");
             _status = new Label { Dock = DockStyle.Top, Height = 26, ForeColor = Theme.Subtle, Padding = new Padding(16, 4, 0, 0), Text = I18n.T("Generando composición…") };
 
             _legend = new Panel { Dock = DockStyle.Top, Height = _classify != null ? 28 : 0, BackColor = Theme.Bg, Visible = _classify != null };
