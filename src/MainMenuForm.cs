@@ -3267,6 +3267,14 @@ namespace SelectOR
                 var pub = PublicServerFor(host, port.ToString());
                 if (pub != null && !await MpGate(pub)) return;
             }
+            // Sala de SelectOR sin ruta asignada: como en los servidores públicos, el primero que entra recibe una
+            // contraseña (o la deja sin ella) y los demás la tienen que escribir mientras su Open Rails siga abierto.
+            // La partida es suya (su ruta): así nadie se cuela en una sesión privada de una sala libre.
+            else if (_roomPending != null && _roomAnyRoute)
+            {
+                var sala = new GameServer { Ip = "sala", Port = _roomPending, Route = _curRoute?.Name ?? "" };
+                if (!await MpGate(sala, _roomName)) { _roomPending = null; RoomRestoreSettings(); return; }
+            }
             Launch(args);
         }
 

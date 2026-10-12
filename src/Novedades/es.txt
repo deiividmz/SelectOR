@@ -1,5 +1,2 @@
-1.2.60
-Desvíos según tu itinerario|En las salas de Servidores SelectOR, con un itinerario en la hoja de ruta, los desvíos que tienes por delante se ponen solos al acercarte. Si otro tren los necesita antes (primero los servicios programados, después viajeros y después mercancías), SelectOR te avisa para que esperes.
-Desvíos para todos|En las salas de Servidores SelectOR cualquier jugador puede cambiar los desvíos desde el mapa (Ctrl+9).
-Salas para cualquier ruta|El administrador puede crear salas sin ruta asignada: la partida es de la ruta del primero que entra.
-Servicios programados|El panel de «Programados» enseña el tren con el mismo 2D que Servicios, en filas mejor ordenadas, y la hora de fin siempre completa.
+1.2.61
+Salas libres con contraseña|En las salas de Servidores SelectOR para cualquier ruta, el primero que entra recibe una contraseña, como en los servidores públicos: mientras siga dentro, los demás la tienen que escribir para unirse. También puede dejar la sala sin contraseña.

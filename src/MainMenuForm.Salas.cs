@@ -21,6 +21,7 @@ namespace SelectOR
         RoundButton _roomEditBtn, _roomDelBtn;
         string _roomPending, _roomJoined;   // sala a la que se va a entrar · en la que se está jugando
         string _roomHost; int _roomPort;     // a dónde conecta la sala (no se enseña: no pasa por «Servidor» ni «Puerto»)
+        bool _roomAnyRoute; string _roomName; // sala sin ruta asignada: la protege el primero que entra (como un servidor público)
         Timer _roomBeat;
         bool _roomsMissing;
         int _mpSection;                      // 0 servidores SelectOR · 1 servidores públicos
@@ -185,6 +186,7 @@ namespace SelectOR
                 while ((_curRoute?.Path != route.Path || _routeLoadedToken != _routeToken) && (DateTime.UtcNow - t0).TotalSeconds < 30) await Task.Delay(100);
             }
             _rbClient.Checked = true;
+            _roomAnyRoute = it.AnyRoute; _roomName = it.Name;
             _roomHost = Str(j, "host");
             _roomPort = (int)Num(j, "port");
             UpdateStatus();

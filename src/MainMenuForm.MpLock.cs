@@ -35,7 +35,8 @@ namespace SelectOR
             _serversAll?.FirstOrDefault(s => string.Equals(s.Ip?.Trim(), host?.Trim(), StringComparison.OrdinalIgnoreCase) && (s.Port ?? "").Trim() == (port ?? "").Trim());
 
         // Antes de lanzar Open Rails contra un servidor público: true = adelante.
-        async Task<bool> MpGate(GameServer sv)
+        // «display»: lo que se enseña en las ventanas en vez de la dirección (el nombre de una sala de SelectOR).
+        async Task<bool> MpGate(GameServer sv, string display = null)
         {
             if (!Supa.IsLoggedIn)
             {
@@ -61,7 +62,7 @@ namespace SelectOR
 
             if (status == "owner")
             {
-                using var dlg = new MpOwnerDialog(key, string.IsNullOrWhiteSpace(sv.Route) ? key : sv.Route, password, async mode =>
+                using var dlg = new MpOwnerDialog(display ?? key, string.IsNullOrWhiteSpace(sv.Route) ? display ?? key : sv.Route, password, async mode =>
                 {
                     var (j2, e2) = await Supa.RpcAsync("mp_set_password", new { p_server = key, p_mode = mode });
                     if (e2 != null) return (null, Tr("Error: ") + e2);
@@ -73,7 +74,7 @@ namespace SelectOR
             }
             if (status == "open") return true;               // lo protege otro, pero sin contraseña
             // protegido: pedir la contraseña
-            using (var dlg = new MpPasswordDialog(owner, string.IsNullOrWhiteSpace(sv.Route) ? key : sv.Route, since, async pw =>
+            using (var dlg = new MpPasswordDialog(owner, string.IsNullOrWhiteSpace(sv.Route) ? display ?? key : (display != null ? display + " · " + sv.Route : sv.Route), since, async pw =>
             {
                 var (j3, e3) = await Supa.RpcAsync("mp_check", new { p_server = key, p_password = pw });
                 if (e3 != null) return (false, Tr("Error: ") + e3);

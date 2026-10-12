@@ -1,5 +1,2 @@
-1.2.60
-Switches along your itinerary|In SelectOR server rooms, with an itinerary in the road book, the switches ahead are set automatically as you approach. If another train needs them first (scheduled services first, then passenger and then freight trains), SelectOR tells you to wait.
-Switches for everyone|In SelectOR server rooms any player can throw switches from the map (Ctrl+9).
-Rooms for any route|The administrator can create rooms with no route assigned: the session uses the route of the first player to join.
-Scheduled services|The «Scheduled» board shows the train with the same 2D view as Services, in tidier rows, and the end time always in full.
+1.2.61
+Open rooms with a password|In SelectOR server rooms for any route, the first player to join gets a password, just like on public servers: while they stay in, everyone else has to type it to join. They can also leave the room without a password.
