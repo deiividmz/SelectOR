@@ -68,7 +68,7 @@ namespace SelectOR
             {
                 Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4),
                 Title = Tr("SALIDAS PROGRAMADAS"), Heads = new[] { Tr("SALIDA"), Tr("DESTINO · RECORRIDO"), Tr("TREN"), Tr("ESTADO"), Tr("PRIMA") },
-                LblAnyPax = Tr("cualquier tren de viajeros"), LblAnyFreight = Tr("cualquier tren de mercancías"), LblAny = Tr("cualquier tren"), LblDrawing = Tr("dibujando…")
+                LblAnyPax = Tr("cualquier tren de viajeros"), LblAnyFreight = Tr("cualquier tren de mercancías"), LblAny = Tr("cualquier tren"), LblDrawing = Tr("dibujando…"), LblNoImage = Tr("sin composición 2D"), LblNoTrain = Tr("sin tren asignado")
             };
             _schedCards.ImageLoader = SchedImageFileAsync;
             _schedCards.SelectedIndexChanged += (s, e) => UpdateSchedButtons();
@@ -259,7 +259,7 @@ namespace SelectOR
                 rows.Add(new SchedBoard.Row
                 {
                     Id = r.Id, Time = r.Start.ToString("HH:mm", ci),
-                    Until = string.Format(Tr("hasta {0}"), r.End.ToString("HH:mm", ci) + (r.End.Date != r.Start.Date ? " (+1)" : "")), Day = day,
+                    UntilLabel = string.Format(Tr("hasta {0}"), "").Trim(), UntilTime = r.End.ToString("HH:mm", ci), NextDay = r.End.Date != r.Start.Date, Day = day,
                     Route = r.Route ?? "", Path = SchedWhere(r), Note = r.Note ?? "",
                     HasTrain = !string.IsNullOrEmpty(r.TrainId) || !string.IsNullOrEmpty(r.TrainName),
                     Train = string.IsNullOrEmpty(r.TrainName) ? Tr("(tren vendido)") : r.TrainName, Kind = r.TrainKind ?? "",
@@ -559,6 +559,7 @@ namespace SelectOR
         async Task SchedBeforeLaunchAsync(string companyId, string route, string path)
         {
             var (hit, other) = await SchedNowAsync(companyId, route, path);
+            _schedDriving = hit != null;   // prioridad en los desvíos de las salas (MainMenuForm.Agujas.cs)
             SavedItinerary it = hit != null && hit.HasItin ? await SchedInstallItineraryAsync(hit.Id, hit.Route) : null;
             string m = SchedNoticeText(hit, other, it != null);
             if (m == null) return;
@@ -569,6 +570,7 @@ namespace SelectOR
         async Task<string> SchedMidRunAsync(string companyId, string route, string path)
         {
             var (hit, other) = await SchedNowAsync(companyId, route, path);
+            if (hit != null) _schedDriving = true;
             SavedItinerary it = hit != null && hit.HasItin ? await SchedInstallItineraryAsync(hit.Id, hit.Route) : null;
             if (it != null) { try { string lm = LoadSavedItinerary(it); if (HudAlive && lm != null) _serviceHud.MapNotice(lm); } catch { } }
             return SchedNoticeText(hit, other, it != null);

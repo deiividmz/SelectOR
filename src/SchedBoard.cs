@@ -1,6 +1,6 @@
 // Servicios programados como un teleindicador de estación (Empresas → Servicios → «Programados»): reloj arriba,
-// hora de salida en ámbar, ruta y recorrido, la composición 2D del tren asignado como en Flota (o la silueta de
-// «cualquier tren de viajeros / mercancías») y el estado en una paleta como las de los paneles de salidas.
+// hora de salida en ámbar (y hasta cuándo), ruta y recorrido, la composición 2D del tren asignado como en Flota (o
+// «cualquier tren de viajeros / mercancías» en la misma franja, como en Servicios) y el estado en una paleta como las de los paneles de salidas.
 
 using System;
 using System.Collections.Generic;
@@ -15,17 +15,18 @@ namespace SelectOR
     {
         public sealed class Row
         {
-            public string Id, Time = "", Until = "", Day = "", Route = "", Path = "", Note = "", Train = "", Kind = "";   // Kind: pax | freight | "" (cualquiera)
+            public string Id, Time = "", UntilLabel = "", UntilTime = "", Day = "", Route = "", Path = "", Note = "", Train = "", Kind = "";   // Kind: pax | freight | "" (cualquiera)
             public string State = "", StateText = "", Who = "", Right = "", RightSub = "";
             public Color StateColor = Color.Gray;
             public bool HasTrain;          // tren concreto de la flota (con su 2D)
             public bool Past;              // cumplido o caducado: la fila va apagada
             public bool Now;               // la franja de salida está abierta ahora
+            public bool NextDay;           // la franja acaba al día siguiente («+1»)
         }
 
         public string Title = "SALIDAS PROGRAMADAS", Hint = "";
         public string[] Heads = { "SALIDA", "DESTINO · RECORRIDO", "TREN", "ESTADO", "PRIMA" };
-        public string LblAnyPax = "cualquier tren de viajeros", LblAnyFreight = "cualquier tren de mercancías", LblAny = "cualquier tren", LblDrawing = "dibujando…";
+        public string LblAnyPax = "cualquier tren de viajeros", LblAnyFreight = "cualquier tren de mercancías", LblAny = "cualquier tren", LblDrawing = "dibujando…", LblNoImage = "sin composición 2D", LblNoTrain = "sin tren asignado";
         // La imagen 2D de un tren (ruta del archivo PNG/JPG) o null; se pide una vez por fila.
         public Func<Row, Task<string>> ImageLoader;
 
@@ -34,12 +35,14 @@ namespace SelectOR
         readonly Font _fH = Theme.Font(7.75f, FontStyle.Bold), _fTitle = Theme.Font(9f, FontStyle.Bold),
                       _fClock = new Font("Consolas", 15f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold),
                       _fTime = new Font("Consolas", 19f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold),
-                      _fSmallMono = new Font("Consolas", 8.5f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold),
+                      _fSmallMono = new Font("Consolas", 10f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold), _fUntil = Theme.Font(8f),
                       _fRoute = new Font("Consolas", 11.5f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold),
                       _fPath = Theme.Font(9f), _fNote = Theme.Font(8.25f, FontStyle.Italic), _fTrain = Theme.Font(8.25f, FontStyle.Bold),
                       _fFlap = new Font("Consolas", 10.5f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold), _fWho = Theme.Font(8f),
                       _fRight = Theme.Font(11f, FontStyle.Bold), _fRightS = Theme.Font(7.75f);
         readonly Dictionary<string, Bitmap> _img = new();          // fila (Id) → 2D
+        readonly Dictionary<string, (int w, Bitmap bmp)> _fit = new();   // la 2D reducida al ancho de la vía (trenes largos), hecha una vez
+        int _c0;                                                    // ancho de SALIDA: lo que ocupen la hora, «hasta …» y el día
         readonly HashSet<string> _asked = new(), _loading = new();
         readonly Timer _clock = new() { Interval = 1000 };
 
@@ -55,15 +58,16 @@ namespace SelectOR
             if (disposing)
             {
                 _clock.Dispose();
-                foreach (var f in new[] { _fH, _fTitle, _fClock, _fTime, _fSmallMono, _fRoute, _fPath, _fNote, _fTrain, _fFlap, _fWho, _fRight, _fRightS }) f.Dispose();
+                foreach (var f in new[] { _fH, _fTitle, _fClock, _fTime, _fSmallMono, _fUntil, _fRoute, _fPath, _fNote, _fTrain, _fFlap, _fWho, _fRight, _fRightS }) f.Dispose();
                 foreach (var b in _img.Values) b?.Dispose();
-                _img.Clear();
+                foreach (var f in _fit.Values) f.bmp?.Dispose();
+                _img.Clear(); _fit.Clear();
             }
             base.Dispose(disposing);
         }
 
         protected override int MaxCols => 1;
-        protected override int CardH => Theme.Px(96);
+        protected override int CardH => Theme.Px(104);
         protected override int Gap => 0;
         int HeadH => Theme.Px(64);
         protected override int TopOffset => HeadH;
@@ -75,20 +79,70 @@ namespace SelectOR
             Items.Clear();
             foreach (var r in rows) { Items.Add(r); keep.Add(r.Id); }
             EndUpdate();
+            // SALIDA a la medida de lo más ancho («hasta 23:30 +1», «ayer», «mañana»…): nunca con puntos suspensivos
+            int c0 = Theme.Px(96);
+            foreach (Row r in Items)
+            {
+                c0 = Math.Max(c0, TW(r.Time, _fTime));
+                c0 = Math.Max(c0, UntilW(r));
+                c0 = Math.Max(c0, TW((r.Now ? "● " : "") + r.Day.ToUpperInvariant(), _fH));
+            }
+            _c0 = c0 + Theme.Px(4);
             // las imágenes de filas que ya no están, fuera (las demás se conservan entre recargas)
-            foreach (var k in new List<string>(_img.Keys)) if (!keep.Contains(k)) { _img[k]?.Dispose(); _img.Remove(k); _asked.Remove(k); }
+            foreach (var k in new List<string>(_img.Keys)) if (!keep.Contains(k)) { _img[k]?.Dispose(); _img.Remove(k); _asked.Remove(k); DropFit(k); }
             Relayout();
         }
 
         // SALIDA · DESTINO/RECORRIDO · TREN (2D) · ESTADO · PRIMA
+        static int TW(string s, Font f) => string.IsNullOrEmpty(s) ? 0 : TextRenderer.MeasureText(s, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+        int UntilW(Row r) => TW(r.UntilLabel, _fUntil) + Theme.Px(5) + TW(r.UntilTime, _fSmallMono) + (r.NextDay ? Theme.Px(5) + TW("+1", _fH) + Theme.Px(8) : 0);
+        void DropFit(string id) { if (_fit.TryGetValue(id, out var f)) { f.bmp?.Dispose(); _fit.Remove(id); } }
+
+        // La 2D tal como se pinta: a su alto; si no cabe a lo ancho, una copia reducida (como en Servicios).
+        Bitmap Fit(string id, Bitmap img, int maxW)
+        {
+            if (img == null || img.Width <= maxW) return img;
+            if (_fit.TryGetValue(id, out var f) && f.w == maxW) return f.bmp;
+            f.bmp?.Dispose();
+            int h = Math.Max(1, (int)Math.Round(img.Height * (maxW / (double)img.Width)));
+            var bmp = new Bitmap(maxW, h, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(img, new Rectangle(0, 0, maxW, h));
+            }
+            _fit[id] = (maxW, bmp);
+            return bmp;
+        }
+
         int[] Cols5(int w)
         {
-            int gaps = Theme.Px(14) * 4 + Theme.Px(28);
-            int t = Theme.Px(96), st = Theme.Px(150), pr = Theme.Px(120);
+            int gaps = Theme.Px(GapPx) * 4 + Theme.Px(PadPx) * 2;
+            int t = Math.Max(Theme.Px(96), _c0), st = Theme.Px(150), pr = Theme.Px(120);
             int rest = Math.Max(Theme.Px(320), w - t - st - pr - gaps);
             int route = Math.Max(Theme.Px(170), Math.Min(Theme.Px(330), (int)(rest * 0.42)));
             return new[] { t, route, rest - route, st, pr };
         }
+
+        // Las cinco columnas de una fila (y de la cabecera, con el mismo ancho): x y ancho de cada una; la última llega
+        // hasta el margen derecho, igual que el izquierdo.
+        const int PadPx = 16, GapPx = 14;
+        (int[] x, int[] w) Columns(int left, int width)
+        {
+            var cw = Cols5(width);
+            int[] xs = new int[5], ws = new int[5];
+            int x = left + Theme.Px(PadPx);
+            for (int k = 0; k < 5; k++) { xs[k] = x; ws[k] = cw[k]; x += cw[k] + Theme.Px(GapPx); }
+            ws[4] = Math.Max(Theme.Px(40), left + width - Theme.Px(PadPx) - xs[4]);
+            return (xs, ws);
+        }
+
+        // Rejilla común a todas las columnas, centrada en la fila: banda A (lo principal: hora, ruta, tren, estado, prima)
+        // y banda B debajo, en dos medias líneas (B1 y B2) o entera (la composición 2D).
+        static int BandA => Theme.Px(30);
+        static int BandGap => Theme.Px(6);
+        static int BandB => Theme.Px(44);
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -106,102 +160,90 @@ namespace SelectOR
             if (Items[i] is not Row r) return;
             var bg = sel ? Color.FromArgb(28, 52, 32) : hov ? Color.FromArgb(22, 24, 26) : (i % 2 == 0 ? BoardBg : Color.FromArgb(15, 17, 18));
             using (var b = new SolidBrush(bg)) g.FillRectangle(b, rc);
-            if (sel) using (var b = new SolidBrush(Theme.Accent)) g.FillRectangle(b, rc.X, rc.Y, Theme.Px(3), rc.Height);
+            // marca a la izquierda: la elegida (verde) o la que sale ahora (verde claro)
+            if (sel || r.Now) using (var b = new SolidBrush(sel ? Theme.Accent : Color.FromArgb(120, 120, 220, 120))) g.FillRectangle(b, rc.X, rc.Y, Theme.Px(3), rc.Height);
             using (var p = new Pen(Line)) g.DrawLine(p, rc.X, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
-            var cw = Cols5(rc.Width);
-            int x = rc.X + Theme.Px(14), gap = Theme.Px(14);
+            var (cx, cw) = Columns(rc.X, rc.Width);
             Color dim(Color c) => r.Past ? Color.FromArgb(c.R * 55 / 100, c.G * 55 / 100, c.B * 55 / 100) : c;
 
-            // SALIDA: hora grande en ámbar, «hasta» y el día
-            TextRenderer.DrawText(g, r.Time, _fTime, new Rectangle(x, rc.Y + Theme.Px(10), cw[0], Theme.Px(30)), dim(Amber), L1);
-            TextRenderer.DrawText(g, r.Until, _fSmallMono, new Rectangle(x, rc.Y + Theme.Px(42), cw[0], Theme.Px(16)), dim(AmberDim), L1);
-            TextRenderer.DrawText(g, (r.Now ? "● " : "") + r.Day.ToUpperInvariant(), _fH, new Rectangle(x, rc.Y + Theme.Px(62), cw[0], Theme.Px(16)), r.Now ? Color.FromArgb(120, 220, 120) : dim(Grey), L1);
-            x += cw[0] + gap;
+            int yA = rc.Y + (rc.Height - BandA - BandGap - BandB) / 2, yB = yA + BandA + BandGap, half = BandB / 2;
+            Rectangle A(int k) => new Rectangle(cx[k], yA, cw[k], BandA);
+            Rectangle B1(int k) => new Rectangle(cx[k], yB, cw[k], half);
+            Rectangle B2(int k) => new Rectangle(cx[k], yB + half, cw[k], BandB - half);
 
-            // DESTINO · RECORRIDO (y la nota)
-            TextRenderer.DrawText(g, r.Route.ToUpperInvariant(), _fRoute, new Rectangle(x, rc.Y + Theme.Px(12), cw[1], Theme.Px(22)), dim(Color.White), L1);
-            TextRenderer.DrawText(g, "→ " + r.Path, _fPath, new Rectangle(x, rc.Y + Theme.Px(38), cw[1], Theme.Px(18)), dim(Color.FromArgb(207, 211, 214)), L1);
-            if (r.Note.Length > 0) TextRenderer.DrawText(g, "«" + r.Note + "»", _fNote, new Rectangle(x, rc.Y + Theme.Px(60), cw[1], Theme.Px(18)), dim(AmberDim), L1);
-            x += cw[1] + gap;
+            // separadores finos entre columnas, a la altura de la rejilla
+            using (var p = new Pen(Color.FromArgb(30, 33, 36)))
+                for (int k = 1; k < 5; k++)
+                {
+                    int sx = cx[k] - Theme.Px(GapPx) / 2 - 1;
+                    g.DrawLine(p, sx, yA + Theme.Px(2), sx, yB + BandB - Theme.Px(2));
+                }
 
-            // TREN: nombre y su composición 2D sobre la vía
-            var tr = new Rectangle(x, rc.Y + Theme.Px(8), cw[2], rc.Height - Theme.Px(16));
-            string tname = r.HasTrain ? r.Train : r.Kind == "pax" ? LblAnyPax : r.Kind == "freight" ? LblAnyFreight : LblAny;
-            TextRenderer.DrawText(g, tname, _fTrain, new Rectangle(tr.X, tr.Y, tr.Width, Theme.Px(16)), dim(r.HasTrain ? Color.White : Grey), L1);
-            // la composición 2D como en Flota y Conducción libre (CardPaint.Rail_: fondo gris, carril y el tren encima)
-            var track = new Rectangle(tr.X, tr.Y + Theme.Px(20), tr.Width, tr.Height - Theme.Px(20));
+            // SALIDA: A la hora · B1 «hasta» con su hora (y «+1») · B2 el día
+            TextRenderer.DrawText(g, r.Time, _fTime, A(0), dim(Amber), L1);
+            {
+                var u = B1(0);
+                int lw = TW(r.UntilLabel, _fUntil);
+                TextRenderer.DrawText(g, r.UntilLabel, _fUntil, new Rectangle(u.X, u.Y, lw + Theme.Px(2), u.Height), dim(Grey), L1);
+                int ux = u.X + lw + Theme.Px(5), tw = TW(r.UntilTime, _fSmallMono);
+                TextRenderer.DrawText(g, r.UntilTime, _fSmallMono, new Rectangle(ux, u.Y, tw + Theme.Px(2), u.Height), dim(Color.FromArgb(232, 178, 64)), L1);
+                ux += tw + Theme.Px(5);
+                if (r.NextDay)
+                {
+                    int ph = Theme.Px(14);
+                    var pr1 = new Rectangle(ux, u.Y + (u.Height - ph) / 2, TW("+1", _fH) + Theme.Px(8), ph);
+                    g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, pr1, Theme.Px(3), Color.FromArgb(r.Past ? 30 : 46, 255, 196, 64)); g.SmoothingMode = SmoothingMode.None;
+                    TextRenderer.DrawText(g, "+1", _fH, pr1, dim(Amber), C1);
+                }
+            }
+            TextRenderer.DrawText(g, (r.Now ? "● " : "") + r.Day.ToUpperInvariant(), _fH, B2(0), r.Now ? Color.FromArgb(120, 220, 120) : dim(Grey), L1);
+
+            // DESTINO · RECORRIDO: A la ruta · B1 el recorrido · B2 la nota
+            TextRenderer.DrawText(g, r.Route.ToUpperInvariant(), _fRoute, A(1), dim(Color.White), L1);
+            TextRenderer.DrawText(g, "→ " + r.Path, _fPath, B1(1), dim(Color.FromArgb(207, 211, 214)), L1);
+            if (r.Note.Length > 0) TextRenderer.DrawText(g, "«" + r.Note + "»", _fNote, B2(1), dim(AmberDim), L1);
+
+            // TREN: A el nombre · B entera la composición 2D en la franja de Servicios (sin tren concreto, el aviso)
+            string anyKind = r.Kind == "pax" ? LblAnyPax : r.Kind == "freight" ? LblAnyFreight : LblAny;
+            TextRenderer.DrawText(g, r.HasTrain ? r.Train : anyKind, _fTrain, A(2), dim(r.HasTrain ? Color.White : Grey), L1);
+            var track = new Rectangle(cx[2], yB, cw[2], BandB);
             Bitmap bmp = null;
             if (r.HasTrain && !_img.TryGetValue(r.Id, out bmp) && !_asked.Contains(r.Id)) RequestImage(r);
             bool loading = r.HasTrain && _loading.Contains(r.Id);
-            CardPaint.Rail_(g, track, bmp, loading ? LblDrawing : null, _fWho);
-            if (bmp == null && !loading)
-                Silhouette(g, new Rectangle(track.X + Theme.Px(10), track.Y + Theme.Px(4), track.Width - Theme.Px(20), track.Height - Theme.Px(12)), r.Kind, r.Past);
+            string empty = loading ? LblDrawing : bmp == null ? "🚆  " + (r.HasTrain ? LblNoImage : LblNoTrain) : null;
+            Strip(g, track, Fit(r.Id, bmp, track.Width - Theme.Px(16)), empty, _fWho);
             if (r.Past)   // cumplido o caducado: apagado
                 using (var b = new SolidBrush(Color.FromArgb(120, BoardBg))) g.FillRectangle(b, track);
-            x += cw[2] + gap;
 
-            // ESTADO: paleta tipo teleindicador (dos medias placas) y quién
-            var fl = new Rectangle(x, rc.Y + Theme.Px(14), cw[3], Theme.Px(34));
-            Flap(g, fl, r.StateText.ToUpperInvariant(), r.StateColor, r.Past);
-            if (r.Who.Length > 0) TextRenderer.DrawText(g, r.Who, _fWho, new Rectangle(x, fl.Bottom + Theme.Px(6), cw[3], Theme.Px(16)), Grey, C1);
-            x += cw[3] + gap;
+            // ESTADO: A la paleta tipo teleindicador · B1 quién
+            Flap(g, A(3), r.StateText.ToUpperInvariant(), r.StateColor, r.Past);
+            if (r.Who.Length > 0) TextRenderer.DrawText(g, r.Who, _fWho, B1(3), Grey, C1);
 
-            // PRIMA
-            var pr = new Rectangle(x, rc.Y, rc.Right - x - Theme.Px(14), rc.Height);
-            TextRenderer.DrawText(g, r.Right, _fRight, new Rectangle(pr.X, rc.Y + Theme.Px(24), pr.Width, Theme.Px(22)), r.State == "done" ? Color.FromArgb(245, 197, 66) : dim(Color.White), R1);
-            TextRenderer.DrawText(g, r.RightSub, _fRightS, new Rectangle(pr.X, rc.Y + Theme.Px(48), pr.Width, Theme.Px(16)), Grey, R1);
+            // PRIMA: A la cifra · B1 de dónde sale (a la derecha, con el mismo margen que la izquierda)
+            TextRenderer.DrawText(g, r.Right, _fRight, A(4), r.State == "done" ? Color.FromArgb(245, 197, 66) : dim(Color.White), R1);
+            TextRenderer.DrawText(g, r.RightSub, _fRightS, B1(4), Grey, R1);
         }
 
-        // Silueta de «cualquier tren»: locomotora y coches (con ventanas) o vagones tolva.
-        public static void Silhouette(Graphics g, Rectangle a, string kind, bool past)
+        // La franja de la composición como en Servicios (ServiceCards): fondo oscuro redondeado y el tren a la izquierda,
+        // centrado en alto y, si no cabe, reducido; sin imagen, el aviso a la izquierda.
+        public static void Strip(Graphics g, Rectangle sr, Bitmap img, string emptyText, Font f)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            int h = Math.Min(a.Height, Theme.Px(30)), y = a.Bottom - h, x = a.X;
-            Color body = past ? Color.FromArgb(52, 56, 60) : Color.FromArgb(78, 84, 90), win = past ? Color.FromArgb(40, 44, 48) : Color.FromArgb(150, 255, 196, 64);
-            int locoW = Theme.Px(46), carW = Theme.Px(kind == "freight" ? 34 : 50), gapC = Theme.Px(3);
-            int n = Math.Max(1, Math.Min(4, (a.Width - locoW) / (carW + gapC)));
-            using var bb = new SolidBrush(body); using var wb = new SolidBrush(win); using var wheel = new SolidBrush(Color.FromArgb(30, 32, 34));
-            // locomotora
-            using (var p = new GraphicsPath())
-            {
-                var lr = new Rectangle(x, y + Theme.Px(3), locoW, h - Theme.Px(8));
-                p.AddLine(lr.X + Theme.Px(10), lr.Y, lr.Right, lr.Y);
-                p.AddLine(lr.Right, lr.Y, lr.Right, lr.Bottom);
-                p.AddLine(lr.Right, lr.Bottom, lr.X, lr.Bottom);
-                p.AddLine(lr.X, lr.Bottom, lr.X, lr.Y + Theme.Px(10));
-                p.CloseFigure();
-                g.FillPath(bb, p);
-                g.FillRectangle(wb, lr.X + Theme.Px(4), lr.Y + Theme.Px(4), Theme.Px(8), Theme.Px(6));
-            }
-            Wheels(g, wheel, x, locoW, a.Bottom);
-            x += locoW + gapC;
-            for (int k = 0; k < n; k++, x += carW + gapC)
-            {
-                if (kind == "freight")
-                {
-                    // tolva: trapecio
-                    using var p = new GraphicsPath();
-                    int top = y + Theme.Px(6), bot = a.Bottom - Theme.Px(5);
-                    p.AddPolygon(new[] { new Point(x, top), new Point(x + carW, top), new Point(x + carW - Theme.Px(6), bot), new Point(x + Theme.Px(6), bot) });
-                    g.FillPath(bb, p);
-                }
-                else
-                {
-                    var cr = new Rectangle(x, y + Theme.Px(5), carW, h - Theme.Px(10));
-                    Theme.FillRound(g, cr, Theme.Px(3), body);
-                    for (int wx = cr.X + Theme.Px(5); wx + Theme.Px(6) < cr.Right - Theme.Px(3); wx += Theme.Px(9))
-                        g.FillRectangle(wb, wx, cr.Y + Theme.Px(4), Theme.Px(6), Theme.Px(5));
-                }
-                Wheels(g, wheel, x, carW, a.Bottom);
-            }
+            Theme.FillRound(g, sr, Theme.Px(6), CardPaint.Rail);
             g.SmoothingMode = SmoothingMode.None;
-        }
-
-        static void Wheels(Graphics g, Brush b, int x, int w, int bottom)
-        {
-            int d = Theme.Px(7);
-            g.FillEllipse(b, x + Theme.Px(4), bottom - d, d, d);
-            g.FillEllipse(b, x + w - Theme.Px(4) - d, bottom - d, d, d);
+            if (img != null)
+            {
+                int w = img.Width, h = img.Height, maxW = sr.Width - Theme.Px(16), maxH = sr.Height - Theme.Px(4);
+                if (w > maxW) { h = Math.Max(1, h * maxW / w); w = maxW; }
+                if (h > maxH) { w = Math.Max(1, w * maxH / h); h = maxH; }
+                g.InterpolationMode = w == img.Width ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(img, new Rectangle(sr.X + Theme.Px(8), sr.Y + (sr.Height - h) / 2, w, h));
+                g.PixelOffsetMode = PixelOffsetMode.Default;
+            }
+            else if (!string.IsNullOrEmpty(emptyText))
+                TextRenderer.DrawText(g, emptyText, f, new Rectangle(sr.X + Theme.Px(10), sr.Y, sr.Width - Theme.Px(20), sr.Height), Theme.Subtle,
+                                      TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
 
         // Paleta: dos medias placas con la rendija en medio, como los indicadores de lamas.
@@ -233,12 +275,13 @@ namespace SelectOR
             try
             {
                 string file = await ImageLoader(r);
-                if (!string.IsNullOrEmpty(file)) bmp = await Task.Run(() => VehicleThumbs.Decode(file, Theme.Px(60)));
+                if (!string.IsNullOrEmpty(file)) bmp = await Task.Run(() => VehicleThumbs.Decode(file, Theme.Px(40)));   // como en Servicios: franja de 44, tren de 40
             }
             catch { }
             if (IsDisposed) { bmp?.Dispose(); return; }
             _loading.Remove(r.Id);
             if (_img.TryGetValue(r.Id, out var old)) old?.Dispose();
+            DropFit(r.Id);
             _img[r.Id] = bmp;
             Invalidate();
         }
@@ -249,23 +292,19 @@ namespace SelectOR
         {
             var hr = new Rectangle(0, 0, ClientSize.Width, HeadH);
             using (var b = new SolidBrush(BoardBg)) g.FillRectangle(b, hr);
-            int x = Theme.Px(14);
+            int x = Theme.Px(2 + PadPx);
             // rótulo con el pictograma del tren y reloj de andén
             TextRenderer.DrawText(g, "🚆  " + Title, _fTitle, new Rectangle(x, Theme.Px(8), hr.Width / 2, Theme.Px(22)), Amber, L1);
             string clock = DateTime.Now.ToString("HH:mm:ss");
             int cwid = TextRenderer.MeasureText(clock, _fClock, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.Px(16);
-            var cr = new Rectangle(hr.Right - cwid - Theme.Px(14), Theme.Px(6), cwid, Theme.Px(26));
+            var cr = new Rectangle(hr.Right - Theme.Px(2 + PadPx) - cwid, Theme.Px(6), cwid, Theme.Px(26));
             g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, cr, Theme.Px(4), Color.FromArgb(24, 22, 14)); g.SmoothingMode = SmoothingMode.None;
             TextRenderer.DrawText(g, clock, _fClock, cr, Amber, C1);
             if (Hint.Length > 0) TextRenderer.DrawText(g, Hint, _fH, new Rectangle(hr.Width / 2, Theme.Px(8), cr.X - hr.Width / 2 - Theme.Px(12), Theme.Px(22)), Grey, R1);
-            var cw = Cols5(hr.Width - Theme.Px(4));
-            int gap = Theme.Px(14);
-            for (int i = 0; i < Heads.Length && i < cw.Length; i++)
-            {
-                int w = i == 4 ? hr.Width - x - Theme.Px(16) : cw[i];   // la prima, pegada a la derecha como en las filas
-                TextRenderer.DrawText(g, Heads[i], _fH, new Rectangle(x, Theme.Px(40), w, Theme.Px(18)), Grey, i == 3 ? C1 : i == 4 ? R1 : L1);
-                x += cw[i] + gap;
-            }
+            // los rótulos, en las mismas columnas que las filas (mismo ancho y márgenes) y alineados como su contenido
+            var (cx, cw) = Columns(Theme.Px(2), ClientSize.Width - Theme.Px(4));
+            for (int i = 0; i < Heads.Length && i < 5; i++)
+                TextRenderer.DrawText(g, Heads[i], _fH, new Rectangle(cx[i], Theme.Px(40), cw[i], Theme.Px(18)), Grey, i == 3 ? C1 : i == 4 ? R1 : L1);
             using (var p = new Pen(Color.FromArgb(36, 39, 42))) g.DrawLine(p, 0, HeadH - 1, hr.Width, HeadH - 1);
         }
     }

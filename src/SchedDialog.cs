@@ -241,7 +241,7 @@ namespace SelectOR
             try
             {
                 string file = TrainImage == null ? null : await TrainImage(id);
-                if (!string.IsNullOrEmpty(file)) bmp = await Task.Run(() => VehicleThumbs.Decode(file, Theme.Px(70)));
+                if (!string.IsNullOrEmpty(file)) bmp = await Task.Run(() => VehicleThumbs.Decode(file, Theme.Px(40)));   // franja de Servicios: tren de 40
             }
             catch { }
             if (IsDisposed) { bmp?.Dispose(); return; }
@@ -365,13 +365,12 @@ namespace SelectOR
                 // ruta y recorrido
                 TextRenderer.DrawText(g, (Route ?? "").ToUpperInvariant(), _fRoute, new Rectangle(x, y, w, Theme.Px(26)), Ink, L); y += Theme.Px(28);
                 TextRenderer.DrawText(g, "→ " + Path, _fPath, new Rectangle(x, y, w, Theme.Px(18)), Faint, L); y += Theme.Px(26);
-                // tren: 2D como en Flota (o la silueta)
+                // tren: 2D como en Servicios (o el aviso en la franja)
                 TextRenderer.DrawText(g, I18n.T("TREN"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
                 TextRenderer.DrawText(g, TrainText, _fVal, new Rectangle(x, y, w, Theme.Px(18)), Ink, L); y += Theme.Px(22);
-                var strip = new Rectangle(x, y, w, Theme.Px(60));
-                CardPaint.Rail_(g, strip, Fleet ? Image : null, Fleet && Loading ? I18n.T("dibujando…") : null, _fSmall);
-                if (!Fleet || (Image == null && !Loading))
-                    SchedBoard.Silhouette(g, new Rectangle(strip.X + Theme.Px(10), strip.Y + Theme.Px(6), strip.Width - Theme.Px(20), strip.Height - Theme.Px(14)), Fleet ? "" : Kind, false);
+                var strip = new Rectangle(x, y, w, Theme.Px(44));
+                SchedBoard.Strip(g, strip, Fleet ? Image : null,
+                                Fleet && Loading ? I18n.T("dibujando…") : Fleet && Image == null ? "🚆  " + I18n.T("sin composición 2D") : !Fleet ? "🚆  " + I18n.T("sin tren asignado") : null, _fSmall);
                 y = strip.Bottom + Theme.Px(14);
                 // salida
                 TextRenderer.DrawText(g, I18n.T("SALIDA"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);

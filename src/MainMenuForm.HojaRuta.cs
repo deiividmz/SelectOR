@@ -300,6 +300,7 @@ namespace SelectOR
                 if (_road.OffRoute && (DateTime.UtcNow - _road.OffSinceUtc).TotalSeconds > 8) RoadReplan();
                 else if (!_road.HasPlan && _road.Points.Count > _road.ReachedPoints && _road.Graph != null && t.has && _roadTicks % 3 == 0) RoadReplan();
                 _road.ComputeEtas(_roadLimit, _roadVmax, Math.Max(0, _prefs?.RoadDwellS ?? 30), RoadGameNow());
+                PilotTick();   // salas de SelectOR: los desvíos del itinerario
                 if (RoadHudAlive && _roadHud.Visible) _roadHud.Invalidate();
             }
             catch { }
@@ -332,7 +333,8 @@ namespace SelectOR
                     Info = () => _roadVmax > 0 ? string.Format(Tr("tren: máx. {0} km/h"), Math.Round(_roadVmax)) : "",
                     CloseRequested = () => { _roadHud?.Hide(); },
                     Changed = () => { _road.ComputeEtas(_roadLimit, _roadVmax, Math.Max(0, _prefs?.RoadDwellS ?? 30), RoadGameNow()); },
-                    OpenMap = () => { OpenBigMapForRoute(); }
+                    OpenMap = () => { OpenBigMapForRoute(); },
+                    SwitchNote = PilotNote
                 };
                 _roadHud.Show();
             }

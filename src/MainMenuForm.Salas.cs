@@ -20,6 +20,7 @@ namespace SelectOR
         RoomCardGrid _roomGrid; Control _roomPage, _roomAdminBar; Label _roomMsg;
         RoundButton _roomEditBtn, _roomDelBtn;
         string _roomPending, _roomJoined;   // sala a la que se va a entrar · en la que se está jugando
+        string _roomHost; int _roomPort;     // a dónde conecta la sala (no se enseña: no pasa por «Servidor» ni «Puerto»)
         Timer _roomBeat;
         bool _roomsMissing;
         int _mpSection;                      // 0 servidores SelectOR · 1 servidores públicos
@@ -45,6 +46,7 @@ namespace SelectOR
             _roomGrid = new RoomCardGrid
             {
                 Dock = DockStyle.Fill,
+                LblAnyRoute = Tr("Cualquier ruta"), LblAnyRouteHint = Tr("la del primero que entra"),
                 LblJoin = Tr("Entrar"), LblInside = Tr("Estás dentro"), LblNoRoute = Tr("Ruta que no tienes en tu contenido"), LblHave = "✓ " + Tr("la tienes"),
                 LblNoPlayers = Tr("sin jugadores"), LblPass = "🔒 " + Tr("Con contraseña"), LblFree = "🔓 " + Tr("Sin contraseña"), LblAll = "👥 " + Tr("Para todos"),
                 LblCompanies = "🏢 " + Tr("Empresas autorizadas"), LblUsers = "⭐ " + Tr("Por invitación"), LblPoints = "🪪 " + Tr("Carné ≥ {0} puntos"),
@@ -120,7 +122,7 @@ namespace SelectOR
                         Denied = Str(e, "denied") is { Length: > 0 } dn ? dn : null,
                         Host = Str(e, "host") is { Length: > 0 } h ? h : null, Port = Num(e, "port") > 0 ? ((int)Num(e, "port")).ToString() : null
                     };
-                    it.HaveRoute = RouteByName(it.Route) != null;
+                    it.HaveRoute = it.AnyRoute || RouteByName(it.Route) != null;
                     list.Add(it);
                 }
             }
@@ -136,7 +138,9 @@ namespace SelectOR
             if (it == null) return;
             if (!Supa.IsLoggedIn) { Warn(Tr("Inicia sesión en Empresas para entrar en los servidores SelectOR.")); return; }
             if (it.Denied != null) { Warn(it.Denied + "."); return; }
-            var route = RouteByName(it.Route);
+            // sala sin ruta asignada: se entra con la ruta elegida (si ya hay partida, tiene que ser la del despachador)
+            var route = it.AnyRoute ? _curRoute : RouteByName(it.Route);
+            if (route == null && it.AnyRoute) { Warn(Tr("Esta sala no tiene ruta asignada: elige primero la ruta con la que quieres entrar.")); return; }
             if (route == null) { Warn(string.Format(Tr("No tienes la ruta «{0}» en esta carpeta de contenido: hace falta para entrar en la sala."), it.Route)); return; }
             if (!MPUserValid(_txtMPUser.Text.Trim()))
             {
@@ -181,8 +185,8 @@ namespace SelectOR
                 while ((_curRoute?.Path != route.Path || _routeLoadedToken != _routeToken) && (DateTime.UtcNow - t0).TotalSeconds < 30) await Task.Delay(100);
             }
             _rbClient.Checked = true;
-            _txtMPHost.Text = Str(j, "host");
-            _txtMPPort.Text = ((int)Num(j, "port")).ToString();
+            _roomHost = Str(j, "host");
+            _roomPort = (int)Num(j, "port");
             UpdateStatus();
             _roomPending = it.Id;
             PlayMultiplayer();
@@ -193,6 +197,7 @@ namespace SelectOR
         {
             if (_roomPending == null) return;
             _roomJoined = _roomPending; _roomPending = null;
+            PilotCreate();   // desvíos según el itinerario (MainMenuForm.Agujas.cs)
             if (_roomBeat == null)
             {
                 _roomBeat = new Timer { Interval = 45000 };
@@ -206,7 +211,42 @@ namespace SelectOR
         {
             var id = _roomJoined;
             _roomJoined = null; _roomPending = null; _roomBeat?.Stop();
+            PilotStop();
+            RoomRestoreSettings();
             if (id != null) { try { await Supa.RpcAsync("room_leave", new { p_room = id }); } catch { } }
+        }
+
+        // La sala se lanza escribiendo su IP y su puerto en el registro de Open Rails (RunActivity los lee de ahí):
+        // al salir se devuelve lo que había, para que no aparezcan en «Servidor» y «Puerto».
+        void RoomWriteSettings()
+        {
+            if (string.IsNullOrEmpty(_prefs.RoomRegHost))   // (si ya hay una guardada, lo de antes sigue siendo lo bueno)
+            {
+                _prefs.RoomPrevHost = _settings.Multiplayer_Host ?? "";
+                _prefs.RoomPrevPort = _settings.Multiplayer_Port;
+            }
+            _prefs.RoomRegHost = _roomHost;
+            try { _prefs.Save(); } catch { }
+            _settings.Multiplayer_Host = _roomHost;
+            _settings.Multiplayer_Port = _roomPort;
+        }
+
+        void RoomRestoreSettings()
+        {
+            if (string.IsNullOrEmpty(_prefs.RoomRegHost)) return;
+            try
+            {
+                try { _settings = new ORTS.Settings.UserSettings(new string[0]); } catch { }
+                if (_settings.Multiplayer_Host == _prefs.RoomRegHost)
+                {
+                    _settings.Multiplayer_Host = _prefs.RoomPrevHost ?? "";
+                    if (_prefs.RoomPrevPort > 0) _settings.Multiplayer_Port = _prefs.RoomPrevPort;
+                    _settings.Save();
+                }
+            }
+            catch { }
+            _prefs.RoomRegHost = null; _prefs.RoomPrevHost = null; _prefs.RoomPrevPort = 0;
+            try { _prefs.Save(); } catch { }
         }
 
         // ---------------- administrador ----------------

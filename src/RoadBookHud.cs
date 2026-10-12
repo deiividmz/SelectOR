@@ -18,6 +18,7 @@ namespace SelectOR
         readonly System.Windows.Forms.Timer _tick;
         public Func<double> GameNow;          // hora del simulador (s desde medianoche; NaN = no se sabe)
         public Func<string> Info;             // línea bajo la cabecera (velocidad máx. del tren, etc.)
+        public Func<(string text, Color color)?> SwitchNote;   // salas de SelectOR: el estado de los desvíos (manda sobre «Faltan…»)
         public Action CloseRequested, Changed, OpenMap;
 
         bool _collapsed, _hover, _down, _dragging, _resizing;
@@ -262,6 +263,7 @@ namespace SelectOR
             else if (_rb.Problem != null) { sub = _rb.Problem; subCol = Color.FromArgb(235, 150, 120); }
             else if (!_rb.HasPlan) sub = I18n.T("Marca el itinerario en el mapa grande.");
             else if (_rb.OffRoute) { sub = I18n.T("Fuera del itinerario: se recalculará en unos segundos…"); subCol = Color.FromArgb(235, 150, 120); }
+            else if (SwitchNote?.Invoke() is { } sn) { sub = sn.text; subCol = sn.color; }
             else sub = string.Format(I18n.T("Faltan {0}"), Km(Math.Max(0, _rb.TotalLen - _rb.Progress))) + (Info?.Invoke() is string inf && inf.Length > 0 ? "  ·  " + inf : "");
             using (var sf = Theme.Font(8.3f))
                 TextRenderer.DrawText(g, sub, sf, new Rectangle(12, HdrH, Width - 24, SubH), subCol,

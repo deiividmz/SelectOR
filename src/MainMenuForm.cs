@@ -2376,7 +2376,8 @@ namespace SelectOR
             _cboFolder.Items.Clear();
             foreach (var f in _folders) _cboFolder.Items.Add(f.Name);
 
-            // Multiplayer defaults desde settings
+            // Multiplayer defaults desde settings (si quedó escrita la IP de una sala de SelectOR, antes se devuelve lo de antes)
+            if (_roomJoined == null && _roomPending == null) RoomRestoreSettings();
             try
             {
                 _txtMPUser.Text = MPUserValid(MPUserClean(_settings.Multiplayer_User)) ? MPUserClean(_settings.Multiplayer_User) : MPUserDefault();
@@ -3221,14 +3222,16 @@ namespace SelectOR
 
             // Puerto: el que abre el servidor o al que se conecta el cliente. Si no es válido, no se lanza (antes
             // se ignoraba sin avisar y se usaba el último guardado).
-            if (!int.TryParse(_txtMPPort.Text.Trim(), out int port) || port < 1 || port > 65535)
+            bool room = _roomPending != null && !string.IsNullOrEmpty(_roomHost);   // sala de SelectOR: su IP y su puerto, sin enseñarlos
+            int port = _roomPort;
+            if (!room && (!int.TryParse(_txtMPPort.Text.Trim(), out port) || port < 1 || port > 65535))
             {
                 Warn(Tr("El puerto debe ser un número entre 1 y 65535."));
                 try { _txtMPPort.Focus(); _txtMPPort.SelectAll(); } catch { }
                 return;
             }
             // Cliente: hace falta la IP del servidor. (Servidor: no se usa; el campo enseña la IP propia.)
-            string host = _txtMPHost.Text.Trim();
+            string host = room ? _roomHost : _txtMPHost.Text.Trim();
             if (_rbClient.Checked && host.Length == 0)
             {
                 Warn(Tr("Escribe la IP del servidor al que te quieres unir."));
@@ -3243,8 +3246,12 @@ namespace SelectOR
             {
                 try { _settings = new UserSettings(new string[0]); } catch { }
                 _settings.Multiplayer_User = _txtMPUser.Text.Trim();
-                if (_rbClient.Checked) _settings.Multiplayer_Host = host;
-                _settings.Multiplayer_Port = port;
+                if (room) RoomWriteSettings();
+                else
+                {
+                    if (_rbClient.Checked) _settings.Multiplayer_Host = host;
+                    _settings.Multiplayer_Port = port;
+                }
                 _settings.Save();
             }
             catch { }
@@ -3313,6 +3320,7 @@ namespace SelectOR
             var exe = SysPath.Combine(AppContext.BaseDirectory, "RunActivity.exe");
             if (!File.Exists(exe)) { Warn(Tr("No se encuentra RunActivity.exe junto al selector.")); return; }
             _prefs.Save();
+            _schedDriving = false;   // (si es un turno, lo dice SchedBeforeLaunchAsync)
             EnsureOrWebServer();   // el HUD, el pupitre, los viajeros y el carné lo necesitan desde el arranque
             // Teleindicador: el destino elegido para este tren se pone en su carpeta antes de que OR lo cargue.
             if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase))
@@ -3349,6 +3357,8 @@ namespace SelectOR
                     bool svc = serviceId != null;   // servicio de empresa (con tiempo/viajeros) o conducción normal
                     _mpClientRun = args.IndexOf("-multiplayerclient", StringComparison.OrdinalIgnoreCase) >= 0;
                     if (_mpClientRun) RoomLaunched(); else _roomPending = null;   // servidores SelectOR: avisos mientras se juega
+                    // «Unirse a un servidor» a mano: si es un servidor de SelectOR, también pone los desvíos del itinerario
+                    if (_mpClientRun && _pilot == null) { try { PilotCreateFor(_settings?.Multiplayer_Host, _settings?.Multiplayer_Port ?? 0); } catch { } }
                     _pendingServiceId = serviceId;
                     _svcOpenedUtc = svc ? DateTime.UtcNow : (DateTime?)null;
                     if (!svc) _driveStartUtc = DateTime.UtcNow;

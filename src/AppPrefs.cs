@@ -34,6 +34,11 @@ namespace SelectOR
     {
         public string LastFolder { get; set; }
         public string LastRoute { get; set; }
+        // Servidores SelectOR: la IP de la sala se escribe en el registro de Open Rails solo para lanzarlo; aquí lo que
+        // había antes, para devolverlo al cerrar (y no enseñar la IP de la sala en «Servidor» la próxima vez).
+        public string RoomRegHost { get; set; }
+        public string RoomPrevHost { get; set; }
+        public int RoomPrevPort { get; set; }
         public string InstallId { get; set; }   // identificador al azar de esta instalación (usuarios conectados; no es personal)
         public string LastConsist { get; set; }
         public int LastTab { get; set; }

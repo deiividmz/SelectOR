@@ -20,6 +20,7 @@ namespace SelectOR
         public sealed class Edge
         {
             public int A = -1, B = -1;              // nodo del .tdb en el inicio (A) y en el final (B)
+            public int Vec = -1;                    // el propio tramo en el .tdb (nodo vectorial)
             public float[] X, Y;                    // vértices (proyección local)
             public double[] Cum;                    // distancia desde el inicio del tramo hasta cada vértice
             public double Len;
@@ -33,6 +34,17 @@ namespace SelectOR
             public readonly List<(double off, string name)> Sidings = new();
         }
         sealed class Node { public readonly List<int> In = new(), Out = new(); }
+        // Desvíos tal como los conoce Open Rails: su identificador en el mundo (casilla y número, el mismo que manda el
+        // mapa del despachador al cambiarlo) y los tramos de sus pines, en el orden del .tdb: la posición 0/1 del
+        // desvío es la rama Out[0]/Out[1] (TrackCircuitSection: Pins[1, SelectedRoute]).
+        sealed class Junc { public int Tx, Tz, Id; public int[] In, Out; }
+        readonly Dictionary<int, Junc> _junc = new();
+        // Desvíos en el orden de su índice del .tdb: así manda Open Rails sus posiciones (SWITCHSTATES, un byte cada uno).
+        public int[] JunctionOrder = Array.Empty<int>();
+        // Varios desvíos de un mismo objeto (escapes, bretelles…) comparten identificador; Open Rails, al pedirlo por
+        // multijugador, cambia el PRIMERO del .tdb (TDB.GetTrJunctionNode). Los demás no se pueden pedir.
+        readonly HashSet<int> _juncHidden = new();
+        public bool SwitchHidden(int node) => _juncHidden.Contains(node);
 
         public Edge[] Edges = Array.Empty<Edge>();
         readonly Dictionary<int, Node> _nodes = new();
@@ -144,7 +156,7 @@ namespace SelectOR
                 var vn = tn[ni]?.TrVectorNode;
                 if (vn?.TrVectorSections == null || vn.TrVectorSections.Length < 1) continue;
                 if (!EdgeGeometry(tn[ni], tsec, nodePos, out int a, out int b, out var kp, out var kc, out double len, out double pre)) continue;
-                var e = new Edge { A = a, B = b, Cum = kc.ToArray(), Len = len };
+                var e = new Edge { A = a, B = b, Cum = kc.ToArray(), Len = len, Vec = ni };
 
                 if (vn.TrItemRefs != null)
                     foreach (int r in vn.TrItemRefs)
@@ -245,6 +257,25 @@ namespace SelectOR
                 }
                 g._nodes[ni] = node;
             }
+            for (int ni = 0; ni < tn.Length; ni++)
+            {
+                var n = tn[ni];
+                if (n?.TrJunctionNode == null || n.UiD == null || n.TrPins == null) continue;
+                int nin = (int)Math.Min(n.Inpins, (uint)n.TrPins.Length);
+                g._junc[ni] = new Junc
+                {
+                    Tx = n.UiD.WorldTileX, Tz = n.UiD.WorldTileZ, Id = n.UiD.WorldId,
+                    In = n.TrPins.Take(nin).Select(p => p.Link).ToArray(),
+                    Out = n.TrPins.Skip(nin).Select(p => p.Link).ToArray(),
+                };
+            }
+            var firstOf = new Dictionary<(int, int, int), int>();
+            foreach (var kv in g._junc.OrderBy(k => k.Key))
+            {
+                var key = (kv.Value.Tx, kv.Value.Tz, kv.Value.Id);
+                if (firstOf.ContainsKey(key)) g._juncHidden.Add(kv.Key); else firstOf[key] = kv.Key;
+            }
+            g.JunctionOrder = Enumerable.Range(0, tn.Length).Where(i => tn[i]?.TrJunctionNode != null).OrderBy(i => tn[i].Index).ToArray();
             g.BuildGrid();
             // lado de cada andén: solo las teselas del mundo donde hay andenes y solo sus objetos «Platform»
             var platTiles = new HashSet<(int x, int z)>();
@@ -266,6 +297,22 @@ namespace SelectOR
                 foreach (int nId in new[] { g.Edges[k].A, g.Edges[k].B })
                     if (nId >= 0) { if (!g._edgesAt.TryGetValue(nId, out var l)) g._edgesAt[nId] = l = new List<int>(); if (!l.Contains(k)) l.Add(k); }
             return g;
+        }
+
+        // Pasar por el desvío del nodo «node» del tramo «from» al tramo «to»: en qué posición tiene que estar. De punta
+        // (del tronco a una rama): la rama por la que se sale; de talón (de una rama al tronco): la rama por la que se
+        // llega. false si ese nodo no es un desvío de dos ramas o el paso no es posible.
+        public bool SwitchFor(int node, int from, int to, out int tx, out int tz, out int id, out int sel)
+        {
+            tx = tz = id = 0; sel = -1;
+            if (!_junc.TryGetValue(node, out var j) || j.Out.Length != 2 || from < 0 || to < 0) return false;
+            int vf = Edges[from].Vec, vt = Edges[to].Vec;
+            if (vf == vt) return false;
+            if (Array.IndexOf(j.In, vf) >= 0 && Array.IndexOf(j.Out, vt) >= 0) sel = Array.IndexOf(j.Out, vt);
+            else if (Array.IndexOf(j.Out, vf) >= 0 && Array.IndexOf(j.In, vt) >= 0) sel = Array.IndexOf(j.Out, vf);
+            else return false;
+            tx = j.Tx; tz = j.Tz; id = j.Id;
+            return true;
         }
 
         static long WKey(double x, double z) => ((long)Math.Floor(x / 4) << 32) ^ (uint)(int)Math.Floor(z / 4);
@@ -690,6 +737,11 @@ namespace SelectOR
         public double TotalLen, Progress;
         public bool OffRoute, Reversal;
         public double[] PointDist = Array.Empty<double>();
+        // Desvíos por los que pasa el itinerario: dónde (distancia desde el origen), cuál (como lo conoce Open Rails)
+        // y en qué posición tiene que estar. Para el piloto de desvíos de las salas de SelectOR.
+        public readonly List<(double d, int tx, int tz, int id, int sel)> Switches = new();
+        public readonly List<int> SwitchNodes = new();     // (el nodo del .tdb de cada uno, para el diagnóstico)
+        public int SwitchesHidden;                          // desvíos del itinerario que no se pueden pedir (comparten número)
         public int ReachedPoints;                       // puntos ya alcanzados (no se vuelven a planificar)
         public int Version;                             // cambia con cada itinerario nuevo (para repintar)
         public DateTime OffSinceUtc = DateTime.MaxValue;
@@ -705,7 +757,7 @@ namespace SelectOR
 
         void ClearPlan()
         {
-            Stops.Clear(); Limits.Clear();
+            Stops.Clear(); Limits.Clear(); Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0;
             PathLat = PathLon = Array.Empty<double>(); _px = _py = Array.Empty<float>(); _pc = Array.Empty<double>();
             TotalLen = Progress = 0; OffRoute = false; Reversal = false; PointDist = Array.Empty<double>();
             OffSinceUtc = DateTime.MaxValue; Version++;
@@ -927,6 +979,27 @@ namespace SelectOR
             Build(parts, pd, oldPassed);
         }
 
+        // Cada cambio de tramo en un nodo que es un desvío: su posición necesaria, a la distancia a la que se cruza.
+        void FindSwitches(List<(int e, double from, double to)> parts)
+        {
+            Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0;
+            double acc = 0; int prevE = -1, prevEnd = -1;
+            foreach (var (e, from, to) in parts)
+            {
+                var E = Graph.Edges[e];
+                double len = Math.Abs(to - from);
+                int start = from <= 0.5 ? E.A : from >= E.Len - 0.5 ? E.B : -1;
+                if (prevE >= 0 && e != prevE && start >= 0 && start == prevEnd
+                    && Graph.SwitchFor(start, prevE, e, out int tx, out int tz, out int id, out int sel))
+                {
+                    if (Graph.SwitchHidden(start)) SwitchesHidden++;   // pedirlo cambiaría otro desvío del mismo objeto
+                    else { Switches.Add((acc, tx, tz, id, sel)); SwitchNodes.Add(start); }
+                }
+                acc += len;
+                if (len > 0.5 || e != prevE) { prevE = e; prevEnd = to >= E.Len - 0.5 ? E.B : to <= 0.5 ? E.A : -1; }
+            }
+        }
+
         void ClearPlanKeepProblem() { var pr = Problem; ClearPlan(); Problem = pr; }
 
         void Build(List<(int e, double from, double to)> parts, List<double> pointDist, Dictionary<string, (double PassedAt, DateTime PassedAtPc)> oldPassed)
@@ -959,6 +1032,7 @@ namespace SelectOR
             }
             _px = xs.ToArray(); _py = ys.ToArray(); _pc = cs.ToArray();
             TotalLen = at;
+            FindSwitches(parts);
             PathLat = new double[_px.Length]; PathLon = new double[_px.Length];
             for (int i = 0; i < _px.Length; i++) (PathLat[i], PathLon[i]) = Graph.Unproj(_px[i], _py[i]);
             Limits.Sort((a, b) => a.d.CompareTo(b.d));
@@ -1119,6 +1193,7 @@ namespace SelectOR
         public (double lat, double lon) LatLonAt(double d)
         {
             if (_pc.Length == 0) return (0, 0);
+            if (_pc.Length == 1) return Graph.Unproj(_px[0], _py[0]);   // itinerario de un solo punto
             int i = Array.BinarySearch(_pc, d); if (i < 0) i = ~i - 1;
             i = Math.Max(0, Math.Min(_pc.Length - 2, i));
             double span = _pc[i + 1] - _pc[i], t = span > 0 ? Math.Max(0, Math.Min(1, (d - _pc[i]) / span)) : 0;

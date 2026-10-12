@@ -1,8 +1,5 @@
-1.2.59
-Servicios programados|El gerente o un gestor programan turnos con ruta, itinerario, tren y franja de salida. Los socios los reservan y, con «Preparar», el itinerario se carga solo en la hoja de ruta. Al cumplirlo, la empresa cobra una prima y el maquinista suma turnos cumplidos en su perfil.
-Servidores SelectOR|En Multijugador hay salas oficiales: entra con un clic, con la ruta, el servidor y la contraseña ya puestos. Cada sala dice cuántos jugadores tiene y quién puede entrar.
-Usuarios conectados|La portada enseña en directo cuántos usuarios hay conectados y cuántos están conduciendo, y tiene accesos a la web y al Discord de SelectOR.
-Tipo de tren en Flota|Con «Tipo y plazas…» la empresa decide si un tren es de viajeros o de mercancías, y sus plazas.
-Ventanas nuevas|Avisos, formularios y diálogos con un diseño más cuidado, con su icono, y la barra de título oscura.
-Paradas sin viajeros|Corregidas las paradas en las que a veces no subía ni bajaba nadie.
-Rutas autorizadas|Una versión de una ruta casi igual a otra ya autorizada se autoriza sola.
+1.2.60
+Desvíos según tu itinerario|En las salas de Servidores SelectOR, con un itinerario en la hoja de ruta, los desvíos que tienes por delante se ponen solos al acercarte. Si otro tren los necesita antes (primero los servicios programados, después viajeros y después mercancías), SelectOR te avisa para que esperes.
+Desvíos para todos|En las salas de Servidores SelectOR cualquier jugador puede cambiar los desvíos desde el mapa (Ctrl+9).
+Salas para cualquier ruta|El administrador puede crear salas sin ruta asignada: la partida es de la ruta del primero que entra.
+Servicios programados|El panel de «Programados» enseña el tren con el mismo 2D que Servicios, en filas mejor ordenadas, y la hora de fin siempre completa.

@@ -27,6 +27,9 @@ namespace SelectOR
         readonly bool _hadPassword;
         readonly RoundedInput _name, _desc, _host, _port, _pw, _max, _points, _users;
         readonly ThemeCombo _route;
+        // «Sin ruta asignada»: no es un nombre de ruta (no puede coincidir con una de verdad); se guarda como ruta vacía
+        sealed class NoRouteItem { public override string ToString() => "🌐  " + I18n.T("Sin ruta asignada (la del primero que entra)"); }
+        static readonly NoRouteItem NoRoute = new NoRouteItem();
         readonly FlowLayoutPanel _pwChips, _accChips, _stateChips;
         readonly CheckedListBox _cos;
         readonly Label _err, _cosCap, _usersCap, _pwCap;
@@ -87,9 +90,11 @@ namespace SelectOR
             Cap(T("Ruta"), x1, W); y += Theme.Px(19);
             _route = new ThemeCombo { Location = new Point(x1, y), Width = W, Font = Theme.Font(9.75f), ItemHeight = Theme.Px(24), BackColor = Theme.Surface2, ForeColor = Theme.Text, MaxDropDownItems = 14 };
             _route.DrawItem += DialogKit.DrawComboItem;
+            _route.Items.Add(NoRoute);   // primera opción: sala sin ruta (la del primero que entra)
             foreach (var r in routes) _route.Items.Add(r);
             int ri = routes.ToList().FindIndex(r => string.Equals(r, d.Route, StringComparison.OrdinalIgnoreCase));
-            if (_route.Items.Count > 0) _route.SelectedIndex = Math.Max(0, ri);
+            bool editingAny = editing && string.IsNullOrWhiteSpace(d.Route);
+            _route.SelectedIndex = editingAny ? 0 : _route.Items.Count > 1 ? 1 + Math.Max(0, ri) : 0;
             body.Controls.Add(_route); y += Theme.Px(42);
             int pw = Theme.Px(110);
             Cap(T("IP o nombre del servidor"), x1, W - pw - Theme.Px(14)); Cap(T("Puerto"), x1 + W - pw, pw); y += Theme.Px(19);
@@ -173,7 +178,7 @@ namespace SelectOR
             {
                 var d = new Data
                 {
-                    Name = _name.Box.Text.Trim(), Description = _desc.Box.Text.Trim(), Route = _route.SelectedItem as string, Host = _host.Box.Text.Trim(), Port = port,
+                    Name = _name.Box.Text.Trim(), Description = _desc.Box.Text.Trim(), Route = _route.SelectedItem as string ?? "", Host = _host.Box.Text.Trim(), Port = port,
                     PassMode = _hadPassword ? (_pwMode == 0 ? "keep" : _pwMode == 1 ? "none" : "set") : (_pwMode == 1 ? "set" : "none"),
                     Password = _pw.Box.Text.Trim(), MaxPlayers = max, MinPoints = pts, Active = _state == 0,
                     Access = _acc == 1 ? "companies" : _acc == 2 ? "users" : "all",
