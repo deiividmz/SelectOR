@@ -1,8 +1,8 @@
-// Piloto de desvíos (salas de «Servidores SelectOR»): con la hoja de ruta en marcha, pide al servidor de la sala los
-// desvíos que el itinerario tiene por delante en la posición que necesita, y el servidor los reparte con prioridad
-// (servicio programado > viajeros > mercancías; a igualdad, el que llega antes). Va por una conexión aparte a la misma
-// sala (no es un jugador: el servidor lo reconoce por su primer mensaje, «SELECTOR HELLO»). Con un servidor que no lo
-// conoce (el de Open Rails), no contesta «READY» y el piloto se retira.
+// Conexión aparte con el servidor de una sala de «Servidores SelectOR» (no es un jugador: el servidor la reconoce por su
+// primer mensaje, «SELECTOR HELLO»). Hoy sirve para el HUD (WHO → «SELECTOR YOU»: dentro / entrando / fuera y si eres
+// el despachador) y para la contraseña de las salas libres (GATE OWNER). Sabe también pedir desvíos (WANT / PASSED /
+// CANCEL / FIX), pero desde la 1.2.63 SelectOR ya no se los pide (los desvíos según el itinerario están aparcados).
+// Con un servidor que no la conoce (el de Open Rails), no contesta «READY» y se retira.
 // Mensajes: los mismos de Open Rails (texto UTF-16 con la longitud delante); ver «SelectOR Servidor MP\Interlock.cs».
 
 using System;

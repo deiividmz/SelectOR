@@ -301,7 +301,7 @@ namespace SelectOR
         {
             if (_roomPending == null) return;
             _roomJoined = _roomPending; _roomPending = null;
-            PilotCreate();   // desvíos según el itinerario (MainMenuForm.Agujas.cs)
+            PilotCreate();   // si seguimos dentro (HUD) y la contraseña (MainMenuForm.Agujas.cs)
             if (_roomBeat == null)
             {
                 _roomBeat = new Timer { Interval = 45000 };

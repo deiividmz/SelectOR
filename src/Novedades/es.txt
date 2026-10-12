@@ -1,6 +1,3 @@
-1.2.62
-Señales con bloqueo en multijugador|Rojo con un tren en el cantón, anuncio de parada en la de detrás y una sola salida a la vez en las estaciones.
-Mapa de Open Rails renovado|En multijugador (Ctrl+9), con el aspecto de SelectOR y en español; todos pueden cambiar señales y desvíos.
-Itinerario a tu medida|Sigue exactamente las vías que marcas: arrastra el trazado o un punto para cambiarlo, y Ctrl+Z deshace.
-Servidores SelectOR al momento|La lista de salas se actualiza sola y las salas libres enseñan la ruta en juego.
-Conexión en el HUD|En multijugador, el HUD dice si estás en línea. CONECTAR está ahora en «Tus datos».
+1.2.63
+Multijugador como en Open Rails|Las señales y el mapa (Ctrl+9) vuelven a funcionar como en Open Rails, sin el bloqueo de la 1.2.62.
+Desvíos a mano en las salas|Ya no se ponen solos según el itinerario: cámbialos desde el mapa (Ctrl+9) o con G / Mayús+G.

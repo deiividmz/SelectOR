@@ -3370,10 +3370,6 @@ namespace SelectOR
             try
             {
                 var psi = new ProcessStartInfo { FileName = exe, Arguments = args, WorkingDirectory = AppContext.BaseDirectory, UseShellExecute = false };
-                // Multijugador: el guardián de señales entra en Open Rails al arrancar (SignalGuard\: cantón de verdad para
-                // los scripts de señal del despachador, señales a los demás cada 2 s y arreglos de la Map Window), en Open
-                // Rails de .NET 6 y de .NET Framework. No cambia ningún archivo de Open Rails; sin él, todo como siempre.
-                if (args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) >= 0) SignalGuardFiles.Apply(psi);
                 var p = Process.Start(psi);
                 _preLaunchState = WindowState;   // al volver del simulador se deja exactamente así
                 WindowState = FormWindowState.Minimized;

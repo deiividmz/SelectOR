@@ -7,7 +7,9 @@
 //     composiciones 2D sin acoplar);
 //   · índices de contenido que llevan 60 días sin usarse (se vuelven a crear si hacen falta);
 //   · audios de megafonía que llevan 45 días sin sonar (se vuelven a bajar si hacen falta);
-//   · copias de teleindicadores de trenes que ya no existen.
+//   · copias de teleindicadores de trenes que ya no existen;
+//   · lo que dejaron el guardián de señales y los desvíos según el itinerario (1.2.60–1.2.62, ya quitados): sus
+//     registros y la elección de tema del mapa, y junto a Open Rails SelectOR.SignalGuard.dll y su 0Harmony.dll.
 // Las cachés pueden ir a otra carpeta con SELECTOR_CACHE_DIR (lo usan las pruebas).
 
 using System;
@@ -38,6 +40,21 @@ namespace SelectOR
             if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SELECTOR_PREFS_FILE"))
                 || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SELECTOR_CACHE_DIR"))) return;
             RunIn(OrData, Teleindicadores.BackupRoot);
+            GuardLeftovers(AppContext.BaseDirectory);
+        }
+
+        // Junto a Open Rails: el guardián de señales de la 1.2.62 (ya no se usa). 0Harmony.dll solo si está con él, que
+        // es quien lo dejó. Si Open Rails lo tiene cargado (está abierto), se intenta otra vez al arrancar la próxima vez.
+        public static void GuardLeftovers(string dir)
+        {
+            try
+            {
+                string g = Path.Combine(dir, "SelectOR.SignalGuard.dll");
+                if (!File.Exists(g)) { Del(g + ".new"); return; }
+                Del(g); Del(g + ".new");
+                if (!File.Exists(g)) { Del(Path.Combine(dir, "0Harmony.dll")); Del(Path.Combine(dir, "0Harmony.dll.new")); }
+            }
+            catch { }
         }
 
         // root = %AppData%\Open Rails (o una carpeta de pruebas); tele = copias de los teleindicadores.
@@ -48,6 +65,7 @@ namespace SelectOR
                 string sel = Path.Combine(root, "SelectOR");
                 if (!Flag("SELECTOR_CABLOG")) Del(Path.Combine(sel, "pupitre-diagnostico.json"));
                 if (!Flag("SELECTOR_PALOG")) Del(Path.Combine(sel, "megafonia.log"));
+                foreach (var f in new[] { "senales.log", "mapa-tema.txt", "sin-guardian.txt", "desvios.log" }) Del(Path.Combine(sel, f));   // (1.2.60–1.2.62)
 
                 // Versiones antiguas: preferencias con el nombre de antes (ya migradas) y vistas previas en disco.
                 if (File.Exists(Path.Combine(root, "SelectOR.json"))) Del(Path.Combine(root, "MenuParalelo.json"));

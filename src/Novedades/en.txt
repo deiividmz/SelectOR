@@ -1,6 +1,3 @@
-1.2.62
-Block signalling in multiplayer|Red with a train in the block, a stop warning on the signal behind and only one exit at a time at stations.
-Refreshed Open Rails map|In multiplayer (Ctrl+9), with the SelectOR look; everyone can change signals and switches.
-Itineraries your way|They follow exactly the tracks you mark: drag the line or a point to change it, and Ctrl+Z undoes.
-SelectOR servers in real time|The room list refreshes by itself and open rooms show the route in play.
-Connection in the HUD|In multiplayer, the HUD shows whether you are online. CONNECT is now in «Your details».
+1.2.63
+Multiplayer as in Open Rails|Signals and the map (Ctrl+9) work as in Open Rails again, without the 1.2.62 block signalling.
+Switches by hand in rooms|They no longer set themselves along your itinerary: throw them from the map (Ctrl+9) or with G / Shift+G.

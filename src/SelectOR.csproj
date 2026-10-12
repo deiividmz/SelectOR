@@ -13,9 +13,9 @@
     <AssemblyTitle>SelectOR</AssemblyTitle>
     <Company>David MZP</Company>
     <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
-    <Version>1.2.62</Version>
-    <AssemblyVersion>1.2.62.0</AssemblyVersion>
-    <FileVersion>1.2.62.0</FileVersion>
+    <Version>1.2.63</Version>
+    <AssemblyVersion>1.2.63.0</AssemblyVersion>
+    <FileVersion>1.2.63.0</FileVersion>
 
     <!-- Carpeta de una instalación de Open Rails (la que contiene OpenRails.exe). Por defecto,
          «OR Desplegado» junto a esta carpeta; se cambia al compilar con
@@ -35,24 +35,6 @@
     <ApplicationIcon>SelectOR.ico</ApplicationIcon>
   </PropertyGroup>
 
-  <!-- El guardián de señales del multijugador es un proyecto aparte (SignalGuard\): no se compila aquí. -->
-  <ItemGroup>
-    <Compile Remove="SignalGuard\**" />
-    <None Remove="SignalGuard\**" />
-  </ItemGroup>
-  <!-- …pero se compila antes y va DENTRO de SelectOR.dll (con Harmony): SelectOR lo deja junto a Open Rails al entrar en
-       multijugador (SignalGuardFiles.cs). Así llega con la actualización de siempre, que solo instala sus propios archivos. -->
-  <Target Name="BuildSignalGuard" BeforeTargets="BeforeBuild">
-    <MSBuild Projects="SignalGuard\SelectOR.SignalGuard.csproj" Targets="Restore" Properties="Configuration=$(Configuration);ORDir=$([System.IO.Path]::GetFullPath('$(ORPath)'));_SgRestore=1" />
-    <MSBuild Projects="SignalGuard\SelectOR.SignalGuard.csproj" Targets="Build" Properties="Configuration=$(Configuration);ORDir=$([System.IO.Path]::GetFullPath('$(ORPath)'))" />
-    <ItemGroup>
-      <!-- .NET 6 (StartupHook) y .NET Framework (GuardDomainManager): SelectOR deja la que toca junto a Open Rails -->
-      <EmbeddedResource Include="SignalGuard\bin\net6.0-windows\SelectOR.SignalGuard.dll" LogicalName="signalguard.core.SelectOR.SignalGuard.dll" />
-      <EmbeddedResource Include="SignalGuard\bin\net6.0-windows\0Harmony.dll" LogicalName="signalguard.core.0Harmony.dll" />
-      <EmbeddedResource Include="SignalGuard\bin\net472\SelectOR.SignalGuard.dll" LogicalName="signalguard.fx.SelectOR.SignalGuard.dll" />
-      <EmbeddedResource Include="SignalGuard\bin\net472\0Harmony.dll" LogicalName="signalguard.fx.0Harmony.dll" />
-    </ItemGroup>
-  </Target>
 
   <!-- Shader propio (réplica del Shape Viewer de TSRE5), compilado con mgfxc a DirectX_11.
        Se copia junto al .exe para cargarlo en tiempo de ejecución. -->
