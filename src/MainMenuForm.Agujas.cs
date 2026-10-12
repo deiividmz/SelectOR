@@ -31,6 +31,7 @@ namespace SelectOR
             if (name.Length == 0) return;
             _pilot = new SwitchPilot(host, port, name, PilotPrio());
             _pilot.Changed += (key, before, now) => { try { BeginInvoke((Action)(() => PilotChanged(key, before, now))); } catch { } };
+            _pilot.GateOwner += (tok, pw) => { try { BeginInvoke((Action)(() => RoomGateInherited(tok, pw))); } catch { } };
             _pilotToldReady = false;
         }
 

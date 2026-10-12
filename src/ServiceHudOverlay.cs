@@ -158,6 +158,14 @@ namespace SelectOR
         bool _paShown;   // hay fila de megafonía (y su alto está ya contado en el tamaño de la ventana)
         bool PaAvail { get { try { return _pa != null && _pa().avail; } catch { return false; } } }
 
+        // Multijugador: fila «en línea» entre los viajeros y la megafonía (MainMenuForm.Online.cs).
+        // level: 0 sin fila · 1 en línea · 2 entrando · 3 sin conexión; extra = a la derecha (la contraseña de la sala).
+        public Func<(int level, string text, string extra)> Net;
+        (int level, string text, string extra) _net;
+        const int NetRowH = 24;
+        bool _netShown;
+        int NetRow => _netShown ? NetRowH : 0;
+
         // La llama la aplicación cuando ya sabe si esta ruta tiene megafonía: la fila aparece o
         // desaparece y la ventana crece o encoge para dejarle sitio.
         public void NotifyPaChanged()
@@ -287,7 +295,7 @@ namespace SelectOR
         }
 
         int InfoHeight() => (!_service ? (_showPax ? ExpandedHNoSvcPax : ExpandedHNoSvc) : (_showPax ? ExpandedHPax : ExpandedH))
-                            + PaRow;
+                            + NetRow + PaRow;
         // Fila de viajeros: bajo el cronómetro en servicio; bajo la fila de km en conducción libre.
         int PaxRowTop(int top) => _service ? top + 66 : top + 38;
         int InfoTop() => (_mapOpen && !_collapsed) ? MapBlockH : 0;
@@ -347,7 +355,9 @@ namespace SelectOR
             }
             bool want = _pax != null && _pCap > 0;   // tren de viajeros (en servicio o en conducción libre)
             bool pa = PaAvail;                        // megafonía: llega al descargarse el paquete de la ruta
-            if (want != _showPax || pa != _paShown) { _showPax = want; _paShown = pa; ApplySize(); }
+            if (Net != null) { try { _net = Net(); } catch { _net = default; } }
+            bool net = _net.level > 0;                // multijugador: ¿conectado al servidor?
+            if (want != _showPax || pa != _paShown || net != _netShown) { _showPax = want; _paShown = pa; _netShown = net; ApplySize(); }
             Invalidate();
         }
 
@@ -514,8 +524,31 @@ namespace SelectOR
             int infoTop = InfoTop();
             if (_mapOpen) DrawMap(g); else _hitZoomIn = _hitZoomOut = Rectangle.Empty;
             DrawInfo(g, infoTop);
+            DrawNetRow(g, infoTop);
             DrawPaRow(g, infoTop);
             DrawResizeGrip(g);
+        }
+
+        // Fila de la conexión al servidor de multijugador: punto (verde en línea, ámbar entrando, rojo sin conexión),
+        // el estado y, a la derecha, la contraseña de la sala si la protege uno.
+        void DrawNetRow(Graphics g, int top)
+        {
+            if (!_netShown) return;
+            int y = top + InfoHeight() - PaRow - NetRowH;
+            var col = _net.level == 1 ? Teal : _net.level == 2 ? Theme.Gold : Rec;
+            DrawDot(g, 15, y + NetRowH / 2, col, _net.level != 2 || _blink);
+            int right = Width - 10;
+            if (!string.IsNullOrEmpty(_net.extra))
+            {
+                using var fx = Theme.Font(9f, FontStyle.Bold);
+                int xw = TextRenderer.MeasureText(g, _net.extra, fx, Size.Empty, TextFormatFlags.NoPadding).Width;
+                TextRenderer.DrawText(g, _net.extra, fx, new Rectangle(right - xw, y, xw, NetRowH), Theme.Gold,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                right -= xw + 8;
+            }
+            TextRenderer.DrawText(g, _net.text ?? "", Theme.Font(9.25f, FontStyle.Bold), new Rectangle(28, y, Math.Max(10, right - 28), NetRowH),
+                _net.level == 1 ? Blend(Teal, Theme.Text, 0.25f) : Blend(col, Theme.Text, 0.2f),
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }
 
         // Fila de megafonía: altavoz (clic = encender/apagar) y línea elegida (clic = elegir otra).
@@ -1107,6 +1140,12 @@ namespace SelectOR
                     for (int i = 0, num = 0; i < book.Points.Count; i++)
                     {
                         if (book.Points[i].Guide) continue;   // puntos de paso del recorrido (.pat): no se dibujan
+                        if (book.Points[i].Via)               // puntos «vía» (arrastrando el trazado): rombo sin número
+                        {
+                            ItinDrag.DrawVia(g, Proj(book.Points[i].Lat, book.Points[i].Lon), 6f * Math.Max(1f, arrowScale * 0.6f),
+                                i < book.ReachedPoints ? Color.FromArgb(150, 130, 110) : Color.FromArgb(96, 165, 250));
+                            continue;
+                        }
                         num++;
                         var p = Proj(book.Points[i].Lat, book.Points[i].Lon);
                         float r = 7f * Math.Max(1f, arrowScale * 0.6f);
@@ -1223,6 +1262,23 @@ namespace SelectOR
         string _notice; DateTime _noticeUntil;   // aviso breve sobre el mapa (guardado, cargado…)
         public void Notice(string msg) { if (string.IsNullOrWhiteSpace(msg)) return; _notice = msg; _noticeUntil = DateTime.UtcNow.AddSeconds(5); Invalidate(); }
         Func<PointF, (double lat, double lon)> _inv;   // píxel → lat/lon del último dibujo
+        // Editar el itinerario arrastrando (modo «Itinerario»): el trazado o un punto, a otra vía (ItinDrag).
+        readonly ItinDrag _itDrag = new ItinDrag();
+        bool _itDragging, _itMoved; Point _itAt;
+        (double lat, double lon) InvPt(Point p) => _inv(new PointF(p.X, p.Y));
+        double MPerPx(Point p) { var a = _inv(new PointF(p.X, p.Y)); var b = _inv(new PointF(p.X + 1, p.Y)); return Math.Max(0.01, Haversine(a.lat, a.lon, b.lat, b.lon)); }
+        // lat/lon → píxel: la inversa de _inv (el dibujo es una proyección lineal)
+        Func<double, double, PointF> ProjFromInv()
+        {
+            if (_inv == null) return null;
+            var a = _inv(new PointF(0, 0)); var b = _inv(new PointF(1000, 0)); var c = _inv(new PointF(0, 1000));
+            double m11 = (b.lat - a.lat) / 1000, m12 = (c.lat - a.lat) / 1000, m21 = (b.lon - a.lon) / 1000, m22 = (c.lon - a.lon) / 1000;
+            double det = m11 * m22 - m12 * m21;
+            if (Math.Abs(det) < 1e-20) return null;
+            return (la, lo) => { double dla = la - a.lat, dlo = lo - a.lon; return new PointF((float)((m22 * dla - m12 * dlo) / det), (float)((-m21 * dla + m11 * dlo) / det)); };
+        }
+        bool ItinEditable(Point p) => Book is RoadBook rb && rb.Editing && rb.Graph != null && rb.Points.Count > 0 && _inv != null && p.Y > HdrH
+                                      && !_hitGrip.Contains(p) && !_hitKey.Contains(p) && !_legendBox.Contains(p) && !(_savedOpen && _savedPanel.Contains(p));
         bool _panMoved; Point _panDown;
         RoadBook Book => _hud?.Book;
         // Leyenda de los demás usuarios de la ruta: su caja y cada fila (clic → centrar en ese usuario).
@@ -1314,6 +1370,12 @@ namespace SelectOR
         // Una tecla pulsada con el mapa delante es para el simulador: se le reenvía (y se queda con el teclado).
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            // modo «Itinerario»: Ctrl+Z deshace el último cambio (no va al simulador)
+            if (keyData == (Keys.Control | Keys.Z) && Book is RoadBook ub && ub.Editing)
+            {
+                ub.Undo(); try { _hud?.BookChanged?.Invoke(); } catch { } Invalidate();
+                return true;
+            }
             var k = keyData & Keys.KeyCode;
             if (k != Keys.ShiftKey && k != Keys.ControlKey && k != Keys.Menu && k != Keys.None)
             {
@@ -1325,6 +1387,16 @@ namespace SelectOR
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            if ((e.Button == MouseButtons.Left || e.Button == MouseButtons.Right) && ItinEditable(e.Location))
+            {
+                var pj = ProjFromInv();
+                if (pj != null && _itDrag.Down(Book, pj, InvPt, MPerPx(e.Location), e.Location, e.Button, out bool changed))
+                {
+                    if (changed) { try { _hud?.BookChanged?.Invoke(); } catch { } }
+                    if (e.Button == MouseButtons.Left) { _itDragging = true; _itMoved = false; _itAt = e.Location; }
+                    Invalidate(); base.OnMouseDown(e); return;
+                }
+            }
             if (e.Button != MouseButtons.Left) { base.OnMouseDown(e); return; }
             if (_hitGrip.Contains(e.Location)) { _resizing = true; _downScreen = Cursor.Position; _sizeAtDown = Size; }   // esquina → tamaño
             else if (_hitKey.Contains(e.Location)) _keyDown = true;                                                          // leyenda → plegar
@@ -1337,6 +1409,12 @@ namespace SelectOR
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            if (_itDragging)
+            {
+                if (Math.Abs(e.X - _itAt.X) + Math.Abs(e.Y - _itAt.Y) > 3) _itMoved = true;
+                if (_itMoved && _inv != null) { _itDrag.Move(Book, InvPt, MPerPx(e.Location), e.Location); Invalidate(); }
+                base.OnMouseMove(e); return;
+            }
             if (_resizing)
             {
                 var now = Cursor.Position;
@@ -1367,14 +1445,33 @@ namespace SelectOR
                 foreach (var (hit, _) in _legendHits) if (hit.Contains(e.Location)) { sobre = true; break; }
                 int hh = HdrZone(e.Location);
                 if (hh != _hoverHdr) { _hoverHdr = hh; Invalidate(new Rectangle(0, 0, Width, HdrH)); }
+                bool editable = false;
+                if (ItinEditable(e.Location) && ProjFromInv() is Func<double, double, PointF> pj)
+                {
+                    var h = ItinDrag.Hit(Book, pj, InvPt, MPerPx(e.Location), e.Location);
+                    editable = h.point >= 0 || h.leg >= 0;
+                }
                 Cursor = _hitGrip.Contains(e.Location) ? Cursors.SizeNWSE : _hitKey.Contains(e.Location) ? Cursors.Hand
-                       : sobre || hh >= 0 ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
+                       : sobre || hh >= 0 || editable ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
             }
             base.OnMouseMove(e);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            if (_itDragging)
+            {
+                _itDragging = false;
+                bool onPoint = _itDrag.MovingPoint;
+                if (_inv != null && _itDrag.Up(Book, InvPt, MPerPx(e.Location), e.Location, _itMoved)) { try { _hud?.BookChanged?.Invoke(); } catch { } }
+                else if (_itMoved) Notice(I18n.T("Suéltalo encima de una vía."));
+                else _itDrag.Cancel();
+                Invalidate();
+                // sin moverse y fuera de un punto (sobre el trazado): un clic normal, que añade un punto
+                if (_itMoved || onPoint) { base.OnMouseUp(e); return; }
+                if (Book is RoadBook rb0) AddPointAt(rb0, e.Location);
+                base.OnMouseUp(e); return;
+            }
             bool wasWinDrag = _winDrag, moved = _moved, legend = _legendDown, wasPan = _panning, panMoved = _panMoved;
             if (_resizing) { _resizing = false; SavePlace(); Invalidate(); base.OnMouseUp(e); return; }
             if (_keyDown)
@@ -1398,13 +1495,7 @@ namespace SelectOR
             if (wasPan && !panMoved && Book is RoadBook rb && rb.Editing && _inv != null && e.Button == MouseButtons.Left)
             {
                 if (rb.Graph == null) { _hud?.BookEnsureGraph?.Invoke(); Invalidate(); }
-                else
-                {
-                    var a = _inv(new PointF(e.X, e.Y)); var b = _inv(new PointF(e.X + 30, e.Y));
-                    double maxM = Math.Max(15, Haversine(a.lat, a.lon, b.lat, b.lon));   // 30 px de margen
-                    if (rb.AddPoint(a.lat, a.lon, maxM)) { try { _hud?.BookChanged?.Invoke(); } catch { } }
-                    Invalidate();
-                }
+                else AddPointAt(rb, e.Location);
                 base.OnMouseUp(e);
                 return;
             }
@@ -1430,6 +1521,15 @@ namespace SelectOR
         {
             if (e.Y >= HdrH && !_legendBox.Contains(e.Location) && !(_savedOpen && _savedPanel.Contains(e.Location))) { _free = false; _pxPerM = HudMapRender.BaseScale; UpdateFollow(); Invalidate(); }   // volver a centrar en el tren
             base.OnMouseDoubleClick(e);
+        }
+
+        void AddPointAt(RoadBook rb, Point p)
+        {
+            if (_inv == null || rb.Graph == null) return;
+            var a = _inv(new PointF(p.X, p.Y)); var b = _inv(new PointF(p.X + 30, p.Y));
+            double maxM = Math.Max(15, Haversine(a.lat, a.lon, b.lat, b.lon));   // 30 px de margen
+            if (rb.AddPoint(a.lat, a.lon, maxM)) { try { _hud?.BookChanged?.Invoke(); } catch { } }
+            Invalidate();
         }
 
         int HdrZone(Point p)
@@ -1536,7 +1636,7 @@ namespace SelectOR
             string hdr = rb != null && rb.Editing
                 ? (rb.Building ? I18n.T("Preparando el esquema de vías…")
                    : rb.Graph == null && rb.Problem != null ? rb.Problem
-                   : I18n.T("Haz clic en la vía para añadir puntos del itinerario"))
+                   : I18n.T("Clic en la vía: añadir · arrastra el trazado o un punto a otra vía · clic derecho: quitar · Ctrl+Z: deshacer"))
                 : I18n.T("rueda: zoom · arrastra: mover · doble clic: centrar");
             TextRenderer.DrawText(g, hdr, Theme.Font(9.5f, FontStyle.Bold), new Rectangle(14, 0, bx - 20, HdrH),
                 rb != null && rb.Editing ? Color.FromArgb(240, 180, 70) : Theme.Text,
@@ -1559,6 +1659,10 @@ namespace SelectOR
                 snap.Crumb, snap.HasPos, snap.CurLat, snap.CurLon, snap.HasHeading, snap.Heading,
                 worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true, book: Book,
                 detail: snap.Detail);
+            if (_itDrag.Active && ProjFromInv() is Func<double, double, PointF> pjd)   // arrastrando: el recorrido nuevo
+            {
+                var clip = g.Clip; g.SetClip(area); _itDrag.Draw(g, pjd); g.Clip = clip;
+            }
             DrawKey(g, area, snap.Detail);
             _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox);
             DrawSaved(g, area);

@@ -72,6 +72,7 @@ namespace SelectOR
             SavedItinerary picked = null;
             string dir = route.Path, key = RouteKey(dir);
             var rb = new RoadBook(); rb.Reset(dir);
+            var drag = new ItinDrag();
             string loadedId = null; bool dirty = false;
 
             using var f = new Form
@@ -87,7 +88,7 @@ namespace SelectOR
             var head = new DialogKit.Header(string.Format(Tr("Itinerario en {0}"), route.Name),
                 forSched ? Tr("Para el servicio programado: el maquinista lo tendrá en su hoja de ruta al conducir.") : null, "🧭");
 
-            var view = new RoutePlanView { Dock = DockStyle.Fill, Expandable = false, Hint = Tr("Clic en la vía: añadir un punto · rueda: acercar · arrastrar: mover") };
+            var view = new RoutePlanView { Dock = DockStyle.Fill, Expandable = false, Hint = Tr("Clic en la vía: añadir un punto · arrastra el trazado o un punto a otra vía · clic derecho: quitar · Ctrl+Z: deshacer") };
             view.SetPlan(null, Tr("Preparando el esquema de vías…"));
             var mapHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(14, 12, 8, 8) };
             mapHost.Controls.Add(view);
@@ -101,7 +102,7 @@ namespace SelectOR
             Label Cap(string t) => new Label { Text = t, AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 8, 0, 4) };
             var help = new Label
             {
-                Text = Tr("Haz clic en la vía para marcar la salida, los puntos de paso y la llegada: el camino va por las vías, como en el mapa grande del HUD. Al conducir desde Conducción libre, el itinerario sale ya en el HUD y en la hoja de ruta."),
+                Text = Tr("Haz clic en la vía para marcar la salida, los puntos de paso y la llegada: el camino va por las vías, como en el mapa grande del HUD. Para que vaya por otra vía, arrastra el trazado (o un punto) hasta ella. Al conducir desde Conducción libre, el itinerario sale ya en el HUD y en la hoja de ruta, y se sigue por esas mismas vías."),
                 AutoSize = true, MaximumSize = new Size(Theme.Px(330), 0), ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 6)
             };
             var saved = new ThemeCombo { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 4) };
@@ -167,8 +168,10 @@ namespace SelectOR
                     using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, p.X - 5, p.Y - 5, 10, 10);
                     using (var pen = new Pen(HudMapRender.ItineraryCol, 2.2f)) g.DrawEllipse(pen, p.X - 5, p.Y - 5, 10, 10);
                 }
+                // puntos «vía» (arrastrando el trazado): rombos sin número
+                foreach (var w in rb.Points.Where(p => p.Via)) ItinDrag.DrawVia(g, proj(w.Lat, w.Lon), 7f, Color.FromArgb(96, 165, 250));
                 // puntos marcados: numerados (salida verde, llegada ámbar)
-                var vis = rb.Points.Where(p => !p.Guide).ToList();
+                var vis = rb.Points.Where(p => !p.Guide && !p.Via).ToList();
                 using var fN = Theme.Font(8f, FontStyle.Bold);
                 for (int i = 0; i < vis.Count; i++)
                 {
@@ -180,6 +183,7 @@ namespace SelectOR
                     TextRenderer.DrawText(g, (i + 1).ToString(), fN, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.White,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 }
+                drag.Draw(g, proj);   // arrastrando: el recorrido nuevo
             };
 
             // ---------- estado ----------
@@ -195,7 +199,7 @@ namespace SelectOR
                 stops.BeginUpdate(); stops.Items.Clear();
                 foreach (var s in rb.Stops) stops.Items.Add(s);
                 stops.EndUpdate();
-                bUndo.Enabled = rb.Points.Count > 0; bClear.Enabled = rb.Points.Count > 0;
+                bUndo.Enabled = rb.CanUndo; bClear.Enabled = rb.Points.Count > 0;
                 bSave.Enabled = bUse.Enabled = rb.Points.Count >= 2 && rb.HasPlan;
                 bRemove.Visible = !forSched && ExploreItineraryFor(dir) != null;
                 foreach (var b in new[] { bUndo, bClear, bSave, bUse }) b.Invalidate();
@@ -246,7 +250,7 @@ namespace SelectOR
                 if (it == null || rb.Graph == null) return;
                 rb.ClearAll(); rb.SetHaltChoices(it.Halts);
                 int ok = 0;
-                foreach (var p in it.Points) if (rb.AddSavedPoint(p.Lat, p.Lon, p.Edge, p.Off, p.Guide, p.Reverse)) ok++;
+                foreach (var p in it.Points) if (rb.AddSavedPoint(p.Lat, p.Lon, p.Edge, p.Off, p.Guide, p.Reverse, p.Via)) ok++;
                 if (ok == 0) { rb.ClearAll(); msg.Text = Tr("Ese itinerario no encaja en las vías de esta ruta."); }
                 else { loadedId = it.Id; dirty = false; msg.Text = string.Format(Tr("Cargado «{0}»."), it.Name); }
                 Refresh();
@@ -268,10 +272,29 @@ namespace SelectOR
                 Refresh();
             };
             bUndo.Click += (s, e) => { rb.Undo(); dirty = true; Refresh(); };
+            // arrastrar el trazado o un punto a otra vía; clic derecho en un punto: quitarlo (ItinDrag)
+            (double lat, double lon) Inv(Point pt) => view.LatLonAt(pt);
+            view.EditDown = (p, b) =>
+            {
+                if (rb.Graph == null || rb.Points.Count == 0) return false;
+                bool took = drag.Down(rb, view.PixelOf, Inv, view.MetersPerPixel, p, b, out bool changed);
+                if (changed) { dirty = true; msg.Text = ""; Refresh(); }
+                return took;
+            };
+            view.EditMove = p => { drag.Move(rb, Inv, view.MetersPerPixel, p); view.Redraw(); };
+            view.EditUp = (p, moved) =>
+            {
+                bool onPoint = drag.MovingPoint;
+                bool changed = drag.Up(rb, Inv, view.MetersPerPixel, p, moved);
+                if (changed) { dirty = true; msg.Text = ""; Refresh(); }
+                else { if (moved) msg.Text = Tr("Suéltalo encima de una vía."); view.Redraw(); }
+                return onPoint;   // un clic en un punto no añade otro
+            };
+            view.EditHover = p => { if (rb.Graph == null) return false; var h = ItinDrag.Hit(rb, view.PixelOf, Inv, view.MetersPerPixel, p); return h.point >= 0 || h.leg >= 0; };
             void Halts(bool on) { rb.SetAllHalts(on); dirty = true; stops.Invalidate(); view.Redraw(); if (rb.HasPlan) sum.Text = string.Format(Tr("{0} km · {1} paradas"), (rb.TotalLen / 1000.0).ToString("N1", EsEs), rb.HaltCount); }
             bHaltAll.Click += (s, e) => Halts(true);
             bHaltNone.Click += (s, e) => Halts(false);
-            bClear.Click += (s, e) => { rb.ClearAll(); dirty = true; loadedId = null; Refresh(); };
+            bClear.Click += (s, e) => { rb.PushUndo(); rb.ClearAll(keepUndo: true); dirty = true; loadedId = null; Refresh(); };
             bAll.Click += (s, e) => view.ResetView();
             bFollow.Click += (s, e) =>
             {
@@ -296,7 +319,7 @@ namespace SelectOR
                 }
                 if (name.Length > 80) name = name.Substring(0, 80);
                 var it = new SavedItinerary { Name = name, Route = key, Km = Math.Round(rb.TotalLen / 1000.0, 1), Halts = rb.HaltsForSave() };
-                foreach (var p in rb.Points) it.Points.Add(new SavedItineraryPoint { Lat = p.Lat, Lon = p.Lon, Edge = p.Edge, Off = p.Off, Guide = p.Guide, Reverse = p.Reverse });
+                foreach (var p in rb.Points) it.Points.Add(new SavedItineraryPoint { Lat = p.Lat, Lon = p.Lon, Edge = p.Edge, Off = p.Off, Guide = p.Guide, Reverse = p.Reverse, Via = p.Via });
                 _prefs.SavedItineraries.RemoveAll(x => string.Equals(x.Route, key, StringComparison.OrdinalIgnoreCase) && string.Equals(x.Name, it.Name, StringComparison.OrdinalIgnoreCase));
                 _prefs.SavedItineraries.Add(it);
                 try { _prefs.Save(); } catch { }

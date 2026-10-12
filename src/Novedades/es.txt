@@ -1,2 +1,6 @@
-1.2.61
-Salas libres con contraseña|En las salas de Servidores SelectOR para cualquier ruta, el primero que entra recibe una contraseña, como en los servidores públicos: mientras siga dentro, los demás la tienen que escribir para unirse. También puede dejar la sala sin contraseña.
+1.2.62
+Señales con bloqueo en multijugador|Rojo con un tren en el cantón, anuncio de parada en la de detrás y una sola salida a la vez en las estaciones.
+Mapa de Open Rails renovado|En multijugador (Ctrl+9), con el aspecto de SelectOR y en español; todos pueden cambiar señales y desvíos.
+Itinerario a tu medida|Sigue exactamente las vías que marcas: arrastra el trazado o un punto para cambiarlo, y Ctrl+Z deshace.
+Servidores SelectOR al momento|La lista de salas se actualiza sola y las salas libres enseñan la ruta en juego.
+Conexión en el HUD|En multijugador, el HUD dice si estás en línea. CONECTAR está ahora en «Tus datos».

@@ -37,6 +37,14 @@ namespace SelectOR
         // un byte por desvío en el orden de su índice del .tdb. null hasta el primero.
         public byte[] States { get; private set; }
         public DateTime StatesAt { get; private set; }
+        // ¿Está mi Open Rails dentro de la sala? (respuesta a «WHO»): «in», «wait» (entrando) u «out»; null = sin saber.
+        public string Presence { get; private set; }
+        public bool IsDispatcher { get; private set; }
+        public DateTime PresenceAt { get; private set; }
+        DateTime _whoAt = DateTime.MinValue;
+        // La sala pasa a protegerla yo (se fue quien la abrió): token y contraseña (null = sin contraseña).
+        public event Action<string, string> GateOwner;
+        public int LocalPort { get { try { return (_tcp?.Client?.LocalEndPoint as System.Net.IPEndPoint)?.Port ?? 0; } catch { return 0; } } }
 
         public SwitchPilot(string host, int port, string name, int prio) { _host = host; _port = port; _name = name; _prio = prio; }
 
@@ -45,7 +53,7 @@ namespace SelectOR
         public int Prio
         {
             get => _prio;
-            set { if (_prio == value) return; _prio = value; if (Ready) Send($"HELLO {_name} {_prio} 1"); }
+            set { if (_prio == value) return; _prio = value; if (Ready) Send($"HELLO {_name} {_prio} 2"); }
         }
 
         // Se conecta (una vez; si se cae, lo reintenta cada 10 s). Solo con Open Rails ya dentro de la sala.
@@ -64,7 +72,7 @@ namespace SelectOR
                 var tcp = new TcpClient { NoDelay = true };
                 using (var to = new CancellationTokenSource(5000)) await tcp.ConnectAsync(_host, _port, to.Token);
                 _tcp = tcp; _ns = tcp.GetStream(); _cts = new CancellationTokenSource();
-                Send($"HELLO {_name} {_prio} 1");
+                Send($"HELLO {_name} {_prio} 2");
                 var rx = Task.Run(() => Receive(_cts.Token));
                 await Task.Delay(4000);
                 if (!Ready && _tcp == tcp) { Unsupported = true; Close(); }   // no es un servidor de SelectOR
@@ -93,10 +101,11 @@ namespace SelectOR
             }
             catch { }
             lock (_wl) { Ready = false; _asked.Clear(); }
+            Presence = null;
         }
 
         // Como lo lee Open Rails: primer «:», las cifras justo antes son la longitud de lo que va detrás de «: ».
-        static string NextFrame(StringBuilder sb)
+        internal static string NextFrame(StringBuilder sb)
         {
             string s = sb.ToString();
             int i = s.IndexOf(':');
@@ -116,6 +125,8 @@ namespace SelectOR
             if (t.Length == 0) return;
             if (t[0] == "READY") { Ready = true; return; }
             if (t[0] == "STATES" && t.Length >= 2) { var st = DecodeStates(t[1]); if (st != null) { States = st; StatesAt = DateTime.UtcNow; } return; }
+            if (t[0] == "YOU" && t.Length >= 3) { Presence = t[1]; IsDispatcher = t[2] == "d"; PresenceAt = DateTime.UtcNow; return; }
+            if (t[0] == "GATE" && t.Length >= 4 && t[1] == "OWNER") { try { GateOwner?.Invoke(t[2], t[3] == "-" ? null : t[3]); } catch { } return; }
             if (t.Length < 4) return;
             string key = t[1] + " " + t[2] + " " + t[3];
             Status now = t[0] switch
@@ -156,6 +167,7 @@ namespace SelectOR
         public void Tick(IEnumerable<(int tx, int tz, int id, int sel, double dist, double eta)> ahead, IEnumerable<(int tx, int tz, int id)> passed)
         {
             if (!Ready) return;
+            if ((DateTime.UtcNow - _whoAt).TotalSeconds >= 3) { _whoAt = DateTime.UtcNow; Send("WHO " + _name); }   // ¿sigo dentro? (el HUD lo enseña)
             var now = new HashSet<string>();
             foreach (var a in ahead)
             {
@@ -194,6 +206,7 @@ namespace SelectOR
             try { _cts?.Cancel(); } catch { }
             try { _tcp?.Close(); } catch { }
             lock (_wl) { _tcp = null; _ns = null; Ready = false; _asked.Clear(); }
+            Presence = null;
         }
 
         public void Dispose() { Unsupported = true; Close(); }

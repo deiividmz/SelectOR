@@ -1,2 +1,6 @@
-1.2.61
-Open rooms with a password|In SelectOR server rooms for any route, the first player to join gets a password, just like on public servers: while they stay in, everyone else has to type it to join. They can also leave the room without a password.
+1.2.62
+Block signalling in multiplayer|Red with a train in the block, a stop warning on the signal behind and only one exit at a time at stations.
+Refreshed Open Rails map|In multiplayer (Ctrl+9), with the SelectOR look; everyone can change signals and switches.
+Itineraries your way|They follow exactly the tracks you mark: drag the line or a point to change it, and Ctrl+Z undoes.
+SelectOR servers in real time|The room list refreshes by itself and open rooms show the route in play.
+Connection in the HUD|In multiplayer, the HUD shows whether you are online. CONNECT is now in «Your details».

@@ -283,10 +283,11 @@ namespace SelectOR
     {
         public string Password { get; private set; }
         readonly Label _pw, _msg;
-        public MpOwnerDialog(string server, string route, string password, Func<string, System.Threading.Tasks.Task<(string pw, string err)>> setMode)
+        public MpOwnerDialog(string server, string route, string password, Func<string, System.Threading.Tasks.Task<(string pw, string err)>> setMode,
+                             string title = null, string note = null)
         {
             Password = password;
-            Text = I18n.T("Eres el primero en este servidor");
+            Text = title ?? I18n.T("Eres el primero en este servidor");
             BackColor = Theme.Bg; ForeColor = Theme.Text; Font = Theme.Font(9.5f);
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(Theme.Px(480), Theme.Px(300));
@@ -295,7 +296,7 @@ namespace SelectOR
             _pw = new Label { AutoSize = false, Bounds = new Rectangle(Theme.Px(20), Theme.Px(74), Theme.Px(440), Theme.Px(64)), TextAlign = ContentAlignment.MiddleCenter,
                               Font = new Font("Consolas", 24f * Theme.UiScale * Theme.DpiComp, FontStyle.Bold), ForeColor = Theme.Gold, BackColor = Color.FromArgb(28, 31, 36) };
             _msg = new Label { AutoSize = false, Bounds = new Rectangle(Theme.Px(20), Theme.Px(194), Theme.Px(440), Theme.Px(40)), ForeColor = Theme.Subtle, Font = Theme.Font(8.5f),
-                               Text = I18n.T("Al cerrar Open Rails la contraseña deja de valer y el siguiente en entrar pone una nueva.") };
+                               Text = note ?? I18n.T("Al cerrar Open Rails la contraseña deja de valer y el siguiente en entrar pone una nueva.") };
             RoundButton Btn(string t, int x, int w, bool primary = false)
             {
                 var b = new RoundButton { Text = t, Bounds = new Rectangle(x, Theme.Px(150), w, Theme.Px(34)), Radius = 8, FontSize = 9f, BaseColor = primary ? Theme.Accent : Theme.Surface2, HoverColor = primary ? Theme.AccentHi : Theme.SurfaceHi, TextColor = primary ? Color.White : Theme.Text };

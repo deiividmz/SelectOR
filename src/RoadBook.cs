@@ -561,7 +561,10 @@ namespace SelectOR
         const double ReversePenaltyM = 5000;   // solo se invierte si no hay otro camino razonable
 
         // Camino más corto por las vías desde (e0, off0) en el sentido dir0 hasta (eg, offg). null si no hay.
-        public Leg Route(int e0, double off0, int dir0, int eg, double offg)
+        // corridor: las vías del trozo tal como se marcó (itinerario exacto): salirse de ellas cuesta OffCorridor veces más,
+        // así que el camino solo se aparta si no hay otro (p. ej., para volver a ellas desde la vía en la que está el tren).
+        public const double OffCorridor = 4;
+        public Leg Route(int e0, double off0, int dir0, int eg, double offg, HashSet<int> corridor = null)
         {
             var E0 = Edges[e0];
             if (e0 == eg && (dir0 == 0 ? offg >= off0 - 0.5 : offg <= off0 + 0.5))
@@ -593,7 +596,7 @@ namespace SelectOR
                     double tot = c + (d == 0 ? offg : E.Len - offg);
                     if (tot < best) { best = tot; bestState = s; }
                 }
-                double c2 = c + E.Len;
+                double c2 = c + E.Len * (corridor == null || corridor.Contains(e) ? 1 : OffCorridor);
                 foreach (int t in Exits(e, d))
                     if (c2 < dist[t]) { dist[t] = c2; prev[t] = s; pq.Enqueue(t, c2); }
                 if (DeadEnd(d == 0 ? E.B : E.A))
@@ -628,6 +631,12 @@ namespace SelectOR
             public bool Guide;   // punto de paso sacado del recorrido (.pat) para seguirlo tramo a tramo: no se dibuja
             public bool Reverse; // el recorrido invierte la marcha aquí: el tramo siguiente sale en sentido contrario
             public List<(int e, double off)> Alts;   // clic en vía doble: las vías paralelas que también valían (no se guarda)
+            public bool Via;     // punto de paso puesto arrastrando el trazado: fija la vía, sin número ni parada
+            // Itinerario exacto: los tramos del .tdb por los que llega hasta aquí desde el punto anterior, tal como se
+            // dibujó al marcarlo. Al conducir se sigue por ellos (no por el camino más corto desde donde esté el tren).
+            // null = aún sin fijar (o se ha cambiado uno de sus dos extremos). No se guarda: se rehace igual al cargar.
+            public int[] Path;
+            public Waypoint Clone() => (Waypoint)MemberwiseClone();
         }
         public sealed class Stop
         {
@@ -752,7 +761,7 @@ namespace SelectOR
         {
             if (!string.Equals(routeDir, RouteDir, StringComparison.OrdinalIgnoreCase)) { Graph = null; Building = false; _haltChoice.Clear(); }
             RouteDir = routeDir;
-            Points.Clear(); ClearPlan(); Editing = false; Problem = null; ReachedPoints = 0;
+            Points.Clear(); ClearPlan(); Editing = false; Problem = null; ReachedPoints = 0; _undo.Clear();
         }
 
         void ClearPlan()
@@ -787,6 +796,7 @@ namespace SelectOR
         public bool AddPoint(double lat, double lon, double maxM)
         {
             if (Graph == null || !Graph.Nearest(lat, lon, maxM, out int e, out double off, out double d)) return false;
+            PushUndo();
             var alts = Graph.NearbyEdges(lat, lon, Math.Min(maxM, d + ParallelM)).Take(4).Select(c => (c.edge, c.off)).ToList();   // como mucho 4 (en una estación hay muchas vías)
             var (x, y) = Graph.PointAt(e, off); var (la, lo) = Graph.Unproj(x, y);
             Points.Add(new Waypoint { Lat = la, Lon = lo, Edge = e, Off = off, Alts = alts.Count > 1 ? alts : null });
@@ -825,8 +835,8 @@ namespace SelectOR
                 }
             }
             if (bestLen == double.MaxValue) return;   // ninguna combinación tiene camino: se deja la más cercana
-            // Se cambia de vía solo si compensa de verdad: si la pinchada no tiene camino o el cambio ahorra un rodeo
-            // (más de 200 m: un escape, un cambio de sentido). Así una vía de apartado pinchada a propósito se respeta.
+            // Se cambia de vía solo si con la pinchada no hay camino: el itinerario va por las vías que se marcan (antes
+            // también si el cambio ahorraba más de 200 m, y el recorrido acababa por la vía de al lado).
             double baseLen = double.MaxValue;
             {
                 double bIn = 0; var bDirs = new List<int> { 0, 1 }; bool ok = true;
@@ -839,7 +849,7 @@ namespace SelectOR
                 if (ok)
                     foreach (int d0 in bDirs) { var l = Graph.Route(prev.Edge, prev.Off, d0, cur.Edge, cur.Off); if (l != null) baseLen = Math.Min(baseLen, bIn + l.Len); }
             }
-            if (baseLen < double.MaxValue && bestLen > baseLen - 200) return;
+            if (baseLen < double.MaxValue) return;
             void Set(Waypoint w, (int e, double off) c)
             {
                 if (w.Edge == c.e && Math.Abs(w.Off - c.off) < 0.01) return;
@@ -866,7 +876,7 @@ namespace SelectOR
         }
 
         // Punto de un itinerario guardado: el mismo tramo si sigue ahí (mismo .tdb); si no, el más cercano.
-        public bool AddSavedPoint(double lat, double lon, int edge, double off, bool guide, bool reverse)
+        public bool AddSavedPoint(double lat, double lon, int edge, double off, bool guide, bool reverse, bool via = false)
         {
             if (Graph == null) return false;
             int e = edge; double o = off;
@@ -878,7 +888,7 @@ namespace SelectOR
             }
             if (!ok && !Graph.Nearest(lat, lon, 60, out e, out o, out _)) return false;
             var (px, py) = Graph.PointAt(e, o); var (pla, plo) = Graph.Unproj(px, py);
-            Points.Add(new Waypoint { Lat = pla, Lon = plo, Edge = e, Off = o, Guide = guide, Reverse = reverse });
+            Points.Add(new Waypoint { Lat = pla, Lon = plo, Edge = e, Off = o, Guide = guide, Reverse = reverse, Via = via });
             return true;
         }
 
@@ -915,12 +925,157 @@ namespace SelectOR
         }
         public void Undo()
         {
+            // cada cambio guardó cómo estaba (añadir, mover, insertar o quitar un punto): se vuelve a eso
+            if (_undo.Count > 0)
+            {
+                var prev = _undo[^1]; _undo.RemoveAt(_undo.Count - 1);
+                Points.Clear(); Points.AddRange(prev);
+                ReachedPoints = Math.Min(ReachedPoints, Points.Count);
+                return;
+            }
             if (Points.Count > ReachedPoints) Points.RemoveAt(Points.Count - 1);
             // los puntos de paso de un recorrido (.pat) que llevaban hasta él se van con él
             while (Points.Count > ReachedPoints && Points[^1].Guide) Points.RemoveAt(Points.Count - 1);
             if (Points.Count == 0) ReachedPoints = 0;
         }
-        public void ClearAll() { Points.Clear(); ReachedPoints = 0; ClearPlan(); Problem = null; }
+        public void ClearAll(bool keepUndo = false) { Points.Clear(); ReachedPoints = 0; ClearPlan(); Problem = null; if (!keepUndo) _undo.Clear(); }
+        public bool CanUndo => _undo.Count > 0 || Points.Count > ReachedPoints;
+
+        // ---------------- editar el itinerario (arrastrar en el mapa) ----------------
+        readonly List<List<Waypoint>> _undo = new();
+        public void PushUndo()
+        {
+            _undo.Add(Points.Select(w => w.Clone()).ToList());
+            if (_undo.Count > 60) _undo.RemoveAt(0);
+        }
+
+        // Dónde cae ese punto del trazado: el índice en Points del punto al que llega ese trozo (para insertar uno «vía»
+        // delante de él), o -1 (lejos del trazado, o en lo ya recorrido).
+        public int LegAt(double lat, double lon, double maxM)
+        {
+            if (!HasPlan || Graph == null) return -1;
+            var (x, y) = Graph.Proj(lat, lon);
+            double best = double.MaxValue, bestD = 0;
+            for (int i = 0; i + 1 < _px.Length; i++)
+            {
+                double ax = _px[i], ay = _py[i], dx = _px[i + 1] - ax, dy = _py[i + 1] - ay, l2 = dx * dx + dy * dy;
+                double t = l2 > 0 ? Math.Max(0, Math.Min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+                double ex = ax + t * dx - x, ey = ay + t * dy - y, d2 = ex * ex + ey * ey;
+                if (d2 < best) { best = d2; bestD = _pc[i] + t * (_pc[i + 1] - _pc[i]); }
+            }
+            if (Math.Sqrt(best) > maxM || bestD < Progress) return -1;
+            for (int k = 0; k < PointDist.Length; k++) if (bestD <= PointDist[k] + 0.5) return _firstPlanned + k;
+            return -1;
+        }
+
+        // Punto «vía» en esa vía exacta, delante del punto index (en el trozo que llega a él).
+        public bool InsertVia(int index, double lat, double lon, double maxM)
+        {
+            if (Graph == null || index < ReachedPoints || index > Points.Count) return false;
+            if (!Graph.Nearest(lat, lon, maxM, out int e, out double off, out _)) return false;
+            PushUndo();
+            var (x, y) = Graph.PointAt(e, off); var (la, lo) = Graph.Unproj(x, y);
+            Points.Insert(index, new Waypoint { Lat = la, Lon = lo, Edge = e, Off = off, Via = true });
+            if (index + 1 < Points.Count) Points[index + 1].Path = null;   // ese trozo se rehace pasando por él
+            return true;
+        }
+
+        // Llevar un punto a otra vía (la más cercana a donde se suelta).
+        public bool MovePoint(int index, double lat, double lon, double maxM)
+        {
+            if (Graph == null || index < ReachedPoints || index >= Points.Count) return false;
+            if (!Graph.Nearest(lat, lon, maxM, out int e, out double off, out _)) return false;
+            PushUndo();
+            var w = Points[index];
+            var (x, y) = Graph.PointAt(e, off); (w.Lat, w.Lon) = Graph.Unproj(x, y);
+            w.Edge = e; w.Off = off; w.Alts = null; w.Path = null;
+            if (index + 1 < Points.Count) Points[index + 1].Path = null;
+            return true;
+        }
+
+        public bool RemovePoint(int index)
+        {
+            if (index < ReachedPoints || index >= Points.Count) return false;
+            PushUndo();
+            Points.RemoveAt(index);
+            if (index < Points.Count) Points[index].Path = null;
+            return true;
+        }
+
+        // Mientras se arrastra: dónde quedaría (pegado a la vía) y los trozos nuevos que llegan a él y salen de él.
+        // moveIndex ≥ 0: se mueve ese punto; si no, se inserta uno delante de insertIndex.
+        public List<(double lat, double lon)[]> PreviewEdit(int moveIndex, int insertIndex, double lat, double lon, double maxM, out (double lat, double lon)? snap)
+        {
+            snap = null;
+            var res = new List<(double lat, double lon)[]>();
+            if (Graph == null || !Graph.Nearest(lat, lon, maxM, out int e, out double off, out _)) return res;
+            var (sx, sy) = Graph.PointAt(e, off); snap = Graph.Unproj(sx, sy);
+            Waypoint prev = null, next = null;
+            if (moveIndex >= 0) { prev = moveIndex > 0 ? Points[moveIndex - 1] : null; next = moveIndex + 1 < Points.Count ? Points[moveIndex + 1] : null; }
+            else { prev = insertIndex > 0 ? Points[insertIndex - 1] : null; next = insertIndex < Points.Count ? Points[insertIndex] : null; }
+            int endDir = -1;
+            if (prev != null)
+            {
+                RouteGraph.Leg li = null;
+                foreach (int d in new[] { 0, 1 }) { var l = Graph.Route(prev.Edge, prev.Off, d, e, off); if (l != null && (li == null || l.Len < li.Len)) li = l; }
+                if (li != null) { res.Add(LegLatLon(li)); endDir = li.EndDir; }
+            }
+            if (next != null)
+            {
+                RouteGraph.Leg lo2 = null;
+                foreach (int d in endDir >= 0 ? new[] { endDir } : new[] { 0, 1 }) { var l = Graph.Route(e, off, d, next.Edge, next.Off); if (l != null && (lo2 == null || l.Len < lo2.Len)) lo2 = l; }
+                if (lo2 != null) res.Add(LegLatLon(lo2));
+            }
+            return res;
+        }
+
+        (double lat, double lon)[] LegLatLon(RouteGraph.Leg leg)
+        {
+            var pts = new List<(double, double)>();
+            foreach (var (e, from, to) in leg.Parts)
+            {
+                var E = Graph.Edges[e];
+                pts.Add(Graph.Unproj(Graph.PointAt(e, from).x, Graph.PointAt(e, from).y));
+                if (to >= from) { for (int i = 0; i < E.Cum.Length; i++) if (E.Cum[i] > from && E.Cum[i] < to) pts.Add(Graph.Unproj(E.X[i], E.Y[i])); }
+                else { for (int i = E.Cum.Length - 1; i >= 0; i--) if (E.Cum[i] < from && E.Cum[i] > to) pts.Add(Graph.Unproj(E.X[i], E.Y[i])); }
+                var p1 = Graph.PointAt(e, to); pts.Add(Graph.Unproj(p1.x, p1.y));
+            }
+            return pts.ToArray();
+        }
+
+        // ---------------- itinerario exacto ----------------
+        HashSet<int> Corridor(int i) => i >= 0 && i < Points.Count && Points[i].Path != null ? new HashSet<int>(Points[i].Path) : null;
+        static int[] EdgesOf(RouteGraph.Leg l) => l.Parts.Select(p => p.e).Distinct().ToArray();
+
+        // El mejor trozo hasta p desde (e, off) en alguno de esos sentidos (o, si no hay, invirtiendo), por su pasillo.
+        RouteGraph.Leg BestLeg(int e, double off, List<int> dirs, Waypoint p, HashSet<int> corr)
+        {
+            RouteGraph.Leg best = null;
+            foreach (int d in dirs) { var l = Graph.Route(e, off, d, p.Edge, p.Off, corr); if (l != null && (best == null || l.Len < best.Len)) best = l; }
+            if (best == null)   // con cambio de sentido (p. ej., en una estación término)
+                foreach (int d in new[] { 0, 1 }.Where(x => !dirs.Contains(x)))
+                {
+                    var l = Graph.Route(e, off, d, p.Edge, p.Off, corr);
+                    if (l != null && (best == null || l.Len < best.Len)) best = l;
+                }
+            return best;
+        }
+
+        // Fija los trozos que aún no lo están, recorriendo el itinerario desde su primer punto como al marcarlo (así lo
+        // que se vio en el mapa es lo que se sigue al conducir, aunque el tren empiece a mitad o se haya salido).
+        void EnsurePinned()
+        {
+            if (Graph == null || Points.Count < 2 || !Points.Skip(1).Any(p => p.Path == null)) return;
+            int e = Points[0].Edge; double off = Points[0].Off; var dirs = new List<int> { 0, 1 };
+            for (int i = 1; i < Points.Count; i++)
+            {
+                var p = Points[i];
+                var best = BestLeg(e, off, dirs, p, Corridor(i));
+                if (best == null) return;
+                if (p.Path == null) p.Path = EdgesOf(best);
+                e = p.Edge; off = p.Off; dirs = new List<int> { p.Reverse ? 1 - best.EndDir : best.EndDir };
+            }
+        }
 
         public void ToggleHalt(int stopIndex)
         {
@@ -944,9 +1099,19 @@ namespace SelectOR
                 .ToDictionary(s => s.Name, s => (s.PassedAt, s.PassedAtPc), StringComparer.OrdinalIgnoreCase);
             ClearPlan(); Problem = null;
             if (Graph == null || Points.Count <= ReachedPoints) return;
+            EnsurePinned();
             int startIdx = ReachedPoints, e; double off; var dirs = new List<int>();
-            if (hasPos && Graph.Nearest(lat, lon, 150, out e, out off, out _))
+            bool fromTrain = false;
+            if (hasPos && Graph.Nearest(lat, lon, 150, out e, out off, out double dNear))
             {
+                fromTrain = true;
+                // vía doble: si la vía marcada está casi igual de cerca que la más cercana, el tren va por la marcada
+                var corr = Corridor(startIdx);
+                if (corr != null)
+                {
+                    if (startIdx > 0) corr.Add(Points[startIdx - 1].Edge);
+                    if (Graph.NearestOn(corr, lat, lon, dNear + 2.5, out int ce, out double co)) { e = ce; off = co; }
+                }
                 if (hasHdg)
                 {
                     double diff = Math.Abs(((hdg - Graph.BearingAt(e, off)) % 360 + 540) % 360 - 180);
@@ -964,14 +1129,8 @@ namespace SelectOR
             for (int i = startIdx; i < Points.Count; i++)
             {
                 var p = Points[i];
-                RouteGraph.Leg best = null;
-                foreach (int d in dirs) { var l = Graph.Route(e, off, d, p.Edge, p.Off); if (l != null && (best == null || l.Len < best.Len)) best = l; }
-                if (best == null)   // con cambio de sentido (p. ej., en una estación término)
-                    foreach (int d in new[] { 0, 1 }.Where(x => !dirs.Contains(x)))
-                    {
-                        var l = Graph.Route(e, off, d, p.Edge, p.Off);
-                        if (l != null && (best == null || l.Len < best.Len)) best = l;
-                    }
+                var best = BestLeg(e, off, dirs, p, Corridor(i));
+                if (best != null && !(fromTrain && i == startIdx)) p.Path = EdgesOf(best);   // lo que se ve es lo que se sigue
                 if (best == null) { Problem = string.Format(I18n.T("No hay camino por la vía hasta el punto {0}."), i + 1); ClearPlanKeepProblem(); return; }
                 parts.AddRange(best.Parts); total += best.Len; pd.Add(total);
                 e = p.Edge; off = p.Off; dirs = new List<int> { p.Reverse ? 1 - best.EndDir : best.EndDir };

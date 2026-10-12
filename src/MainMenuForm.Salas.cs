@@ -22,6 +22,10 @@ namespace SelectOR
         string _roomPending, _roomJoined;   // sala a la que se va a entrar · en la que se está jugando
         string _roomHost; int _roomPort;     // a dónde conecta la sala (no se enseña: no pasa por «Servidor» ni «Puerto»)
         bool _roomAnyRoute; string _roomName; // sala sin ruta asignada: la protege el primero que entra (como un servidor público)
+        // Contraseña de la sala libre, en el servidor de la sala (RoomGate.cs): ya comprobada · mi token si la protejo yo
+        // (y su contraseña, para el HUD) · si el servidor es de antes, MpGate con Supabase, como hasta la 1.2.61.
+        bool _roomGated, _roomGateOwner; string _roomGateToken, _roomGatePw;
+        bool _roomsLoading; string _roomsJson;
         Timer _roomBeat;
         bool _roomsMissing;
         int _mpSection;                      // 0 servidores SelectOR · 1 servidores públicos
@@ -36,6 +40,7 @@ namespace SelectOR
             if (_srvGrid != null) _srvGrid.Parent.Visible = !rooms;
             if (_srvTabs != null) _srvTabs.Visible = !rooms;
             if (_srvAge != null) _srvAge.Visible = !rooms;
+            if (_mpStatusTimer != null) _mpStatusTimer.Interval = rooms ? 4000 : 30000;   // las salas, casi al momento
             if (rooms) LoadRooms(); else if (_serversAll == null || _serversAll.Count == 0) LoadServers();
         }
 
@@ -47,7 +52,7 @@ namespace SelectOR
             _roomGrid = new RoomCardGrid
             {
                 Dock = DockStyle.Fill,
-                LblAnyRoute = Tr("Cualquier ruta"), LblAnyRouteHint = Tr("la del primero que entra"),
+                LblAnyRoute = Tr("Cualquier ruta"), LblAnyRouteHint = Tr("la del primero que entra"), LblLive = Tr("en juego"),
                 LblJoin = Tr("Entrar"), LblInside = Tr("Estás dentro"), LblNoRoute = Tr("Ruta que no tienes en tu contenido"), LblHave = "✓ " + Tr("la tienes"),
                 LblNoPlayers = Tr("sin jugadores"), LblPass = "🔒 " + Tr("Con contraseña"), LblFree = "🔓 " + Tr("Sin contraseña"), LblAll = "👥 " + Tr("Para todos"),
                 LblCompanies = "🏢 " + Tr("Empresas autorizadas"), LblUsers = "⭐ " + Tr("Por invitación"), LblPoints = "🪪 " + Tr("Carné ≥ {0} puntos"),
@@ -96,7 +101,11 @@ namespace SelectOR
             if (_roomGrid == null) return;
             UpdateRoomButtons();
             if (!Supa.IsLoggedIn) { _roomGrid.EmptyText = Tr("Inicia sesión en Empresas para ver los servidores SelectOR y entrar en sus salas."); _roomGrid.SetItems(new List<RoomCardGrid.Item>()); return; }
-            var (json, err) = await Supa.RpcAsync("room_list", new { });
+            if (_roomsLoading) return;
+            _roomsLoading = true;
+            string json, err;
+            try { (json, err) = await Supa.RpcAsync("room_list", new { }); }
+            finally { _roomsLoading = false; }
             _roomsMissing = NoRoomsOnServer(err);
             if (err != null)
             {
@@ -104,6 +113,8 @@ namespace SelectOR
                 _roomGrid.SetItems(new List<RoomCardGrid.Item>());
                 return;
             }
+            if (json == _roomsJson && _roomGrid.Items.Count > 0) { UpdateRoomButtons(); return; }   // nada ha cambiado: ni se toca
+            _roomsJson = json;
             var list = new List<RoomCardGrid.Item>();
             try
             {
@@ -121,9 +132,10 @@ namespace SelectOR
                         Active = !(e.TryGetProperty("active", out var ac) && ac.ValueKind == JsonValueKind.False),
                         Mine = e.TryGetProperty("mine", out var mi) && mi.ValueKind == JsonValueKind.True,
                         Denied = Str(e, "denied") is { Length: > 0 } dn ? dn : null,
-                        Host = Str(e, "host") is { Length: > 0 } h ? h : null, Port = Num(e, "port") > 0 ? ((int)Num(e, "port")).ToString() : null
+                        Host = Str(e, "host") is { Length: > 0 } h ? h : null, Port = Num(e, "port") > 0 ? ((int)Num(e, "port")).ToString() : null,
+                        LiveRoute = Str(e, "live_route") is { Length: > 0 } lr ? lr : null
                     };
-                    it.HaveRoute = it.AnyRoute || RouteByName(it.Route) != null;
+                    it.HaveRoute = it.AnyRoute ? (it.LiveRoute == null || RouteByName(it.LiveRoute) != null) : RouteByName(it.Route) != null;
                     list.Add(it);
                 }
             }
@@ -139,8 +151,9 @@ namespace SelectOR
             if (it == null) return;
             if (!Supa.IsLoggedIn) { Warn(Tr("Inicia sesión en Empresas para entrar en los servidores SelectOR.")); return; }
             if (it.Denied != null) { Warn(it.Denied + "."); return; }
-            // sala sin ruta asignada: se entra con la ruta elegida (si ya hay partida, tiene que ser la del despachador)
-            var route = it.AnyRoute ? _curRoute : RouteByName(it.Route);
+            // sala sin ruta asignada: la de la partida que ya hay; si está vacía, la que tengas elegida (serás el primero)
+            var route = it.AnyRoute ? (it.LiveRoute != null ? RouteByName(it.LiveRoute) : _curRoute) : RouteByName(it.Route);
+            if (route == null && it.AnyRoute && it.LiveRoute != null) { Warn(string.Format(Tr("En esta sala se está jugando en la ruta «{0}», que no tienes en esta carpeta de contenido."), it.LiveRoute)); return; }
             if (route == null && it.AnyRoute) { Warn(Tr("Esta sala no tiene ruta asignada: elige primero la ruta con la que quieres entrar.")); return; }
             if (route == null) { Warn(string.Format(Tr("No tienes la ruta «{0}» en esta carpeta de contenido: hace falta para entrar en la sala."), it.Route)); return; }
             if (!MPUserValid(_txtMPUser.Text.Trim()))
@@ -152,7 +165,9 @@ namespace SelectOR
             JsonElement? ok = null;
             async Task<string> Try(string pw)
             {
-                var (json, err) = await Supa.RpcAsync("room_join", new { p_room = it.Id, p_password = pw });
+                // con la ruta con la que entra (para que la lista la enseñe en las salas libres); sin salas-ruta-viva.sql, sin ella
+                var (json, err) = await Supa.RpcAsync("room_join", new { p_room = it.Id, p_password = pw, p_route = route.Name ?? "" });
+                if (NoRoomsOnServer(err)) (json, err) = await Supa.RpcAsync("room_join", new { p_room = it.Id, p_password = pw });
                 if (err != null) return NoRoomsOnServer(err) ? Tr("El servidor aún no tiene los servidores SelectOR (falta salas-multijugador.sql).") : err;
                 using var d = JsonDocument.Parse(json);
                 var r = d.RootElement;
@@ -173,6 +188,14 @@ namespace SelectOR
                 if (e1 != null) { Warn(e1); LoadRooms(); return; }
             }
             var j = ok.Value;
+            // Sala libre: la contraseña, en el servidor de la sala y nada más entrar (antes de cargar la ruta), para que
+            // nadie se cuele como «el primero» mientras tanto.
+            _roomGated = _roomGateOwner = false; _roomGateToken = _roomGatePw = null;
+            if (it.AnyRoute)
+            {
+                var g = await RoomGateEnter(Str(j, "host"), (int)Num(j, "port"), it.Name, route.Name ?? "");
+                if (g == false) { _ = Supa.RpcAsync("room_leave", new { p_room = it.Id }); _roomsJson = null; LoadRooms(); return; }
+            }
             // la ruta de la sala, modo cliente, la IP y el puerto
             if (_curRoute?.Path != route.Path)
             {
@@ -191,7 +214,86 @@ namespace SelectOR
             _roomPort = (int)Num(j, "port");
             UpdateStatus();
             _roomPending = it.Id;
+            if (_curRoute?.Path != route.Path) { Warn(Tr("No se ha podido cargar la ruta de la sala.")); RoomAbort(); return; }
             PlayMultiplayer();
+        }
+
+        // Contraseña de la sala libre en el servidor de la sala: true = adelante · false = cancelado · null = servidor de
+        // antes (sin contraseña propia: luego, MpGate con Supabase, como hasta ahora).
+        async Task<bool?> RoomGateEnter(string host, int port, string roomName, string routeName)
+        {
+            string me = _txtMPUser.Text.Trim();
+            if (string.IsNullOrEmpty(host) || port <= 0) return null;
+            SetBusy(Tr("Comprobando la sala…"));
+            var r = await RoomGate.Ask(host, port, me, $"GATE {me} - {routeName}");
+            SetIdle();
+            if (r == null || r.Length < 2) return null;
+            if (r[1] == "OWNER" && r.Length >= 4)
+            {
+                _roomGateToken = r[2];
+                using var dlg = new MpOwnerDialog(roomName, routeName, r[3] == "-" ? null : r[3], async mode =>
+                {
+                    var a = await RoomGate.Ask(host, port, me, $"SETPW {me} {_roomGateToken} {mode}");
+                    if (a == null || a.Length < 2 || a[1] == "ERR") return (null, Tr("No se ha podido cambiar: inténtalo otra vez."));
+                    return (a[1] == "-" ? null : a[1], null);
+                }, Tr("Eres el primero en esta sala"),
+                   Tr("La sala sigue protegida mientras haya alguien dentro. Si sales, la contraseña pasa al que quede de despachador."));
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    _ = RoomGate.Ask(host, port, me, $"UNGATE {me} {_roomGateToken}", 3000);
+                    _roomGateToken = null;
+                    return false;
+                }
+                _roomGated = _roomGateOwner = true; _roomGatePw = dlg.Password;
+                return true;
+            }
+            if (r[1] == "OPEN") { _roomGated = true; return true; }
+            if (r[1] == "LOCKED")
+            {
+                string owner = r.Length > 2 ? r[2] : "?";
+                DateTime since = r.Length > 3 && long.TryParse(r[3], out long ux) ? DateTimeOffset.FromUnixTimeSeconds(ux).UtcDateTime : DateTime.UtcNow;
+                using var dlg = new MpPasswordDialog(owner, roomName + " · " + routeName, since, async pw =>
+                {
+                    var a = await RoomGate.Ask(host, port, me, $"PASS {me} {pw}");
+                    if (a == null || a.Length < 2) return (false, Tr("El servidor de la sala no contesta."));
+                    if (a[1] == "OK") return (true, null);
+                    if (a[1] == "WAIT" && a.Length > 2) return (false, string.Format(Tr("Demasiados intentos: espera {0} s."), a[2]));
+                    return (false, Tr("Contraseña incorrecta."));
+                });
+                if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+                _roomGated = true;
+                return true;
+            }
+            return null;
+        }
+
+        // Ya no entra (cancela o falla antes de lanzar Open Rails), o sale: suelta su sitio en la contraseña de la sala.
+        void RoomUngate()
+        {
+            string me = (_txtMPUser?.Text ?? "").Trim(), host = _roomHost, tok = _roomGateToken; int port = _roomPort;
+            if (_roomGated && !string.IsNullOrEmpty(host) && port > 0 && me.Length > 0) _ = RoomGate.Ask(host, port, me, $"UNGATE {me} {tok ?? "-"}", 3000);
+            _roomGated = _roomGateOwner = false; _roomGateToken = _roomGatePw = null;
+        }
+
+        // No se llega a lanzar Open Rails: fuera de la sala (que no salga «dentro» en la lista) y la reserva, suelta.
+        void RoomAbort()
+        {
+            var id = _roomPending;
+            _roomPending = null;
+            RoomUngate();
+            RoomRestoreSettings();
+            if (id != null) _ = Supa.RpcAsync("room_leave", new { p_room = id });
+            _roomsJson = null; LoadRooms();
+        }
+
+        // Se fue quien abrió la sala libre y ahora la protejo yo (lo dice el servidor por la conexión del piloto).
+        void RoomGateInherited(string token, string pw)
+        {
+            _roomGated = _roomGateOwner = true; _roomGateToken = token; _roomGatePw = pw;
+            EnqueueToast(new NotificationToast("🔐", Tr("Ahora proteges tú la sala"),
+                pw != null ? string.Format(Tr("Quien la abrió se ha ido. Contraseña para los que quieran unirse: {0}"), pw)
+                           : Tr("Quien la abrió se ha ido. La sala sigue sin contraseña."),
+                "SelectOR · " + Tr("Servidores SelectOR"), Theme.Gold));
         }
 
         // Open Rails ya está en marcha en la sala: avisos cada 45 s (para contar los jugadores).
@@ -214,8 +316,9 @@ namespace SelectOR
             var id = _roomJoined;
             _roomJoined = null; _roomPending = null; _roomBeat?.Stop();
             PilotStop();
+            RoomUngate();
             RoomRestoreSettings();
-            if (id != null) { try { await Supa.RpcAsync("room_leave", new { p_room = id }); } catch { } }
+            if (id != null) { try { await Supa.RpcAsync("room_leave", new { p_room = id }); } catch { } _roomsJson = null; }
         }
 
         // La sala se lanza escribiendo su IP y su puerto en el registro de Open Rails (RunActivity los lee de ahí):

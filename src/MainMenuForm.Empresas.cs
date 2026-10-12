@@ -3021,6 +3021,7 @@ namespace SelectOR
                 _serviceHud.ToggleCab = ToggleCabHudFromBar;
                 _serviceHud.Mates = LiveMarkers;   // mapa en vivo: los demás usuarios de la ruta
                 _serviceHud.Me = LiveMe;
+                _serviceHud.Net = HudNetStatus;    // multijugador: ¿conectado al servidor? (MainMenuForm.Online.cs)
                 WireRoadToHud();                   // hoja de ruta: itinerario en el mapa grande
                 var _ = _serviceHud.Handle;   // la ventana existe ya (el trazado del mapa se le pasa aunque esté oculta)
                 if (_scenarioReady || force) _serviceHud.Show(); else _hudWaiting = true;

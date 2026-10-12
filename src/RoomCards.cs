@@ -16,6 +16,7 @@ namespace SelectOR
         public sealed class Item
         {
             public string Id = "", Name = "", Description = "", Route = "", Access = "all", Denied, Host, Port;
+            public string LiveRoute;   // sala sin ruta asignada con partida: la ruta que se está jugando
             public int MaxPlayers, Players, MinPoints;
             public string[] Names = Array.Empty<string>();
             public bool HasPassword, Active = true, Mine, HaveRoute;
@@ -25,7 +26,7 @@ namespace SelectOR
         public Func<string, Image> ThumbOf;
         public string SelectedId { get; private set; }
         public event Action<Item> Selected, Join;
-        public string LblAnyRoute = "Cualquier ruta", LblAnyRouteHint = "la del primero que entra";
+        public string LblAnyRoute = "Cualquier ruta", LblAnyRouteHint = "la del primero que entra", LblLive = "en juego";
         public string LblJoin = "Entrar", LblInside = "Estás dentro", LblNoRoute = "Ruta que no tienes en tu contenido", LblHave = "✓ la tienes",
                       LblNoPlayers = "sin jugadores", LblPass = "🔒 Con contraseña", LblFree = "🔓 Sin contraseña", LblAll = "👥 Para todos",
                       LblCompanies = "🏢 Empresas autorizadas", LblUsers = "⭐ Por invitación", LblPoints = "🪪 Carné ≥ {0} puntos", LblClosed = "⛔ Cerrada", LblFull = "Llena";
@@ -110,7 +111,8 @@ namespace SelectOR
 
                 // imagen de la ruta
                 var ir = new Rectangle(r.X + Theme.Px(14), r.Y + Theme.Px(14), Theme.Px(170), r.Height - Theme.Px(28));
-                var img = it.HaveRoute && !it.AnyRoute ? ThumbOf?.Invoke(it.Route) : null;
+                string shown = it.AnyRoute ? it.LiveRoute : it.Route;   // sala libre: la ruta que se está jugando (si hay partida)
+                var img = it.HaveRoute && shown != null ? ThumbOf?.Invoke(shown) : null;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var path = Theme.Round(ir, Theme.Px(10)))
                 {
@@ -122,12 +124,12 @@ namespace SelectOR
                         int iw = (int)(img.Width * k), ih = (int)(img.Height * k);
                         g.DrawImage(img, ir.X + (ir.Width - iw) / 2, ir.Y + (ir.Height - ih) / 2, iw, ih);
                     }
-                    else if (it.AnyRoute) SelectorArt(g, ir, _fCnt);
+                    else if (it.AnyRoute && shown == null) SelectorArt(g, ir, _fCnt);
                     else using (var b = new LinearGradientBrush(ir, Color.FromArgb(44, 58, 50), Color.FromArgb(28, 31, 36), LinearGradientMode.ForwardDiagonal)) g.FillRectangle(b, ir);
                     g.Restore(st);
                 }
                 g.SmoothingMode = SmoothingMode.None;
-                if (it.AnyRoute)
+                if (it.AnyRoute && (shown == null || it.HaveRoute))
                 {
                     string ar = "🌐 " + LblAnyRoute;
                     int aw = TW(ar, _fImg) + Theme.Px(12);
@@ -155,7 +157,7 @@ namespace SelectOR
                 Text(g, it.Name, _fT, new Rectangle(x, y, right - cntW - x - Theme.Px(10), Theme.Px(22)), it.Active ? Theme.Text : Theme.Subtle, L1);
                 y += Theme.Px(24);
                 // ruta · descripción
-                string rt = it.AnyRoute ? "🌐 " + LblAnyRoute + " · " + LblAnyRouteHint : "🗺 " + it.Route;
+                string rt = !it.AnyRoute ? "🗺 " + it.Route : shown != null ? "🗺 " + shown + " · " + LblLive : "🌐 " + LblAnyRoute + " · " + LblAnyRouteHint;
                 int rw = Math.Min(TW(rt, _fRoute) + 4, right - cntW - x - Theme.Px(10));
                 Text(g, rt, _fRoute, new Rectangle(x, y, rw, Theme.Px(18)), Theme.AccentHi, L1);
                 y += Theme.Px(19);

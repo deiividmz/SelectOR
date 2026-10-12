@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Guardián de señales del multijugador: SelectOR lo carga en Open Rails (RunActivity) al entrar en una partida en
+       red, sin cambiar ningún archivo de Open Rails:
+         · Open Rails de .NET 6 (el de «OR Desplegado»): con DOTNET_STARTUP_HOOKS (StartupHook.cs);
+         · Open Rails de .NET Framework (NY, NewYear MG, Estable, Testing…): con APPDOMAIN_MANAGER_ASM/TYPE
+           (GuardDomainManager.cs).
+       Cada variante se compila contra las DLL de su Open Rails y va dentro de SelectOR.dll (SignalGuardFiles.cs). -->
+  <PropertyGroup>
+    <TargetFrameworks>net6.0-windows;net472</TargetFrameworks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>SelectOR.SignalGuard</AssemblyName>
+    <RootNamespace>SelectOR.SignalGuard</RootNamespace>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <Company>David MZP</Company>
+    <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
+    <ORDir Condition="'$(ORDir)' == ''">..\..\OR Desplegado\</ORDir>
+    <ORPath>$([MSBuild]::EnsureTrailingSlash('$(ORDir)'))</ORPath>
+    <!-- Open Rails de .NET Framework para compilar esa variante (las mismas clases; se usa NY 174) -->
+    <ORFxDir Condition="'$(ORFxDir)' == ''">$(USERPROFILE)\Desktop\Simulador Ferroviario\Versiones Launcher\OR_NY 174\</ORFxDir>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- bin\<variante>\: de ahí se meten en SelectOR.dll -->
+    <OutputPath>bin\</OutputPath>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows'">
+    <UseWindowsForms>true</UseWindowsForms>
+    <OrRef>$(ORPath)</OrRef>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net472'">
+    <OrRef>$([MSBuild]::EnsureTrailingSlash('$(ORFxDir)'))</OrRef>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.3.3" />
+  </ItemGroup>
+
+  <!-- Las DLLs de Open Rails: solo para compilar (no se copian). -->
+  <ItemGroup>
+    <Reference Include="Orts.Simulation"><HintPath>$(OrRef)Orts.Simulation.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Orts.Formats.Msts"><HintPath>$(OrRef)Orts.Formats.Msts.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Orts.Common"><HintPath>$(OrRef)Orts.Common.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
+    <Reference Include="System.Windows.Forms" />
+    <Compile Remove="StartupHook.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0-windows'">
+    <Compile Remove="GuardDomainManager.cs" />
+  </ItemGroup>
+
+</Project>

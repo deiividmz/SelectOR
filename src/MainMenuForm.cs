@@ -592,22 +592,9 @@ namespace SelectOR
             _btnPlay.Click += (s, e) => Play();
             rightCol.Controls.Add(_btnPlay);
 
-            // Multijugador: el mismo botón grande, en el mismo sitio, pero para entrar en la partida.
-            _btnConnect = new RoundButton
-            {
-                Text = Tr("CONECTAR"), GlyphKind = "connect", Radius = 12, Size = new Size(240, 60),
-                ActiveColor = Theme.Accent, BaseColor = Theme.Accent, HoverColor = Theme.AccentHi,
-                TextColor = Color.White, FontSize = 14f, FontStyle = FontStyle.Bold,
-                Anchor = AnchorStyles.Right, Visible = false
-            };
-            _btnConnect.Click += (s, e) => PlayMultiplayer();
-            rightCol.Controls.Add(_btnConnect);
-
+            // (Multijugador: CONECTAR va en su tarjeta «Tus datos», junto al usuario, el servidor y el puerto.)
             Action centerPlay = () =>
-            {
-                foreach (var b in new[] { _btnPlay, _btnConnect })
-                    b.Location = new Point(rightCol.ClientSize.Width - b.Width - 20, Math.Max(4, (rightCol.ClientSize.Height - b.Height) / 2));
-            };
+                _btnPlay.Location = new Point(rightCol.ClientSize.Width - _btnPlay.Width - 20, Math.Max(4, (rightCol.ClientSize.Height - _btnPlay.Height) / 2));
             rightCol.Resize += (s, e) => centerPlay();
             rightCol.HandleCreated += (s, e) => centerPlay();
 
@@ -1887,6 +1874,17 @@ namespace SelectOR
             _lblMPUserRule = new Label { Location = new Point(0, 142), Size = new Size(380, 34), ForeColor = Theme.Subtle, BackColor = Theme.Surface, AutoSize = false, Font = Theme.Font(8f),
                                          Text = Tr("Usuario: de 4 a 10 caracteres, sin espacios ni ' \" -, y sin empezar por un número (lo exige Open Rails).") };
             data.Controls.Add(_lblMPUserRule); data.Controls.Add(radios);
+            // CONECTAR, en la misma tarjeta: a la derecha de los tres campos (o debajo, si no cabe).
+            _btnConnect = new RoundButton
+            {
+                Text = Tr("CONECTAR"), GlyphKind = "connect", Radius = 10, Size = new Size(158, 50),
+                ActiveColor = Theme.Accent, BaseColor = Theme.Accent, HoverColor = Theme.AccentHi,
+                TextColor = Color.White, FontSize = 11f, FontStyle = FontStyle.Bold
+            };
+            _btnConnect.Click += (s, e) => PlayMultiplayer();
+            data.Controls.Add(_btnConnect);
+            data.Resize += (s, e) => PlaceConnectButton(data);
+            data.HandleCreated += (s, e) => PlaceConnectButton(data);
             right.Controls.Add(data);
             top.Controls.Add(left, 0, 0); top.Controls.Add(right, 1, 0);
             right.Controls.Add(info);
@@ -1938,7 +1936,7 @@ namespace SelectOR
 
             // Se actualiza solo cada 30 s mientras la página está a la vista (lista + candados, de una vez y sin
             // repintar si nada ha cambiado); el contador «hace X s» corre cada segundo.
-            _mpStatusTimer = new Timer { Interval = 30000 };
+            _mpStatusTimer = new Timer { Interval = _mpSection == 0 ? 4000 : 30000 };
             _mpStatusTimer.Tick += (s, e) => { if (page.Visible && !IsMinimizedNow()) { if (_mpSection == 0) LoadRooms(); else LoadServers(); } };
             var ageTimer = new Timer { Interval = 1000 };
             ageTimer.Tick += (s, e) => UpdateServerAge();
@@ -1952,6 +1950,21 @@ namespace SelectOR
         }
 
         bool IsMinimizedNow() => WindowState == FormWindowState.Minimized;
+
+        // CONECTAR en «Tus datos»: centrado en el hueco a la derecha de los campos y a la altura de ellos; si la tarjeta
+        // es estrecha, debajo de la regla del usuario, a la derecha (la tarjeta crece para dejarle sitio: LayoutMpTop).
+        void PlaceConnectButton(Control data)
+        {
+            if (_btnConnect == null || _txtMPUser == null || _txtMPPort == null) return;
+            Control first = _txtMPUser.Parent, last = _txtMPPort.Parent;
+            int gap = Theme.Px(16), free = data.ClientSize.Width - first.Right - gap;
+            Point at = free >= _btnConnect.Width
+                ? new Point(first.Right + gap + (free - _btnConnect.Width) / 2, (first.Top + last.Bottom - _btnConnect.Height) / 2)
+                : new Point(Math.Max(0, data.ClientSize.Width - _btnConnect.Width), _lblMPUserRule.Bottom + Theme.Px(8));
+            if (_btnConnect.Location == at) return;
+            _btnConnect.Location = at;
+            LayoutMpTop();
+        }
 
         TableLayoutPanel _mpTop; Control _mpRight, _srvBar, _srvRefreshBtn;
 
@@ -2321,7 +2334,6 @@ namespace SelectOR
             __lay.Dispose();
             var __rest = Perf.T("ShowPage " + i + " · datos");
             _btnPlay.Visible = i != 0 && i != 4 && i != PageEditor && i != PageEmpresas;   // estas pestañas no usan CONDUCIR
-            _btnConnect.Visible = i == 4;                                                  // Multijugador: CONECTAR
             UpdateDutyHostVisible();   // barra "de servicio" en Empresas (solo si perteneces a alguna empresa)
             _prefs.LastTab = i;
             if (i == 4 && !_warmingPages && (_serversAll == null || _serversAll.Count == 0)) LoadServers();
@@ -3210,7 +3222,7 @@ namespace SelectOR
             if (_curRoute == null) { Warn(Tr("Selecciona primero una ruta.")); return; }
             var c = _lstConsists.SelectedItem as TrainItem;
             var p = CurrentPath();
-            if (c == null || p == null) { Warn(Tr("Configura recorrido y tren en «Conducción libre» antes de conectar.")); return; }
+            if (c == null || p == null) { if (_roomPending != null) RoomAbort(); Warn(Tr("Configura recorrido y tren en «Conducción libre» antes de conectar.")); return; }
 
             // El usuario tiene que cumplir las reglas de Open Rails o la conexión falla.
             if (!MPUserValid(_txtMPUser.Text.Trim()))
@@ -3270,10 +3282,10 @@ namespace SelectOR
             // Sala de SelectOR sin ruta asignada: como en los servidores públicos, el primero que entra recibe una
             // contraseña (o la deja sin ella) y los demás la tienen que escribir mientras su Open Rails siga abierto.
             // La partida es suya (su ruta): así nadie se cuela en una sesión privada de una sala libre.
-            else if (_roomPending != null && _roomAnyRoute)
+            else if (_roomPending != null && _roomAnyRoute && !_roomGated)   // (servidor de sala de antes: con Supabase)
             {
                 var sala = new GameServer { Ip = "sala", Port = _roomPending, Route = _curRoute?.Name ?? "" };
-                if (!await MpGate(sala, _roomName)) { _roomPending = null; RoomRestoreSettings(); return; }
+                if (!await MpGate(sala, _roomName)) { RoomAbort(); return; }
             }
             Launch(args);
         }
@@ -3351,19 +3363,25 @@ namespace SelectOR
                     var r = ThemedBox.Show(this,
                         head + "\n\n" + Tr("¿Conducir de todas formas sin registrarlo para la empresa?"),
                         "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-                    if (r != DialogResult.Yes) return;
+                    if (r != DialogResult.Yes) { if (_roomPending != null) RoomAbort(); return; }
                 }
             }
 
             try
             {
-                var p = Process.Start(new ProcessStartInfo { FileName = exe, Arguments = args, WorkingDirectory = AppContext.BaseDirectory, UseShellExecute = false });
+                var psi = new ProcessStartInfo { FileName = exe, Arguments = args, WorkingDirectory = AppContext.BaseDirectory, UseShellExecute = false };
+                // Multijugador: el guardián de señales entra en Open Rails al arrancar (SignalGuard\: cantón de verdad para
+                // los scripts de señal del despachador, señales a los demás cada 2 s y arreglos de la Map Window), en Open
+                // Rails de .NET 6 y de .NET Framework. No cambia ningún archivo de Open Rails; sin él, todo como siempre.
+                if (args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) >= 0) SignalGuardFiles.Apply(psi);
+                var p = Process.Start(psi);
                 _preLaunchState = WindowState;   // al volver del simulador se deja exactamente así
                 WindowState = FormWindowState.Minimized;
                 if (p != null)
                 {
                     bool svc = serviceId != null;   // servicio de empresa (con tiempo/viajeros) o conducción normal
                     _mpClientRun = args.IndexOf("-multiplayerclient", StringComparison.OrdinalIgnoreCase) >= 0;
+                    _netInAt = _netAt = DateTime.MinValue;   // HUD: la conexión se mira de nuevo
                     if (_mpClientRun) RoomLaunched(); else _roomPending = null;   // servidores SelectOR: avisos mientras se juega
                     // «Unirse a un servidor» a mano: si es un servidor de SelectOR, también pone los desvíos del itinerario
                     if (_mpClientRun && _pilot == null) { try { PilotCreateFor(_settings?.Multiplayer_Host, _settings?.Multiplayer_Port ?? 0); } catch { } }
@@ -3393,7 +3411,7 @@ namespace SelectOR
                     p.Exited += (s, e) => { try { BeginInvoke(new Action(() => { MpRelease(); OnDriveReturned(); })); } catch { } };
                 }
             }
-            catch (Exception ex) { Warn(Tr("No se pudo iniciar el simulador:\n") + ex.Message); }
+            catch (Exception ex) { if (_roomPending != null) RoomAbort(); Warn(Tr("No se pudo iniciar el simulador:\n") + ex.Message); }
         }
 
         // Partidas guardadas de OR (F2 en el simulador): reanudar o repetir.

@@ -58,7 +58,7 @@ namespace SelectOR
                 Halts = _road.HaltsForSave()
             };
             foreach (var p in _road.Points)
-                it.Points.Add(new SavedItineraryPoint { Lat = p.Lat, Lon = p.Lon, Edge = p.Edge, Off = p.Off, Guide = p.Guide, Reverse = p.Reverse });
+                it.Points.Add(new SavedItineraryPoint { Lat = p.Lat, Lon = p.Lon, Edge = p.Edge, Off = p.Off, Guide = p.Guide, Reverse = p.Reverse, Via = p.Via });
             // mismo nombre en la misma ruta: se sustituye
             _prefs.SavedItineraries.RemoveAll(s => string.Equals(s.Route, it.Route, StringComparison.OrdinalIgnoreCase)
                                                 && string.Equals(s.Name, it.Name, StringComparison.OrdinalIgnoreCase));
@@ -96,7 +96,7 @@ namespace SelectOR
             _road.Editing = false;
             _road.SetHaltChoices(it.Halts);
             int ok = 0;
-            foreach (var p in it.Points) if (_road.AddSavedPoint(p.Lat, p.Lon, p.Edge, p.Off, p.Guide, p.Reverse)) ok++;
+            foreach (var p in it.Points) if (_road.AddSavedPoint(p.Lat, p.Lon, p.Edge, p.Off, p.Guide, p.Reverse, p.Via)) ok++;
             if (ok == 0) { _road.ClearAll(); return Tr("Ese itinerario no encaja en las vías de esta ruta."); }
             var t = RoadTrain();
             int skipped = _road.SkipReachedFrom(t.has, t.lat, t.lon);

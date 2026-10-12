@@ -28,6 +28,7 @@ namespace SelectOR
         public double Off { get; set; }
         public bool Guide { get; set; }              // punto de paso de un recorrido (.pat): no se dibuja
         public bool Reverse { get; set; }            // ahí invierte la marcha
+        public bool Via { get; set; }                // punto de paso puesto arrastrando el trazado (fija la vía; sin número)
     }
 
     public class AppPrefs

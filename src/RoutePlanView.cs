@@ -26,6 +26,13 @@ namespace SelectOR
         public Action<Graphics, Func<double, double, PointF>, Rectangle> Overlay;
         public event Action<double, double, double> MapClick;
         public string Hint;
+        // Editar el itinerario arrastrando (planificador): al pulsar, true = lo coge el itinerario (un punto o el trazado) y
+        // el plano no se mueve; mientras se arrastra y al soltar (con «se ha movido»). EditHover: mano encima de algo editable.
+        public Func<Point, MouseButtons, bool> EditDown;
+        public Action<Point> EditMove;
+        public Func<Point, bool, bool> EditUp;   // true = ya está (no es un clic para añadir un punto)
+        public Func<Point, bool> EditHover;
+        bool _edit, _editMoved; Point _editAt;
         public void Redraw() => Invalidate();
         public void ResetView() { _zoom = 1; _cLat = _cLon = double.NaN; Invalidate(); }
         static readonly Color MapBg = Color.FromArgb(30, 34, 38);
@@ -278,7 +285,13 @@ namespace SelectOR
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (!HasPlan || e.Button != MouseButtons.Left) return;
+            if (!HasPlan) return;
+            if (!_hitExpand.Contains(e.Location) && !_hitKey.Contains(e.Location) && EditDown != null && EditDown(e.Location, e.Button))
+            {
+                if (e.Button == MouseButtons.Left) { _edit = true; _editMoved = false; _editAt = e.Location; Focus(); }
+                return;
+            }
+            if (e.Button != MouseButtons.Left) return;
             Focus();
             _moved = false;
             if (_hitExpand.Contains(e.Location) || _hitKey.Contains(e.Location)) return;
@@ -288,7 +301,17 @@ namespace SelectOR
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            if (_drag == null) { if (HasPlan) Cursor = _hitExpand.Contains(e.Location) || _hitKey.Contains(e.Location) ? Cursors.Hand : Cursors.SizeAll; return; }
+            if (_edit)
+            {
+                if (Math.Abs(e.X - _editAt.X) + Math.Abs(e.Y - _editAt.Y) > 3) _editMoved = true;
+                if (_editMoved) EditMove?.Invoke(e.Location);
+                return;
+            }
+            if (_drag == null)
+            {
+                if (HasPlan) Cursor = _hitExpand.Contains(e.Location) || _hitKey.Contains(e.Location) || (EditHover?.Invoke(e.Location) ?? false) ? Cursors.Hand : Cursors.SizeAll;
+                return;
+            }
             if (Math.Abs(e.X - _drag.Value.X) + Math.Abs(e.Y - _drag.Value.Y) > 3) _moved = true;
             double px = PxPerM(), mLat = 111320.0, mLon = 111320.0 * Math.Cos(_dLat * Math.PI / 180);
             _cLat = _dLat + (e.Y - _drag.Value.Y) / (mLat * px); _cLon = _dLon - (e.X - _drag.Value.X) / (mLon * px);
@@ -298,6 +321,12 @@ namespace SelectOR
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (_edit)
+            {
+                _edit = false;
+                bool done = EditUp?.Invoke(e.Location, _editMoved) ?? false;
+                if (done || _editMoved) return;   // (sin moverse y sin hacer nada, es un clic normal: añade un punto)
+            }
             bool wasDrag = _drag != null && _moved;
             _drag = null;
             if (!HasPlan || e.Button != MouseButtons.Left || wasDrag) return;
@@ -319,6 +348,17 @@ namespace SelectOR
             if (MapClick != null) return;   // en el planificador cada clic marca un punto: la vista entera, con su botón
             _zoom = 1; _cLat = _cLon = double.NaN; Invalidate();
         }
+
+        // Píxel → lat/lon con la vista actual, y metros por píxel (para el planificador).
+        public (double lat, double lon) LatLonAt(Point p)
+        {
+            var (la, lo) = Center(); double px = PxPerM();
+            double mLat = 111320.0, mLon = 111320.0 * Math.Cos(la * Math.PI / 180);
+            var mr = MapRect; double cx = mr.X + mr.Width / 2.0, cy = mr.Y + mr.Height / 2.0;
+            return (la - (p.Y - cy) / (mLat * px), lo + (p.X - cx) / (mLon * px));
+        }
+        public double MetersPerPixel => HasPlan ? 1 / PxPerM() : 1;
+        public PointF PixelOf(double lat, double lon) => ViewProj(MapRect)(lat, lon);
 
         void OpenWindow()
         {
