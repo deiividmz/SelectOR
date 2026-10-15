@@ -40,6 +40,7 @@ namespace SelectOR
         public string RoomRegHost { get; set; }
         public string RoomPrevHost { get; set; }
         public int RoomPrevPort { get; set; }
+        public string MpClientHost { get; set; }   // la IP del último servidor al que se unió (al alojar, Open Rails queda con la de alojar)
         public string InstallId { get; set; }   // identificador al azar de esta instalación (usuarios conectados; no es personal)
         public string LastConsist { get; set; }
         public int LastTab { get; set; }
@@ -122,6 +123,24 @@ namespace SelectOR
         public Dictionary<string, double> CabBcScaleBar { get; set; } = new Dictionary<string, double>();
         // Itinerarios guardados desde el mapa grande (pestaña «Guardados»), de todas las rutas.
         public List<SavedItinerary> SavedItineraries { get; set; } = new List<SavedItinerary>();
+        // Mandos (Ajustes de SelectOR → Mandos): usarlos al conducir y qué palanca o botón hace qué (Joysticks.cs).
+        public bool JoyEnabled { get; set; } = false;   // (de serie, desactivado: el usuario lo marca)
+        public List<JoyBinding> JoyBindings { get; set; } = new List<JoyBinding>();
+        // Gráficos (Ajustes de SelectOR → Gráficos; ReShadeFiles.cs): ReShade con el efecto de SelectOR y sus valores.
+        public bool GfxEnabled { get; set; } = false;
+        public string GfxPreset { get; set; } = "selector";   // (de serie, el perfil propio de SelectOR: ReShadeFiles.Presets)
+        public double GfxSharpen { get; set; } = 0.55;
+        public double GfxSaturation { get; set; } = 0.0;
+        public double GfxContrast { get; set; } = 0.04;
+        public double GfxBrightness { get; set; } = 0.07;
+        public double GfxWarmth { get; set; } = 0.06;
+        public double GfxVignette { get; set; } = 0.10;
+        public double GfxVibrance { get; set; } = 0.25;   // Vibrance de SweetFX: realza los colores apagados
+        public bool GfxEdgeAA { get; set; } = true;
+        // Clima (Ajustes de SelectOR → Clima; ClimaFiles.cs): las imágenes de clima de SelectOR en Content de Open Rails
+        // mientras se conduce. De serie, desactivado; los grupos elegidos (nubes, lluvia, nieve, luces, cielo nocturno).
+        public bool ClimaEnabled { get; set; } = false;
+        public List<string> ClimaGroups { get; set; } = new List<string> { "clouds", "rain", "snow", "lights", "night" };
 
         static string Dir => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Open Rails");
@@ -153,6 +172,7 @@ namespace SelectOR
                         p.CabAirScaleBar ??= new Dictionary<string, double>();
                         p.CabBcScaleBar ??= new Dictionary<string, double>();
                         p.SavedItineraries ??= new List<SavedItinerary>();
+                        p.JoyBindings ??= new List<JoyBinding>();
                         return p;
                     }
                 }

@@ -436,11 +436,7 @@ namespace SelectOR
             {
                 var p = _pathsAll.FirstOrDefault(x => string.Equals(x.Name, s.Path, StringComparison.OrdinalIgnoreCase));
                 if (p == null) notes.Add(string.Format(Tr("No encuentro el recorrido «{0}» en tu ruta: elígelo a mano."), s.Path));
-                else
-                {
-                    _cboStart.SelectedItem = p.Start ?? "";
-                    _cboEnd.SelectedItem = p.End ?? "";
-                }
+                else SelectTripPath(p);   // ese recorrido exacto (aunque otros vayan de la misma salida a la misma llegada)
             }
             TrainItem item = null;
             try { item = await tTrain; } catch { }

@@ -117,7 +117,8 @@ namespace SelectOR
         }
 
         // Para el HUD y el mapa grande: los demás usuarios (null si no hay nadie) y quién soy yo.
-        List<LiveMarker> LiveMarkers() => _liveMates.Count > 0 ? _liveMates.Current() : null;
+        // (en una sala de Servidores SelectOR, los trenes de la sala: MainMenuForm.MapaSala.cs)
+        List<LiveMarker> LiveMarkers() => RoomPlayers() ?? (_liveMates.Count > 0 ? _liveMates.Current() : null);
         (string name, string company) LiveMe() => (Supa.Username, _pendingServiceId != null ? _empOnDutyCompany?.Name : null);
 
         // Casilla de Mi perfil (a la derecha del título de la sección).

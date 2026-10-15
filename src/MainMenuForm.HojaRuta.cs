@@ -301,6 +301,7 @@ namespace SelectOR
                 else if (!_road.HasPlan && _road.Points.Count > _road.ReachedPoints && _road.Graph != null && t.has && _roadTicks % 3 == 0) RoadReplan();
                 _road.ComputeEtas(_roadLimit, _roadVmax, Math.Max(0, _prefs?.RoadDwellS ?? 30), RoadGameNow());
                 PilotTick();   // salas de SelectOR: si seguimos dentro (HUD) y la contraseña
+                LocalMapTick();   // conducción libre: mapa grande como Ctrl+9 (MainMenuForm.MapaLocal.cs)
                 if (RoadHudAlive && _roadHud.Visible) _roadHud.Invalidate();
             }
             catch { }

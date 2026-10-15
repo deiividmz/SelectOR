@@ -123,6 +123,9 @@ namespace SelectOR
             return Convert.ToBase64String(ec.ExportSubjectPublicKeyInfo());
         }
 
+        // Firma con la clave de las actualizaciones (también el clima: ClimaFiles.cs). null sin la clave de este equipo.
+        public static string SignData(byte[] data) => SignPackage(data);
+
         static string SignPackage(byte[] data)
         {
             if (!File.Exists(SigningKeyPath)) return null;

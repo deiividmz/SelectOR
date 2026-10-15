@@ -3020,6 +3020,9 @@ namespace SelectOR
                 _serviceHud.Paused = () => _svcPaused;                            // cronómetro parado: Open Rails en pausa
                 _serviceHud.ToggleCab = ToggleCabHudFromBar;
                 _serviceHud.Mates = LiveMarkers;   // mapa en vivo: los demás usuarios de la ruta
+                _serviceHud.RoomMap = RoomMapNow; _serviceHud.RoomClick = RoomMapClick;   // en una sala: agujas, señales y trenes (MainMenuForm.MapaSala.cs)
+                _serviceHud.RoomPlayerClick = RoomPlayerMenu;                             // … y el despachador nombra ayudantes
+                _serviceHud.RoomMeStatus = RoomMeStatus;                                  // … y tu papel en la leyenda
                 _serviceHud.Me = LiveMe;
                 _serviceHud.Net = HudNetStatus;    // multijugador: ¿conectado al servidor? (MainMenuForm.Online.cs)
                 WireRoadToHud();                   // hoja de ruta: itinerario en el mapa grande
@@ -3436,6 +3439,26 @@ namespace SelectOR
         async Task<(string json, string err)> StartServiceRpc(string company, string route, string consist, string path,
                                                                string vehicle, TrainItem train)
         {
+            var res = await StartServiceRpcCore(company, route, consist, path, vehicle, train);
+            // Las plazas según los archivos del maquinista (sin las fijadas por la empresa): quedan junto a las usadas para
+            // la Revisión del administrador (revision-viajeros.sql). Sin ese SQL, no se guardan.
+            if (res.err == null && train != null && !string.IsNullOrWhiteSpace(res.json))
+            {
+                string sid = res.json.Trim().Trim('"');
+                try { using var d = JsonDocument.Parse(res.json); if (d.RootElement.ValueKind == JsonValueKind.String) sid = d.RootElement.GetString(); } catch { }
+                try
+                {
+                    double files = await Task.Run(() => FileCapacity(train));
+                    if (!string.IsNullOrEmpty(sid)) _ = Supa.RpcAsync("service_set_capacity_files", new { p_service = sid, p_files = Math.Round(files) });
+                }
+                catch { }
+            }
+            return res;
+        }
+
+        async Task<(string json, string err)> StartServiceRpcCore(string company, string route, string consist, string path,
+                                                                   string vehicle, TrainItem train)
+        {
             var tot = train != null ? ConsistTotals(train) : default;
             _svcTrainMass = tot.mass > 0 ? Math.Round(tot.mass, 1) : double.NaN;
             _svcTrainCap = tot.cars > 0 ? Math.Round(tot.capacity) : double.NaN;
@@ -3781,6 +3804,9 @@ namespace SelectOR
         // Llamado cuando OR se cierra tras un lanzamiento con servicio abierto.
         void OnDriveReturned()
         {
+            LocalMapStop();      // conducción libre: la conexión con el agente del mapa
+            ReShadeFiles.Remove();   // gráficos: fuera el dxgi.dll de ReShade (solo mientras se conduce)
+            ClimaFiles.Remove();     // clima: las imágenes de Open Rails otra vez en Content
             CloseServiceHud();   // cerrar el HUD al volver de conducir
             CloseCabHud();       // y el pupitre
             CloseChatHud();      // y el chat
@@ -6934,6 +6960,22 @@ namespace SelectOR
             return ops;
         }
 
+        // Plazas del tren según sus archivos (PassengerCapacity de cada .eng/.wag), sin las que haya fijado la empresa.
+        double FileCapacity(TrainItem c)
+        {
+            double cap = 0;
+            try
+            {
+                foreach (var r in ConsistCarRefs(c?.FilePath))
+                {
+                    var v = Veh(ResolveCarFile(r.name, r.folder));
+                    if (v != null) cap += v.Capacity;
+                }
+            }
+            catch { }
+            return cap;
+        }
+
         // Suma de toda la composición: vehículos, masa, freno y plazas. Es lo que se manda al
         // servidor para tasar la compra, de modo que arrastrar más coches cueste más.
         (int cars, double mass, double brake, double capacity) ConsistTotals(TrainItem c)
@@ -8750,7 +8792,12 @@ namespace SelectOR
             }
 
             Msg(_empHomeMsg, Tr("Registrando servicio…"), false);
-            var (jr, err) = await Supa.RpcAsync("close_service", new
+            // Con sus paradas (revision-viajeros.sql): el servidor no acepta más viajeros que los que suben en ellas ni más
+            // de los que caben, y anota si el viaje se ha recuperado del archivo del ordenador.
+            var stopsPayload = new List<object>();
+            foreach (var st in _svcStopsLog)
+                if (openedUtc == null || st.Utc >= openedUtc.Value.AddSeconds(-5)) stopsPayload.Add(new { s = st.Station ?? "", t = st.Time ?? "", b = st.Board, a = st.Alight });
+            var (jr, err) = await Supa.RpcAsync("close_service_v2", new
             {
                 p_service = svc,
                 p_km = _estimatedKm,
@@ -8758,8 +8805,25 @@ namespace SelectOR
                 p_notes = "",
                 p_duration_s = _tripDurationS,
                 p_pax = _paxBoarded,
-                p_pax_km = Math.Round(_paxKm, 1)
+                p_pax_km = Math.Round(_paxKm, 1),
+                p_stops = stopsPayload,
+                p_recovered = _svcRecoveredNote != null
             });
+            bool closedV2 = err == null;
+            // Servidor sin revision-viajeros.sql: el cierre de siempre (y las paradas aparte, más abajo).
+            if (err != null && (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                                || err.IndexOf("close_service_v2", StringComparison.OrdinalIgnoreCase) >= 0
+                                || err.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0))
+                (jr, err) = await Supa.RpcAsync("close_service", new
+                {
+                    p_service = svc,
+                    p_km = _estimatedKm,
+                    p_completed = true,
+                    p_notes = "",
+                    p_duration_s = _tripDurationS,
+                    p_pax = _paxBoarded,
+                    p_pax_km = Math.Round(_paxKm, 1)
+                });
             // Servidor sin billete-por-km.sql: no conoce p_pax_km → se registra como antes, sin él.
             if (err != null && (err.IndexOf("p_pax_km", StringComparison.OrdinalIgnoreCase) >= 0
                                 || err.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0))
@@ -8853,7 +8917,7 @@ namespace SelectOR
             if (showDialog) r.Map = await BuildTripMap(openedUtc);
             if (!r.Valid) return ShowNotRegistered(r, showDialog);
             Msg(_empHomeMsg, Tr("Servicio registrado."), false);
-            if (r.Stops != null) SaveServiceStops(svc, r.Stops);
+            if (r.Stops != null && !closedV2) SaveServiceStops(svc, r.Stops);   // (con close_service_v2 ya van con el cierre)
             SaveServiceTrail(svc, trailPayload);
             // Registro publicado → refresca saldo y la subpestaña visible (sin botón "Actualizar").
             LoadCompanies(soft: true);

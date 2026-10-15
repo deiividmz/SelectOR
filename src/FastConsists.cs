@@ -45,6 +45,12 @@ namespace SelectOR
 
     public static class FastConsists
     {
+        // Cuántos .con lleva leídos la lectura en marcha (para «Leyendo trenes: 4.500 de 12.000…»).
+        static int _progDone, _progTotal;
+        public static int ProgressDone => System.Threading.Volatile.Read(ref _progDone);
+        public static int ProgressTotal => System.Threading.Volatile.Read(ref _progTotal);
+        public static void ResetProgress() { System.Threading.Volatile.Write(ref _progDone, 0); System.Threading.Volatile.Write(ref _progTotal, 0); }
+
         /// <summary>Trenes de una carpeta de contenido, ordenados por nombre. Lista vacía si no hay CONSISTS.
         /// rescan: el contenido ha cambiado con SelectOR abierto (Editor, archivos copiados): la lista del índice se pone
         /// al día con la carpeta (los .con nuevos y los de «changed» se leen; los que ya no están, fuera).</summary>
@@ -76,10 +82,11 @@ namespace SelectOR
                 if (!Directory.Exists(dir)) return list;
                 var files = Directory.GetFiles(dir, "*.con");
                 var items = new TrainItem[files.Length];
+                System.Threading.Volatile.Write(ref _progDone, 0); System.Threading.Volatile.Write(ref _progTotal, files.Length);
 
                 Parallel.For(0, files.Length,
                     new ParallelOptions { MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2) },
-                    i => { items[i] = Parse(files[i], folderPath); });
+                    i => { items[i] = Parse(files[i], folderPath); System.Threading.Interlocked.Increment(ref _progDone); });
 
                 foreach (var it in items) if (it != null) list.Add(it);
                 // Mismo orden que daba Open Rails: OrderBy por nombre (estable).

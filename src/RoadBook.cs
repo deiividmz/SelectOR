@@ -46,6 +46,112 @@ namespace SelectOR
         readonly HashSet<int> _juncHidden = new();
         public bool SwitchHidden(int node) => _juncHidden.Contains(node);
 
+        // Para el mapa grande en una sala (como el mapa de Open Rails): cada desvío con su identificador de Open Rails,
+        // su posición en la foto de agujas del despachador (JunctionOrder), dónde está y por dónde sale cada posición
+        // (los primeros metros de la rama Out[0] y Out[1]).
+        public sealed class SwitchGeo
+        {
+            public int Node, Order, Tx, Tz, Id; public bool Hidden;
+            public double Lat, Lon;
+            public readonly List<(double lat, double lon)>[] Branch = new List<(double lat, double lon)>[2];
+        }
+
+        public List<SwitchGeo> SwitchGeometry(double branchM = 30)
+        {
+            var vecToEdge = new Dictionary<int, int>();
+            for (int i = 0; i < Edges.Length; i++) vecToEdge[Edges[i].Vec] = i;
+            var order = new Dictionary<int, int>();
+            for (int i = 0; i < JunctionOrder.Length; i++) order[JunctionOrder[i]] = i;
+            var list = new List<SwitchGeo>();
+            foreach (var kv in _junc)
+            {
+                if (!order.TryGetValue(kv.Key, out int ord) || kv.Value.Out == null || kv.Value.Out.Length < 2) continue;
+                var sg = new SwitchGeo { Node = kv.Key, Order = ord, Tx = kv.Value.Tx, Tz = kv.Value.Tz, Id = kv.Value.Id, Hidden = _juncHidden.Contains(kv.Key) };
+                bool hasPos = false;
+                for (int k = 0; k < 2; k++)
+                {
+                    if (!vecToEdge.TryGetValue(kv.Value.Out[k], out int ei)) continue;
+                    var E = Edges[ei];
+                    bool fromA = E.A == kv.Key;
+                    if (!fromA && E.B != kv.Key) continue;
+                    var pts = new List<(double lat, double lon)>();
+                    double len = Math.Min(branchM, E.Len);
+                    for (double d = 0; d <= len + 0.01; d += Math.Max(1, len / 6)) { var (x, y) = PointAt(ei, fromA ? d : E.Len - d); pts.Add(Unproj(x, y)); }
+                    sg.Branch[k] = pts;
+                    if (!hasPos) { (sg.Lat, sg.Lon) = pts[0]; hasPos = true; }
+                }
+                if (hasPos && sg.Branch[0] != null && sg.Branch[1] != null) list.Add(sg);
+            }
+            return list;
+        }
+
+        // ---- Camino por delante de un tren, como «Draw next path section» del mapa de Open Rails (Ctrl+9) ----
+        Dictionary<int, int> _vecEdge;
+
+        // Desde la cola del tren tal como la manda Open Rails (su tramo del .tdb, dónde está, el sentido de la cola en el
+        // tramo —1 hacia su final— y MUDirection —1 marcha atrás—): por la vía, según cómo están las agujas (pos: posición
+        // de un desvío por su nodo, -1 si no se sabe), hasta maxM metros por delante de la cabeza. Se para en un final de
+        // vía, en una aguja de punta sin posición conocida o en una de talón puesta en contra (against: dónde, para la X).
+        public List<(double lat, double lon)> PathAhead(int vec, double lat, double lon, int dir, int mu, double len, double maxM,
+                                                         Func<int, int> pos, out (double lat, double lon)? against)
+        {
+            against = null; WalkStop = null;
+            if (_vecEdge == null) { var d = new Dictionary<int, int>(); for (int i = 0; i < Edges.Length; i++) d[Edges[i].Vec] = i; _vecEdge = d; }
+            if (!_vecEdge.TryGetValue(vec, out int e0) || !NearestOn(new[] { e0 }, lat, lon, 80, out int e, out double off)) return null;
+            bool fwd = dir == 1;
+            if (mu == 1) fwd = !fwd;                                                        // marcha atrás: por delante está detrás de la cola
+            else if (!Walk(ref e, ref off, ref fwd, len, pos, null, out _)) return null;   // la cabeza: la cola + la longitud
+            var pts = new List<(double lat, double lon)>();
+            Walk(ref e, ref off, ref fwd, maxM, pos, pts, out against);
+            return pts.Count >= 2 ? pts : null;
+        }
+
+        public string WalkStop;   // (diagnóstico: por qué se paró el último camino)
+        bool Walk(ref int e, ref double off, ref bool fwd, double dist, Func<int, int> pos, List<(double lat, double lon)> pts, out (double lat, double lon)? against)
+        {
+            against = null;
+            if (pts != null) { var (x0, y0) = PointAt(e, off); pts.Add(Unproj(x0, y0)); }
+            for (int guard = 0; dist > 0.01 && guard < 3000; guard++)
+            {
+                var E = Edges[e];
+                double step = Math.Min(fwd ? E.Len - off : off, dist), to = fwd ? off + step : off - step;
+                if (pts != null)
+                {
+                    if (fwd) { for (int i = 0; i < E.Cum.Length; i++) if (E.Cum[i] > off && E.Cum[i] < to) pts.Add(Unproj(E.X[i], E.Y[i])); }
+                    else { for (int i = E.Cum.Length - 1; i >= 0; i--) if (E.Cum[i] < off && E.Cum[i] > to) pts.Add(Unproj(E.X[i], E.Y[i])); }
+                    var (x1, y1) = PointAt(e, to); pts.Add(Unproj(x1, y1));
+                }
+                off = to; dist -= step;
+                if (dist <= 0.01) break;
+                // al final del tramo: el desvío, otro tramo pegado (sin desvío en medio) o un final de vía (se acaba)
+                int n = fwd ? E.B : E.A;
+                if (!_junc.TryGetValue(n, out var J))
+                {
+                    if (!_vecEdge.TryGetValue(n, out int ve)) { WalkStop = "fin " + n; return false; }
+                    var V = Edges[ve];
+                    if (V.A == E.Vec) { e = ve; off = 0; fwd = true; }
+                    else if (V.B == E.Vec) { e = ve; off = V.Len; fwd = false; }
+                    else { WalkStop = "tramo pegado sin enlace " + n; return false; }
+                    continue;
+                }
+                int p = pos(n), ii = Array.IndexOf(J.In, E.Vec), oi = Array.IndexOf(J.Out, E.Vec), next;
+                if (ii >= 0) { if (p < 0 || p >= J.Out.Length) { WalkStop = $"desvío {n} sin posición ({p})"; return false; } next = J.Out[p]; }     // de punta: por donde está puesta
+                else if (oi >= 0)
+                {
+                    if (p >= 0 && p != oi) { var (xa, ya) = PointAt(e, off); against = Unproj(xa, ya); return false; }   // de talón, en contra
+                    if (J.In.Length == 0) { WalkStop = "desvío sin entrada " + n; return false; }
+                    next = J.In[0];
+                }
+                else { WalkStop = $"desvío {n} sin el tramo {E.Vec}"; return false; }
+                if (!_vecEdge.TryGetValue(next, out int ne)) { WalkStop = $"tramo {next} sin geometría"; return false; }
+                var N = Edges[ne];
+                if (N.A == n) { e = ne; off = 0; fwd = true; }
+                else if (N.B == n) { e = ne; off = N.Len; fwd = false; }
+                else { WalkStop = $"tramo {next} no llega al desvío {n}"; return false; }
+            }
+            return true;
+        }
+
         public Edge[] Edges = Array.Empty<Edge>();
         readonly Dictionary<int, Node> _nodes = new();
         // Para seguir un recorrido (.pat): los nodos del .tdb (desvíos y finales) por su posición en el mundo y los

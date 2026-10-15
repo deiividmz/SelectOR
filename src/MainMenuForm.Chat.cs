@@ -133,6 +133,7 @@ namespace SelectOR
         async Task<string> ChatSendText(ChatRoom r, string text)
         {
             if (r == null) return Tr("Elige una empresa.");
+            if (IsRoomChat(r.CompanyId)) return RoomChatSend(text);   // chat de la sala (no pasa por Supabase)
             text = (text ?? "").Trim();
             if (text.Length == 0) return null;
             if (text.Length > 500) return Tr("El mensaje es demasiado largo (máximo 500 caracteres).");
@@ -211,7 +212,7 @@ namespace SelectOR
             bool mutes = _chatMutesChanged; _chatMutesChanged = false;
             var rooms = new List<ChatRoom>();
             if (ChatSectionVisible) rooms.Add(ChatSectionRoom());
-            if (ChatHudAlive && _chatHud.Visible && !string.IsNullOrEmpty(_chatHudCompanyId)) rooms.Add(ChatRoomFor(_chatHudCompanyId));
+            if (ChatHudAlive && _chatHud.Visible && !string.IsNullOrEmpty(_chatHudCompanyId) && !IsRoomChat(_chatHudCompanyId)) rooms.Add(ChatRoomFor(_chatHudCompanyId));
             var done = new HashSet<ChatRoom>();
             foreach (var r in rooms)
             {
@@ -470,7 +471,7 @@ namespace SelectOR
                 _chatHudManual = false;
                 _chatHud = new ChatHudOverlay(_prefs, Supa.UserId)
                 {
-                    Companies = () => (_chatMine ?? ChatFallbackCompanies()).ConvertAll(x => (x.id, x.name)),
+                    Companies = ChatHudChannels,
                     CurrentId = () => _chatHudCompanyId,
                     Pick = id => { _chatHudManual = true; SetChatHudCompany(id); },
                     WriteState = ChatHudWriteState,
@@ -507,9 +508,18 @@ namespace SelectOR
             try { _prefs.Save(); } catch { }
         }
 
-        // Empresa del HUD: con la que estás de servicio; si no, la favorita; si no, la primera.
+        // Canales del HUD: la sala en la que estás (si la hay) y tus empresas.
+        List<(string id, string name)> ChatHudChannels()
+        {
+            var l = (_chatMine ?? ChatFallbackCompanies()).ConvertAll(x => (x.id, x.name));
+            if (RoomChatOn) l.Insert(0, (RoomChatId, RoomChatName()));
+            return l;
+        }
+
+        // Canal del HUD: la sala en la que estás; si no, la empresa con la que estás de servicio; si no, la favorita; si no, la primera.
         string ChatHudDefault()
         {
+            if (RoomChatOn) return RoomChatId;
             var mine = _chatMine ?? ChatFallbackCompanies();
             bool IsMine(string id) => !string.IsNullOrEmpty(id) && (mine.Count == 0 || mine.Exists(x => x.id == id));
             if (_pendingServiceId != null && IsMine(_empOnDutyCompany?.Id)) return _empOnDutyCompany.Id;
@@ -557,6 +567,7 @@ namespace SelectOR
             if (string.IsNullOrEmpty(id)) { RefreshChatHud(); return; }
             _chatHudCompanyId = id;
             _chatLastDefault ??= id;
+            if (IsRoomChat(id)) { RoomChat(); RefreshChatHud(); return; }
             var r = ChatRoomFor(id, ChatCompanyName(id));
             RefreshChatHud();
             if (!r.StateLoaded) await ChatLoadState(r);
@@ -566,6 +577,7 @@ namespace SelectOR
 
         string ChatCompanyName(string id)
         {
+            if (IsRoomChat(id)) return RoomChatName();
             var m = (_chatMine ?? ChatFallbackCompanies()).Find(x => x.id == id);
             if (!string.IsNullOrEmpty(m.name)) return m.name;
             return _empCompanies.Find(c => c.Id == id)?.Name ?? "";
@@ -576,6 +588,7 @@ namespace SelectOR
             if (!ChatHudAlive) return;
             if (string.IsNullOrEmpty(_chatHudCompanyId)) { _chatHud.SetRoom(Tr("Chat"), new List<ChatMsg>(), Tr("No perteneces a ninguna empresa.")); return; }
             var r = ChatRoomFor(_chatHudCompanyId);
+            if (IsRoomChat(r.CompanyId)) { _chatHud.SetRoom(RoomChatName(), r.Msgs, RoomChatOn ? null : Tr("Sin conexión con la sala.")); return; }
             if (string.IsNullOrEmpty(r.Name)) r.Name = ChatCompanyName(r.CompanyId);
             _chatHud.SetRoom(r.Name, r.Msgs, r.Error ?? (r.Loaded ? null : Tr("Cargando el chat…")));
         }
@@ -583,6 +596,7 @@ namespace SelectOR
         (bool can, string why) ChatHudWriteState()
         {
             if (string.IsNullOrEmpty(_chatHudCompanyId)) return (false, "");
+            if (IsRoomChat(_chatHudCompanyId)) return RoomChatOn ? (true, null) : (false, Tr("Sin conexión con la sala."));
             var r = ChatRoomFor(_chatHudCompanyId);
             if (r.Error != null) return (false, "");
             if (!r.Member && !r.AsSuper) return (false, Tr("Solo los socios pueden escribir"));

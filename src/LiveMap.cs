@@ -18,6 +18,9 @@ namespace SelectOR
         public double Lat, Lon, Heading, SpeedKmh;
         public bool HasHeading, Me;
         public Color Color;
+        public bool Room;          // jugador de la sala de Servidores SelectOR (su nombre en Open Rails)
+        public string Status;      // lo que dice la leyenda a su lado (si no, la empresa o «Conducción libre»)
+        public string Role;        // en una sala: su papel (despachador, ayudante, jugador), en su tarjeta del mapa
     }
 
     // Lo que llega del servidor en cada consulta.
@@ -161,30 +164,110 @@ namespace SelectOR
         // Flechas y etiquetas. detail=false (minimapa): solo el nombre corto; detail=true (mapa grande):
         // nombre, tren con velocidad (o «parado en …») y empresa de servicio o «Conducción libre».
         public static void Draw(Graphics g, Rectangle area, Func<double, double, PointF> proj, IReadOnlyList<LiveMarker> mates,
-                                float arrowScale, bool detail, double[] stLat, double[] stLon, string[] stName)
+                                float arrowScale, bool detail, double[] stLat, double[] stLon, string[] stName,
+                                float locoA = 0, bool names = true,   // locoA: escala de las locomotoras según el zoom (0 = la de siempre)
+                                Func<double, double, double?> trackAxis = null)   // rumbo de la vía en un punto (los que no tienen rumbo)
         {
             if (mates == null || mates.Count == 0) return;
             float a = arrowScale * (detail ? 0.875f : 0.95f);
             var vis = RectangleF.Inflate(area, 20, 20);
             var pts = new PointF[mates.Count];
+            var placed = new List<Rectangle>();   // locomotoras y etiquetas ya puestas (para no pisarse)
             for (int i = 0; i < mates.Count; i++)
             {
                 pts[i] = proj(mates[i].Lat, mates[i].Lon);
-                if (vis.Contains(pts[i])) Arrow(g, pts[i], mates[i], a);
+                if (!vis.Contains(pts[i])) continue;
+                double? ax = mates[i].HasHeading ? null : trackAxis?.Invoke(mates[i].Lat, mates[i].Lon);
+                placed.Add(Rectangle.Round(Loco(g, pts[i], mates[i].HasHeading, mates[i].Heading, mates[i].Color, detail && names ? mates[i].Short ?? mates[i].Name : null, locoA > 0 ? locoA : a, ax)));
             }
-            // Etiquetas encima de todas las flechas.
+            // Etiquetas encima de todas las locomotoras.
             using var fN = Theme.Font(detail ? 9.5f : 7.5f, FontStyle.Bold);
             using var fS = Theme.Font(8.5f);
-            var placed = new List<Rectangle>();   // etiquetas ya puestas (para no pisarse)
             for (int i = 0; i < mates.Count; i++)
             {
                 if (!area.Contains(Point.Round(pts[i]))) continue;
                 var m = mates[i];
                 var lines = detail
-                    ? new[] { m.Name, TrainLine(m, stLat, stLon, stName), CompanyLine(m.Company) }
+                    ? new[] { m.Name, TrainLine(m, stLat, stLon, stName), m.Room ? (m.Role ?? I18n.T("Jugador de la sala")) : CompanyLine(m.Company) }
                     : new[] { m.Short };
                 Pill(g, area, pts[i], lines, m.Color, fN, fS, 12 * a + 6, placed);
             }
+        }
+
+        // Locomotora vista desde arriba (la posición de un tren en los mapas): el cuerpo a lo largo de la marcha, el morro
+        // en punta hacia donde va (heading: grados desde el norte, en sentido horario; sin rumbo, hacia el este) y acabando en
+        // el punto (la cabeza del tren), del color
+        // del tren, con la ventanilla de la cabina y, si se da, el nombre dentro (el cuerpo se alarga para que quepa; el
+        // texto, siempre derecho). Devuelve lo que ocupa en la pantalla.
+        // Sin rumbo (no se sabe hacia dónde va): sin morro, con cabina en los dos extremos, centrada y a lo largo de la vía
+        // si se sabe (axis: rumbo de la vía en ese punto, sin sentido); si tampoco, tumbada.
+        public static RectangleF Loco(Graphics g, PointF p, bool hasHeading, double heading, Color c, string name, float a, double? axis = null)
+        {
+            float W = 7.5f * a, N = hasHeading ? W * 0.72f : 0, cab = W * 0.55f, pad = W * 0.32f;
+            int cabs = hasHeading ? 1 : 2;
+            string txt = string.IsNullOrWhiteSpace(name) ? null : Clip(name.Trim(), 14);
+            using var font = new Font(Theme.Font(9f).FontFamily, Math.Max(8f, W * 0.66f), FontStyle.Bold, GraphicsUnit.Pixel);
+            float tw = 0;
+            if (txt != null) tw = g.MeasureString(txt, font, PointF.Empty, StringFormat.GenericTypographic).Width;
+            float body = Math.Max(13f * a, txt != null ? tw + 2 * pad + cabs * cab : 0);   // sin el morro
+            // con rumbo, el morro acaba justo en el punto (la cabeza del tren: ahí empieza su camino por delante); sin rumbo, centrada
+            float L = body + N, x0 = hasHeading ? -L : -L / 2, xn = x0 + body;
+            double ang = (hasHeading ? heading : axis ?? 90) - 90;
+            var st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TranslateTransform(p.X, p.Y);
+            g.RotateTransform((float)ang);
+            float r = W * 0.28f;
+            using var path = new GraphicsPath();
+            path.AddArc(x0, -W / 2, 2 * r, 2 * r, 180, 90);
+            if (hasHeading)
+            {
+                path.AddLine(x0 + r, -W / 2, xn, -W / 2);
+                path.AddLine(xn, -W / 2, xn + N, 0);
+                path.AddLine(xn + N, 0, xn, W / 2);
+                path.AddLine(xn, W / 2, x0 + r, W / 2);
+            }
+            else
+            {
+                path.AddLine(x0 + r, -W / 2, xn - r, -W / 2);
+                path.AddArc(xn - 2 * r, -W / 2, 2 * r, 2 * r, 270, 90);
+                path.AddArc(xn - 2 * r, W / 2 - 2 * r, 2 * r, 2 * r, 0, 90);
+                path.AddLine(xn - r, W / 2, x0 + r, W / 2);
+            }
+            path.AddArc(x0, W / 2 - 2 * r, 2 * r, 2 * r, 90, 90);
+            path.CloseFigure();
+            using (var halo = new Pen(Color.FromArgb(60, c), Math.Min(W * 0.35f, 5f)) { LineJoin = LineJoin.Round }) g.DrawPath(halo, path);
+            using (var b = new SolidBrush(c)) g.FillPath(b, path);
+            var dark = Color.FromArgb(235, (int)(c.R * 0.16), (int)(c.G * 0.16), (int)(c.B * 0.16));
+            using (var pen = new Pen(dark, Math.Max(1.1f, 0.65f * a)) { LineJoin = LineJoin.Round }) g.DrawPath(pen, path);
+            // ventanilla de la cabina, junto al morro (sin rumbo: una en cada extremo)
+            using (var wb = new SolidBrush(Color.FromArgb(150, dark)))
+            {
+                g.FillRectangle(wb, xn - cab + W * 0.08f, -W * 0.3f, cab - W * 0.2f, W * 0.6f);
+                if (!hasHeading) g.FillRectangle(wb, x0 + W * 0.12f, -W * 0.3f, cab - W * 0.2f, W * 0.6f);
+            }
+            if (txt != null)
+            {
+                float cx = hasHeading ? x0 + pad + (body - cab - 2 * pad) / 2 + pad * 0.1f : x0 + body / 2;
+                var ts = g.Save();
+                g.TranslateTransform(cx, 0);
+                double norm = ((ang % 360) + 360) % 360;
+                if (norm > 90 && norm < 270) g.RotateTransform(180);   // (que no quede boca abajo)
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                using var sf = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                using (var tb = new SolidBrush(dark)) g.DrawString(txt, font, tb, new PointF(0, W * 0.04f), sf);
+                g.Restore(ts);
+            }
+            g.Restore(st);
+            // lo que ocupa (las cuatro esquinas, giradas)
+            double rad = ang * Math.PI / 180, co = Math.Cos(rad), si = Math.Sin(rad);
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            foreach (var (lx, ly) in new[] { (x0, -W / 2), (x0 + L, -W / 2), (x0, W / 2), (x0 + L, W / 2) })
+            {
+                float sx = p.X + (float)(lx * co - ly * si), sy = p.Y + (float)(lx * si + ly * co);
+                minX = Math.Min(minX, sx); maxX = Math.Max(maxX, sx); minY = Math.Min(minY, sy); maxY = Math.Max(maxY, sy);
+            }
+            return RectangleF.FromLTRB(minX, minY, maxX, maxY);
         }
 
         static void Arrow(Graphics g, PointF p, LiveMarker m, float a)
@@ -305,7 +388,7 @@ namespace SelectOR
         // Devuelve la zona de cada fila para centrar el mapa en ese usuario al hacer clic.
         public static List<(Rectangle hit, LiveMarker m)> Legend(Graphics g, Rectangle area, string meName, string meCompany,
                                                                  IReadOnlyList<LiveMarker> mates, out Rectangle box,
-                                                                 bool includeMe = true)
+                                                                 bool includeMe = true, string meStatus = null)
         {
             var hits = new List<(Rectangle, LiveMarker)>();
             box = Rectangle.Empty;
@@ -318,12 +401,13 @@ namespace SelectOR
             var rows = new List<(string name, string status, Color c, LiveMarker m)>();
             if (includeMe)
                 rows.Add((I18n.T("Tú") + (string.IsNullOrWhiteSpace(meName) ? "" : " (" + LiveMates.ShortName(meName) + ")"),
-                          Status(meCompany), Color.FromArgb(120, 210, 150), null));
-            foreach (var m in mates) rows.Add((m.Short, Status(m.Company), m.Color, m));
+                          meStatus ?? Status(meCompany), Color.FromArgb(120, 210, 150), null));
+            foreach (var m in mates) rows.Add((m.Short, m.Status ?? Status(m.Company), m.Color, m));
             int extra = Math.Max(0, rows.Count - maxRows);
             if (extra > 0) rows.RemoveRange(maxRows, rows.Count - maxRows);
 
-            string title = I18n.T("EN LA RUTA AHORA"), sub = I18n.T("Comunidad SelectOR"), foot = I18n.T("Clic en un nombre: centrar");
+            bool room = System.Linq.Enumerable.All(mates, m => m.Room);   // en una sala: sus jugadores
+            string title = I18n.T(room ? "EN LA SALA" : "EN LA RUTA AHORA"), sub = I18n.T(room ? "Servidores SelectOR" : "Comunidad SelectOR"), foot = I18n.T("Clic en un nombre: centrar");
             if (extra > 0) foot = string.Format(I18n.T("y {0} más"), extra) + " · " + foot;
             int nameW = 0, stW = 0;
             foreach (var r in rows)

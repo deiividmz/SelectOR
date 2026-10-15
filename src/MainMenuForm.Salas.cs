@@ -84,8 +84,12 @@ namespace SelectOR
             return page;
         }
 
+        // (si la ruta elegida ya es esa, la elegida: con dos carpetas de ruta con el mismo nombre se cambiaba a la otra y se
+        // perdía el recorrido elegido)
         ORTS.Menu.Route RouteByName(string name)
-            => _routesAll.FirstOrDefault(x => string.Equals(x.Name?.Trim(), name?.Trim(), StringComparison.OrdinalIgnoreCase)
+            => (_curRoute != null && (string.Equals(_curRoute.Name?.Trim(), name?.Trim(), StringComparison.OrdinalIgnoreCase)
+                                      || string.Equals(System.IO.Path.GetFileName((_curRoute.Path ?? "").TrimEnd('\\', '/')), name?.Trim(), StringComparison.OrdinalIgnoreCase)) ? _curRoute : null)
+               ?? _routesAll.FirstOrDefault(x => string.Equals(x.Name?.Trim(), name?.Trim(), StringComparison.OrdinalIgnoreCase)
                                            || string.Equals(System.IO.Path.GetFileName((x.Path ?? "").TrimEnd('\\', '/')), name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
         void UpdateRoomButtons()
@@ -156,11 +160,8 @@ namespace SelectOR
             if (route == null && it.AnyRoute && it.LiveRoute != null) { Warn(string.Format(Tr("En esta sala se está jugando en la ruta «{0}», que no tienes en esta carpeta de contenido."), it.LiveRoute)); return; }
             if (route == null && it.AnyRoute) { Warn(Tr("Esta sala no tiene ruta asignada: elige primero la ruta con la que quieres entrar.")); return; }
             if (route == null) { Warn(string.Format(Tr("No tienes la ruta «{0}» en esta carpeta de contenido: hace falta para entrar en la sala."), it.Route)); return; }
-            if (!MPUserValid(_txtMPUser.Text.Trim()))
-            {
-                Warn(Tr("El usuario de Multijugador debe tener de 4 a 10 caracteres, sin espacios ni ' \" -, y no puede empezar por un número."));
-                return;
-            }
+            // el nombre del jugador, en su ventana (MainMenuForm.MpConectar.cs; la IP y el puerto de la sala no se enseñan)
+            if (!MpConnectDialog(false, it.Name)) return;
             // contraseña (si la tiene) y el permiso: lo comprueba el servidor y da la IP y el puerto
             JsonElement? ok = null;
             async Task<string> Try(string pw)

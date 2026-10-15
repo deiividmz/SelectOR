@@ -157,7 +157,7 @@ namespace SelectOR
             UpdateItineraryChip();   // el itinerario elegido es de cada ruta
             if (_tripLine == null) return;
             var p = CurrentPath();
-            string st = _cboStart?.SelectedItem as string ?? "", en = _cboEnd?.SelectedItem as string ?? "";
+            string st = _cboStart?.SelectedItem as string ?? "", en = EndStation();
             if (p == null || _pathsAll.Count == 0)
             {
                 _tripLine.Km = 0; _tripLine.Count = 0; _tripLine.Empty = _pathsAll.Count == 0 ? Tr("Esta ruta no tiene recorridos.") : "";
@@ -181,13 +181,13 @@ namespace SelectOR
         // Intercambia salida y llegada (solo si hay un recorrido en el otro sentido).
         void SwapTrip()
         {
-            string st = _cboStart.SelectedItem as string ?? "", en = _cboEnd.SelectedItem as string ?? "";
+            string st = _cboStart.SelectedItem as string ?? "", en = EndStation();
             if (!_pathsAll.Any(x => (x.Start ?? "") == en && (x.End ?? "") == st)) return;
             int i = _cboStart.Items.IndexOf(en);
             if (i < 0) return;
             _cboStart.SelectedIndex = i;   // rellena las llegadas (OnStartChanged)
-            int j = _cboEnd.Items.IndexOf(st);
-            if (j >= 0) _cboEnd.SelectedIndex = j;
+            for (int j = 0; j < _cboEnd.Items.Count; j++)
+                if (_cboEnd.Items[j] is TripEnd t && t.End == st) { _cboEnd.SelectedIndex = j; break; }
         }
 
         // ---------------- desplegables de los chips ----------------

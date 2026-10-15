@@ -383,23 +383,22 @@ namespace SelectOR
             var dict = air ? _prefs?.CabAirScaleBar : _prefs?.CabBcScaleBar;
             double cur = 0; if (_machineKey != null) dict?.TryGetValue(_machineKey, out cur);
             string Num(double v) => v.ToString(v % 1 == 0 ? "0" : "0.#", System.Globalization.CultureInfo.InvariantCulture);
-            var cm = MenuStyle.Apply(new ContextMenuStrip() { ShowImageMargin = false, ShowCheckMargin = true });
-            cm.Items.Add(new ToolStripMenuItem(air ? I18n.T("Escala del manómetro TDP/TFA") : I18n.T("Escala del cilindro de freno")) { Enabled = false });
-            var it = new ToolStripMenuItem(string.Format(I18n.T("Automática: 0-{0} {1}"), Num(auto), unit)) { Checked = cur <= 0 };
-            it.Click += (s, e) => SetGauge(air, 0);
-            cm.Items.Add(it);
+            // (menú propio: uno de Windows se cerraría solo, porque el pupitre no le quita el foco a Open Rails)
+            bool can = _machineKey != null;
+            var items = new List<OverlayMenu.Item>
+            {
+                new OverlayMenu.Item { Text = string.Format(I18n.T("Automática: 0-{0} {1}"), Num(auto), unit), Checked = cur <= 0, Enabled = can, Click = () => SetGauge(air, 0) }
+            };
             foreach (double bar in GaugePresetsBar)
             {
                 double v = InUnit(bar, f);
                 string txt = Math.Abs(f - 1) < 1e-9 ? $"0-{Num(v)} bar" : $"0-{Num(v)} {unit}  (≈{Num(bar)} bar)";
-                var x = new ToolStripMenuItem(txt) { Checked = cur > 0 && Math.Abs(cur - bar) < 0.01 };
-                x.Click += (s, e) => SetGauge(air, bar);
-                cm.Items.Add(x);
+                double b0 = bar;
+                items.Add(new OverlayMenu.Item { Text = txt, Checked = cur > 0 && Math.Abs(cur - bar) < 0.01, Enabled = can, Click = () => SetGauge(air, b0) });
             }
-            if (_machineKey == null) foreach (ToolStripItem i in cm.Items) if (i != cm.Items[0]) i.Enabled = false;
-            cm.Items.Add(new ToolStripSeparator());
-            cm.Items.Add(new ToolStripMenuItem(I18n.T("Se recuerda para esta máquina")) { Enabled = false });
-            cm.Show(at);
+            items.Add(OverlayMenu.Item.Sep());
+            items.Add(new OverlayMenu.Item { Text = I18n.T("Se recuerda para esta máquina"), Enabled = false });
+            OverlayMenu.Show(at, air ? I18n.T("Escala del manómetro TDP/TFA") : I18n.T("Escala del cilindro de freno"), items);
         }
 
         void SetGauge(bool air, double bar)

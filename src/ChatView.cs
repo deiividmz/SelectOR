@@ -19,6 +19,7 @@ namespace SelectOR
         public string UserId = "", User = "", Role = "", Body = "";
         public DateTime AtUtc;
         public bool Edited, Deleted;      // rastro público: «Editado» / «Eliminado»
+        public bool Fixed;                // no se puede editar ni eliminar (chat de la sala)
     }
 
     // Chat de una empresa: mensajes recibidos y mi permiso.
@@ -230,21 +231,26 @@ namespace SelectOR
                 if (it != null && !it.M.Deleted)
                 {
                     var m = it.M;
-                    var cm = MenuStyle.Apply(new ContextMenuStrip());
-                    cm.Items.Add(I18n.T("Copiar mensaje"), null, (s, a) => { try { Clipboard.SetText(m.Body); } catch { } });
-                    if (it.Mine && (EditRequested != null || DeleteRequested != null))
+                    // (menú propio: en el HUD del chat, uno de Windows se cerraría solo porque no le quita el foco a Open Rails)
+                    var items = new List<OverlayMenu.Item> { new OverlayMenu.Item { Text = I18n.T("Copiar mensaje"), Click = () => { try { Clipboard.SetText(m.Body); } catch { } } } };
+                    if (it.Mine && !m.Fixed && (EditRequested != null || DeleteRequested != null))
                     {
-                        cm.Items.Add(new ToolStripSeparator());
-                        if (EditRequested != null) cm.Items.Add(I18n.T("Editar mensaje"), null, (s, a) => EditRequested(m));
+                        items.Add(OverlayMenu.Item.Sep());
+                        if (EditRequested != null) items.Add(new OverlayMenu.Item { Text = I18n.T("Editar mensaje"), Click = () => EditRequested(m) });
                         if (DeleteRequested != null)
-                        {
-                            // sin diálogos (en el HUD quedarían detrás del simulador): se confirma en un submenú
-                            var del = new ToolStripMenuItem(I18n.T("Eliminar mensaje"));
-                            del.DropDownItems.Add(I18n.T("Sí, eliminarlo (los demás verán «Mensaje eliminado»)"), null, (s, a) => DeleteRequested(m));
-                            cm.Items.Add(del);
-                        }
+                            // sin diálogos (en el HUD quedarían detrás del simulador): se confirma en el propio menú
+                            items.Add(new OverlayMenu.Item
+                            {
+                                Text = I18n.T("Eliminar mensaje"), Color = Color.FromArgb(239, 83, 80),
+                                ThenTitle = I18n.T("¿Eliminar el mensaje?"),
+                                Then = new List<OverlayMenu.Item>
+                                {
+                                    new OverlayMenu.Item { Text = I18n.T("Sí, eliminarlo (los demás verán «Mensaje eliminado»)"), Color = Color.FromArgb(239, 83, 80), Click = () => DeleteRequested(m) },
+                                    new OverlayMenu.Item { Text = I18n.T("Cancelar"), Click = () => { } }
+                                }
+                            });
                     }
-                    cm.Show(this, e.Location);
+                    OverlayMenu.Show(PointToScreen(e.Location), null, items);
                 }
             }
             base.OnMouseUp(e);

@@ -84,6 +84,11 @@ namespace SelectOR
             finally { System.Threading.Interlocked.Decrement(ref _inFlight); }
         }
 
+        // Descargas y subidas grandes (imágenes del clima, ClimaFiles.cs): sin el tope de 25 s. Las pruebas ponen el suyo.
+        static HttpClient _httpBig;
+        public static HttpClient HttpBig() => _httpBig ??= new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        public static HttpRequestMessage NewRequest(HttpMethod m, string path, bool useUserToken = true) => Req(m, path, null, useUserToken);
+
         static HttpClient Http()
         {
             if (_http == null)

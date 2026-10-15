@@ -1,5 +1,6 @@
 // Revisión (superadmin): las infracciones del carné en tarjetas, una por fila, con todo a la vista:
 // código y nombre, maquinista, empresa, fecha, tren, recorrido, detalle, puntos, estado y quién la revisó.
+// Con mapas (WithMaps), además, el tramo de vía de la infracción con los límites de la ruta y su perfil (InfrMap.cs).
 
 using System;
 using System.Drawing;
@@ -14,6 +15,10 @@ namespace SelectOR
         public string Driver = "", Company = "", When = "", Train = "", Route = "", Detail = "", Reviewer = "";
         public int Points;
         public double AtS = double.NaN;   // segundos desde el inicio del servicio hasta la infracción (NaN = no se sabe)
+        public InfrPlace Place;           // dónde fue (null: infracción anterior a la 1.2.64)
+        public InfrMap Map;               // su mapa, ya preparado
+        public string MapNote;            // por qué no hay mapa (o null)
+        internal bool MapAsked;
         // «a los 12 min 30 s del inicio del servicio»
         public string AtText
         {
@@ -41,7 +46,9 @@ namespace SelectOR
 
         protected override int MinCardW => Theme.Px(600);
         protected override int MaxCols => 1;
-        protected override int CardH => Theme.Px(94);
+        public bool WithMaps;                      // infracciones: con su mapa y su perfil de límites
+        public Action<ReviewItem> NeedMap;         // preparar el mapa de una tarjeta que se ve (se repinta al acabar)
+        protected override int CardH => Theme.Px(WithMaps ? 230 : 94);
         protected override int Gap => Theme.Px(8);
 
         protected override void Dispose(bool disposing)
@@ -86,7 +93,33 @@ namespace SelectOR
                     new Rectangle(right, pill.Bottom + Theme.Px(2), rightW - pad, Theme.Px(18)), Theme.Subtle, R1);
             using (var sep = new Pen(Theme.Surface2)) g.DrawLine(sep, right - Theme.Px(8), rc.Y + Theme.Px(12), right - Theme.Px(8), rc.Bottom - Theme.Px(12));
 
-            int tw = right - Theme.Px(18) - tx;
+            // Mapa (a la derecha, antes de los puntos) y perfil de límites (debajo del texto)
+            bool maps = WithMaps && it.Code != "train_kind";
+            int contentRight = right;
+            if (maps)
+            {
+                int mapW = Math.Min(Theme.Px(440), (int)((right - rc.X) * 0.46));
+                var mapR = new Rectangle(right - Theme.Px(18) - mapW, rc.Y + Theme.Px(12), mapW, rc.Height - Theme.Px(24));
+                var profR = new Rectangle(rc.X + pad + Theme.Px(2), rc.Y + Theme.Px(94), mapR.Left - Theme.Px(12) - (rc.X + pad + Theme.Px(2)), rc.Bottom - Theme.Px(12) - (rc.Y + Theme.Px(94)));
+                contentRight = mapR.Left - Theme.Px(4);
+                float k = Theme.Px(100) / 100f;
+                if (it.Map != null)
+                {
+                    it.Map.PaintMap(g, mapR, _fSmall, _fBold, k);
+                    it.Map.PaintProfile(g, profR, _fSmall, _fBold, k);
+                }
+                else
+                {
+                    if (!it.MapAsked && it.Place != null) NeedMap?.Invoke(it);
+                    string note = it.Place == null ? I18n.T("Sin mapa: la infracción es de antes de la 1.2.64 (no se guardaba dónde ocurrió).")
+                                : it.MapNote ?? I18n.T("Preparando el mapa…");
+                    using (var bp = Theme.Round(mapR, Theme.Px(8))) using (var b = new SolidBrush(Color.FromArgb(30, 34, 38))) g.FillPath(b, bp);
+                    var nr = Rectangle.Inflate(mapR, -Theme.Px(14), -Theme.Px(10));
+                    TextRenderer.DrawText(g, note, _fText, nr, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+                }
+            }
+
+            int tw = contentRight - Theme.Px(18) - tx;
             // 1) nombre de la infracción
             int nw = Math.Min(TW(Carne.Name(it.Code), _fTitle), tw);
             TextRenderer.DrawText(g, Carne.Name(it.Code), _fTitle, new Rectangle(tx, y, nw + 2, Theme.Px(22)), annulled ? Theme.Subtle : Theme.Text, L1);

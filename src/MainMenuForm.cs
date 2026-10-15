@@ -117,8 +117,9 @@ namespace SelectOR
         RadioButton _rbClient, _rbServer;
         TextBox _txtMPUser, _txtMPHost, _txtMPPort;
         Label _lblMPInfo;
-        string _mpClientHost;      // la IP escrita para unirse (se guarda mientras el campo enseña la IP propia)
-        bool _mpShowingOwnIp;      // el campo Host enseña la IP de este equipo (modo Servidor)
+        string _mpClientHost;      // la IP escrita para unirse (se guarda mientras el campo enseña la de alojar)
+        string _mpHostIp = "127.0.0.1";   // la IP al alojar partida (por defecto, este equipo)
+        bool _mpShowingOwnIp;      // el campo Host enseña la IP de alojar (modo Servidor)
         Label _lblMPUserRule;
         Label _lblServers;
         List<GameServer> _serversAll = new List<GameServer>();
@@ -216,6 +217,8 @@ namespace SelectOR
             Layout += (s, e) => LayoutBottomBar();
             Shown += (s, e) => { ApplyResponsiveChrome(); ApplyAdaptiveTexts(); ApplyTabIcons(); LayoutBottomBar(); };
             Shown += (s, e) => StartPresence();      // usuarios conectados en la portada (MainMenuForm.Conectados.cs)
+            Shown += (s, e) => ReShadeFiles.Remove();   // gráficos: si quedó el dxgi.dll de ReShade de otra vez, fuera (ReShadeFiles.cs)
+            Shown += (s, e) => { ClimaFiles.Remove(); ClimaSyncSoon(); };   // clima: las imágenes de Open Rails en su sitio y el clima al día
             Shown += (s, e) => StartUpdateChecks();   // aviso de nueva versión (al arrancar y cada 3 h)            LayoutBottomBar();
         }
 
@@ -488,6 +491,9 @@ namespace SelectOR
             var btnOptions = MakeChip("", 36, "gear");
             btnOptions.Click += (s, e) => LaunchSibling("Menu.exe", "");
             tip.SetToolTip(btnOptions, Tr("Opciones OR"));
+            var btnSettings = MakeChip("", 36, "joystick");
+            btnSettings.Click += (s, e) => ShowSelectorSettings();
+            tip.SetToolTip(btnSettings, Tr("Ajustes de SelectOR (mandos)"));
             var btnAbout = MakeChip("", 36, "info");
             btnAbout.Click += (s, e) => ShowAbout();
             tip.SetToolTip(btnAbout, Tr("Acerca de SelectOR"));
@@ -503,7 +509,7 @@ namespace SelectOR
                 top.Controls.Add(pill);
             }
 
-            top.Controls.AddRange(new Control[] { logo, _lblVersion, lblPack, _cboFolder, btnResume, btnOptions, btnAbout });
+            top.Controls.AddRange(new Control[] { logo, _lblVersion, lblPack, _cboFolder, btnResume, btnOptions, btnSettings, btnAbout });
             top.Layout += (s, e) =>
             {
                 int band = Math.Max(Theme.Px(28), top.ClientSize.Height - stripe.Height);
@@ -535,7 +541,7 @@ namespace SelectOR
                     foreach (var c in configs)
                         foreach (var se in new[] { false, true })
                         {
-                            int tools = Theme.Px(36) * 2 + gap * 2 + (c.resume ? resumeFull : Theme.Px(36)) + gap + Theme.Px(c.combo) + Theme.Px(14)
+                            int tools = Theme.Px(36) * 3 + gap * 3 + (c.resume ? resumeFull : Theme.Px(36)) + gap + Theme.Px(c.combo) + Theme.Px(14)
                                       + (c.label ? TextRenderer.MeasureText(lblPack.Text, lblPack.Font).Width + gap : 0);
                             if (tabsX + TabsW(withGlyphs, se) + Theme.Px(10) <= right - tools) { pick = c; glyphs = withGlyphs; shortEd = se; found = true; goto done; }
                         }
@@ -543,9 +549,10 @@ namespace SelectOR
                     if (found) break;
                 }
 
-                btnAbout.Size = btnOptions.Size = new Size(Theme.Px(36), chipH);
+                btnAbout.Size = btnOptions.Size = btnSettings.Size = new Size(Theme.Px(36), chipH);
                 btnAbout.Location = new Point(right - btnAbout.Width, chipY);
-                btnOptions.Location = new Point(btnAbout.Left - btnOptions.Width - gap, chipY);
+                btnSettings.Location = new Point(btnAbout.Left - btnSettings.Width - gap, chipY);
+                btnOptions.Location = new Point(btnSettings.Left - btnOptions.Width - gap, chipY);
                 btnResume.Text = pick.resume ? Tr("Reanudar") : "";
                 btnResume.Size = new Size(pick.resume ? resumeFull : Theme.Px(36), chipH);
                 btnResume.Location = new Point(btnOptions.Left - btnResume.Width - gap, chipY);
@@ -1184,6 +1191,7 @@ namespace SelectOR
             _lstConsists.ContextMenuStrip = consistCtx;
             var trainsHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 4, 0, 0) };
             trainsHost.Controls.Add(_lstConsists);
+            BuildTrainNotice(trainsHost);   // «N trenes no salen aquí porque…» (MainMenuForm.AvisoTrenes.cs)
             _consistsOverlay = new ListStatePanel { Bg = Theme.Bg, Icon = "🚆" };
             trainsHost.Controls.Add(_consistsOverlay);
             void syncConsistsOverlay() { if (_consistsOverlay != null) { _consistsOverlay.Bounds = _lstConsists.Bounds; if (_consistsOverlay.Visible) _consistsOverlay.BringToFront(); } }
@@ -1357,6 +1365,7 @@ namespace SelectOR
                 if (_classifyLbl.Text != t) _classifyLbl.Text = t;
             }
             if (done != _classShown) { _classShown = done; RefreshConsistList(); }
+            else UpdateTrainNotice();
             if (finished) _classifyTimer?.Stop();
         }
 
@@ -1835,15 +1844,16 @@ namespace SelectOR
         {
             var page = new Panel { BackColor = Theme.Bg };
 
-            // ---- arriba: cómo quieres jugar · tus datos ----
+            // ---- arriba: cómo quieres jugar ----
+            // Sin la tarjeta «Tus datos»: el nombre del jugador, la IP y el puerto se piden en una ventana al pulsar «Alojar
+            // partida» o «Unirme a un servidor» (y al unirse a uno de la lista), con su botón Conectar (MpConnectDialog).
             // (Los tamaños fijos de aquí los escala la ventana; el alto de arriba se calcula con el contenido, ver LayoutMpTop.)
-            var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 212, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Padding = new Padding(0, 0, 0, 12) };
-            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-            var right = new Card { Dock = DockStyle.Fill, Fill = Theme.Surface, Radius = 12, Padding = new Padding(14, 10, 14, 10), Margin = new Padding(6, 0, 0, 0) };
+            var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 160, ColumnCount = 1, RowCount = 1, BackColor = Theme.Bg, Padding = new Padding(0, 0, 0, 12) };
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var right = new Panel { Visible = false };   // (los campos siguen existiendo: el resto del programa los lee)
             _mpMode = new MpModeCards(new[] { ("🖥", Tr("Alojar partida"), Tr("Tu PC es el servidor (red local o puerto abierto)")),
-                                              ("🔗", Tr("Unirme a un servidor"), Tr("Elige uno público abajo o escribe la dirección")) })
-                      { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0), Caption = Tr("CÓMO QUIERES JUGAR") };
+                                              ("🔗", Tr("Unirme a un servidor"), Tr("Escribe su dirección, o elige uno de la lista de abajo")) })
+                      { Dock = DockStyle.Fill, Margin = new Padding(0), Caption = Tr("CÓMO QUIERES JUGAR") };
             // La nota sigue en una etiqueta (la rellena ApplyMPMode), pero la pinta la tarjeta.
             var info = new Label { Visible = false, Text = Tr("Se lanza la selección de «Conducción libre» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.") };
             _lblMPInfo = info;
@@ -1860,6 +1870,7 @@ namespace SelectOR
             // Primero el de servidor: si se desmarcaba antes el de cliente, ApplyMPMode veía los dos sin marcar
             // y «Alojar partida» se quedaba sin tu IP en «Servidor».
             _mpMode.Changed += i => { _rbServer.Checked = i == 0; _rbClient.Checked = i == 1; ApplyMPMode(); UpdateStatus(); };
+            _mpMode.Clicked += i => { if (MpConnectDialog(i == 0)) PlayMultiplayer(); };
 
             var data = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
             var lblD = new Label { Text = Tr("TUS DATOS"), Location = new Point(0, 0), AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold) };
@@ -1886,9 +1897,10 @@ namespace SelectOR
             data.Resize += (s, e) => PlaceConnectButton(data);
             data.HandleCreated += (s, e) => PlaceConnectButton(data);
             right.Controls.Add(data);
-            top.Controls.Add(left, 0, 0); top.Controls.Add(right, 1, 0);
+            top.Controls.Add(left, 0, 0);
             right.Controls.Add(info);
-            _mpTop = top; _mpRight = right;
+            page.Controls.Add(right);
+            _mpTop = top; _mpRight = null;
             top.SizeChanged += (s, e) => LayoutMpTop();
             ApplyMPMode();
 
@@ -1927,7 +1939,7 @@ namespace SelectOR
                 }
             };
             _srvGrid.Selected += it => SelectServer(it.S);
-            _srvGrid.Join += it => { SelectServer(it.S); PlayMultiplayer(); };
+            _srvGrid.Join += it => { SelectServer(it.S); if (MpConnectDialog(false)) PlayMultiplayer(); };
             var srvHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 6, 0, 0) };
             srvHost.Controls.Add(_srvGrid);
             var listHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -1971,12 +1983,15 @@ namespace SelectOR
         // Alto de «Cómo quieres jugar · Tus datos» según lo que ocupa cada tarjeta con su ancho real.
         void LayoutMpTop()
         {
-            if (_mpTop == null || _mpMode == null || _mpRight == null || _mpTop.Width <= 0) return;
+            if (_mpTop == null || _mpMode == null || _mpTop.Width <= 0) return;
             int leftW = _mpMode.Width > 0 ? _mpMode.Width : _mpTop.Width / 2;
             int need = _mpMode.NeededHeight(leftW);
             int rightNeed = 0;
-            foreach (Control c in _mpRight.Controls) foreach (Control k in c.Controls) if (k.Visible) rightNeed = Math.Max(rightNeed, k.Bottom);
-            rightNeed += _mpRight.Padding.Vertical + 6;
+            if (_mpRight != null)
+            {
+                foreach (Control c in _mpRight.Controls) foreach (Control k in c.Controls) if (k.Visible) rightNeed = Math.Max(rightNeed, k.Bottom);
+                rightNeed += _mpRight.Padding.Vertical + 6;
+            }
             int h = Math.Max(need, rightNeed) + _mpTop.Padding.Vertical;
             if (Math.Abs(_mpTop.Height - h) > 1) _mpTop.Height = h;
             _mpMode.Invalidate();
@@ -2001,27 +2016,18 @@ namespace SelectOR
             if (_rbServer.Checked)
             {
                 if (!_mpShowingOwnIp) _mpClientHost = _txtMPHost.Text;
-                string ip = LocalIPv4();
-                var bg = _txtMPHost.BackColor;
-                _txtMPHost.ReadOnly = true; _txtMPHost.BackColor = bg;
-                _txtMPHost.ForeColor = Theme.AccentHi;
-                _txtMPHost.Text = ip ?? Tr("(sin red)");
+                _txtMPHost.ReadOnly = false;
+                _txtMPHost.Text = string.IsNullOrWhiteSpace(_mpHostIp) ? "127.0.0.1" : _mpHostIp;
                 _mpShowingOwnIp = true;
-                if (_lblMPInfo != null)
-                    _lblMPInfo.Text = ip != null
-                        ? string.Format(Tr("Tu IP en la red local es {0}: dásela a los demás jugadores junto con el puerto. Para jugar por internet, abre ese puerto (TCP) en tu router y da tu IP pública."), ip)
-                        : Tr("No se ha encontrado ninguna red activa en este equipo.");
             }
             else
             {
                 if (_mpShowingOwnIp) _txtMPHost.Text = _mpClientHost ?? "";
-                var bg = _txtMPHost.BackColor;
-                _txtMPHost.ReadOnly = false; _txtMPHost.BackColor = bg;
-                _txtMPHost.ForeColor = Theme.Text;
+                _txtMPHost.ReadOnly = false;
                 _mpShowingOwnIp = false;
-                if (_lblMPInfo != null)
-                    _lblMPInfo.Text = Tr("Se lanza la selección de «Conducción libre» (recorrido + tren) en red. Configura tu usuario; como cliente, indica el host y el puerto del servidor.");
             }
+            if (_lblMPInfo != null)
+                _lblMPInfo.Text = Tr("Pulsa una de las dos: se abre una ventana con tu nombre de jugador, la IP y el puerto, y desde ella te conectas. Se juega con lo elegido en «Conducción libre» (recorrido y tren).");
             _txtMPHost.Enabled = true;
         }
 
@@ -2177,26 +2183,58 @@ namespace SelectOR
             return lb;
         }
 
+        // Una llegada de «Ir hacia». Si varios recorridos (.pat) van de la misma salida a la misma llegada (en algunas rutas
+        // pasa con 1 de cada 15: «Aranda-Sur-A» y «Aranda-Sur-B»), sale uno por recorrido, con su nombre: antes solo salía
+        // la estación y se lanzaba siempre el primero (también al entrar en una sala multijugador).
+        sealed class TripEnd
+        {
+            public string End, Label; public OrPath Path;
+            public override string ToString() => Label;
+        }
+
         // Al cambiar "Empezar en", recalcula los destinos disponibles para ese origen.
         void OnStartChanged()
         {
             if (_cboEnd == null) return;
             var start = _cboStart.SelectedItem as string ?? "";
             _cboEnd.Items.Clear();
-            foreach (var en in _pathsAll.Where(p => (p.Start ?? "") == start).Select(p => p.End ?? "").Distinct().OrderBy(s => s, StringComparer.CurrentCultureIgnoreCase))
-                _cboEnd.Items.Add(en);
+            foreach (var grp in _pathsAll.Where(p => (p.Start ?? "") == start).GroupBy(p => p.End ?? "").OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase))
+            {
+                var ps = grp.ToList();
+                if (ps.Count == 1) { _cboEnd.Items.Add(new TripEnd { End = grp.Key, Label = grp.Key, Path = ps[0] }); continue; }
+                // el nombre del recorrido; si dos se llaman igual, el del archivo
+                bool sameNames = ps.Select(p => (p.Name ?? "").Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() < ps.Count;
+                foreach (var p in ps.OrderBy(p => sameNames ? SysPath.GetFileNameWithoutExtension(p.FilePath ?? "") : p.Name ?? "", StringComparer.CurrentCultureIgnoreCase))
+                {
+                    string v = sameNames || string.IsNullOrWhiteSpace(p.Name) ? SysPath.GetFileNameWithoutExtension(p.FilePath ?? "") : p.Name.Trim();
+                    _cboEnd.Items.Add(new TripEnd { End = grp.Key, Label = grp.Key + "  ·  " + v, Path = p });
+                }
+            }
             if (_cboEnd.Items.Count > 0) _cboEnd.SelectedIndex = 0;
             UpdateStatus();
         }
 
-        // Recorrido (.pat) resultante del par Empezar en / Ir hacia.
+        // La estación de llegada elegida (sin el nombre del recorrido).
+        string EndStation() => (_cboEnd?.SelectedItem as TripEnd)?.End ?? _cboEnd?.SelectedItem as string ?? "";
+
+        // Recorrido (.pat) elegido en Empezar en / Ir hacia.
         OrPath CurrentPath()
         {
+            if (_cboEnd?.SelectedItem is TripEnd te && te.Path != null && _pathsAll.Contains(te.Path)) return te.Path;
             var st = _cboStart?.SelectedItem as string ?? "";
-            var en = _cboEnd?.SelectedItem as string ?? "";
+            var en = EndStation();
             foreach (var p in _pathsAll)
                 if ((p.Start ?? "") == st && (p.End ?? "") == en) return p;
             return _pathsAll.Count > 0 ? _pathsAll[0] : null;
+        }
+
+        // Elige ese recorrido exacto en Empezar en / Ir hacia.
+        void SelectTripPath(OrPath p)
+        {
+            if (p == null || _cboStart == null) return;
+            _cboStart.SelectedItem = p.Start ?? "";   // rellena las llegadas (OnStartChanged)
+            for (int i = 0; i < _cboEnd.Items.Count; i++)
+                if (_cboEnd.Items[i] is TripEnd t && t.Path == p) { _cboEnd.SelectedIndex = i; return; }
         }
 
         TextBox MakeReadonlyText()
@@ -2393,7 +2431,8 @@ namespace SelectOR
             try
             {
                 _txtMPUser.Text = MPUserValid(MPUserClean(_settings.Multiplayer_User)) ? MPUserClean(_settings.Multiplayer_User) : MPUserDefault();
-                _mpClientHost = string.IsNullOrEmpty(_settings.Multiplayer_Host) ? "127.0.0.1" : _settings.Multiplayer_Host;
+                _mpClientHost = !string.IsNullOrEmpty(_prefs?.MpClientHost) ? _prefs.MpClientHost
+                              : string.IsNullOrEmpty(_settings.Multiplayer_Host) ? "127.0.0.1" : _settings.Multiplayer_Host;
                 if (_mpShowingOwnIp) ApplyMPMode(); else _txtMPHost.Text = _mpClientHost;
                 _txtMPPort.Text = _settings.Multiplayer_Port > 0 ? _settings.Multiplayer_Port.ToString() : "30000";
             }
@@ -2439,6 +2478,7 @@ namespace SelectOR
             SetBusy(string.Format(Tr("Cargando rutas de «{0}»…"), _curFolder.Name));
             _routesOverlay?.SetState(ListStatePanel.Mode.Loading, Tr("Cargando rutas…"));
             _consistsOverlay?.SetState(ListStatePanel.Mode.Loading, Tr("Cargando trenes…"));
+            StartConsistsProgress();   // «Leyendo trenes: 4.500 de 12.000…» (la primera vez, sin índice)
             var folder = _curFolder;
 
             Task.Run(() =>
@@ -2647,6 +2687,7 @@ namespace SelectOR
                 }
                 shown.Add(c);
             }
+            _incompleteCount = kindCount[6];
             bool same = shown.Count == _lstConsists.Items.Count;
             for (int k = 0; same && k < shown.Count; k++) same = ReferenceEquals(shown[k], _lstConsists.Items[k]);
             _lstConsists.BeginUpdate();
@@ -2674,6 +2715,7 @@ namespace SelectOR
                 for (int i = 0; i < _lstConsists.Items.Count; i++)
                     if (((TrainItem)_lstConsists.Items[i]).FilePath == _prefs.LastConsist) { _lstConsists.SelectedIndex = i; break; }
             if (_lstConsists.SelectedIndex < 0 && _lstConsists.Items.Count > 0) _lstConsists.SelectedIndex = 0;
+            UpdateTrainNotice();
         }
 
         // Mientras la pestaña está cerrada, la lista no tiene ventana nativa y Windows se guarda los miles de
@@ -3261,8 +3303,9 @@ namespace SelectOR
                 if (room) RoomWriteSettings();
                 else
                 {
-                    if (_rbClient.Checked) _settings.Multiplayer_Host = host;
+                    _settings.Multiplayer_Host = host.Length > 0 ? host : "127.0.0.1";   // al alojar, la de alojar (127.0.0.1 por defecto)
                     _settings.Multiplayer_Port = port;
+                    if (_rbClient.Checked && _prefs != null && _prefs.MpClientHost != host) { _prefs.MpClientHost = host; try { _prefs.Save(); } catch { } }
                 }
                 _settings.Save();
             }
@@ -3370,6 +3413,15 @@ namespace SelectOR
             try
             {
                 var psi = new ProcessStartInfo { FileName = exe, Arguments = args, WorkingDirectory = AppContext.BaseDirectory, UseShellExecute = false };
+                // Multijugador: el agente del mapa entra en Open Rails al arrancar (MapAgent\: en el despachador, acepta las
+                // órdenes de señal y los nombramientos de ayudante del mapa grande). No cambia ningún archivo de Open Rails.
+                if (args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) >= 0) MapAgentFiles.Apply(psi);
+                // Conducción libre: el mismo agente, para que el mapa grande haga lo de Ctrl+9 (MainMenuForm.MapaLocal.cs)
+                LocalMapPrepare(psi, args);
+                // Gráficos: ReShade junto a Open Rails mientras se conduce (ReShadeFiles.cs; se quita al volver)
+                { string why = ReShadeFiles.Install(_prefs); if (why != null) RoomLog("gráficos: sin ReShade: " + why); }
+                // Clima: las imágenes de clima de SelectOR en Content mientras se conduce (ClimaFiles.cs; se quitan al volver)
+                { string why = ClimaFiles.Install(_prefs); if (why != null) RoomLog("clima: sin el de SelectOR: " + why); }
                 var p = Process.Start(psi);
                 _preLaunchState = WindowState;   // al volver del simulador se deja exactamente así
                 WindowState = FormWindowState.Minimized;

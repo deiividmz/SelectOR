@@ -13,9 +13,9 @@
     <AssemblyTitle>SelectOR</AssemblyTitle>
     <Company>David MZP</Company>
     <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
-    <Version>1.2.63</Version>
-    <AssemblyVersion>1.2.63.0</AssemblyVersion>
-    <FileVersion>1.2.63.0</FileVersion>
+    <Version>1.2.64</Version>
+    <AssemblyVersion>1.2.64.0</AssemblyVersion>
+    <FileVersion>1.2.64.0</FileVersion>
 
     <!-- Carpeta de una instalación de Open Rails (la que contiene OpenRails.exe). Por defecto,
          «OR Desplegado» junto a esta carpeta; se cambia al compilar con
@@ -48,6 +48,13 @@
   <ItemGroup>
     <EmbeddedResource Include="Pictogramas\*.png" LogicalName="pict.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Novedades\*.txt" LogicalName="novedades.%(Filename)%(Extension)" />
+    <!-- ReShade (BSD, © Patrick Mours) y el efecto de SelectOR: se ponen junto a Open Rails al conducir (ReShadeFiles.cs) -->
+    <EmbeddedResource Include="ReShade\ReShade64.dll" LogicalName="reshade.dxgi.dll" />
+    <EmbeddedResource Include="ReShade\*.fx;ReShade\*.fxh" LogicalName="reshade.shaders.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="ReShade\*.png" LogicalName="reshade.textures.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="ReShade\ejemplo.jpg" LogicalName="gfx.ejemplo.jpg" />
+    <EmbeddedResource Include="ReShade\LICENCIA-ReShade.txt" LogicalName="reshade.licencia.txt" />
+    <None Remove="ReShade\**" />
   </ItemGroup>
 
   <!-- Referencias a las DLLs ya compiladas de Open Rails (no se copian, Private=false) -->
@@ -99,5 +106,24 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <!-- El agente del mapa (multijugador) es un proyecto aparte (MapAgent\): no se compila aquí… -->
+  <ItemGroup>
+    <Compile Remove="MapAgent\**" />
+    <None Remove="MapAgent\**" />
+  </ItemGroup>
+  <!-- …pero se compila antes y va DENTRO de SelectOR.dll (con Harmony): SelectOR lo deja junto a Open Rails al entrar en
+       multijugador (MapAgentFiles.cs). Así llega con la actualización de siempre, que solo instala sus propios archivos. -->
+  <Target Name="BuildMapAgent" BeforeTargets="BeforeBuild">
+    <MSBuild Projects="MapAgent\SelectOR.MapAgent.csproj" Targets="Restore" Properties="Configuration=$(Configuration);ORDir=$([System.IO.Path]::GetFullPath('$(ORPath)'));_MaRestore=1" />
+    <MSBuild Projects="MapAgent\SelectOR.MapAgent.csproj" Targets="Build" Properties="Configuration=$(Configuration);ORDir=$([System.IO.Path]::GetFullPath('$(ORPath)'))" />
+    <ItemGroup>
+      <!-- .NET 6 (StartupHook) y .NET Framework (AgentDomainManager): SelectOR deja la que toca junto a Open Rails -->
+      <EmbeddedResource Include="MapAgent\bin\net6.0-windows\SelectOR.MapAgent.dll" LogicalName="mapagent.core.SelectOR.MapAgent.dll" />
+      <EmbeddedResource Include="MapAgent\bin\net6.0-windows\0Harmony.dll" LogicalName="mapagent.core.0Harmony.dll" />
+      <EmbeddedResource Include="MapAgent\bin\net472\SelectOR.MapAgent.dll" LogicalName="mapagent.fx.SelectOR.MapAgent.dll" />
+      <EmbeddedResource Include="MapAgent\bin\net472\0Harmony.dll" LogicalName="mapagent.fx.0Harmony.dll" />
+    </ItemGroup>
+  </Target>
 
 </Project>

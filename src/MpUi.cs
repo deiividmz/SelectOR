@@ -16,6 +16,7 @@ namespace SelectOR
     {
         public int Selected { get; private set; }
         public event Action<int> Changed;
+        public event Action<int> Clicked;   // al pulsar una opción (aunque ya estuviera elegida): abre su ventana
         public string Caption = "";
         string _info = "";
         public string Info { get => _info; set { if (_info == value) return; _info = value ?? ""; Invalidate(); } }
@@ -104,7 +105,7 @@ namespace SelectOR
         int HitOpt(Point p) { var (o, _) = Geo(Width); for (int i = 0; i < o.Length; i++) if (o[i].Contains(p)) return i; return -1; }
         protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); int h = HitOpt(e.Location); Cursor = h >= 0 ? Cursors.Hand : Cursors.Default; if (h != _hover) { _hover = h; Invalidate(); } }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hover = -1; Invalidate(); }
-        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); int h = HitOpt(e.Location); if (h >= 0) Select(h); }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); int h = HitOpt(e.Location); if (h >= 0) { Select(h); Clicked?.Invoke(h); } }
     }
 
     public class ServerCardGrid : CanvasPanel

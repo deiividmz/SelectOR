@@ -2,7 +2,9 @@
 // desvíos: los desvíos según el itinerario de la hoja de ruta se quitaron en la 1.2.63 (copia en «Proyecto Menú OR\
 // SelectOR Desvíos por itinerario (aparcado)»). Sigue haciendo falta para:
 //  · el HUD: si Open Rails está dentro de la sala y si eres el despachador (WHO cada 3 s, «SELECTOR YOU»);
-//  · la contraseña de las salas libres: si se va quien la abrió, pasa al que queda de despachador («GATE OWNER»).
+//  · la contraseña de las salas libres: si se va quien la abrió, pasa al que queda de despachador («GATE OWNER»);
+//  · el chat de la sala en el HUD (MainMenuForm.ChatSala.cs);
+//  · agujas, señales y trenes de la sala en el mapa grande (MainMenuForm.MapaSala.cs).
 // Con un servidor que no es el de SelectOR (el de Open Rails), no contesta y la conexión se retira sola.
 
 using System;
@@ -25,6 +27,8 @@ namespace SelectOR
             if (name.Length == 0) return;
             _pilot = new SwitchPilot(host, port, name, 1);
             _pilot.GateOwner += (tok, pw) => { try { BeginInvoke((Action)(() => RoomGateInherited(tok, pw))); } catch { } };
+            RoomChatHook(_pilot);   // chat de la sala en el HUD (MainMenuForm.ChatSala.cs)
+            RoomMapHook(_pilot);    // agujas, señales y trenes en el mapa grande (MainMenuForm.MapaSala.cs)
         }
 
         void PilotStop()
@@ -39,6 +43,7 @@ namespace SelectOR
             if (_pilot == null || !_scenarioReady) return;
             _pilot.EnsureStarted();
             if (_pilot.Ready) _pilot.Tick(Array.Empty<(int, int, int, int, double, double)>(), Array.Empty<(int, int, int)>());
+            RoomMapTick();
         }
     }
 }

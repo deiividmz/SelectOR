@@ -158,6 +158,7 @@ namespace SelectOR
                 case "resume": DrawResume(g, b, cx, cy); break;
                 case "gear": DrawGear(g, b, cx, cy); break;
                 case "info": DrawInfo(g, b, cx, cy); break;
+                case "joystick": DrawJoystick(g, b, cx, cy); break;
                 case "shield": DrawShield(g, b, cx, cy); break;
                 case "chat": ChatHudOverlay.DrawBubble(g, new Rectangle(cx - (int)(b.Width * 0.38f), cy - (int)(b.Height * 0.36f), (int)(b.Width * 0.76f), (int)(b.Height * 0.72f)), Color.FromArgb(94, 190, 155)); break;
                 case "bank": DrawBank(g, b, cx, cy); break;
@@ -389,6 +390,20 @@ namespace SelectOR
                 int ly = y + fold + 2 + k * (h - fold - 4) / 3;
                 g.DrawLine(line, x + w / 5, ly, x + w - w / 5, ly);
             }
+        }
+
+        // Palanca de mando sobre su base (Ajustes de SelectOR: mandos).
+        static void DrawJoystick(Graphics g, Rectangle b, int cx, int cy)
+        {
+            var sm = g.SmoothingMode; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            float w = b.Width * 0.70f, h = b.Height * 0.22f, top = cy + b.Height * 0.10f;
+            using var col = new SolidBrush(Color.FromArgb(176, 190, 197));
+            using (var p = Theme.Round(new Rectangle((int)(cx - w / 2), (int)top, (int)w, (int)h), (int)(h / 2))) g.FillPath(col, p);
+            using (var stick = new Pen(Color.FromArgb(176, 190, 197), Math.Max(2f, b.Width * 0.09f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                g.DrawLine(stick, cx, top, cx + b.Width * 0.06f, cy - b.Height * 0.20f);
+            float r = b.Width * 0.14f;
+            using (var knob = new SolidBrush(Color.FromArgb(239, 83, 80))) g.FillEllipse(knob, cx + b.Width * 0.06f - r, cy - b.Height * 0.20f - r, 2 * r, 2 * r);
+            g.SmoothingMode = sm;
         }
 
         static void DrawInfo(Graphics g, Rectangle b, int cx, int cy)

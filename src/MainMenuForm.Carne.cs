@@ -424,7 +424,7 @@ namespace SelectOR
             if (shortTrip) _infrItems.Clear();
             if (_infrItems.Count == 0) return rep;
             var items = new List<object>();
-            foreach (var (code, detail) in _infrItems) items.Add(new { code, detail });
+            foreach (var (code, detail) in _infrItems) { InfrAddPlace(detail); items.Add(new { code, detail }); }   // (con dónde fue: MainMenuForm.InfrLugar.cs)
             var (json, err) = await Supa.RpcAsync("report_infractions",
                 new { p_service = svc, p_items = items, p_km = Math.Round(km, 1), p_duration_s = durationS });
             // Servidor sin carne-revision-superadmin.sql: sin los km ni la duración.
@@ -582,24 +582,34 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // tabla
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // acciones
 
-            var intro = EmpIntro("Todas las infracciones del carné de todos los usuarios. En cualquier momento puedes aprobarlas (los puntos quedan restados), anularlas (se devuelven los puntos) o eliminarlas (se devuelven los puntos y se borran). Los excesos de velocidad (B6 y B7) llegan pendientes de revisión.");
+            var intro = EmpIntro(RevIntroInfr);
             intro.MaximumSize = new Size(900, 0);
+            _revIntro = intro;
             t.Controls.Add(intro);
 
-            _revList = new ReviewCardList { Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4) };
+            _revList = new ReviewCardList { Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4), WithMaps = true };
+            _revList.NeedMap = it => _ = RevBuildMap(it);   // el mapa de cada infracción (InfrMap.cs)
             var top = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 42, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7
-            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "Tipo cambiado" }, i => { _revTab = i; if (i == 4) LoadKindOverrides(); FillReviewCards(); });
+            // Viajeros · Plazas · Por empresa: servicios con viajeros o plazas que no cuadran (MainMenuForm.RevisionViajeros.cs)
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "Tipo cambiado", "Viajeros", "Plazas", "Por empresa" },
+                                   i => { _revTab = i; if (i == 4) LoadKindOverrides(); RevTabChanged(i); FillReviewCards(); });
             // «Tipo cambiado» son avisos, no infracciones: sin Aprobar, Anular ni Eliminar
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
-            var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 260, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
-            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); };
+            _revTabBar = tabs;
+            var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 220, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
+            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); FillPaxReview(); };
+            _revSearch = search;
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
-            t.Controls.Add(_revList);
+            var revHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0), Padding = new Padding(2, 4, 2, 4) };
+            _revList.Dock = DockStyle.Fill;
+            revHost.Controls.Add(_revList);
+            revHost.Controls.Add(BuildPaxReviewPanel());
+            t.Controls.Add(revHost);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
             var ok = EmpButton(Tr("Aprobar"), primary: true); ok.Width = 170;
@@ -650,7 +660,8 @@ namespace SelectOR
                             Route = Str(e, "route"), Detail = e.TryGetProperty("detail", out var dd) ? Carne.Detail(code, dd) : "",
                             Reviewer = Str(e, "reviewer"), Points = (int)Num(e, "points"),
                             AtS = e.TryGetProperty("detail", out var dt) && dt.ValueKind == JsonValueKind.Object
-                                  && dt.TryGetProperty("at_s", out var at) && at.ValueKind == JsonValueKind.Number ? at.GetDouble() : double.NaN
+                                  && dt.TryGetProperty("at_s", out var at) && at.ValueKind == JsonValueKind.Number ? at.GetDouble() : double.NaN,
+                            Place = e.TryGetProperty("detail", out var dp) ? InfrPlace.From(dp) : null
                         });
                     }
                 }
@@ -673,11 +684,15 @@ namespace SelectOR
             var words = _revQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _revList.BeginUpdate();
             _revList.Items.Clear();
+            _revList.WithMaps = _revTab != 4;   // (tipo cambiado: sin mapas)
             if (_revTab == 4)
                 _revList.EmptyText = _revKindsErr ?? Tr("Ningún servicio con un tren de viajeros puesto como mercancías.");
             else _revList.EmptyText = Tr("No hay infracciones.");
             if (_revBtns != null)
-                foreach (Control c in _revBtns.Controls) if (c is RoundButton) c.Visible = _revTab != 4;
+            {
+                _revBtns.Visible = _revTab < 5;   // (Viajeros, Plazas y Por empresa llevan sus botones)
+                foreach (Control c in _revBtns.Controls) if (c is RoundButton) c.Visible = _revTab < 4;
+            }
             foreach (var r in _revTab == 4 ? _revKinds : _revAll)
             {
                 bool tabOk = _revTab switch

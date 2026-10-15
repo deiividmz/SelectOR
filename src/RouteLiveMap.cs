@@ -188,6 +188,35 @@ namespace SelectOR
             if (hit) (sLat, sLon) = Unproj(bx, by);
             return hit;
         }
+
+        // Rumbo de la vía más cercana (a menos de maxM metros; sin sentido): los trenes de los que no se sabe hacia dónde
+        // van se ponen a lo largo de la vía, como en el mapa grande del HUD.
+        public bool TrackBearing(double lat, double lon, double maxM, out double bearing)
+        {
+            bearing = 0;
+            if (_grid == null) return false;
+            var (x, y) = Proj(lat, lon);
+            int gx = (int)Math.Floor(x / Cell), gy = (int)Math.Floor(y / Cell);
+            double best = maxM * maxM; int bp = -1, bi = -1;
+            for (int cx = gx - 1; cx <= gx + 1; cx++)
+                for (int cy = gy - 1; cy <= gy + 1; cy++)
+                {
+                    if (!_grid.TryGetValue(Key(cx, cy), out var l)) continue;
+                    foreach (var (p, i) in l)
+                    {
+                        double ax = X[p][i], ay = Y[p][i], dx = X[p][i + 1] - ax, dy = Y[p][i + 1] - ay;
+                        double len2 = dx * dx + dy * dy;
+                        if (len2 < 0.01) continue;
+                        double t = Math.Max(0, Math.Min(1, ((x - ax) * dx + (y - ay) * dy) / len2));
+                        double px = ax + t * dx, py = ay + t * dy, d2 = (px - x) * (px - x) + (py - y) * (py - y);
+                        if (d2 < best) { best = d2; bp = p; bi = i; }
+                    }
+                }
+            if (bp < 0) return false;
+            var (la1, lo1) = Unproj(X[bp][bi], Y[bp][bi]); var (la2, lo2) = Unproj(X[bp][bi + 1], Y[bp][bi + 1]);
+            bearing = LiveMates.Bearing(la1, lo1, la2, lo2);
+            return true;
+        }
     }
 
     // Posiciones en vivo suavizadas. Cada lectura trae su antigüedad (age_s), así que se sabe CUÁNDO
@@ -612,22 +641,31 @@ namespace SelectOR
             }
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            // Las locomotoras, a escala según el zoom (como en el mapa grande del HUD): crecen al acercarse y menguan al
+            // alejarse (raíz cuadrada de los px por metro), entre 7 y 30 px de ancho; el nombre dentro solo si cabe.
+            float locoW = LocoW();
+            float locoA = locoW / 7.5f; bool locoNames = locoW >= 11;
             if (_follow != null)
             {
                 var fm = _marks.Find(m => m.Id == _follow);
                 if (fm != null)
                 {
                     var p = ScrLL(fm.Lat, fm.Lon);
+                    float r = Math.Max(17f, locoW * 2.4f);
                     using var pen = new Pen(Color.FromArgb(150, 255, 255, 255), 1.6f);
-                    g.DrawEllipse(pen, p.X - 17, p.Y - 17, 34, 34);
+                    g.DrawEllipse(pen, p.X - r, p.Y - r, 2 * r, 2 * r);
                 }
             }
-            LiveMapDraw.Draw(g, rect, ScrLL, _marks, 1.15f, true, _d.StLat, _d.StLon, _d.StName);
+            LiveMapDraw.Draw(g, rect, ScrLL, _marks, 1.15f, true, _d.StLat, _d.StLon, _d.StName, locoA, locoNames,
+                             (la, lo) => _d.TrackBearing(la, lo, 40, out double b) ? b : null);
             _hits = LiveMapDraw.Legend(g, rect, null, null, _marks, out _legendBox, includeMe: false);
 
             DrawChip(g);
             DrawScale(g, rect);
         }
+
+        // Ancho de las locomotoras en píxeles con el zoom de ahora (la misma regla que el mapa grande del HUD).
+        float LocoW() => (float)Math.Max(7, Math.Min(30, 13 * Math.Sqrt(Math.Max(1e-6, _s) / 1.5)));
 
         void DrawChip(Graphics g)
         {
@@ -722,7 +760,7 @@ namespace SelectOR
             foreach (var h in _hits) if (h.hit.Contains(e.Location)) { id = h.m.Id; break; }
             if (id == null && !_legendBox.Contains(e.Location))
             {
-                double best = 18 * 18;
+                double rr = Math.Max(18, LocoW() * 2.2), best = rr * rr;   // (la locomotora crece con el zoom)
                 foreach (var m in _marks)
                 {
                     var p = ScrLL(m.Lat, m.Lon);

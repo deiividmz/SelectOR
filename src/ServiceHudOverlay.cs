@@ -133,6 +133,16 @@ namespace SelectOR
         public Func<SavedItinerary, string> LoadSaved;
         public Action<SavedItinerary> DeleteSaved;
         public void MapNotice(string msg) { try { if (_bigMap != null && !_bigMap.IsDisposed) _bigMap.Notice(msg); } catch { } }
+        // En una sala de Servidores SelectOR: agujas, señales y trenes en el mapa grande (RoomMap.cs) y qué hacer al pulsarlos.
+        public Func<RoomMapView> RoomMap;
+        public Func<string> RoomMeStatus;   // «Tú» en la leyenda de una sala: tu papel
+        public Func<object, Point, string> RoomClick;
+        public Func<LiveMarker, Point, Action, bool> RoomPlayerClick;   // clic en un jugador de la leyenda (el despachador: ayudantes)
+        public RoomMapView RoomMapNow() { try { return RoomMap?.Invoke(); } catch { return null; } }
+        public void BigMapInvalidate() { try { if (_bigMap != null && !_bigMap.IsDisposed) _bigMap.Invalidate(); } catch { } }
+        // Menú dentro del mapa grande (texto, color, acción; texto null = separador). En la pantalla: dónde se pulsó.
+        public void BigMapMenu(Point screen, string title, List<(string text, Color col, Action act)> items)
+        { try { if (_bigMap != null && !_bigMap.IsDisposed) _bigMap.ShowMenu(screen, title, items); } catch { } }
 
         static readonly Color Rec = Color.FromArgb(224, 86, 86);
         static readonly Color Teal = Color.FromArgb(94, 190, 155);
@@ -1005,7 +1015,7 @@ namespace SelectOR
             double worldWidthM, float labelPt, float arrowScale, string loadingText,
             double viewCenterLat = double.NaN, double viewCenterLon = double.NaN, double viewPxPerM = 0,
             IReadOnlyList<LiveMarker> mates = null, bool mateDetail = false, RoadBook book = null,
-            HudMapDetail detail = null)
+            HudMapDetail detail = null, string meName = null, Action<Func<double, double, PointF>> underTrains = null)
         {
             segLat ??= Array.Empty<double[]>(); segLon ??= Array.Empty<double[]>();
             trkLat ??= Array.Empty<double>(); trkLon ??= Array.Empty<double>();
@@ -1056,6 +1066,20 @@ namespace SelectOR
                 Proj = (la, lo) => new PointF((float)(ox + (lo - minLon) * k * sc), (float)(oy + (maxLat - la) * sc));
                 Inv = p => (maxLat - (p.Y - oy) / sc, minLon + (p.X - ox) / (k * sc));
             }
+
+            // Tamaño de las locomotoras según el zoom (px por metro del mapa dibujado): crecen al acercarse y menguan al
+            // alejarse, más suave que la escala real (raíz cuadrada) y entre un mínimo y un máximo; el nombre va dentro
+            // solo si cabe (en el mapa grande). W: el ancho de la locomotora en píxeles (LiveMapDraw.Loco: 7,5 · escala).
+            double viewPx;
+            {
+                var (cla, clo) = Inv(new PointF(area.X + area.Width / 2f, area.Y + area.Height / 2f));
+                var q0 = Proj(cla, clo); var q1 = Proj(cla + 100 / 111320.0, clo);
+                viewPx = Math.Max(1e-4, Math.Sqrt((q1.X - q0.X) * (q1.X - q0.X) + (q1.Y - q0.Y) * (q1.Y - q0.Y)) / 100);
+            }
+            float locoW = mateDetail ? (float)Math.Max(7, Math.Min(30, 13 * Math.Sqrt(viewPx / 1.5)))
+                                     : (float)Math.Max(6, Math.Min(12, 7.5 * Math.Sqrt(viewPx / BaseScale)));
+            float locoA = locoW / 7.5f; bool locoNames = mateDetail && locoW >= 11;
+            double? TrackAxisAt(double la, double lo) => haveSeg && TrackAxis(segLat, segLon, la, lo, 40, out double b) ? b : null;
 
             var oldClip = g.Clip; g.SetClip(area);
 
@@ -1193,26 +1217,48 @@ namespace SelectOR
                     }
                 }
 
+            // Lo que va debajo de los trenes (en una sala: agujas, señales, caminos y la IA; RoomMap.cs)
+            try { underTrains?.Invoke(Proj); } catch { }
             // Los demás usuarios de la ruta, debajo de la flecha propia.
             if (mates != null && mates.Count > 0)
-                LiveMapDraw.Draw(g, area, Proj, mates, arrowScale, mateDetail, stLat, stLon, stName);
+                LiveMapDraw.Draw(g, area, Proj, mates, arrowScale, mateDetail, stLat, stLon, stName, locoA, locoNames, TrackAxisAt);
 
             if (hasPos)
             {
+                // tu tren: una locomotora vista desde arriba (LiveMapDraw.Loco), con tu nombre dentro en el mapa grande
                 var p = Proj(curLat, curLon);
-                var st = g.Save();
-                g.TranslateTransform(p.X, p.Y);
-                if (hasHeading) g.RotateTransform((float)heading);
-                float a = arrowScale;
-                var tri = new[] { new PointF(0, -9 * a), new PointF(7 * a, 8 * a), new PointF(0, 4f * a), new PointF(-7 * a, 8 * a) };
-                using (var halo = new SolidBrush(Color.FromArgb(60, 120, 200, 140))) g.FillEllipse(halo, -12 * a, -12 * a, 24 * a, 24 * a);
-                using (var b = new SolidBrush(Color.FromArgb(120, 210, 150))) g.FillPolygon(b, tri);
-                using (var pen = new Pen(Color.FromArgb(20, 40, 24), 1.2f * a)) g.DrawPolygon(pen, tri);
-                g.Restore(st);
+                LiveMapDraw.Loco(g, p, hasHeading, heading, Color.FromArgb(120, 210, 150), locoNames ? meName : null, locoA, hasHeading ? null : TrackAxisAt(curLat, curLon));
             }
 
             g.Clip = oldClip;
             return Inv;
+        }
+
+        // Rumbo de la vía más cercana a un punto (a menos de maxM metros; sin sentido): para poner a lo largo de la vía los
+        // trenes de los que no se sabe hacia dónde van.
+        static bool TrackAxis(double[][] segLat, double[][] segLon, double lat, double lon, double maxM, out double bearing)
+        {
+            bearing = 0;
+            if (segLat == null || segLat.Length == 0) return false;
+            EnsureBoxes(segLat, segLon);
+            double k = Math.Max(0.05, Math.Cos(lat * Math.PI / 180)), dLa = maxM / 111320.0, dLo = dLa / k;
+            double best = maxM * maxM; int bs = -1, bi = -1;
+            for (int s = 0; s < segLat.Length; s++)
+            {
+                if (lat < _bbMinLa[s] - dLa || lat > _bbMaxLa[s] + dLa || lon < _bbMinLo[s] - dLo || lon > _bbMaxLo[s] + dLo) continue;
+                var la = segLat[s]; var lo = segLon[s];
+                for (int i = 0; i + 1 < la.Length; i++)
+                {
+                    double x1 = (lo[i] - lon) * 111320 * k, y1 = (la[i] - lat) * 111320, x2 = (lo[i + 1] - lon) * 111320 * k, y2 = (la[i + 1] - lat) * 111320;
+                    double dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy;
+                    double t = l2 > 0 ? Math.Max(0, Math.Min(1, -(x1 * dx + y1 * dy) / l2)) : 0;
+                    double px = x1 + t * dx, py = y1 + t * dy, d = px * px + py * py;
+                    if (d < best && l2 > 0.01) { best = d; bs = s; bi = i; }
+                }
+            }
+            if (bs < 0) return false;
+            bearing = LiveMates.Bearing(segLat[bs][bi], segLon[bs][bi], segLat[bs][bi + 1], segLon[bs][bi + 1]);
+            return true;
         }
 
         // Caja (lat/lon) de cada tramo de vía, calculada una vez por mapa.
@@ -1387,6 +1433,13 @@ namespace SelectOR
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            if (_menu != null)
+            {
+                // fuera del menú: se cierra (y ese clic no hace nada más); dentro, se elige al soltar
+                if (!_menu.Box.Contains(e.Location)) { _menu = null; Invalidate(); }
+                else _menuDown = true;
+                base.OnMouseDown(e); return;
+            }
             if ((e.Button == MouseButtons.Left || e.Button == MouseButtons.Right) && ItinEditable(e.Location))
             {
                 var pj = ProjFromInv();
@@ -1409,6 +1462,13 @@ namespace SelectOR
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            if (_menu != null)
+            {
+                int hv = MenuRowAt(e.Location);
+                if (hv != _menu.Hover) { _menu.Hover = hv; Invalidate(_menu.Box); }
+                Cursor = hv >= 0 ? Cursors.Hand : Cursors.Default;
+                base.OnMouseMove(e); return;
+            }
             if (_itDragging)
             {
                 if (Math.Abs(e.X - _itAt.X) + Math.Abs(e.Y - _itAt.Y) > 3) _itMoved = true;
@@ -1451,14 +1511,23 @@ namespace SelectOR
                     var h = ItinDrag.Hit(Book, pj, InvPt, MPerPx(e.Location), e.Location);
                     editable = h.point >= 0 || h.leg >= 0;
                 }
+                bool roomHit = !editable && Book?.Editing != true && e.Y > HdrH && _hud?.RoomMapNow() is RoomMapView rvh && ProjFromInv() is Func<double, double, PointF> pjh
+                               && RoomMapDraw.Hit(rvh, pjh, MPerPx(e.Location), e.Location) != null;
                 Cursor = _hitGrip.Contains(e.Location) ? Cursors.SizeNWSE : _hitKey.Contains(e.Location) ? Cursors.Hand
-                       : sobre || hh >= 0 || editable ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
+                       : sobre || hh >= 0 || editable || roomHit ? Cursors.Hand : (Book?.Editing == true && e.Y > HdrH ? Cursors.Cross : Cursors.Default);
             }
             base.OnMouseMove(e);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            if (_menuDown)
+            {
+                _menuDown = false;
+                var m = _menu; int i = MenuRowAt(e.Location);
+                if (m != null && i >= 0) { _menu = null; Invalidate(); try { m.Items[i].act?.Invoke(); } catch { } }
+                base.OnMouseUp(e); return;
+            }
             if (_itDragging)
             {
                 _itDragging = false;
@@ -1499,15 +1568,38 @@ namespace SelectOR
                 base.OnMouseUp(e);
                 return;
             }
+            // en una sala: un clic en una aguja (la cambia) o en una señal (su menú)
+            if (wasPan && !panMoved && e.Button == MouseButtons.Left && RoomClickAt(e.Location)) { base.OnMouseUp(e); return; }
             if (legend)
                 foreach (var (hit, m) in _legendHits)
                     if (hit.Contains(e.Location))
                     {
-                        // Centra el mapa en ese usuario (vista libre: doble clic vuelve a seguir a tu tren).
-                        _free = true; _cLat = m.Lat; _cLon = m.Lon; _haveCenter = true; Invalidate();
+                        // Centra el mapa en ese usuario (vista libre: doble clic vuelve a seguir a tu tren). En una sala, el
+                        // despachador además lo puede nombrar ayudante (menú).
+                        void Center() { _free = true; _cLat = m.Lat; _cLon = m.Lon; _haveCenter = true; Invalidate(); }
+                        bool menu = false;
+                        try { menu = m != null && _hud?.RoomPlayerClick?.Invoke(m, PointToScreen(e.Location), Center) == true; } catch { }
+                        if (!menu) Center();
                         break;
                     }
             base.OnMouseUp(e);
+        }
+
+        object _roomLastHit; DateTime _roomLastAt;
+        bool RoomClickAt(Point p)
+        {
+            var rv = _hud?.RoomMapNow(); var pj = ProjFromInv();
+            if (rv == null || pj == null) return false;
+            var hit = RoomMapDraw.Hit(rv, pj, MPerPx(p), p);
+            if (hit == null) return false;
+            // (el doble clic no la vuelve a cambiar)
+            if (ReferenceEquals(hit, _roomLastHit) && (DateTime.UtcNow - _roomLastAt).TotalMilliseconds < 700) return true;
+            _roomLastHit = hit; _roomLastAt = DateTime.UtcNow;
+            string msg = null;
+            try { msg = _hud.RoomClick?.Invoke(hit, PointToScreen(p)); } catch { }
+            if (msg != null) Notice(msg);
+            Invalidate();
+            return true;
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -1658,15 +1750,27 @@ namespace SelectOR
             _inv = HudMapRender.Draw(g, area, snap.SegLat, snap.SegLon, snap.TrkLat, snap.TrkLon, snap.StLat, snap.StLon, snap.StName,
                 snap.Crumb, snap.HasPos, snap.CurLat, snap.CurLon, snap.HasHeading, snap.Heading,
                 worldWidthM, 9.5f, 2.0f, I18n.T("Cargando mapa…"), vLat, vLon, vPx, snap.Mates, mateDetail: true, book: Book,
+                meName: string.IsNullOrWhiteSpace(snap.Me.name) ? I18n.T("Tú") : LiveMates.ShortName(snap.Me.name),
+                underTrains: pj =>
+                {
+                    // en una sala o en Conducción libre: agujas, señales, el camino de cada tren y la IA, debajo de las locomotoras
+                    if (_hud?.RoomMapNow() is not RoomMapView rv) return;
+                    var q0 = pj(rv.Geo.Switches.Count > 0 ? rv.Geo.Switches[0].Lat : 40, rv.Geo.Switches.Count > 0 ? rv.Geo.Switches[0].Lon : -3);
+                    var q1 = pj(rv.Geo.Switches.Count > 0 ? rv.Geo.Switches[0].Lat + 0.001 : 40.001, rv.Geo.Switches.Count > 0 ? rv.Geo.Switches[0].Lon : -3);
+                    double px = Math.Sqrt((q1.X - q0.X) * (q1.X - q0.X) + (q1.Y - q0.Y) * (q1.Y - q0.Y));
+                    RoomMapDraw.Draw(g, area, rv, pj, px > 0.01 ? 111.2 / px : 99);
+                },
                 detail: snap.Detail);
             if (_itDrag.Active && ProjFromInv() is Func<double, double, PointF> pjd)   // arrastrando: el recorrido nuevo
             {
                 var clip = g.Clip; g.SetClip(area); _itDrag.Draw(g, pjd); g.Clip = clip;
             }
             DrawKey(g, area, snap.Detail);
-            _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox);
+            string meSt = null; try { meSt = _hud?.RoomMeStatus?.Invoke(); } catch { }   // en una sala: tu papel
+            _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox, true, meSt);
             DrawSaved(g, area);
             DrawNotice(g, area);
+            DrawMenu(g, area);
             DrawGrip(g);
         }
 
@@ -1761,6 +1865,67 @@ namespace SelectOR
         }
 
         // Aviso breve abajo, en el centro del mapa.
+        // ---------------- menú dentro del mapa (señal, jugador de la sala) ----------------
+        // Un menú de Windows (ContextMenuStrip) se cierra solo si SelectOR no es la ventana activa, y el mapa grande no
+        // le quita el foco a Open Rails: por eso el menú va dibujado dentro del propio mapa, como «Guardados».
+        sealed class MapMenu
+        {
+            public Point At; public string Title;
+            public List<(string text, Color col, Action act)> Items;
+            public Rectangle Box; public readonly List<(Rectangle row, int item)> Rows = new(); public int Hover = -1;
+        }
+        MapMenu _menu; bool _menuDown;
+
+        public void ShowMenu(Point screen, string title, List<(string text, Color col, Action act)> items)
+        {
+            if (items == null || items.Count == 0) return;
+            _menu = new MapMenu { At = PointToClient(screen), Title = title, Items = items };
+            Invalidate();
+        }
+
+        void DrawMenu(Graphics g, Rectangle area)
+        {
+            var m = _menu; if (m == null) return;
+            m.Rows.Clear();
+            using var fT = Theme.Font(8.6f, FontStyle.Bold); using var f = Theme.Font(9.75f);
+            const int Pad = 14, RowH = 32, SepH = 11, TitleH = 30;
+            int w = 200;
+            if (!string.IsNullOrEmpty(m.Title)) w = Math.Max(w, TextRenderer.MeasureText(m.Title, fT).Width + 2 * Pad);
+            foreach (var it in m.Items) if (it.text != null) w = Math.Max(w, TextRenderer.MeasureText(it.text, f).Width + 2 * Pad);
+            int h = 8 + (string.IsNullOrEmpty(m.Title) ? 0 : TitleH + SepH);
+            foreach (var it in m.Items) h += it.text == null ? SepH : RowH;
+            h += 6;
+            int x = Math.Min(m.At.X + 6, area.Right - w - 6), y = Math.Min(m.At.Y + 6, area.Bottom - h - 6);
+            x = Math.Max(area.X + 6, x); y = Math.Max(area.Y + 6, y);
+            m.Box = new Rectangle(x, y, w, h);
+            using (var path = Theme.Round(m.Box, 10))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(248, 30, 33, 36))) g.FillPath(b, path);
+                using (var pen = new Pen(Color.FromArgb(90, 255, 255, 255), 1f)) g.DrawPath(pen, path);
+            }
+            int cy = y + 8;
+            using var sep = new Pen(Color.FromArgb(60, 255, 255, 255), 1f);
+            if (!string.IsNullOrEmpty(m.Title))
+            {
+                TextRenderer.DrawText(g, m.Title, fT, new Rectangle(x + Pad, cy, w - 2 * Pad, TitleH), Theme.Subtle,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                cy += TitleH; g.DrawLine(sep, x + Pad, cy + SepH / 2, x + w - Pad, cy + SepH / 2); cy += SepH;
+            }
+            for (int i = 0; i < m.Items.Count; i++)
+            {
+                var it = m.Items[i];
+                if (it.text == null) { g.DrawLine(sep, x + Pad, cy + SepH / 2, x + w - Pad, cy + SepH / 2); cy += SepH; continue; }
+                var row = new Rectangle(x + 5, cy, w - 10, RowH);
+                if (m.Hover == i) using (var hp = Theme.Round(row, 7)) using (var hb = new SolidBrush(Color.FromArgb(60, 255, 255, 255))) g.FillPath(hb, hp);
+                TextRenderer.DrawText(g, it.text, f, new Rectangle(x + Pad, cy, w - 2 * Pad, RowH), it.col.IsEmpty ? Theme.Text : it.col,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                m.Rows.Add((row, i));
+                cy += RowH;
+            }
+        }
+
+        int MenuRowAt(Point p) { var m = _menu; if (m == null) return -1; foreach (var (row, i) in m.Rows) if (row.Contains(p)) return i; return -1; }
+
         void DrawNotice(Graphics g, Rectangle area)
         {
             if (string.IsNullOrEmpty(_notice) || DateTime.UtcNow >= _noticeUntil) return;
@@ -1788,6 +1953,8 @@ namespace SelectOR
                 (I18n.T("itinerario"), 9, Color.Empty), (I18n.T("andén"), 3, Color.Empty), (I18n.T("apartadero"), 4, Color.Empty),
                 (I18n.T("cruce de vías"), 6, Color.Empty), (I18n.T("punto de carga"), 7, Color.Empty), (I18n.T("topera"), 8, Color.Empty),
             };
+            // en una sala que sabe las agujas enclavadas (agente del despachador): también esa
+            if (_hud?.RoomMapNow()?.LocksKnown == true) rows = rows.Append((I18n.T("aguja enclavada"), 10, Color.Empty)).ToArray();
             int rowH = f.Height + 6, padX = 10;
             int w = TextRenderer.MeasureText(title, fT).Width + 2 * padX;
             foreach (var r in rows) w = Math.Max(w, 34 + TextRenderer.MeasureText(r.text, f).Width + padX);
@@ -1823,6 +1990,10 @@ namespace SelectOR
                         using (var b = new SolidBrush(MapDetailDraw.DiamondCol)) using (var pen = new Pen(Color.FromArgb(40, 44, 48), 1.2f)) MapDetailDraw.Diamond(g, b, pen, new PointF(box.X + padX + 9, cy), 4.6f);
                         break;
                     case 7: MapDetailDraw.Pickup(g, new PointF(box.X + padX + 9, cy), 1f, true); break;
+                    case 10:
+                        using (var pen = new Pen(RoomMapDraw.SwLocked, 3.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(pen, box.X + padX, cy + 3, box.X + padX + 11, cy + 3);
+                        RoomMapDraw.Padlock(g, box.X + padX + 12, cy - 6);
+                        break;
                     case 8:
                         using (var pen = new Pen(MapDetailDraw.TrackCol, 2.6f)) g.DrawLine(pen, box.X + padX, cy, box.X + padX + 12, cy);
                         using (var b = new SolidBrush(MapDetailDraw.EndCol)) using (var pen = new Pen(Color.FromArgb(40, 44, 48), 1f)) { g.FillRectangle(b, box.X + padX + 10, cy - 3, 6, 6); g.DrawRectangle(pen, box.X + padX + 10, cy - 3, 6, 6); }

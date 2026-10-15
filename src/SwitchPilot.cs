@@ -1,6 +1,7 @@
 // Conexión aparte con el servidor de una sala de «Servidores SelectOR» (no es un jugador: el servidor la reconoce por su
 // primer mensaje, «SELECTOR HELLO»). Hoy sirve para el HUD (WHO → «SELECTOR YOU»: dentro / entrando / fuera y si eres
-// el despachador) y para la contraseña de las salas libres (GATE OWNER). Sabe también pedir desvíos (WANT / PASSED /
+// el despachador), para la contraseña de las salas libres (GATE OWNER) y para el chat de la sala (SAY → «SELECTOR
+// CHAT»; servidor con «READY 3»; ver «SelectOR Servidor MP\Chat.cs»). Sabe también pedir desvíos (WANT / PASSED /
 // CANCEL / FIX), pero desde la 1.2.63 SelectOR ya no se los pide (los desvíos según el itinerario están aparcados).
 // Con un servidor que no la conoce (el de Open Rails), no contesta «READY» y se retira.
 // Mensajes: los mismos de Open Rails (texto UTF-16 con la longitud delante); ver «SelectOR Servidor MP\Interlock.cs».
@@ -44,6 +45,30 @@ namespace SelectOR
         DateTime _whoAt = DateTime.MinValue;
         // La sala pasa a protegerla yo (se fue quien la abrió): token y contraseña (null = sin contraseña).
         public event Action<string, string> GateOwner;
+        // Chat de la sala (servidor con «READY 3»): hora (UTC), tipo ('m' mensaje, 'i' entra, 'o' sale), quién y texto.
+        public bool ChatOk { get; private set; }
+        public event Action<DateTime, char, string, string> Chat;
+        public event Action ChatReset;          // conexión nueva: el servidor vuelve a mandar lo último
+        public event Action<string> ChatError;  // «notin» (no estás en la sala) · «slow» (demasiados seguidos)
+        // Mapa grande (servidor con «READY 4»; MainMenuForm.MapaSala.cs y RoomMap.cs): agujas, señales y trenes de la sala.
+        public bool MapOk { get; private set; }
+        public event Action<int, int, int, int> SwitchSet;          // el despachador acaba de cambiar una aguja (tx tz id posición)
+        public byte[] SigStates { get; private set; }                // dos bytes por cabeza (estado + 1, dibujo + 1)
+        public DateTime SigStatesAt { get; private set; }
+        public List<(string name, int tx, int tz, double x, double z, double kmh, bool player)> Trains { get; private set; } = new();
+        // De cada tren (servidor nuevo): su tramo del .tdb, MUDirection, sentido de la cola y longitud, para su camino por delante.
+        public Dictionary<string, (int node, int mu, int dir, double len)> TrainTrack { get; private set; } = new();
+        public bool Helper { get; private set; }                     // el despachador te ha nombrado ayudante (señales)
+        public event Action<string> MapError;                        // busy · nohelper · notin · nodisp · far · locked · notdisp
+        // Servidor con «READY 5»: el despachador también pide señales desde el mapa (con el agente del mapa en su Open Rails)
+        // y nombra ayudantes desde él; quién es quién en la sala.
+        public bool AgentOk { get; private set; }
+        public string DispatcherName { get; private set; }
+        public HashSet<string> Helpers { get; private set; } = new(StringComparer.Ordinal);
+        // Servidor con «READY 6»: agujas enclavadas en el Open Rails del despachador (las manda su agente del mapa), una
+        // letra por aguja en el orden de States: «.» libre · S señal abierta · T reservada por un tren · O tren encima.
+        // null = no se sabe (servidor de antes, o el despachador sin el agente).
+        public string Blocked { get; private set; }
         public int LocalPort { get { try { return (_tcp?.Client?.LocalEndPoint as System.Net.IPEndPoint)?.Port ?? 0; } catch { return 0; } } }
 
         public SwitchPilot(string host, int port, string name, int prio) { _host = host; _port = port; _name = name; _prio = prio; }
@@ -53,7 +78,7 @@ namespace SelectOR
         public int Prio
         {
             get => _prio;
-            set { if (_prio == value) return; _prio = value; if (Ready) Send($"HELLO {_name} {_prio} 2"); }
+            set { if (_prio == value) return; _prio = value; if (Ready) Send($"HELLO {_name} {_prio} 3"); }
         }
 
         // Se conecta (una vez; si se cae, lo reintenta cada 10 s). Solo con Open Rails ya dentro de la sala.
@@ -71,8 +96,8 @@ namespace SelectOR
                 Close();
                 var tcp = new TcpClient { NoDelay = true };
                 using (var to = new CancellationTokenSource(5000)) await tcp.ConnectAsync(_host, _port, to.Token);
-                _tcp = tcp; _ns = tcp.GetStream(); _cts = new CancellationTokenSource();
-                Send($"HELLO {_name} {_prio} 2");
+                _tcp = tcp; _ns = tcp.GetStream(); _cts = new CancellationTokenSource(); Blocked = null;
+                Send($"HELLO {_name} {_prio} 3");
                 var rx = Task.Run(() => Receive(_cts.Token));
                 await Task.Delay(4000);
                 if (!Ready && _tcp == tcp) { Unsupported = true; Close(); }   // no es un servidor de SelectOR
@@ -121,9 +146,38 @@ namespace SelectOR
         void OnMessage(string body)
         {
             if (!body.StartsWith("SELECTOR ", StringComparison.Ordinal)) return;
+            if (body.StartsWith("SELECTOR CHAT ", StringComparison.Ordinal)) { OnChat(body.Substring(14)); return; }
+            if (body.StartsWith("SELECTOR TRAINS ", StringComparison.Ordinal)) { OnTrains(body.Substring(16)); return; }
+            if (body.StartsWith("SELECTOR SIGS ", StringComparison.Ordinal))
+            {
+                var st = DecodeStates(body.Substring(14).Trim());
+                if (st != null) { SigStates = st; SigStatesAt = DateTime.UtcNow; }
+                return;
+            }
             var t = body.Substring(9).Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (t.Length == 0) return;
-            if (t[0] == "READY") { Ready = true; return; }
+            if (t[0] == "READY")
+            {
+                int rv = t.Length > 1 && int.TryParse(t[1], out int rv0) ? rv0 : 0;
+                ChatOk = rv >= 3;
+                MapOk = rv >= 4;
+                AgentOk = rv >= 5;
+                Ready = true;
+                if (ChatOk) try { ChatReset?.Invoke(); } catch { }
+                return;
+            }
+            if (t[0] == "CHATERR" && t.Length > 1) { try { ChatError?.Invoke(t[1]); } catch { } return; }
+            if (t[0] == "HELPER" && t.Length > 1) { Helper = t[1] == "1"; return; }
+            if (t[0] == "ROLES" && t.Length > 2)
+            {
+                DispatcherName = t[1] == "-" ? null : t[1];
+                Helpers = new HashSet<string>(t[2] == "-" ? Array.Empty<string>() : t[2].Split(',', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
+                return;
+            }
+            if (t[0] == "MAPERR" && t.Length > 1) { try { MapError?.Invoke(t[1]); } catch { } return; }
+            if (t[0] == "BLOCKED" && t.Length > 1) { Blocked = t[1] == "-" ? null : t[1]; return; }
+            if (t[0] == "SW" && t.Length >= 5 && int.TryParse(t[1], out int sx) && int.TryParse(t[2], out int sz) && int.TryParse(t[3], out int sid) && int.TryParse(t[4], out int sp))
+            { try { SwitchSet?.Invoke(sx, sz, sid, sp); } catch { } return; }
             if (t[0] == "STATES" && t.Length >= 2) { var st = DecodeStates(t[1]); if (st != null) { States = st; StatesAt = DateTime.UtcNow; } return; }
             if (t[0] == "YOU" && t.Length >= 3) { Presence = t[1]; IsDispatcher = t[2] == "d"; PresenceAt = DateTime.UtcNow; return; }
             if (t[0] == "GATE" && t.Length >= 4 && t[1] == "OWNER") { try { GateOwner?.Invoke(t[2], t[3] == "-" ? null : t[3]); } catch { } return; }
@@ -147,17 +201,61 @@ namespace SelectOR
             try { Changed?.Invoke(key, before, now); } catch { }
         }
 
-        // Como lo lee Open Rails (MSGSwitchStatus): base64 de [int32][gzip con un byte por desvío].
+        // «hora tipo quién[<TAB>texto]»
+        void OnChat(string s)
+        {
+            try
+            {
+                int tab = s.IndexOf('\t');
+                string head = tab >= 0 ? s.Substring(0, tab) : s, text = tab >= 0 ? s.Substring(tab + 1) : "";
+                var h = head.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
+                if (h.Length < 3 || !long.TryParse(h[0], out long at) || h[1].Length != 1) return;
+                Chat?.Invoke(DateTimeOffset.FromUnixTimeSeconds(at).UtcDateTime, h[1][0], h[2].Trim(), text);
+            }
+            catch { }
+        }
+
+        // «nombre tx tz x z kmh p;…»
+        void OnTrains(string s)
+        {
+            var l = new List<(string, int, int, double, double, double, bool)>();
+            var track = new Dictionary<string, (int, int, int, double)>(StringComparer.Ordinal);
+            foreach (var part in s.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = part.Trim().Split(' ');
+                if (f.Length < 7 || !int.TryParse(f[1], out int tx) || !int.TryParse(f[2], out int tz)
+                    || !double.TryParse(f[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double x) || !double.TryParse(f[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double z)) continue;
+                double.TryParse(f[5], NumberStyles.Float, CultureInfo.InvariantCulture, out double kmh);
+                l.Add((f[0], tx, tz, x, z, kmh, f[6] == "1"));
+                if (f.Length >= 11 && int.TryParse(f[7], out int node) && node >= 0 && int.TryParse(f[8], out int mu) && int.TryParse(f[9], out int dir)
+                    && double.TryParse(f[10], NumberStyles.Float, CultureInfo.InvariantCulture, out double len)) track[f[0]] = (node, mu, dir, len);
+            }
+            TrainTrack = track;
+            Trains = l;
+        }
+
+        // Mapa grande: cambiar una aguja (como desde Ctrl+9) o una señal (solo ayudantes; orden: 0 normal · 1 parada ·
+        // 2 anuncio · 3 vía libre · 4 rebase autorizado).
+        public void Throw(int tx, int tz, int id, int pos) { if (Ready && MapOk) Send($"THROW {tx} {tz} {id} {pos}"); }
+        public void Signal(int obj, int pick) { if (Ready && MapOk) Send($"SIGNAL {obj} {pick}"); }
+        public void SetHelper(string name, bool on) { if (Ready && AgentOk) Send($"SETHELPER {name} {(on ? 1 : 0)}"); }
+
+        // Escribir en el chat de la sala (lo ven los demás en su HUD y en el chat de Open Rails).
+        public void Say(string text) { if (Ready && ChatOk) Send("SAY " + text); }
+
+        // Como lo lee Open Rails (MSGSwitchStatus / MSGSignalStatus): base64 de [int32 cuántos][gzip con los bytes de estado (+ textos)].
         static byte[] DecodeStates(string b64)
         {
             try
             {
                 var raw = Convert.FromBase64String(b64);
+                int n = BitConverter.ToInt32(raw, 0);   // cuántos bytes de estado (las señales llevan detrás sus textos)
                 using var ms = new System.IO.MemoryStream(raw, 4, raw.Length - 4);
                 using var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Decompress);
                 using var outp = new System.IO.MemoryStream();
                 gz.CopyTo(outp);
-                return outp.ToArray();
+                var all = outp.ToArray();
+                return n > 0 && n < all.Length ? all.AsSpan(0, n).ToArray() : all;
             }
             catch { return null; }
         }
