@@ -1,3 +1,2 @@
-1.2.66
-Ves los trenes de los demás|En multijugador, si te falta algún vehículo del tren de otro jugador, Open Rails pone uno de largo parecido y su tren se ve.
-Lista de la sala al momento|En la sala compartida salen todos los jugadores desde que entran, también parados, y el aviso de vía ocupada los tiene en cuenta.
+1.2.67
+Trenes de los demás, también en 3D|En multijugador, el tren de otro jugador con varios vehículos que no tienes se ve en el 3D y en Ctrl+9, no solo en el mapa grande.

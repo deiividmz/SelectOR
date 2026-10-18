@@ -1,3 +1,2 @@
-1.2.66
-You see the others' trains|In multiplayer, if you are missing a vehicle of another player's train, Open Rails puts one of similar length and their train shows.
-Room list at once|In the shared room every player shows from the moment they join, also when stopped, and the occupied-track warning takes them into account.
+1.2.67
+Others' trains, also in 3D|In multiplayer, another player's train with several vehicles you do not have shows in 3D and in Ctrl+9, not only on the big map.

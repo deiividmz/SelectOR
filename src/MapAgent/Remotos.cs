@@ -3,6 +3,8 @@
 //    (MPManager.SubCar → SubMissingCar), pero el largo le llega del «PLAYER» EN CENTÍMETROS y lo trata como metros:
 //    buscaba uno de 2 000 m, no encontraba ninguno, el tren se quedaba vacío y no lo veías. Aquí, el largo en metros para
 //    buscarlo y el vehículo puesto con su largo exacto (lo mismo que el despachador fijo: SelectOR Despachador\Arreglos.cs).
+//    Además, el vehículo puesto lleva el identificador del de verdad (1.2.67): Open Rails le dejaba el de serie, «AI», y con
+//    varios sustituidos marcaba de cabeza todos los «AI», también un coche, y fallaba al ponerle las luces.
 //  · Si aun así Open Rails no puede colocar el tren de otro (le falta todo, o su vía te sale ocupada), queda en el
 //    registro del agente con el motivo (OnlineTrains.AddPlayers), para saber por qué no se ve.
 // Con Harmony, en memoria (no cambia ningún archivo de Open Rails).
@@ -17,6 +19,7 @@ namespace SelectOR.MapAgent
     public static class Remotos
     {
         [ThreadStatic] static int _subs;
+        [ThreadStatic] static MSGPlayer _adding;   // el «PLAYER» que se está poniendo
 
         // (desde Agent.Install) cuántos parches ha puesto.
         public static int Install(Harmony h)
@@ -38,25 +41,28 @@ namespace SelectOR.MapAgent
             return n;
         }
 
-        static void BeforeSub(ref int length, out int __state)
+        // __state: el largo que llegó (cm) y la posición del vehículo en el tren (los anteriores ya están puestos)
+        static void BeforeSub(Orts.Simulation.Physics.Train train, ref int length, out (int len, int index) __state)
         {
-            __state = length;
+            __state = (length, train?.Cars?.Count ?? -1);
             if (length > 100) length = (int)Math.Round(length / 100.0);   // centímetros → metros
         }
 
-        static void AfterSub(TrainCar __result, string wagonFilePath, int __state)
+        static void AfterSub(TrainCar __result, string wagonFilePath, (int len, int index) __state)
         {
             try
             {
                 if (__result == null) { Agent.Log($"vehículo que falta, sin sustituto: {System.IO.Path.GetFileName(wagonFilePath)}"); return; }
-                if (__state > 100) __result.CarLengthM = __state / 100f;
+                if (__state.len > 100) __result.CarLengthM = __state.len / 100f;
+                var p = _adding;
+                if (p?.ids != null && __state.index >= 0 && __state.index < p.ids.Length) __result.CarID = p.ids[__state.index];
                 _subs++;
                 Agent.Log($"vehículo que falta: {System.IO.Path.GetFileName(wagonFilePath)} → {System.IO.Path.GetFileName(__result.WagFilePath)} ({__result.CarLengthM:F1} m)");
             }
             catch { }
         }
 
-        static void BeforeAdd() => _subs = 0;
+        static void BeforeAdd(MSGPlayer player) { _subs = 0; _adding = player; }
 
         static void AfterAdd(MSGPlayer player)
         {
@@ -71,6 +77,7 @@ namespace SelectOR.MapAgent
         // (no se traga el error: Open Rails sigue igual; solo queda apuntado)
         static Exception AddFailed(Exception __exception, MSGPlayer player)
         {
+            _adding = null;
             if (__exception != null)
                 try { Agent.Log($"tren de «{player?.user}»: Open Rails no lo puede poner: {__exception.GetType().Name} {__exception.Message}"); } catch { }
             return __exception;
