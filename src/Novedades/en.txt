@@ -1,7 +1,3 @@
-1.2.65
-Shared CGL room|Free driving on CGL_V22N_RE puts you in a room with an always-on dispatcher, on Spanish time.
-Your path, your signals|In the room you change the switches and signals of your dashed line from the big map.
-Appeals|Appeal a penalty or the annulment of a service from its report; the administrator answers you.
-Service speed|Right-click the cab speedometer: maximum speed on the scale, the diamond and the route sheet.
-More controllers|Throttle and dynamic brake on one lever, cruise control, Xbox controllers and D-pads.
-One name|In multiplayer you play with your SelectOR user name.
+1.2.66
+You see the others' trains|In multiplayer, if you are missing a vehicle of another player's train, Open Rails puts one of similar length and their train shows.
+Room list at once|In the shared room every player shows from the moment they join, also when stopped, and the occupied-track warning takes them into account.

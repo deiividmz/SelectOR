@@ -55,7 +55,8 @@ namespace SelectOR.MapAgent
             if (text != null) { h.Patch(text, prefix: new HarmonyMethod(typeof(Agent), nameof(BeforeText))); n++; }
             int local = LocalLink.Install(h);   // conducción libre: el mapa grande de SelectOR (LocalLink.cs)
             int spawn = Spawn.Install(h);       // sala compartida: el .pat solo para la salida (Spawn.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            int remote = Remotos.Install(h);    // los trenes de los demás: vehículos que faltan y por qué no se ve uno (Remotos.cs)
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
         }
 
         static string ProcessPath()
