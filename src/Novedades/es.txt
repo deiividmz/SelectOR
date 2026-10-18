@@ -1,7 +1,7 @@
-1.2.64
-Mapa del HUD como Ctrl+9|En las salas y en Conducción libre: agujas y señales desde el mapa grande, al momento, y el camino de cada tren.
-Chat de la sala en el HUD|Habla con los jugadores de tu sala de Servidores SelectOR sin salir de Open Rails.
-Tus mandos en Open Rails|Ajustes de SelectOR → Mandos: palancas y botones de tu joystick o cuadrante.
-Gráficos y clima|Ajustes de SelectOR: ReShade con el perfil SelectOR y el clima de SelectOR (nubes, lluvia, nieve…).
-Cada recorrido, el suyo|Si varios .pat van de la misma estación a la misma, ahora eliges cuál.
-Multijugador más claro|Nombre, IP y puerto en una ventana al alojar o al unirte.
+1.2.65
+Sala compartida de CGL|Conducción libre en CGL_V22N_RE te mete en una sala con despachador siempre encendido, a la hora de España.
+Tu camino, tus señales|En la sala cambias las agujas y señales de tu línea discontinua desde el mapa grande.
+Alegaciones|Alega una sanción o la anulación de un servicio desde su informe; el administrador te contesta.
+Velocidad del servicio|Clic derecho en el velocímetro del pupitre: velocidad máxima en la escala, el rombo y la hoja de ruta.
+Más mandos|Regulador y freno dinámico en una palanca, control de crucero, mandos de Xbox y crucetas.
+Un solo nombre|En el multijugador juegas con tu nombre de usuario de SelectOR.

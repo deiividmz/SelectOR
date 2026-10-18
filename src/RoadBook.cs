@@ -25,6 +25,9 @@ namespace SelectOR
             public double[] Cum;                    // distancia desde el inicio del tramo hasta cada vértice
             public double Len;
             public readonly List<(double off, double kmh)> Limits = new();      // señales de límite de velocidad
+            // Las mismas con su sentido, como Open Rails: +1 valen al ir hacia el final del tramo (B), −1 hacia el inicio
+            // (A), 0 no se sabe. (Por ahora solo las usa el mapa de cada infracción en Revisión.)
+            public readonly List<(double off, double kmh, int dir)> LimitDirs = new();
             public readonly List<(double off, string name)> Platforms = new();  // andenes (nombre de estación)
             // Marcas de andén con su id del .tdb (para emparejar inicio y fin y saber a qué lado de la vía está)
             public readonly List<(double off, uint id, uint linked, bool start)> PlatformMarks = new();
@@ -188,6 +191,20 @@ namespace SelectOR
 
         // La geometría de un tramo de vía (mundo): sus secciones, alargado hasta sus desvíos y simplificado a 0,75 m; con
         // la distancia desde el inicio de cada vértice. La misma para el grafo y para la vía de los mapas (TrackLatLon).
+        // Sentido de un poste de velocidad, igual que Open Rails (Signals.AddSpeed): vale para quien va hacia el final del
+        // tramo si su giro (π/2 − Angle) mira como la vía en ese punto (RotY del Traveller = AY; adelante = (sen, cos) en
+        // X, Z), con menos de 90° de diferencia. +1 hacia el final, −1 hacia el inicio, 0 si no se puede saber.
+        static int PostDir(List<(double x, double z)> kp, List<double> kc, double off, float angle)
+        {
+            if (kp == null || kp.Count < 2) return 0;
+            int i = 1; while (i < kc.Count - 1 && kc[i] < off) i++;
+            double dx = kp[i].x - kp[i - 1].x, dz = kp[i].z - kp[i - 1].z;
+            if (dx * dx + dz * dz < 1e-6) return 0;
+            double rotY = Math.Atan2(dx, dz), face = Math.PI / 2 - angle;
+            double diff = Math.IEEERemainder(rotY - face, 2 * Math.PI);
+            return Math.Abs(diff) < Math.PI / 2 ? 1 : -1;
+        }
+
         static bool EdgeGeometry(TrackNode node, TrackSectionsFile tsec, Dictionary<int, (double x, double z)> nodePos,
             out int a, out int b, out List<(double x, double z)> kp, out List<double> kc, out double len, out double pre)
         {
@@ -285,7 +302,7 @@ namespace SelectOR
                             if (!sp.IsLimit || sp.IsMilePost || sp.IsWarning || sp.IsResume) continue;
                             if (sp.IsFreight && !sp.IsPassenger) continue;   // límite solo de mercancías
                             double kmh = sp.SpeedInd * (sp.IsMPH ? 1.609344 : 1.0);
-                            if (kmh > 0 && kmh < 500) e.Limits.Add((off, kmh));
+                            if (kmh > 0 && kmh < 500) { e.Limits.Add((off, kmh)); e.LimitDirs.Add((off, kmh, PostDir(kp, kc, off, sp.Angle))); }
                         }
                         else if (it is PlatformItem pl && !string.IsNullOrWhiteSpace(pl.Station))
                         {
@@ -295,6 +312,7 @@ namespace SelectOR
                         }
                     }
                 e.Limits.Sort((u, v) => u.off.CompareTo(v.off));
+                e.LimitDirs.Sort((u, v) => u.off.CompareTo(v.off));
                 e.Platforms.Sort((u, v) => u.off.CompareTo(v.off));
                 vecToEdge[ni] = edges.Count;
                 edges.Add(e); world.Add(kp);
@@ -844,6 +862,8 @@ namespace SelectOR
         public readonly List<Waypoint> Points = new();
         public readonly List<Stop> Stops = new();
         public readonly List<(double d, double kmh)> Limits = new();
+        // Solo los límites que valen en el sentido en que se recorre el itinerario (los postes del otro sentido, fuera).
+        public readonly List<(double d, double kmh)> LimitsAhead = new();
         readonly Dictionary<string, bool> _haltChoice = new(StringComparer.OrdinalIgnoreCase);
         public bool DefaultHalt;                        // por defecto se pasa sin parar: las paradas las marca el maquinista
         public double[] PathLat = Array.Empty<double>(), PathLon = Array.Empty<double>();
@@ -872,7 +892,7 @@ namespace SelectOR
 
         void ClearPlan()
         {
-            Stops.Clear(); Limits.Clear(); Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0;
+            Stops.Clear(); Limits.Clear(); LimitsAhead.Clear(); Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0;
             PathLat = PathLon = Array.Empty<double>(); _px = _py = Array.Empty<float>(); _pc = Array.Empty<double>();
             TotalLen = Progress = 0; OffRoute = false; Reversal = false; PointDist = Array.Empty<double>();
             OffSinceUtc = DateTime.MaxValue; Version++;
@@ -1292,6 +1312,8 @@ namespace SelectOR
                 var p1 = Graph.PointAt(e, to); Add(p1.x, p1.y, at + len);
                 double lo = Math.Min(from, to), hi = Math.Max(from, to);
                 foreach (var (o, kmh) in E.Limits) if (o >= lo - 0.1 && o <= hi + 0.1) Limits.Add((at + Math.Abs(o - from), kmh));
+                foreach (var (o, kmh, dir) in E.LimitDirs)
+                    if (o >= lo - 0.1 && o <= hi + 0.1 && (dir == 0 || dir == (fwd ? 1 : -1))) LimitsAhead.Add((at + Math.Abs(o - from), kmh));
                 foreach (var (o, name) in E.Platforms) if (o >= lo - 0.1 && o <= hi + 0.1) plats.Add((at + Math.Abs(o - from), name));
                 at += len;
             }
@@ -1301,6 +1323,7 @@ namespace SelectOR
             PathLat = new double[_px.Length]; PathLon = new double[_px.Length];
             for (int i = 0; i < _px.Length; i++) (PathLat[i], PathLon[i]) = Graph.Unproj(_px[i], _py[i]);
             Limits.Sort((a, b) => a.d.CompareTo(b.d));
+            LimitsAhead.Sort((a, b) => a.d.CompareTo(b.d));
             PointDist = pointDist.ToArray();
             AddNearbyPlatforms(plats);
 

@@ -1,6 +1,7 @@
 // Mandos al conducir (Ajustes de SelectOR → Mandos; Joysticks.cs): mientras Open Rails está abierto, cada 25 ms se leen
 // los mandos y, si algo cambia, se le manda al agente del mapa dentro de Open Rails por la conexión local
-// (LocalMapLink: «CAB tipo valor» para las palancas, «BTN orden 1|0» para los botones; MapAgent\Controls.cs). En
+// (LocalMapLink: «CAB tipo valor» para las palancas, «CRUISE fracción máx» para la del control de crucero, «BTN orden
+// 1|0» para los botones; MapAgent\Controls.cs). En
 // cualquier modo (Actividad, Horario, Conducción libre, multijugador). Al conectarse Open Rails se le manda la posición
 // de todas las palancas (como un mando de verdad: lo que marca la palanca es lo que hay).
 
@@ -76,18 +77,35 @@ namespace SelectOR
                 float v = Joy.Value(b, _joySt[b.Device].Axes[Math.Max(0, Math.Min(5, b.Index))]);
                 if (_joyAxSent.TryGetValue(b.Action, out float last) && Math.Abs(v - last) < 0.004f) continue;
                 _joyAxSent[b.Action] = v;
-                l.Send("CAB " + b.Action + " " + v.ToString("0.000", CultureInfo.InvariantCulture));
+                if (b.Action == "THROTTLE_DYNAMIC") JoyCombined(l, v);
+                else if (b.Action == "CRUISE_SPEED")
+                    l.Send("CRUISE " + v.ToString("0.000", CultureInfo.InvariantCulture) + " " + Math.Round(Math.Max(0, _svcMaxKmh)).ToString(CultureInfo.InvariantCulture));
+                else l.Send("CAB " + b.Action + " " + v.ToString("0.000", CultureInfo.InvariantCulture));
             }
             // botones: pulsado si lo está cualquiera de los suyos
             foreach (var g in binds.Where(b => !b.Axis).GroupBy(b => b.Action))
             {
-                bool down = g.Any(b => ok.Contains(b.Device) && (_joySt[b.Device].Buttons & (1u << Math.Max(0, Math.Min(31, b.Index)))) != 0);
+                bool down = g.Any(b => ok.Contains(b.Device) && Joy.Down(_joySt[b.Device], b.Index));
                 bool known = _joyBtnSent.TryGetValue(g.Key, out bool was);
                 if (known && was == down) continue;
                 if (!known && !down) { _joyBtnSent[g.Key] = false; continue; }   // (al empezar, los sueltos no se mandan)
                 _joyBtnSent[g.Key] = down;
                 l.Send("BTN " + g.Key + " " + (down ? "1" : "0"));
             }
+        }
+
+        // Regulador + freno dinámico en una palanca (v: + regulador, − freno dinámico, 0 los dos sueltos). Primero se suelta
+        // el otro, y el freno dinámico solo se manda al ir hacia él o al volver (en punto muerto Open Rails avisa de que no
+        // se puede usar cada vez que le llega, aunque sea un 0).
+        void JoyCombined(LocalMapLink l, float v)
+        {
+            float thr = Math.Max(0, v), dyn = Math.Max(0, -v);
+            float lastThr = _joyAxSent.TryGetValue("THROTTLE", out var t0) ? t0 : -1, lastDyn = _joyAxSent.TryGetValue("DYNAMIC_BRAKE", out var d0) ? d0 : 0;
+            string F(float x) => x.ToString("0.000", CultureInfo.InvariantCulture);
+            if (thr == 0 && lastThr != 0) { l.Send("CAB THROTTLE 0.000"); _joyAxSent["THROTTLE"] = 0; }
+            if (dyn == 0 && lastDyn > 0) { l.Send("CAB DYNAMIC_BRAKE 0.000"); _joyAxSent["DYNAMIC_BRAKE"] = 0; }
+            if (thr > 0) { l.Send("CAB THROTTLE " + F(thr)); _joyAxSent["THROTTLE"] = thr; }
+            if (dyn > 0) { l.Send("CAB DYNAMIC_BRAKE " + F(dyn)); _joyAxSent["DYNAMIC_BRAKE"] = dyn; }
         }
     }
 }

@@ -13,6 +13,7 @@ namespace SelectOR
     public partial class MainMenuForm
     {
         CabHudOverlay _cabHud;
+        double _svcMaxKmh;   // velocidad máxima del servicio (clic derecho en el velocímetro del pupitre); 0 = la del tren
 
         bool CabHudAlive => _cabHud != null && !_cabHud.IsDisposed;
 
@@ -30,11 +31,66 @@ namespace SelectOR
                 _cabHud.MachineKey = CabMachineKey(tren);   // escala de los manómetros elegida para esta máquina
                 var (mrBar, bcBar) = TrainBrakePressures(tren);
                 _cabHud.SetTrainPressures(mrBar, bcBar);    // la escala automática cubre las presiones reales del tren
+                if (_svcMaxKmh > 0) _cabHud.SetServiceMax(_svcMaxKmh);
+                _cabHud.SpeedMaxRequested += () => { try { BeginInvoke((Action)ServiceMaxDialog); } catch { } };
                 if (_tHave) _cabHud.SetPosition(_tLat, _tLon);
                 var _ = _cabHud.Handle;
                 if (_scenarioReady || force) _cabHud.Show(); else _cabWaiting = true;   // aparece con el escenario cargado
             }
             catch { _cabHud = null; }
+        }
+
+        // Clic derecho en el velocímetro del pupitre: la velocidad máxima de este servicio (no más que la del tren). Vale para
+        // la escala del velocímetro, el rombo y el círculo de velocidad y la hoja de ruta (su máximo y las horas de paso),
+        // hasta que acaba la conducción. En la unidad del velocímetro (km/h o mph). Vacío = la del tren.
+        void ServiceMaxDialog()
+        {
+            var prev = Native.Foreground();   // Open Rails: vuelve a primer plano al cerrar
+            try
+            {
+                double eng = 0;
+                try { eng = TrainMaxKmh(_drivenConsist ?? CurrentDrivenConsist()); } catch { }
+                bool mph = _cabHud != null && _cabHud.SpeedMph;
+                double f = mph ? 1 / 1.609344 : 1; string unit = mph ? "mph" : "km/h";
+                double top = eng > 0 ? Math.Round(eng * f) : Math.Round(500 * f), low = Math.Round(10 * f);
+                using var dlg = new FormDialog(Tr("Velocidad máxima del servicio"), Tr("Aceptar"), 440, "⏱",
+                    Tr("Velocímetro, rombo y círculo, y hoja de ruta."));
+                var box = dlg.AddText("v", string.Format(Tr("Velocidad máxima ({0})"), unit),
+                    _svcMaxKmh > 0 ? Math.Round(_svcMaxKmh * f).ToString(System.Globalization.CultureInfo.InvariantCulture) : "",
+                    eng > 0 ? top.ToString(System.Globalization.CultureInfo.InvariantCulture) : "");
+                dlg.AddInfo(eng > 0 ? string.Format(Tr("La del tren: {0} {1}. Déjalo vacío para usar la del tren."), top, unit)
+                                    : Tr("Déjalo vacío para usar la del tren."));
+                dlg.Validate = d =>
+                {
+                    string t = d.Get("v").Trim();
+                    if (t.Length == 0) return System.Threading.Tasks.Task.FromResult<string>(null);
+                    if (!double.TryParse(t.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) || v < low || v > top)
+                        return System.Threading.Tasks.Task.FromResult(string.Format(Tr("Escribe un número entre {0} y {1} {2}."), low, top, unit));
+                    return System.Threading.Tasks.Task.FromResult<string>(null);
+                };
+                dlg.TopMost = true; dlg.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+                dlg.Shown += (s, e) => { try { box.Box.Focus(); box.Box.SelectAll(); } catch { } };
+                if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+                string txt = dlg.Get("v").Trim();
+                double kmh = 0;
+                if (txt.Length > 0 && double.TryParse(txt.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double val))
+                    kmh = val / f;
+                if (eng > 0 && Math.Abs(kmh - eng) < 0.6) kmh = 0;   // la misma que la del tren: como sin poner
+                SetServiceMax(kmh);
+            }
+            catch { }
+            finally { Native.ForceForeground(prev); }
+        }
+
+        // La velocidad máxima del servicio (0 = la del tren), en el pupitre y en la hoja de ruta.
+        void SetServiceMax(double kmh)
+        {
+            _svcMaxKmh = Math.Max(0, kmh);
+            try { _cabHud?.SetServiceMax(_svcMaxKmh); } catch { }
+            double eng = 0;
+            try { eng = TrainMaxKmh(_drivenConsist ?? CurrentDrivenConsist()); } catch { }
+            _roadVmax = _svcMaxKmh > 0 ? _svcMaxKmh : eng;
+            try { _road.ComputeEtas(_roadLimit, _roadVmax, Math.Max(0, _prefs?.RoadDwellS ?? 30), RoadGameNow()); _roadHud?.Invalidate(true); } catch { }
         }
 
         // Máquina de cabeza del tren (carpeta\nombre de su .eng): clave para recordar la escala de sus manómetros.

@@ -200,6 +200,7 @@ namespace SelectOR
             _road.Schedule = null; _road.FromPlan = false; _road.ScheduleFirstPass = false;
             _roadPatPending = null; _roadPlanWaiting = null; _roadHudWaiting = false;
             _roadVmax = 0; _roadLimit = double.NaN; _roadGameS = double.NaN;
+            _svcMaxKmh = 0;   // conducción nueva: la velocidad máxima del servicio vuelve a ser la del tren (MainMenuForm.CabHud.cs)
             try { _roadVmax = TrainMaxKmh(_drivenConsist ?? CurrentDrivenConsist()); } catch { }
             _road.DefaultHalt = false;   // las paradas las marca el maquinista en la hoja de ruta
             _roadTimer = new Timer { Interval = 1000 };
@@ -331,7 +332,8 @@ namespace SelectOR
                 _roadHud = new RoadBookHud(_prefs, _road)
                 {
                     GameNow = RoadGameNow,
-                    Info = () => _roadVmax > 0 ? string.Format(Tr("tren: máx. {0} km/h"), Math.Round(_roadVmax)) : "",
+                    Info = () => _roadVmax <= 0 ? "" : _svcMaxKmh > 0 ? string.Format(Tr("servicio: máx. {0} km/h"), Math.Round(_roadVmax))
+                                                                         : string.Format(Tr("tren: máx. {0} km/h"), Math.Round(_roadVmax)),
                     CloseRequested = () => { _roadHud?.Hide(); },
                     Changed = () => { _road.ComputeEtas(_roadLimit, _roadVmax, Math.Max(0, _prefs?.RoadDwellS ?? 30), RoadGameNow()); },
                     OpenMap = () => { OpenBigMapForRoute(); }

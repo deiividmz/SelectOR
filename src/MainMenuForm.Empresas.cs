@@ -318,7 +318,7 @@ namespace SelectOR
             public int Cars;
         }
         // Borrado por el superadmin (servicios y movimientos de banca)
-        RoundButton _svcDelBtn, _ledgerDelBtn, _svcAnnulBtn;
+        RoundButton _svcDelBtn, _ledgerDelBtn, _svcAnnulBtn, _svcUnannulBtn;
         ServiceCalendar _svcCal;
         (long total, long open, long done, long annulled, double km)? _svcStats;   // totales del servidor (sin límite)
         readonly List<string> _ledgerIds = new();
@@ -326,7 +326,7 @@ namespace SelectOR
 
         sealed class SvcRow
         {
-            public string Id, Date, Driver, Route, Status;
+            public string Id, Date, Driver, Route, Status, DriverId = "";
             public double Km, DurationS, Pax, Income, Cost, Net;
             public double MassT = double.NaN, Capacity = double.NaN;   // toneladas y plazas del tren (NaN = no se sabe)
             public string Train = "";                                   // tren conducido (composición)
@@ -466,9 +466,10 @@ namespace SelectOR
 
             form.Controls.Add(EmpTitle(Tr("Acceso de maquinista")));
             form.Controls.Add(EmpIntro(Tr("Entra con tu nombre de usuario o crea una cuenta nueva. Tu nombre de usuario te identifica en las empresas y debe ser único.")));
+            form.Controls.Add(EmpIntro(Tr("Al registrarte, tu nombre de usuario es también tu nombre de jugador en el multijugador: de 4 a 10 caracteres, sin espacios ni ' \" -, y sin empezar por un número (lo exige Open Rails).")));
 
             form.Controls.Add(EmpFieldLabel(Tr("Nombre de usuario")));
-            _empEmail = EmpInput(Tr("p. ej. David MZP")); form.Controls.Add(_empEmail);
+            _empEmail = EmpInput(Tr("p. ej. DavidMZP")); form.Controls.Add(_empEmail);
             form.Controls.Add(EmpFieldLabel(Tr("Contraseña")));
             _empPass = EmpInput(""); _empPass.Box.UseSystemPasswordChar = true; form.Controls.Add(_empPass);
 
@@ -1075,6 +1076,11 @@ namespace SelectOR
             _svcAnnulBtn.Width = 200; _svcAnnulBtn.Margin = new Padding(8, 10, 2, 2); _svcAnnulBtn.BaseColor = Theme.Surface2; _svcAnnulBtn.HoverColor = Color.FromArgb(150, 60, 60); _svcAnnulBtn.TextColor = RedC; _svcAnnulBtn.Visible = false;
             _svcAnnulBtn.Click += (s, e) => AnnulServiceRow();
             svcBtns.Controls.Add(_svcAnnulBtn);
+            // y quitar la anulación: vuelve a estar normal (MainMenuForm.Alegaciones.cs)
+            _svcUnannulBtn = EmpButton(Tr("Quitar la anulación…"));
+            _svcUnannulBtn.Width = 220; _svcUnannulBtn.Margin = new Padding(8, 10, 2, 2); _svcUnannulBtn.BaseColor = Theme.Surface2; _svcUnannulBtn.Visible = false;
+            _svcUnannulBtn.Click += (s, e) => UnannulServiceRow();
+            svcBtns.Controls.Add(_svcUnannulBtn);
             svcBtns.Controls.Add(_svcDelBtn);
             t.Controls.Add(svcBtns);
             return t;
@@ -1796,37 +1802,50 @@ namespace SelectOR
         // Editar el nombre de maquinista: el NOMBRE VISIBLE en empresas, socios y rankings. Lo cambia
         // el servidor (set_my_username), que comprueba que sea válido y no lo use nadie. El acceso no
         // cambia: se sigue entrando con el nombre de acceso de siempre (o con el correo).
-        async void EditMaquinistaName()
+        async void EditMaquinistaName() => await ChangeMaquinistaName((t, bad) => Msg(_empHomeMsg, t, bad));
+
+        // Cambia el nombre de maquinista. Desde la 1.2.65 es también el nombre de jugador del multijugador: tiene que
+        // cumplir las reglas de Open Rails (MPUserValid). report: dónde se avisa (null = ventanas). Devuelve el nombre
+        // guardado, o null si se cancela o falla.
+        async Task<string> ChangeMaquinistaName(Action<string, bool> report)
         {
-            if (!Supa.IsLoggedIn) return;
+            if (!Supa.IsLoggedIn) return null;
+            void Say(string t, bool bad)
+            {
+                if (report != null) report(t, bad);
+                else if (bad) ThemedBox.Show(this, t, Tr("Nombre de maquinista"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             string email = Supa.Email ?? "";
             string acceso = email.EndsWith("@" + SyntheticEmailDomain, StringComparison.OrdinalIgnoreCase)
                 ? string.Format(Tr("Para iniciar sesión sigues usando tu nombre de acceso «{0}»."), email.Substring(0, email.IndexOf('@')))
                 : Tr("Para iniciar sesión sigues usando tu correo.");
+            string cur = Supa.Username ?? "";
             using var dlg = new TextPromptDialog(Tr("Nombre de maquinista"),
-                Tr("Este nombre te identifica en empresas y rankings (de 3 a 30 caracteres, sin @).") + " " + acceso,
-                Supa.Username ?? "", Tr("p. ej. David MZP"));
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            var name = System.Text.RegularExpressions.Regex.Replace((dlg.Value ?? "").Trim(), @"\s+", " ");
-            if (name == (Supa.Username ?? "")) return;
-            if (name.Length < 3 || name.Length > 30) { Msg(_empHomeMsg, Tr("El nombre debe tener entre 3 y 30 caracteres."), true); return; }
-            if (name.IndexOfAny(new[] { '@', '<', '>', '"', '\\' }) >= 0) { Msg(_empHomeMsg, Tr("El nombre no puede llevar @, <, >, comillas ni barras."), true); return; }
-            Msg(_empHomeMsg, Tr("Guardando nombre…"), false);
+                Tr("Este nombre te identifica en empresas y rankings y es tu nombre de jugador en el multijugador.") + " " + Tr("De 4 a 10 caracteres, sin espacios ni ' \" -, y sin empezar por un número (lo exige Open Rails para el multijugador).") + " " + acceso,
+                MPUserValid(cur) ? cur : MPUserClean(cur), Tr("p. ej. DavidMZP"));
+            if (dlg.ShowDialog(this) != DialogResult.OK) return null;
+            var name = (dlg.Value ?? "").Trim();
+            if (name == cur && MPUserValid(name)) return name;
+            if (!MPUserValid(name)) { Say(Tr("El nombre debe tener de 4 a 10 caracteres, sin espacios ni ' \" -, y no puede empezar por un número."), true); return null; }
+            if (name.IndexOfAny(new[] { '@', '<', '>', '\\' }) >= 0) { Say(Tr("El nombre no puede llevar @, <, >, comillas ni barras."), true); return null; }
+            Say(Tr("Guardando nombre…"), false);
             var (json, err) = await Supa.RpcAsync("set_my_username", new { p_username = name });
             if (err != null)
             {
                 bool falta = err.IndexOf("set_my_username", StringComparison.OrdinalIgnoreCase) >= 0
                              || err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0;
-                Msg(_empHomeMsg, falta ? Tr("El servidor aún no permite cambiar el nombre.")
-                                       : Tr("No se pudo cambiar el nombre: ") + err, true);
-                return;
+                Say(falta ? Tr("El servidor aún no permite cambiar el nombre.")
+                          : Tr("No se pudo cambiar el nombre: ") + err, true);
+                return null;
             }
             // El servidor devuelve el nombre tal como lo ha guardado
             try { var saved = JsonSerializer.Deserialize<string>(json); if (!string.IsNullOrWhiteSpace(saved)) name = saved; } catch { }
             Supa.SetUsername(name);
-            _empUserLbl.Text = UserHeaderText();
-            Msg(_empHomeMsg, Tr("Nombre actualizado."), false);
+            if (_empUserLbl != null) _empUserLbl.Text = UserHeaderText();
+            Say(Tr("Nombre actualizado."), false);
             if (_empSel != null) LoadMembers(_empSel);   // refresca el nombre en la lista de socios
+            if (_txtMPUser != null) _txtMPUser.Text = name;
+            return name;
         }
 
         // ---------------------------------------------------------------- Mi cuenta
@@ -1908,7 +1927,8 @@ namespace SelectOR
         {
             var user = _empEmail.Box.Text.Trim(); var pass = _empPass.Box.Text;
             if (user.Contains("@")) { Msg(_empAuthMsg, Tr("Elige un nombre de usuario (sin @); el correo ya no se usa."), true); return; }
-            if (user.Length < 3) { Msg(_empAuthMsg, Tr("El nombre de usuario debe tener al menos 3 caracteres."), true); return; }
+            // el nombre de usuario es también el nombre de jugador del multijugador: las reglas de Open Rails (1.2.65)
+            if (!MPUserValid(user)) { Msg(_empAuthMsg, Tr("El nombre de usuario debe tener de 4 a 10 caracteres, sin espacios ni ' \" -, y no puede empezar por un número (es también tu nombre de jugador en el multijugador)."), true); return; }
             if (pass.Length < 6) { Msg(_empAuthMsg, Tr("La contraseña debe tener 6 caracteres o más."), true); return; }
             string email = UsernameToEmail(user);
             if (email == null) { Msg(_empAuthMsg, Tr("Nombre de usuario no válido (usa letras o números)."), true); return; }
@@ -2154,7 +2174,7 @@ namespace SelectOR
                         start = so.LocalDateTime;
                     rows.Add(new SvcRow
                     {
-                        Id = id, Date = FmtDate(started), Driver = driver, Route = route, Status = Str(e, "status"),
+                        Id = id, Date = FmtDate(started), Driver = driver, Route = route, Status = Str(e, "status"), DriverId = Str(e, "driver_id"),
                         Km = Num(e, "km"), DurationS = Num(e, "duration_s"), Pax = Num(e, "pax"), Income = Num(e, "income"),
                         Cost = Num(e, "cost_total"), Net = Num(e, "net"), Valid = valid,
                         MassT = tm, Capacity = tc, Train = tn, Cars = tcars, Engines = teng,
@@ -2250,6 +2270,13 @@ namespace SelectOR
                 var ruta = _routesAll.Find(x => string.Equals(x.Name, s.Route, StringComparison.OrdinalIgnoreCase));
                 if (ruta != null) data.Map.Detail = await TripDetailFor(ruta.Path);
             }
+            // Alegaciones (alegaciones.sql): las infracciones del servicio y, si es mío, alegarlas o alegar su anulación;
+            // el administrador, quitar la anulación.
+            bool mine = s.DriverId.Length > 0 && s.DriverId == Supa.UserId;
+            if (mine || Supa.IsSuperadmin) data.Infractions = await ServiceInfractions(s.Id);
+            if (mine) await AttachAppeals(data);
+            if (s.Annulled && Supa.IsSuperadmin)
+                data.RestoreHook = owner => UnannulService(owner, s.Id, string.Format(Tr("Servicio de {0} · {1} · {2}"), s.Driver, s.Route, s.Date));
             using var dlg = new ServiceResultDialog(data);
             dlg.ShowDialog(this);
         }
@@ -3440,19 +3467,6 @@ namespace SelectOR
                                                                string vehicle, TrainItem train)
         {
             var res = await StartServiceRpcCore(company, route, consist, path, vehicle, train);
-            // Las plazas según los archivos del maquinista (sin las fijadas por la empresa): quedan junto a las usadas para
-            // la Revisión del administrador (revision-viajeros.sql). Sin ese SQL, no se guardan.
-            if (res.err == null && train != null && !string.IsNullOrWhiteSpace(res.json))
-            {
-                string sid = res.json.Trim().Trim('"');
-                try { using var d = JsonDocument.Parse(res.json); if (d.RootElement.ValueKind == JsonValueKind.String) sid = d.RootElement.GetString(); } catch { }
-                try
-                {
-                    double files = await Task.Run(() => FileCapacity(train));
-                    if (!string.IsNullOrEmpty(sid)) _ = Supa.RpcAsync("service_set_capacity_files", new { p_service = sid, p_files = Math.Round(files) });
-                }
-                catch { }
-            }
             return res;
         }
 
@@ -8926,6 +8940,7 @@ namespace SelectOR
             if (showDialog)
             {
                 r.RecoveredNote = _svcRecoveredNote ?? "";
+                if (r.Infractions.Count > 0) await AttachAppeals(r);   // alegar una sanción desde el informe
                 using var dlg = new ServiceResultDialog(r);
                 dlg.ShowDialog(this);
             }
@@ -9302,6 +9317,7 @@ namespace SelectOR
             if (_fleetSettingsRow != null) _fleetSettingsRow.Visible = Supa.IsSuperadmin; // economía de flota: solo superadmin
             if (_svcDelBtn != null) _svcDelBtn.Visible = Supa.IsSuperadmin;           // borrar servicio: solo superadmin
             if (_svcAnnulBtn != null) _svcAnnulBtn.Visible = Supa.IsSuperadmin;       // anular servicio: solo superadmin
+            if (_svcUnannulBtn != null) _svcUnannulBtn.Visible = Supa.IsSuperadmin;   // y quitar la anulación
             if (_ledgerDelBtn != null) _ledgerDelBtn.Visible = Supa.IsSuperadmin;     // borrar movimiento: solo superadmin
             bool fleetManage = CanManage() || Supa.IsSuperadmin;                      // flota: dueño/gestor/superadmin
             if (_fleetBuyBtn != null) _fleetBuyBtn.Visible = fleetManage;

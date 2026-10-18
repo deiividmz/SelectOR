@@ -95,7 +95,8 @@ namespace SelectOR
                 if (Math.Ceiling(v / step) <= 12) return Math.Ceiling(v / step) * step;
             return Math.Ceiling(v / 1000) * 1000;
         }
-        readonly double _trainMaxKmh;    // velocidad máxima del tren según sus .eng (0 = sin dato)
+        double _trainMaxKmh;             // velocidad máxima que manda: la del servicio (SetServiceMax) o la del tren (0 = sin dato)
+        readonly double _engMaxKmh;      // la del tren según sus .eng (0 = sin dato)
         bool _scaleFromCab;              // la escala ya se ha tomado del velocímetro de la cabina
         CabValues _v = new CabValues();
         bool _hover, _night;
@@ -192,7 +193,7 @@ namespace SelectOR
             _prefs = prefs;
             _dayOfYear = dayOfYear;
             OrControl.Reload();   // teclado de OR tal como lo tenga configurado ahora
-            _trainMaxKmh = trainMaxKmh > 0 ? trainMaxKmh : 0;
+            _trainMaxKmh = _engMaxKmh = trainMaxKmh > 0 ? trainMaxKmh : 0;
             _unitsKnown = speedoMph != null;
             _mph = speedoMph == true;
             _uf = _mph ? 1 / KmhPorMph : 1;
@@ -221,6 +222,24 @@ namespace SelectOR
         // Las señales de límite y de anuncio nunca pasan de la velocidad máxima del tren (.eng): si la
         // vía admite 160 y el tren 120, el límite que manda para el maquinista es 120.
         double TrainCap(double kmh) => _trainMaxKmh > 0 ? Math.Min(kmh, Math.Round(_trainMaxKmh)) : kmh;
+
+        // Velocidad máxima del servicio (clic derecho en el velocímetro: la ventana la pone SelectOR). Manda sobre la del
+        // tren en la escala del velocímetro y en el rombo y el círculo (TrainCap). 0 = la del tren.
+        public void SetServiceMax(double kmh)
+        {
+            double eff = kmh > 0 ? kmh : _engMaxKmh;
+            if (Math.Abs(eff - _trainMaxKmh) < 0.01) return;
+            _trainMaxKmh = eff;
+            if (eff > 0) { _speedMax = ScaleForTrain(eff * _uf) / _uf; _scaleFromCab = false; }
+            _cacheKey = null;   // la esfera (escala y números) se vuelve a dibujar
+            try { Render(); } catch { }
+        }
+
+        public bool SpeedMph => _mph;                        // el velocímetro va en millas
+        public event Action SpeedMaxRequested;               // clic derecho en el velocímetro
+
+        // ¿Está el punto (coordenadas de diseño) en el velocímetro?
+        bool SpeedoAt(PointF d) { float x = d.X - SpeedX, y = d.Y - Cy; return x * x + y * y <= SpeedR * SpeedR; }
 
         // Escala del velocímetro cuando no se sabe la velocidad máxima del tren (sin MaxVelocity en sus .eng):
         // la de la esfera de la cabina que da Open Rails. Con velocidad máxima, manda siempre esa.
@@ -642,6 +661,7 @@ namespace SelectOR
             {
                 int gauge = GaugeAt(ToDesign(e.Location));
                 if (gauge >= 0) ShowGaugeMenu(gauge, Cursor.Position);   // escala del manómetro
+                else if (SpeedoAt(ToDesign(e.Location))) SpeedMaxRequested?.Invoke();   // velocidad máxima del servicio
                 return;
             }
             if (e.Button != MouseButtons.Left) return;

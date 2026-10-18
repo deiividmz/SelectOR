@@ -123,7 +123,7 @@ namespace SelectOR.MapAgent
                 bool mp = MPManager.IsMultiPlayer();
                 long now = _clock.ElapsedMilliseconds;
                 // los mandos (palancas y botones), en cualquier modo y también en red; lo del mapa, solo en Conducción libre
-                while (_in.TryDequeue(out var cmd)) { if (Controls.Do(cmd)) continue; if (!mp && _mapOn && sim.Signals != null) Command(sim, cmd); }
+                while (_in.TryDequeue(out var cmd)) { if (Controls.Do(cmd, sim)) continue; if (!mp && _mapOn && sim.Signals != null) Command(sim, cmd); }
                 if (_wasConnected && !_connected) Controls.ReleaseAll();   // (sin SelectOR, ningún botón se queda pulsado)
                 _wasConnected = _connected;
                 if (mp || !_mapOn || sim.Signals == null || !_connected) return;   // (en red manda el despachador: Agent.cs)

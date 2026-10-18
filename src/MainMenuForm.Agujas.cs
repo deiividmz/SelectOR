@@ -26,7 +26,6 @@ namespace SelectOR
             string name = (_txtMPUser?.Text ?? "").Trim();
             if (name.Length == 0) return;
             _pilot = new SwitchPilot(host, port, name, 1);
-            _pilot.GateOwner += (tok, pw) => { try { BeginInvoke((Action)(() => RoomGateInherited(tok, pw))); } catch { } };
             RoomChatHook(_pilot);   // chat de la sala en el HUD (MainMenuForm.ChatSala.cs)
             RoomMapHook(_pilot);    // agujas, señales y trenes en el mapa grande (MainMenuForm.MapaSala.cs)
         }

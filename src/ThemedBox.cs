@@ -24,10 +24,14 @@ namespace SelectOR
             => Show(owner, text, caption, buttons, icon, def == MessageBoxDefaultButton.Button2 ? 1 : def == MessageBoxDefaultButton.Button3 ? 2 : 0);
 
         public static DialogResult Show(IWin32Window owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon, int defaultButton = 0)
+            => Show(owner, text, caption, buttons, icon, null, defaultButton);
+
+        // Igual, con el texto de cada botón (en el orden de «buttons»: Sí/No/Cancelar…); null o vacío = el de siempre.
+        public static DialogResult Show(IWin32Window owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon, string[] labels, int defaultButton = 0)
         {
             var auto = AutoAnswer?.Invoke(text ?? "", caption ?? "", buttons);
             if (auto != null) return auto.Value;
-            using var f = new BoxForm(text ?? "", caption, buttons, icon, defaultButton);
+            using var f = new BoxForm(text ?? "", caption, buttons, icon, defaultButton, labels);
             if (owner == null) { f.StartPosition = FormStartPosition.CenterScreen; f.ShowInTaskbar = true; }
             return f.ShowDialog(owner);
         }
@@ -35,7 +39,7 @@ namespace SelectOR
         sealed class BoxForm : Form
         {
             readonly Color _iconColor; readonly string _glyph;
-            public BoxForm(string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon, int defaultButton)
+            public BoxForm(string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon, int defaultButton, string[] labels = null)
             {
                 // el título: el que se pide o, si es el genérico, según el tipo de mensaje
                 string title = string.IsNullOrWhiteSpace(caption) || caption == "SelectOR" || caption == "Selector de Trenes y Rutas"
@@ -80,6 +84,9 @@ namespace SelectOR
                     MessageBoxButtons.AbortRetryIgnore => new[] { (I18n.T("Anular"), DialogResult.Abort), (I18n.T("Reintentar"), DialogResult.Retry), (I18n.T("Omitir"), DialogResult.Ignore) },
                     _ => new[] { (I18n.T("Aceptar"), DialogResult.OK) },
                 };
+                if (labels != null)
+                    for (int k = 0; k < list.Length && k < labels.Length; k++)
+                        if (!string.IsNullOrEmpty(labels[k])) list[k].Item1 = labels[k];
                 var made = new List<RoundButton>();
                 bool danger = icon == MessageBoxIcon.Warning && buttons != MessageBoxButtons.OK;
                 for (int k = 0; k < list.Length; k++)

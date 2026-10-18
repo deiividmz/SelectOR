@@ -27,7 +27,7 @@ namespace SelectOR
             string host = _roomJoined != null ? _roomHost : _settings?.Multiplayer_Host;
             int port = _roomJoined != null ? _roomPort : _settings?.Multiplayer_Port ?? 0;
             bool tcp = OrConnectedTo(host, port);
-            string extra = _roomJoined != null && _roomGateOwner && _roomGatePw != null ? "🔒 " + _roomGatePw : null;
+            string extra = null;
             var p = _pilot;
             string pres = p != null && p.Ready && (DateTime.UtcNow - p.PresenceAt).TotalSeconds < 10 ? p.Presence : null;
             (int, string, string) r;

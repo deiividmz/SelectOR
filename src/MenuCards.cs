@@ -319,6 +319,7 @@ namespace SelectOR
         public Func<object, string> TitleOf, SubOf;
         public Func<object, bool> FavOf;
         public Func<object, (string text, Color color)?> BadgeOf;   // distintivo arriba a la izquierda (rutas autorizadas)
+        public Func<object, (string text, Color color)?> Badge2Of;  // otro, abajo a la izquierda de la imagen (Multijugador SelectOR)
         readonly Font _fT = Theme.Font(10f, FontStyle.Bold), _fS = Theme.Font(8.25f), _fStar = Theme.Font(12f, FontStyle.Bold), _fB = Theme.Font(7.75f, FontStyle.Bold);
         public RouteCardList() { BackColor = Theme.BgSidebar; }
         protected override void Dispose(bool disposing) { if (disposing) { _fT.Dispose(); _fS.Dispose(); _fStar.Dispose(); _fB.Dispose(); } base.Dispose(disposing); }
@@ -353,6 +354,14 @@ namespace SelectOR
                 var br = new Rectangle(rc.X + Theme.Px(7), rc.Y + Theme.Px(7), bs.Width + Theme.Px(14), bs.Height + Theme.Px(6));
                 Fill(g, br, br.Height / 2, Color.FromArgb(215, 22, 25, 28));
                 TextRenderer.DrawText(g, badge.Value.text, _fB, br, badge.Value.color, C1);
+            }
+            var badge2 = Badge2Of?.Invoke(it);
+            if (badge2 != null)
+            {
+                var bs = TextRenderer.MeasureText(badge2.Value.text, _fB, Size.Empty, TextFormatFlags.NoPadding);
+                var br = new Rectangle(rc.X + Theme.Px(7), ir.Bottom - bs.Height - Theme.Px(13), bs.Width + Theme.Px(14), bs.Height + Theme.Px(6));
+                Fill(g, br, br.Height / 2, Color.FromArgb(215, 22, 25, 28));
+                TextRenderer.DrawText(g, badge2.Value.text, _fB, br, badge2.Value.color, C1);
             }
             int x = rc.X + Theme.Px(12), w = rc.Width - Theme.Px(24);
             TextRenderer.DrawText(g, TitleOf?.Invoke(it) ?? it.ToString(), _fT, new Rectangle(x, ir.Bottom + Theme.Px(7), w, Theme.Px(20)), Theme.Text, L1);

@@ -66,6 +66,13 @@ namespace SelectOR
             // Servicio programado (servicios-programados.sql): turno cumplido y prima que paga el servidor (no está en el neto)
             public bool SchedDone;
             public double SchedBonus;
+            // Alegaciones (alegaciones.sql), solo en un servicio mío: las que ya hice, por sanción (su id) o por la
+            // anulación («svc:» + el id del servicio); null = no se puede alegar (no es mío o el servidor no las tiene).
+            public Dictionary<string, (string status, string answer)> Appeals;
+            // Alegar: (ventana, «infraction» o «annulment», id, qué) → null enviada · "" cancelada · otro, el error.
+            public Func<IWin32Window, string, string, string, System.Threading.Tasks.Task<string>> AppealHook;
+            // Quitar la anulación (el administrador): (ventana) → null hecho · "" cancelado · otro, el error.
+            public Func<IWin32Window, System.Threading.Tasks.Task<string>> RestoreHook;
         }
 
         static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-ES");
@@ -161,11 +168,17 @@ namespace SelectOR
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(d.AnnulText)) body.Controls.Add(NoteCard(d.AnnulText, Color.FromArgb(64, 44, 44), Red, bold: true));
+            if (!string.IsNullOrWhiteSpace(d.AnnulText))
+            {
+                body.Controls.Add(NoteCard(d.AnnulText, Color.FromArgb(64, 44, 44), Red, bold: true));
+                var al = AppealLine(d, "annulment", d.ServiceId, I18n.T("Anulación del servicio"), W - 8, canNew: true);
+                if (al != null) { al.Margin = new Padding(4, 0, 0, 10); body.Controls.Add(al); }
+                if (d.RestoreHook != null) body.Controls.Add(RestoreLine(d));
+            }
             if (!string.IsNullOrWhiteSpace(d.Notes)) body.Controls.Add(NoteCard("📝  " + d.Notes, Theme.Surface, Theme.Text));
 
             // Carné por puntos: lo que ha pasado en este servicio y cómo queda el carné.
-            if (!d.History && !d.InProgress && (d.Infractions.Count > 0 || d.SuspendedUntil != null
+            if ((!d.History || d.Infractions.Count > 0) && !d.InProgress && (d.Infractions.Count > 0 || d.SuspendedUntil != null
                                                 || (d.LicensePoints >= 0 && d.LicensePoints < Carne.MaxPoints)))
                 body.Controls.Add(LicenseCard(d, W));
 
@@ -273,6 +286,8 @@ namespace SelectOR
                     Text = txt, AutoSize = true, MaximumSize = new Size(iw, 0), ForeColor = it.Status == "pending" ? Carne.Gold : Carne.Red,
                     Font = Theme.Font(9.5f, FontStyle.Bold), Margin = new Padding(0, 2, 0, 2)
                 });
+                var al = AppealLine(d, "infraction", it.Id, Carne.Label(it.Code), iw - 18, canNew: it.Status != "annulled");
+                if (al != null) col.Controls.Add(al);
             }
             var notes = new System.Collections.Generic.List<string>();
             if (d.Infractions.Exists(x => x.Status == "pending"))
@@ -292,6 +307,69 @@ namespace SelectOR
             return card;
         }
 
+
+        // Bajo una sanción o una anulación de un servicio mío: «Alegar…» o cómo va lo que alegué.
+        static Control AppealLine(Data d, string kind, string refId, string what, int width, bool canNew)
+        {
+            if (d.Appeals == null || d.AppealHook == null || string.IsNullOrEmpty(refId)) return null;
+            string key = kind == "infraction" ? refId : "svc:" + refId;
+            var lbl = new Label { AutoSize = true, MaximumSize = new Size(width, 0), BackColor = Color.Transparent, Margin = new Padding(18, 0, 0, 4) };
+            void Done(string status, string answer)
+            {
+                lbl.Cursor = Cursors.Default; lbl.Font = Theme.Font(9f);
+                lbl.ForeColor = status == "accepted" ? Green : status == "rejected" ? Red : Theme.Subtle;
+                lbl.Text = "✉  " + (status == "accepted" ? I18n.T("Alegación aceptada") : status == "rejected" ? I18n.T("Alegación rechazada")
+                                   : I18n.T("Alegada: el administrador aún no ha contestado"))
+                           + (string.IsNullOrWhiteSpace(answer) ? "" : ":  «" + answer.Trim() + "»");
+            }
+            if (d.Appeals.TryGetValue(key, out var ap)) { Done(ap.status, ap.answer); return lbl; }
+            if (!canNew) return null;
+            lbl.Font = Theme.Font(9f, FontStyle.Underline); lbl.ForeColor = Theme.Accent; lbl.Cursor = Cursors.Hand;
+            lbl.Text = "✉  " + I18n.T(kind == "infraction" ? "Alegar esta sanción…" : "Alegar la anulación…");
+            bool busy = false;
+            lbl.Click += async (s, e) =>
+            {
+                if (busy || lbl.Cursor != Cursors.Hand) return;
+                busy = true;
+                try
+                {
+                    string err = await d.AppealHook(lbl.FindForm(), kind, refId, what);
+                    if (err == null) { d.Appeals[key] = ("open", ""); Done("open", ""); }
+                    else if (err.Length > 0) ThemedBox.Show(lbl.FindForm(), err, I18n.T("Alegar"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                finally { busy = false; }
+            };
+            return lbl;
+        }
+
+        // El administrador, bajo la anulación: «Quitar la anulación…».
+        static Control RestoreLine(Data d)
+        {
+            var lbl = new Label
+            {
+                AutoSize = true, MaximumSize = new Size(W - 8, 0), BackColor = Color.Transparent, Margin = new Padding(4, 0, 0, 10),
+                Font = Theme.Font(9.5f, FontStyle.Bold | FontStyle.Underline), ForeColor = Theme.Accent, Cursor = Cursors.Hand,
+                Text = "↩  " + I18n.T("Quitar la anulación…")
+            };
+            bool busy = false;
+            lbl.Click += async (s, e) =>
+            {
+                if (busy || lbl.Cursor != Cursors.Hand) return;
+                busy = true;
+                try
+                {
+                    string err = await d.RestoreHook(lbl.FindForm());
+                    if (err == null)
+                    {
+                        lbl.Cursor = Cursors.Default; lbl.Font = Theme.Font(9.5f, FontStyle.Bold); lbl.ForeColor = Green;
+                        lbl.Text = "✓  " + I18n.T("Anulación quitada: el servicio vuelve a estar normal. El maquinista ha recibido un aviso.");
+                    }
+                    else if (err.Length > 0) ThemedBox.Show(lbl.FindForm(), err, I18n.T("Quitar la anulación"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                finally { busy = false; }
+            };
+            return lbl;
+        }
 
         public static string FormatDuration(int seconds)
         {

@@ -632,6 +632,7 @@ namespace SelectOR
             _lblStatus = new StatusPills { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Padding = new Padding(18, 0, 0, 0), Font = Theme.Font(10f) };
 
             bottom.Controls.Add(_lblStatus);
+            bottom.Controls.Add(BuildSalaCheck());   // «Conducir en la sala compartida» (MainMenuForm.SalaCgl.cs)
             bottom.Controls.Add(rightCol);
             bottom.Controls.Add(_empDutyHost);
             bottom.Controls.Add(stripe);
@@ -671,6 +672,7 @@ namespace SelectOR
                 FavOf = o => _prefs.Favorites.Contains(((Route)o).Path),
                 ImageOf = o => RouteCardImage((Route)o),
                 BadgeOf = o => RouteCardBadge((Route)o),
+                Badge2Of = o => SalaRouteBadge((Route)o),   // la ruta de la sala compartida (MainMenuForm.SalaCgl.cs)
             };
             _lstRoutes.SelectedIndexChanged += (s, e) => OnRouteChanged();
             // La portada de bienvenida se quita en cuanto el usuario elige una ruta (aunque sea la ya cargada).
@@ -684,6 +686,7 @@ namespace SelectOR
             _lstRoutes.ContextMenuStrip = routeCtx;
 
             left.Controls.Add(_lstRoutes);
+            left.Controls.Add(BuildSalaPromo());   // sin la ruta de la sala compartida: de dónde bajarla (MainMenuForm.SalaCgl.cs)
             left.Controls.Add(_routeChips);
             left.Controls.Add(searchHost);
             left.Controls.Add(_routesCap);
@@ -1870,7 +1873,7 @@ namespace SelectOR
             // Primero el de servidor: si se desmarcaba antes el de cliente, ApplyMPMode veía los dos sin marcar
             // y «Alojar partida» se quedaba sin tu IP en «Servidor».
             _mpMode.Changed += i => { _rbServer.Checked = i == 0; _rbClient.Checked = i == 1; ApplyMPMode(); UpdateStatus(); };
-            _mpMode.Clicked += i => { if (MpConnectDialog(i == 0)) PlayMultiplayer(); };
+            _mpMode.Clicked += async i => { if (await MpPlayerName(i == 0 ? Tr("Alojar partida") : Tr("Unirme a un servidor")) != null && MpConnectDialog(i == 0)) PlayMultiplayer(); };
 
             var data = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface };
             var lblD = new Label { Text = Tr("TUS DATOS"), Location = new Point(0, 0), AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f, FontStyle.Bold) };
@@ -1910,16 +1913,14 @@ namespace SelectOR
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            _lblServers = new Label { Text = Tr("Servidores públicos"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Text, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 0, 14, 0), Visible = false };
-            // Secciones: las salas oficiales de SelectOR (MainMenuForm.Salas.cs) y los servidores públicos de siempre.
-            _mpSections = MakeSubTabs(new[] { "🖥  Servidores SelectOR", "🌐  Servidores públicos" }, i => SetMpSection(i));
-            _mpSections.Dock = DockStyle.None; _mpSections.AutoSize = true; _mpSections.Margin = new Padding(0, 0, 18, 0); _mpSections.Anchor = AnchorStyles.Left;
+            // (desde la 1.2.65 sin «Servidores SelectOR»: la sala de SelectOR es la de CGL, desde Conducción libre)
+            _lblServers = new Label { Text = "🌐  " + Tr("Servidores públicos"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Text, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 0, 18, 0) };
             _srvTabs = MakeSubTabs(new[] { "Todos", "Con jugadores", "Rutas que tengo" }, i => { _srvFilter = i; FillServerCards(); });
             _srvTabs.Dock = DockStyle.Fill; _srvTabs.Margin = new Padding(0);
             _srvAge = new Label { AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Text = "", Margin = new Padding(10, 0, 10, 0) };
             var btnRefresh = new RoundButton { Text = Tr("Actualizar"), Icon = "⟲", Width = 120, Height = 30, Radius = 8, BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text, FontSize = 9f, Anchor = AnchorStyles.Right };
-            btnRefresh.Click += (s, e) => { if (_mpSection == 0) LoadRooms(); else LoadServers(); };
-            bar.Controls.Add(_mpSections, 0, 0); bar.Controls.Add(_srvTabs, 1, 0); bar.Controls.Add(_srvAge, 2, 0); bar.Controls.Add(btnRefresh, 3, 0);
+            btnRefresh.Click += (s, e) => LoadServers();
+            bar.Controls.Add(_lblServers, 0, 0); bar.Controls.Add(_srvTabs, 1, 0); bar.Controls.Add(_srvAge, 2, 0); bar.Controls.Add(btnRefresh, 3, 0);
             // Si no caben las pestañas enteras, fuera la hora de la lista (las pestañas no se cortan).
             bar.SizeChanged += (s, e) => FitServerBar(bar, btnRefresh);
             _srvBar = bar; _srvRefreshBtn = btnRefresh;
@@ -1939,22 +1940,20 @@ namespace SelectOR
                 }
             };
             _srvGrid.Selected += it => SelectServer(it.S);
-            _srvGrid.Join += it => { SelectServer(it.S); if (MpConnectDialog(false)) PlayMultiplayer(); };
+            _srvGrid.Join += async it => { SelectServer(it.S); if (await MpPlayerName(Tr("Unirme a un servidor")) != null && MpConnectDialog(false)) PlayMultiplayer(); };
             var srvHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(0, 6, 0, 0) };
             srvHost.Controls.Add(_srvGrid);
             var listHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-            srvHost.Dock = DockStyle.Fill; srvHost.Visible = false;
-            listHost.Controls.Add(srvHost); listHost.Controls.Add(BuildRoomPage());
+            srvHost.Dock = DockStyle.Fill;
+            listHost.Controls.Add(srvHost);
 
             // Se actualiza solo cada 30 s mientras la página está a la vista (lista + candados, de una vez y sin
             // repintar si nada ha cambiado); el contador «hace X s» corre cada segundo.
-            _mpStatusTimer = new Timer { Interval = _mpSection == 0 ? 4000 : 30000 };
-            _mpStatusTimer.Tick += (s, e) => { if (page.Visible && !IsMinimizedNow()) { if (_mpSection == 0) LoadRooms(); else LoadServers(); } };
+            _mpStatusTimer = new Timer { Interval = 30000 };
+            _mpStatusTimer.Tick += (s, e) => { if (page.Visible && !IsMinimizedNow()) LoadServers(); };
             var ageTimer = new Timer { Interval = 1000 };
             ageTimer.Tick += (s, e) => UpdateServerAge();
-            page.VisibleChanged += (s, e) => { if (page.Visible) { _mpStatusTimer.Start(); ageTimer.Start(); LayoutMpTop(); if (_mpSection == 0) LoadRooms(); } else { _mpStatusTimer.Stop(); ageTimer.Stop(); } };
-            SetMpSection(0);
-
+            page.VisibleChanged += (s, e) => { if (page.Visible) { _mpStatusTimer.Start(); ageTimer.Start(); LayoutMpTop(); if (_serversAll == null || _serversAll.Count == 0) LoadServers(); } else { _mpStatusTimer.Stop(); ageTimer.Stop(); } };
             page.Controls.Add(listHost);
             page.Controls.Add(bar);
             page.Controls.Add(top);
@@ -1999,11 +1998,11 @@ namespace SelectOR
 
         void FitServerBar(Control bar, Control btn)
         {
-            if (_srvTabs == null || _mpSections == null || _srvAge == null) return;
+            if (_srvTabs == null || _lblServers == null || _srvAge == null) return;
             int tabsW = 0; foreach (Control c in _srvTabs.Controls) tabsW += c.Width + c.Margin.Horizontal;
             int ageW = TextRenderer.MeasureText(_srvAge.Text.Length > 0 ? _srvAge.Text : "actualizado hace 59 s", _srvAge.Font).Width + _srvAge.Margin.Horizontal;
-            int free = bar.Width - _mpSections.Width - _mpSections.Margin.Horizontal - btn.Width - btn.Margin.Horizontal - tabsW;
-            bool show = free >= ageW && _mpSection == 1;
+            int free = bar.Width - _lblServers.Width - _lblServers.Margin.Horizontal - btn.Width - btn.Margin.Horizontal - tabsW;
+            bool show = free >= ageW;
             _srvAge.Visible = show;   // siempre: con la pestaña oculta, Visible devuelve false
         }
 
@@ -2372,6 +2371,7 @@ namespace SelectOR
             __lay.Dispose();
             var __rest = Perf.T("ShowPage " + i + " · datos");
             _btnPlay.Visible = i != 0 && i != 4 && i != PageEditor && i != PageEmpresas;   // estas pestañas no usan CONDUCIR
+            SalaCheckUpdate();
             UpdateDutyHostVisible();   // barra "de servicio" en Empresas (solo si perteneces a alguna empresa)
             _prefs.LastTab = i;
             if (i == 4 && !_warmingPages && (_serversAll == null || _serversAll.Count == 0)) LoadServers();
@@ -2564,6 +2564,7 @@ namespace SelectOR
             if (route == null) { _curRoute = null; UpdateRouteOverview(); return; }
             _curRoute = route;
             _prefs.LastRoute = route.Path;
+            SalaCheckUpdate();
             _banner.RouteName = route.Name;
             _routeDescBox.Text = string.IsNullOrEmpty(route.Description) ? "" : route.Description;
             _actMeta.Clear();
@@ -2619,6 +2620,7 @@ namespace SelectOR
             _lstRoutes.EndUpdate();
             if (_routesCap != null) _routesCap.Text = Tr("RUTAS") + "  ·  " + _lstRoutes.Items.Count;
             if (prev != null) SelectRouteInList(prev);
+            SalaPromoUpdate();
         }
 
         void SelectRouteInList(Route r)
@@ -3254,6 +3256,7 @@ namespace SelectOR
         void Play()
         {
             if (_curRoute == null) { Warn(Tr("Selecciona primero una ruta.")); return; }
+            if (SalaWanted) { PlaySala(); return; }   // Conducción libre en CGL: la sala compartida (MainMenuForm.SalaCgl.cs)
             var args = BuildArguments(out string error);
             if (args == null) { Warn(error); return; }
             Launch(args);
@@ -3264,28 +3267,21 @@ namespace SelectOR
             if (_curRoute == null) { Warn(Tr("Selecciona primero una ruta.")); return; }
             var c = _lstConsists.SelectedItem as TrainItem;
             var p = CurrentPath();
-            if (c == null || p == null) { if (_roomPending != null) RoomAbort(); Warn(Tr("Configura recorrido y tren en «Conducción libre» antes de conectar.")); return; }
+            if (c == null || p == null) { Warn(Tr("Configura recorrido y tren en «Conducción libre» antes de conectar.")); return; }
 
-            // El usuario tiene que cumplir las reglas de Open Rails o la conexión falla.
-            if (!MPUserValid(_txtMPUser.Text.Trim()))
-            {
-                Warn(Tr("El usuario de Multijugador debe tener de 4 a 10 caracteres, sin espacios ni ' \" -, y no puede empezar por un número."));
-                try { _txtMPUser.Focus(); } catch { }
-                return;
-            }
+            // El nombre del jugador: el de SelectOR, que cumple las reglas de Open Rails (si no, la conexión falla).
+            if (await MpPlayerName(Tr("Multijugador")) == null) return;
 
             // Puerto: el que abre el servidor o al que se conecta el cliente. Si no es válido, no se lanza (antes
             // se ignoraba sin avisar y se usaba el último guardado).
-            bool room = _roomPending != null && !string.IsNullOrEmpty(_roomHost);   // sala de SelectOR: su IP y su puerto, sin enseñarlos
-            int port = _roomPort;
-            if (!room && (!int.TryParse(_txtMPPort.Text.Trim(), out port) || port < 1 || port > 65535))
+            if (!int.TryParse(_txtMPPort.Text.Trim(), out int port) || port < 1 || port > 65535)
             {
                 Warn(Tr("El puerto debe ser un número entre 1 y 65535."));
                 try { _txtMPPort.Focus(); _txtMPPort.SelectAll(); } catch { }
                 return;
             }
             // Cliente: hace falta la IP del servidor. (Servidor: no se usa; el campo enseña la IP propia.)
-            string host = room ? _roomHost : _txtMPHost.Text.Trim();
+            string host = _txtMPHost.Text.Trim();
             if (_rbClient.Checked && host.Length == 0)
             {
                 Warn(Tr("Escribe la IP del servidor al que te quieres unir."));
@@ -3300,13 +3296,9 @@ namespace SelectOR
             {
                 try { _settings = new UserSettings(new string[0]); } catch { }
                 _settings.Multiplayer_User = _txtMPUser.Text.Trim();
-                if (room) RoomWriteSettings();
-                else
-                {
-                    _settings.Multiplayer_Host = host.Length > 0 ? host : "127.0.0.1";   // al alojar, la de alojar (127.0.0.1 por defecto)
-                    _settings.Multiplayer_Port = port;
-                    if (_rbClient.Checked && _prefs != null && _prefs.MpClientHost != host) { _prefs.MpClientHost = host; try { _prefs.Save(); } catch { } }
-                }
+                _settings.Multiplayer_Host = host.Length > 0 ? host : "127.0.0.1";   // al alojar, la de alojar (127.0.0.1 por defecto)
+                _settings.Multiplayer_Port = port;
+                if (_rbClient.Checked && _prefs != null && _prefs.MpClientHost != host) { _prefs.MpClientHost = host; try { _prefs.Save(); } catch { } }
                 _settings.Save();
             }
             catch { }
@@ -3317,18 +3309,10 @@ namespace SelectOR
             string flag = _rbServer.Checked ? "-multiplayerserver" : "-multiplayerclient";
             var args = $"{flag} -explorer \"{p.FilePath}\" \"{c.FilePath}\" {time} {season} {weather}";
             // Servidor PÚBLICO: la contraseña la gestiona SelectOR (el primero la pone; los demás la escriben).
-            if (_rbClient.Checked && _roomPending == null)   // (en una sala de SelectOR ya lo ha comprobado el servidor)
+            if (_rbClient.Checked)
             {
                 var pub = PublicServerFor(host, port.ToString());
                 if (pub != null && !await MpGate(pub)) return;
-            }
-            // Sala de SelectOR sin ruta asignada: como en los servidores públicos, el primero que entra recibe una
-            // contraseña (o la deja sin ella) y los demás la tienen que escribir mientras su Open Rails siga abierto.
-            // La partida es suya (su ruta): así nadie se cuela en una sesión privada de una sala libre.
-            else if (_roomPending != null && _roomAnyRoute && !_roomGated)   // (servidor de sala de antes: con Supabase)
-            {
-                var sala = new GameServer { Ip = "sala", Port = _roomPending, Route = _curRoute?.Name ?? "" };
-                if (!await MpGate(sala, _roomName)) { RoomAbort(); return; }
             }
             Launch(args);
         }
@@ -3386,7 +3370,7 @@ namespace SelectOR
             _schedDriving = false;   // (si es un turno, lo dice SchedBeforeLaunchAsync)
             EnsureOrWebServer();   // el HUD, el pupitre, los viajeros y el carné lo necesitan desde el arranque
             // Teleindicador: el destino elegido para este tren se pone en su carpeta antes de que OR lo cargue.
-            if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase))
+            if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase) || args.IndexOf("-explore", StringComparison.OrdinalIgnoreCase) >= 0)
                 TeleApplyForLaunch(CurrentDrivenConsist());
 
             // Empresas: si estoy "de servicio", abro el servicio antes de lanzar.
@@ -3416,6 +3400,8 @@ namespace SelectOR
                 // Multijugador: el agente del mapa entra en Open Rails al arrancar (MapAgent\: en el despachador, acepta las
                 // órdenes de señal y los nombramientos de ayudante del mapa grande). No cambia ningún archivo de Open Rails.
                 if (args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) >= 0) MapAgentFiles.Apply(psi);
+                // Sala compartida: el .pat solo para la salida (el agente devuelve las agujas del resto del recorrido: MapAgent\Spawn.cs)
+                if (_roomPending != null) psi.Environment["SELECTOR_SPAWN_ONLY"] = "1";
                 // Conducción libre: el mismo agente, para que el mapa grande haga lo de Ctrl+9 (MainMenuForm.MapaLocal.cs)
                 LocalMapPrepare(psi, args);
                 // Gráficos: ReShade junto a Open Rails mientras se conduce (ReShadeFiles.cs; se quita al volver)
@@ -3430,7 +3416,7 @@ namespace SelectOR
                     bool svc = serviceId != null;   // servicio de empresa (con tiempo/viajeros) o conducción normal
                     _mpClientRun = args.IndexOf("-multiplayerclient", StringComparison.OrdinalIgnoreCase) >= 0;
                     _netInAt = _netAt = DateTime.MinValue;   // HUD: la conexión se mira de nuevo
-                    if (_mpClientRun) RoomLaunched(); else _roomPending = null;   // servidores SelectOR: avisos mientras se juega
+                    if (_mpClientRun) RoomLaunched(); else _roomPending = null;   // sala de CGL: su conexión de SelectOR
                     // «Unirse a un servidor» a mano: si es un servidor de SelectOR, también pone los desvíos del itinerario
                     if (_mpClientRun && _pilot == null) { try { PilotCreateFor(_settings?.Multiplayer_Host, _settings?.Multiplayer_Port ?? 0); } catch { } }
                     _pendingServiceId = serviceId;

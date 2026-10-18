@@ -104,7 +104,7 @@ namespace SelectOR
         // Una infracción de un servicio, tal como la devuelve el servidor.
         public sealed class Item
         {
-            public string Code = "", Status = "", Detail = "";
+            public string Id = "", Code = "", Status = "", Detail = "";   // Id: para alegarla (alegaciones.sql)
             public int Points;
         }
 
@@ -118,6 +118,7 @@ namespace SelectOR
                 if (code == "recovery") continue;
                 l.Add(new Item
                 {
+                    Id = e.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : "",
                     Code = code,
                     Status = e.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : "",
                     Points = e.TryGetProperty("points", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : 0,
@@ -567,8 +568,7 @@ namespace SelectOR
 
         // ---------------------------------------------------------------- Revisión (gerente / gestores)
         ReviewCardList _revList; Label _revMsg; Control _revBtns;
-        readonly List<ReviewItem> _revAll = new(), _revKinds = new();   // _revKinds: «Tipo cambiado» (tipo-tren.sql)
-        string _revKindsErr;
+        readonly List<ReviewItem> _revAll = new();
         int _revTab; string _revQuery = "";
         static bool IsCodeA(string code) => code == "jump" || code == "speed_avg" || code == "time_accel" || code == "autopilot";
 
@@ -593,22 +593,20 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7
-            // Viajeros · Plazas · Por empresa: servicios con viajeros o plazas que no cuadran (MainMenuForm.RevisionViajeros.cs)
-            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "Tipo cambiado", "Viajeros", "Plazas", "Por empresa" },
-                                   i => { _revTab = i; if (i == 4) LoadKindOverrides(); RevTabChanged(i); FillReviewCards(); });
-            // «Tipo cambiado» son avisos, no infracciones: sin Aprobar, Anular ni Eliminar
+            // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7 · Alegaciones (MainMenuForm.Alegaciones.cs)
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "Alegaciones" },
+                                   i => { _revTab = i; RevTabChanged(i); FillReviewCards(); });
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             _revTabBar = tabs;
             var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 220, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
-            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); FillPaxReview(); };
+            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); FillAppeals(); };
             _revSearch = search;
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
             var revHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0), Padding = new Padding(2, 4, 2, 4) };
             _revList.Dock = DockStyle.Fill;
             revHost.Controls.Add(_revList);
-            revHost.Controls.Add(BuildPaxReviewPanel());
+            revHost.Controls.Add(BuildAppealsPanel());
             t.Controls.Add(revHost);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -667,7 +665,7 @@ namespace SelectOR
                 }
                 catch { }
             }
-            SetReviewCount(pending);
+            SetReviewCount(pending + await AppealsOpenCount());   // (y las alegaciones sin contestar)
             if (onlyCount || _revList == null) return;
             _revAll.Clear(); _revAll.AddRange(rows);
             _revList.EmptyText = err != null
@@ -684,23 +682,16 @@ namespace SelectOR
             var words = _revQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _revList.BeginUpdate();
             _revList.Items.Clear();
-            _revList.WithMaps = _revTab != 4;   // (tipo cambiado: sin mapas)
-            if (_revTab == 4)
-                _revList.EmptyText = _revKindsErr ?? Tr("Ningún servicio con un tren de viajeros puesto como mercancías.");
-            else _revList.EmptyText = Tr("No hay infracciones.");
-            if (_revBtns != null)
-            {
-                _revBtns.Visible = _revTab < 5;   // (Viajeros, Plazas y Por empresa llevan sus botones)
-                foreach (Control c in _revBtns.Controls) if (c is RoundButton) c.Visible = _revTab < 4;
-            }
-            foreach (var r in _revTab == 4 ? _revKinds : _revAll)
+            _revList.EmptyText = Tr("No hay infracciones.");
+            if (_revBtns != null) _revBtns.Visible = _revTab != RevTabAppeals;   // (Alegaciones lleva sus botones)
+            foreach (var r in _revAll)
             {
                 bool tabOk = _revTab switch
                 {
                     1 => r.Status == "pending",
                     2 => IsCodeA(r.Code),
                     3 => !IsCodeA(r.Code),
-                    _ => true   // 0 (todas) y 4 (tipo cambiado: su propia lista)
+                    _ => true   // 0 (todas)
                 };
                 if (!tabOk) continue;
                 bool ok = true;
@@ -713,42 +704,6 @@ namespace SelectOR
         }
 
         ReviewItem SelectedReview() => _revList?.SelectedItem as ReviewItem;
-
-        // Revisión → «Tipo cambiado»: servicios con un tren que lleva plazas en sus archivos puesto como mercancías por su
-        // empresa (list_kind_overrides, tipo-tren.sql). No restan puntos: es para que el administrador lo vea.
-        async void LoadKindOverrides()
-        {
-            if (!Supa.IsSuperadmin) return;
-            var (json, err) = await Supa.RpcAsync("list_kind_overrides", new { p_limit = 1000 });
-            var rows = new List<ReviewItem>();
-            _revKindsErr = null;
-            if (err != null)
-                _revKindsErr = err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 || err.IndexOf("Could not find", StringComparison.OrdinalIgnoreCase) >= 0
-                    ? Tr("El servidor aún no anota el tipo de los trenes (falta tipo-tren.sql).") : Tr("Error: ") + err;
-            else
-            {
-                try
-                {
-                    using var d = JsonDocument.Parse(json);
-                    foreach (var e in d.RootElement.EnumerateArray())
-                    {
-                        string who = Str(e, "username"), co = Str(e, "company_name"), train = Str(e, "train_name"), con = Str(e, "consist");
-                        double seats = Num(e, "seats"), km = Num(e, "km"), net = Num(e, "net");
-                        rows.Add(new ReviewItem
-                        {
-                            Id = Str(e, "id"), Status = "noted", Code = "train_kind", Driver = who.Length > 0 ? who : "—", Company = co.Length > 0 ? co : "—",
-                            When = FmtDate(Str(e, "started_at")), Train = train.Length > 0 ? train + (con.Length > 0 && con != train ? " (" + con + ")" : "") : con,
-                            Route = Str(e, "route"),
-                            Detail = string.Format(Tr("{0} plazas en sus archivos"), seats.ToString("N0", EsEs)) + (km > 0 ? " · " + km.ToString("N1", EsEs) + " km" : "")
-                                     + " · " + Tr("neto") + " " + net.ToString("N0", EsEs) + " €"
-                        });
-                    }
-                }
-                catch { }
-            }
-            _revKinds.Clear(); _revKinds.AddRange(rows);
-            if (_revTab == 4) FillReviewCards();
-        }
 
         void SetReviewCount(int n)
         {
@@ -764,7 +719,6 @@ namespace SelectOR
             if (_revList == null || !Supa.IsSuperadmin) return;
             var sel = SelectedReview();
             if (sel == null) { Msg(_revMsg, Tr("Selecciona una infracción de la lista."), true); return; }
-            if (sel.Code == "train_kind") { Msg(_revMsg, Tr("Es solo un aviso, no resta puntos: si el servicio no es correcto, anúlalo desde Servicios."), true); return; }
             var (id, status, driver, code) = (sel.Id, sel.Status, sel.DriverId, sel.Code);
             if (action == "confirm" && status == "applied") { Msg(_revMsg, Tr("Esta infracción ya está aprobada."), true); return; }
             if (action == "annul" && status == "annulled") { Msg(_revMsg, Tr("Esta infracción ya está anulada."), true); return; }

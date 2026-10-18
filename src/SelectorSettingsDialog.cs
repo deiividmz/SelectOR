@@ -22,7 +22,7 @@ namespace SelectOR
         DateTime _enumAt = DateTime.MinValue;
         // captura: «Asignar» → la primera palanca que se mueva / el primer botón que se pulse
         string _capAxis; bool _capButton; DateTime _capUntil;
-        readonly Dictionary<string, float[]> _capBase = new(); readonly Dictionary<string, uint> _capBtnBase = new();
+        readonly Dictionary<string, float[]> _capBase = new(); readonly Dictionary<string, ulong> _capBtnBase = new();
         string _status;
         readonly ThemeCheck _chkOn;
         readonly DevicesView _devView;
@@ -44,7 +44,8 @@ namespace SelectOR
             BackColor = Theme.Bg; ForeColor = Theme.Text; Font = Theme.Font(9.5f);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false; ShowInTaskbar = false;
-            ClientSize = new Size(Theme.Px(1040), Theme.Px(700));
+            // (alto: las 7 palancas a la vista; en pantallas pequeñas, lo que quepa, y la lista se mueve con la rueda)
+            ClientSize = new Size(Theme.Px(1040), Math.Min(Theme.Px(800), Math.Max(Theme.Px(600), (Screen.PrimaryScreen?.WorkingArea.Height ?? 900) - 60)));
             DialogKit.Dress(this);
             KeyPreview = true;
 
@@ -187,17 +188,18 @@ namespace SelectOR
                         if (Math.Abs(s.Axes[i] - b0[i]) > 0.25f)
                         {
                             string act = _capAxis;
-                            Bindings.RemoveAll(x => x.Axis && (x.Action == act || (x.Device == d.Key && x.Index == i)));
+                            Bindings.RemoveAll(x => x.Axis && (x.Action == act || Joy.Conflicts(act).Contains(x.Action) || (x.Device == d.Key && x.Index == i)));
                             Bindings.Add(new JoyBinding { Device = d.Key, DeviceName = d.Name, Axis = true, Index = i, Action = act });
                             Save(); Rebuild();
-                            StopCapture(string.Format(I18n.T("{0}: palanca {1} de {2}."), Joy.Label(act), Joy.AxisName(i), d.Name));
+                            StopCapture(string.Format(I18n.T("{0}: palanca {1} de {2}."), Joy.Label(act), Joy.AxisName(d.Key, i), d.Name)
+                                        + (Joy.Conflicts(act).Length > 0 ? " " + I18n.T("(no va a la vez que el regulador o el freno dinámico sueltos)") : ""));
                             return;
                         }
                 if (_capButton && _capBtnBase.TryGetValue(d.Key, out var bb))
                 {
-                    uint pressed = s.Buttons & ~bb;
-                    for (int i = 0; i < 32; i++)
-                        if ((pressed & (1u << i)) != 0)
+                    ulong pressed = s.Buttons & ~bb;
+                    for (int i = 0; i < 64; i++)
+                        if ((pressed & (1UL << i)) != 0)
                         {
                             _capButton = false;
                             PickButtonAction(d, i);
@@ -211,9 +213,9 @@ namespace SelectOR
         // El botón ya pulsado: ¿qué hace? (lista de órdenes de Open Rails)
         void PickButtonAction(Joy.Device d, int index)
         {
-            _status = string.Format(I18n.T("Botón {0} de {1}: elige qué hace."), index + 1, d.Name);
+            _status = string.Format(I18n.T("Botón {0} de {1}: elige qué hace."), Joy.ButtonName(d.Key, index), d.Name);
             var cm = MenuStyle.Apply(new ContextMenuStrip { ShowImageMargin = false });
-            cm.Items.Add(new ToolStripMenuItem(string.Format(I18n.T("Botón {0} · {1}"), index + 1, d.Name)) { Enabled = false });
+            cm.Items.Add(new ToolStripMenuItem(string.Format(I18n.T("Botón {0} · {1}"), Joy.ButtonName(d.Key, index), d.Name)) { Enabled = false });
             cm.Items.Add(new ToolStripSeparator());
             foreach (var (id, label) in Joy.ButtonActions)
             {
@@ -233,7 +235,7 @@ namespace SelectOR
             Bindings.RemoveAll(x => !x.Axis && x.Device == d.Key && x.Index == index);
             Bindings.Add(new JoyBinding { Device = d.Key, DeviceName = d.Name, Axis = false, Index = index, Action = act });
             Save(); Rebuild();
-            _status = string.Format(I18n.T("Botón {0}: {1}."), index + 1, Joy.Label(act));
+            _status = string.Format(I18n.T("Botón {0}: {1}."), Joy.ButtonName(d.Key, index), Joy.Label(act));
         }
         public string Status => _status;
         public RowsView AxesView => _axes;
@@ -247,7 +249,7 @@ namespace SelectOR
             var d = _devs.FirstOrDefault(x => x.Axes >= 3);
             if (d == null) { _status = I18n.T("No hay ningún mando con 3 palancas conectado."); return; }
             string[] acts = { "THROTTLE", "TRAIN_BRAKE", "ENGINE_BRAKE" };
-            Bindings.RemoveAll(x => x.Axis && (acts.Contains(x.Action) || (x.Device == d.Key && x.Index < 3)));
+            Bindings.RemoveAll(x => x.Axis && (acts.Contains(x.Action) || x.Action == "THROTTLE_DYNAMIC" || (x.Device == d.Key && x.Index < 3)));
             for (int i = 0; i < 3; i++) Bindings.Add(new JoyBinding { Device = d.Key, DeviceName = d.Name, Axis = true, Index = i, Action = acts[i] });
             Save(); Rebuild();
             _status = string.Format(I18n.T("{0}: palanca 1 regulador, 2 freno de tren, 3 freno de locomotora (muévelas para comprobarlo)."), d.Name);
@@ -262,14 +264,14 @@ namespace SelectOR
                 return new RowsView.Row
                 {
                     Tag = a.id, Title = I18n.T(a.label),
-                    Sub = b == null ? I18n.T("Sin asignar") : string.Format(I18n.T("Palanca {0} · {1}"), Joy.AxisName(b.Index), b.DeviceName),
-                    HasBar = b != null, Centered = a.id == "DIRECTION",
+                    Sub = b == null ? I18n.T("Sin asignar") : string.Format(I18n.T("Palanca {0} · {1}"), Joy.AxisName(b.Device, b.Index), b.DeviceName),
+                    HasBar = b != null, Centered = Joy.Centered(a.id),
                     Chips = b == null ? new[] { I18n.T("Asignar") } : new[] { I18n.T("Asignar"), b.Invert ? I18n.T("Invertida ✓") : I18n.T("Invertir"), I18n.T("Quitar") }
                 };
             }).ToList();
             _buttons.Rows = Bindings.Where(x => !x.Axis).OrderBy(x => x.DeviceName).ThenBy(x => x.Index).Select(b => new RowsView.Row
             {
-                Tag = b, Title = Joy.Label(b.Action), Sub = string.Format(I18n.T("Botón {0} · {1}"), b.Index + 1, b.DeviceName), Lamp = true,
+                Tag = b, Title = Joy.Label(b.Action), Sub = string.Format(I18n.T("Botón {0} · {1}"), Joy.ButtonName(b.Device, b.Index), b.DeviceName), Lamp = true,
                 Chips = new[] { I18n.T("Quitar") }
             }).ToList();
             _btnQuick.Visible = _devs.Any(x => x.Axes >= 3);
@@ -289,7 +291,7 @@ namespace SelectOR
             {
                 var b = (JoyBinding)r.Tag; var s = StateOf(b.Device);
                 r.Live = s != null && Dev(b.Device) != null;
-                r.On = s != null && (s.Buttons & (1u << b.Index)) != 0;
+                r.On = s != null && Joy.Down(s, b.Index);
             }
         }
 
@@ -331,13 +333,13 @@ namespace SelectOR
                     var box = new Rectangle(0, y, Width - 1, h);
                     using (var p = Theme.Round(box, 10)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, p);
                     TextRenderer.DrawText(g, d.Name, fN, new Rectangle(box.X + 12, box.Y + 6, box.Width / 3, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    TextRenderer.DrawText(g, string.Format(I18n.T("{0} palancas · {1} botones"), d.Axes, d.Buttons), fS, new Rectangle(box.X + 12, box.Y + 28, box.Width / 3, 18), Theme.Subtle, TextFormatFlags.NoPrefix);
+                    TextRenderer.DrawText(g, string.Format(I18n.T("{0} palancas · {1} botones"), d.Axes, d.Buttons) + (d.Pov ? " · " + I18n.T("cruceta") : ""), fS, new Rectangle(box.X + 12, box.Y + 28, box.Width / 3, 18), Theme.Subtle, TextFormatFlags.NoPrefix);
                     var s = Owner2?.StateOf(d.Key);
                     int ax = box.X + box.Width / 3 + 10, aw = Math.Max(40, (box.Width / 3 - 20) / Math.Max(1, d.Axes) - 8);
                     for (int i = 0; i < d.Axes; i++)
                     {
                         int x = ax + i * (aw + 8);
-                        TextRenderer.DrawText(g, Joy.AxisName(i), fS, new Point(x, box.Y + 6), Theme.Subtle);
+                        TextRenderer.DrawText(g, d.XInput ? new[] { "LX", "LY", "RX", "RY", "LT", "RT" }[i] : Joy.AxisName(i), fS, new Point(x, box.Y + 6), Theme.Subtle);
                         var bar = new Rectangle(x, box.Y + 26, aw, 10);
                         using (var bp = Theme.Round(bar, 5)) using (var bb = new SolidBrush(Theme.Surface2)) g.FillPath(bb, bp);
                         float v = s == null ? 0 : s.Axes[i];
@@ -346,14 +348,19 @@ namespace SelectOR
                         TextRenderer.DrawText(g, ((int)Math.Round(v * 100)) + "%", fS, new Point(x, box.Y + 38), Theme.Subtle);
                     }
                     int bx = box.X + 2 * box.Width / 3 + 10, r = 8;
-                    for (int i = 0; i < d.Buttons; i++)
+                    // los botones y, si la tiene, la cruceta (↑ → ↓ ←); en los de Xbox, con su letra
+                    var idx = Enumerable.Range(0, d.Buttons).ToList();
+                    if (d.Pov) idx.AddRange(Enumerable.Range(Joy.PovFirst, 4));
+                    for (int k = 0; k < idx.Count; k++)
                     {
-                        int col = i % 12, row = i / 12;
+                        int i = idx[k], col = k % 12, row = k / 12;
                         var c = new Rectangle(bx + col * (2 * r + 6), box.Y + 8 + row * (2 * r + 6), 2 * r, 2 * r);
-                        bool on = s != null && (s.Buttons & (1u << i)) != 0;
+                        bool on = s != null && Joy.Down(s, i);
                         using (var cb = new SolidBrush(on ? Theme.AccentHi : Theme.Surface2)) g.FillEllipse(cb, c);
                         using var f7 = Theme.Font(6.5f);
-                        TextRenderer.DrawText(g, (i + 1).ToString(), f7, c, on ? Color.Black : Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                        string lbl = i >= Joy.PovFirst ? new[] { "↑", "→", "↓", "←" }[i - Joy.PovFirst]
+                                   : d.XInput ? new[] { "A", "B", "X", "Y", "LB", "RB", "⧉", "≡", "LS", "RS", "↑", "↓", "←", "→" }[Math.Min(13, i)] : (i + 1).ToString();
+                        TextRenderer.DrawText(g, lbl, f7, c, on ? Color.Black : Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     }
                     y += h + 6;
                 }
@@ -370,7 +377,7 @@ namespace SelectOR
             readonly List<(Rectangle r, Row row, int chip)> _hits = new();
             int _hover = -1, _scroll;
             public RowsView() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); BackColor = Theme.Bg; }
-            int RowH => Theme.Px(54);
+            int RowH => Theme.Px(48);
 
             protected override void OnPaint(PaintEventArgs e)
             {
@@ -413,12 +420,12 @@ namespace SelectOR
                         tx += 24;
                     }
                     int barRight = Width - 1 - 10 - chipsMax;
-                    int textW = Math.Max(60, (row.HasBar ? barRight - 130 : cx) - tx - 6);
-                    TextRenderer.DrawText(g, row.Title, fT, new Rectangle(tx, box.Y + 8, textW, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    TextRenderer.DrawText(g, row.Sub ?? "", fS, new Rectangle(tx, box.Y + 29, textW, 18), row.Live || !row.HasBar ? Theme.Subtle : Color.FromArgb(200, 150, 120), TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    int textW = Math.Max(60, (row.HasBar ? barRight - 108 : cx) - tx - 6);
+                    TextRenderer.DrawText(g, row.Title, fT, new Rectangle(tx, box.Y + 5, textW, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    TextRenderer.DrawText(g, row.Sub ?? "", fS, new Rectangle(tx, box.Y + 25, textW, 18), row.Live || !row.HasBar ? Theme.Subtle : Color.FromArgb(200, 150, 120), TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                     if (row.HasBar)
                     {
-                        var bar = new Rectangle(barRight - 124, box.Y + (RowH - 12) / 2, 116, 12);
+                        var bar = new Rectangle(barRight - 102, box.Y + (RowH - 12) / 2 - 3, 94, 12);
                         using (var bp = Theme.Round(bar, 6)) using (var bb = new SolidBrush(Theme.Surface2)) g.FillPath(bb, bp);
                         if (row.Live)
                         {
@@ -430,7 +437,9 @@ namespace SelectOR
                             }
                             else fill = new Rectangle(bar.X, bar.Y, Math.Max(4, (int)(bar.Width * row.Value)), bar.Height);
                             using (var fp = Theme.Round(fill, 6)) using (var fb = new SolidBrush(Theme.Accent)) g.FillPath(fb, fp);
-                            string txt = row.Centered ? (row.Value > 0.5f ? I18n.T("adelante") : row.Value < -0.5f ? I18n.T("atrás") : I18n.T("neutro")) : ((int)Math.Round(row.Value * 100)) + "%";
+                            string txt = (row.Tag as string) == "THROTTLE_DYNAMIC"
+                                ? (row.Value > 0 ? I18n.T("regulador") + " " + (int)Math.Round(row.Value * 100) + "%" : row.Value < 0 ? I18n.T("freno dinámico") + " " + (int)Math.Round(-row.Value * 100) + "%" : I18n.T("en reposo"))
+                                : row.Centered ? (row.Value > 0.5f ? I18n.T("adelante") : row.Value < -0.5f ? I18n.T("atrás") : I18n.T("neutro")) : ((int)Math.Round(row.Value * 100)) + "%";
                             using var f8 = Theme.Font(7.5f, FontStyle.Bold);
                             TextRenderer.DrawText(g, txt, f8, new Rectangle(bar.X, bar.Bottom + 1, bar.Width, 14), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
                         }

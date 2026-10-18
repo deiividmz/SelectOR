@@ -225,6 +225,7 @@ namespace SelectOR
             if (hit is RouteGraph.SwitchGeo s)
             {
                 if (s.Hidden) return Tr("Esta aguja va unida a otra (un escape): se cambia con la otra.");
+                if (!RoomOnMyPath(s.Lat, s.Lon, null)) { RoomLog($"clic en la aguja {s.Tx} {s.Tz} {s.Id}: fuera de mi camino, no se pide"); return Tr("Solo puedes cambiar las agujas y señales de tu camino (la línea discontinua de tu tren)."); }
                 var v = RoomMapNow();
                 int pos = v?.SwitchPos?.Invoke(s) ?? -1;
                 // enclavada en Open Rails (lo dice el agente del despachador): no se pide
@@ -248,10 +249,54 @@ namespace SelectOR
                 // (servidor de antes: el despachador, solo con Ctrl+9)
                 if (_pilot.IsDispatcher && !_pilot.AgentOk) return Tr("Eres el despachador: las señales se cambian desde el mapa de Open Rails (Ctrl+9).");
                 if (!_pilot.IsDispatcher && !_pilot.Helper) return Tr("Pídele al despachador que te nombre ayudante: lo hace con un clic en tu nombre en la leyenda de su mapa grande.");
+                if (!RoomOnMyPath(g.Lat, g.Lon, g.Hdg)) { RoomLog($"clic en la señal {g.Obj}: fuera de mi camino, no se pide"); return Tr("Solo puedes cambiar las agujas y señales de tu camino (la línea discontinua de tu tren)."); }
                 RoomSignalMenu(g, screen);
                 return null;
             }
             return null;
+        }
+
+        // Sala compartida (despachador fijo): cada jugador solo cambia lo que está en el camino de su tren, la línea
+        // discontinua (el despachador lo comprueba igual: SelectOR Despachador\Limites.cs). Aquí, para no pedirlo y avisar
+        // al momento: a menos de 15 m de mi camino y, una señal, mirando en el sentido de la marcha. Sin datos de mi
+        // tren, se deja pedir (decide el despachador).
+        bool RoomOnMyPath(double lat, double lon, double? hdg)
+        {
+            if (_roomJoined == null || _roomGeo?.Graph == null || _pilot == null) return true;
+            string me = (_txtMPUser?.Text ?? "").Trim();
+            try
+            {
+                var t = _pilot.Trains.FirstOrDefault(x => x.name == me);
+                if (t.name == null || !_pilot.TrainTrack.TryGetValue(me, out var k)) return true;
+                if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) return true;
+                var geo = _roomGeo; var st = _pilot.States; var stAt = _pilot.StatesAt;
+                int Pos(int n) => !geo.OrderOf.TryGetValue(n, out int o) ? -1
+                                  : _roomSwSet.TryGetValue(o, out var ch) && ch.at > stAt ? ch.pos : st != null && o < st.Length ? st[o] : -1;
+                var pts = geo.Graph.PathAhead(k.node, la, lo, k.dir, k.mu, k.len, 5000, Pos, out _);
+                if (pts == null || pts.Count < 2) return true;
+                // el camino empieza en la cabeza: el tren entero va de la cola (pts[0]) a su largo; lo de debajo no cuenta
+                int best = -1; double bd = double.MaxValue;
+                for (int i = 1; i < pts.Count; i++)
+                {
+                    double d = DistToLineM(lat, lon, new List<(double lat, double lon)> { pts[i - 1], pts[i] });
+                    if (d < bd) { bd = d; best = i; }
+                }
+                if (bd > 15) return false;
+                if (hdg == null) return true;
+                double b = LiveMates.Bearing(pts[best - 1].lat, pts[best - 1].lon, pts[best].lat, pts[best].lon);
+                double diff = Math.Abs(((SigBearing(geo.Graph, lat, lon, hdg.Value) - b) % 360 + 540) % 360 - 180);
+                return diff < 90;
+            }
+            catch { return true; }
+        }
+
+        // El sentido de una señal (RoomMapGeo.Sig.Hdg: ángulo en la proyección del grafo, en radianes) como rumbo de
+        // brújula en grados, el de LiveMates.Bearing (antes se comparaban sin convertir y salía «fuera de mi camino» al azar).
+        internal static double SigBearing(RouteGraph g, double lat, double lon, double hdg)
+        {
+            var (x, y) = g.Proj(lat, lon);
+            var (la2, lo2) = g.Unproj(x + Math.Cos(hdg) * 10, y + Math.Sin(hdg) * 10);
+            return LiveMates.Bearing(lat, lon, la2, lo2);
         }
 
         // Clic en un jugador de la leyenda «EN LA SALA»: el despachador lo nombra o lo quita de ayudante (como Ctrl+9).
@@ -316,9 +361,10 @@ namespace SelectOR
             if (DateTime.UtcNow - c.at < TimeSpan.FromSeconds(15)) return;
             _roomSigCheck = null;
             if (p.SigStatesAt <= c.at) return;   // no ha llegado ninguna foto: no se sabe
-            _roomGeo.CanControl = false;
-            RoomLog($"señal {c.obj}: NO llega en parada en 15 s: se dejan de pedir señales en esta ruta");
-            try { _serviceHud?.MapNotice(Tr("La señal no ha cambiado: la numeración de señales no coincide con la del despachador. Usa el mapa de Open Rails (Ctrl+9).")); } catch { }
+            // Solo esa señal: la numeración ya se comprueba al entrar (las cabezas de la foto del despachador); que una no
+            // cambie (Open Rails no lo deja, o el despachador no la da por de tu camino) no apaga las demás.
+            RoomLog($"señal {c.obj}: NO llega en parada en 15 s (se siguen pidiendo señales)");
+            try { _serviceHud?.MapNotice(Tr("La señal no se ha puesto en parada: Open Rails no lo ha permitido.")); } catch { }
         }
 
         void RoomMapError(string e)

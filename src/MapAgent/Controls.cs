@@ -6,6 +6,9 @@
 //  · «BTN Orden 1|0»: un botón → un botón de dispositivo externo registrado en el del RailDriver (UserInput.RDState,
 //    que existe aunque no haya RailDriver): Open Rails lo atiende como una tecla (UserInput.IsPressed/IsReleased), aunque
 //    no sea la ventana activa. La orden va por su NOMBRE («A|B»: la primera que exista en esta versión).
+//  · «CRUISE fracción máx»: la palanca del control de crucero → la velocidad seleccionada de su CruiseControl (lo mismo
+//    que hace Open Rails con ORTS_SELECTED_SPEED_SELECTOR, pero sin romperse si la locomotora no lo tiene): de 0 a la
+//    máxima del servicio (máx, km/h) o, con 0, a la de la locomotora; de 5 en 5 km/h.
 // Todo por reflexión (lo de RunActivity no se compila aquí): si algo no está, esa orden no hace nada.
 
 using System;
@@ -57,8 +60,9 @@ namespace SelectOR.MapAgent
         }
 
         // (en la vuelta del simulador) true = era de mandos.
-        public static bool Do(string cmd)
+        public static bool Do(string cmd, object sim)
         {
+            if (cmd.StartsWith("CRUISE ", StringComparison.Ordinal)) { Cruise(cmd, sim); return true; }
             bool cab = cmd.StartsWith("CAB ", StringComparison.Ordinal), btn = cmd.StartsWith("BTN ", StringComparison.Ordinal);
             if (!cab && !btn) return false;
             if (!Init()) return true;
@@ -105,6 +109,50 @@ namespace SelectOR.MapAgent
             }
             catch (Exception ex) { Agent.Log("mandos: " + cmd + ": " + ex.GetType().Name + " " + ex.Message); }
             return true;
+        }
+
+        static bool _noCruiseTold; static double _cruiseSent = -1;
+        static object Member(object o, string name)
+        {
+            if (o == null) return null;
+            var t = o.GetType();
+            var f = t.GetField(name, BF); if (f != null) return f.GetValue(o);
+            var p = t.GetProperty(name, BF); return p != null && p.GetIndexParameters().Length == 0 ? p.GetValue(o) : null;
+        }
+        static bool SetMember(object o, string name, object v)
+        {
+            var t = o.GetType();
+            var f = t.GetField(name, BF); if (f != null) { f.SetValue(o, Convert.ChangeType(v, f.FieldType)); return true; }
+            var p = t.GetProperty(name, BF); if (p != null && p.CanWrite) { p.SetValue(o, Convert.ChangeType(v, p.PropertyType)); return true; }
+            return false;
+        }
+
+        static void Cruise(string cmd, object sim)
+        {
+            try
+            {
+                var t = cmd.Split(' ');
+                if (t.Length < 3 || !double.TryParse(t[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double frac)) return;
+                double.TryParse(t[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double maxKmh);
+                var loco = Member(sim, "PlayerLocomotive");
+                var cc = Member(loco, "CruiseControl");
+                if (cc == null)
+                {
+                    if (!_noCruiseTold) { _noCruiseTold = true; Agent.Log("mandos: esta locomotora no tiene control de crucero"); }
+                    return;
+                }
+                if (maxKmh <= 0)
+                {
+                    var m = Member(loco, "MaxSpeedMpS");
+                    double mps = m == null ? 0 : Convert.ToDouble(m);
+                    maxKmh = mps > 0 && mps < 120 ? mps * 3.6 : 160;   // (sin dato, Open Rails pone 1000 m/s)
+                }
+                double kmh = Math.Round(Math.Max(0, Math.Min(1, frac)) * maxKmh / 5) * 5;
+                if (Math.Abs(kmh - _cruiseSent) < 0.1) return;
+                if (SetMember(cc, "SelectedSpeedMpS", (float)(kmh / 3.6))) _cruiseSent = kmh;
+                else if (!_noCruiseTold) { _noCruiseTold = true; Agent.Log("mandos: el control de crucero de esta versión de Open Rails no tiene SelectedSpeedMpS"); }
+            }
+            catch (Exception ex) { Agent.Log("mandos: " + cmd + ": " + ex.GetType().Name + " " + ex.Message); }
         }
 
         // Al soltar la conexión: ningún botón se queda pulsado.

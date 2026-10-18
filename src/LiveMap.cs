@@ -407,7 +407,7 @@ namespace SelectOR
             if (extra > 0) rows.RemoveRange(maxRows, rows.Count - maxRows);
 
             bool room = System.Linq.Enumerable.All(mates, m => m.Room);   // en una sala: sus jugadores
-            string title = I18n.T(room ? "EN LA SALA" : "EN LA RUTA AHORA"), sub = I18n.T(room ? "Servidores SelectOR" : "Comunidad SelectOR"), foot = I18n.T("Clic en un nombre: centrar");
+            string title = I18n.T(room ? "EN LA SALA" : "EN LA RUTA AHORA"), sub = I18n.T(room ? "Sala compartida" : "Comunidad SelectOR"), foot = I18n.T("Clic en un nombre: centrar");
             if (extra > 0) foot = string.Format(I18n.T("y {0} más"), extra) + " · " + foot;
             int nameW = 0, stW = 0;
             foreach (var r in rows)

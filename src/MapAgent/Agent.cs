@@ -15,6 +15,7 @@
 //    Solo después de que el servidor se lo pida («TEXT SelectOR … @selector:blocked»): un servidor que no lo conoce se
 //    lo pasaría a los Open Rails de la sala.
 // En Conducción libre (sin red) hace además de Ctrl+9 para el mapa grande de SelectOR: LocalLink.cs.
+// En la sala compartida, el .pat solo para la salida: Spawn.cs.
 // No cambia cómo calcula Open Rails las señales ni las agujas (solo lee). Si algo falla, Open Rails sigue como siempre.
 // Registro: %AppData%\Open Rails\SelectOR\agente-mapa.log (o SELECTOR_CACHE_DIR).
 
@@ -53,7 +54,8 @@ namespace SelectOR.MapAgent
             var text = AccessTools.Method(typeof(MSGText), "HandleMsg");
             if (text != null) { h.Patch(text, prefix: new HarmonyMethod(typeof(Agent), nameof(BeforeText))); n++; }
             int local = LocalLink.Install(h);   // conducción libre: el mapa grande de SelectOR (LocalLink.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            int spawn = Spawn.Install(h);       // sala compartida: el .pat solo para la salida (Spawn.cs)
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
         }
 
         static string ProcessPath()

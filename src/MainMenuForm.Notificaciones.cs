@@ -220,6 +220,28 @@ namespace SelectOR
                     icon = "⛔"; c = bad; title = Tr("Servicio anulado");
                     body = string.Format(Tr("El administrador ha anulado tu servicio {0} en {1}."), routeTxt, co)
                          + (DataStr(r, "reason").Length > 0 ? "\n" + Tr("Motivo: ") + DataStr(r, "reason") : ""); sub = 0; break;
+                // Alegaciones y anulaciones quitadas (alegaciones.sql)
+                case "service_restored":
+                    icon = "↩"; c = ok; title = Tr("Anulación quitada");
+                    body = string.Format(Tr("El administrador ha quitado la anulación de tu servicio {0} en {1}: vuelve a contar con normalidad."), routeTxt, co)
+                         + (DataStr(r, "reason").Length > 0 ? "\n«" + DataStr(r, "reason") + "»" : ""); sub = 0; break;
+                case "appeal_new":
+                    icon = "✉"; c = buy; title = Tr("Alegación nueva");
+                    body = string.Format(DataStr(r, "kind") == "annulment" ? Tr("{0} ha alegado la anulación de un servicio. Contéstala en Revisión → Alegaciones.")
+                                                                           : Tr("{0} ha alegado una sanción. Contéstala en Revisión → Alegaciones."),
+                               DataOr(r, "driver", Tr("Un maquinista"))); sub = 6; break;
+                case "appeal_answered":
+                {
+                    bool acc = DataStr(r, "decision") == "accepted", ann = DataStr(r, "kind") == "annulment";
+                    icon = "✉"; c = acc ? ok : bad; title = acc ? Tr("Alegación aceptada") : Tr("Alegación rechazada");
+                    body = string.Format(acc ? (ann ? Tr("El administrador ha aceptado tu alegación a la anulación del servicio {0}: vuelve a contar con normalidad.")
+                                                    : Tr("El administrador ha aceptado tu alegación a la sanción del servicio {0}: se te devuelven los puntos."))
+                                             : (ann ? Tr("El administrador ha rechazado tu alegación a la anulación del servicio {0}.")
+                                                    : Tr("El administrador ha rechazado tu alegación a la sanción del servicio {0}.")),
+                               DataOr(r, "route", co))
+                         + (DataStr(r, "answer").Length > 0 ? "\n«" + DataStr(r, "answer") + "»" : "");
+                    sub = ann ? 0 : 5; break;
+                }
                 // Préstamos
                 case "loan_approved":
                     icon = "🏦"; c = ok; title = Tr("Préstamo concedido");

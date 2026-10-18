@@ -1,7 +1,7 @@
-1.2.64
-HUD map like Ctrl+9|In rooms and Free driving: switches and signals from the big map, instantly, and each train's path.
-Room chat in the HUD|Talk to the players in your SelectOR server room without leaving Open Rails.
-Your controls in Open Rails|SelectOR settings → Controllers: levers and buttons of your joystick or quadrant.
-Graphics and weather|SelectOR settings: ReShade with the SelectOR profile and the SelectOR weather (clouds, rain, snow…).
-Every path, its own|If several .pat go from the same station to the same one, you now choose which.
-Clearer multiplayer|Name, IP and port in a window when you host or join.
+1.2.65
+Shared CGL room|Free driving on CGL_V22N_RE puts you in a room with an always-on dispatcher, on Spanish time.
+Your path, your signals|In the room you change the switches and signals of your dashed line from the big map.
+Appeals|Appeal a penalty or the annulment of a service from its report; the administrator answers you.
+Service speed|Right-click the cab speedometer: maximum speed on the scale, the diamond and the route sheet.
+More controllers|Throttle and dynamic brake on one lever, cruise control, Xbox controllers and D-pads.
+One name|In multiplayer you play with your SelectOR user name.

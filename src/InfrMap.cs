@@ -108,7 +108,7 @@ namespace SelectOR
             if (lx.Count < 2) return (null, I18n.T("No se ha podido seguir el tramo por las vías de la ruta."));
             m.X = lx.ToArray(); m.Y = ly.ToArray(); m.D = ld.ToArray();
             m.Len = w1 - w0; m.DInf = dI - w0; m.DEnd = dE - w0;
-            foreach (var (d, kmh) in rb.Limits)
+            foreach (var (d, kmh) in rb.LimitsAhead)   // solo los postes del sentido en que iba el tren (como Open Rails)
             {
                 if (d <= w0 + 0.01) m.InitKmh = kmh;
                 else if (d <= w1) m.Limits.Add((d - w0, kmh));
@@ -175,10 +175,27 @@ namespace SelectOR
                     for (int i = 0; i < D.Length; i++) if (D[i] >= DInf - 0.01 && D[i] <= DEnd + 0.01) seg.Add(P(X[i], Y[i]));
                     if (seg.Count > 1) g.DrawLines(op, seg.ToArray());
                 }
-            // el tramo, de color según su límite
+            // el tramo, de color según su límite (con un borde oscuro: los colores parecidos no se funden con el fondo)
+            {
+                var all = new PointF[D.Length];
+                for (int i = 0; i < D.Length; i++) all[i] = P(X[i], Y[i]);
+                using (var ep = new Pen(Color.FromArgb(14, 16, 18), 7.4f * k) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                    g.DrawLines(ep, all);
+            }
             for (int i = 1; i < D.Length; i++)
                 using (var pen = new Pen(LimitColor(LimitAt(D[i - 1])), 4.2f * k) { StartCap = LineCap.Round, EndCap = LineCap.Round })
                     g.DrawLine(pen, P(X[i - 1], Y[i - 1]), P(X[i], Y[i]));
+            // donde cambia el límite: una raya blanca de lado a lado de la vía (se ve aunque la señal no quepa)
+            foreach (var (d, _) in Limits)
+            {
+                if (d <= 0.5 || d >= Len - 0.5) continue;
+                var c0 = PointAtD(Math.Max(0, d - 3), P); var c1 = PointAtD(Math.Min(Len, d + 3), P); var cm = PointAtD(d, P);
+                double an = Math.Atan2(c1.Y - c0.Y, c1.X - c0.X) + Math.PI / 2; float hl = 6.5f * k;
+                var t0 = new PointF(cm.X + (float)Math.Cos(an) * hl, cm.Y + (float)Math.Sin(an) * hl);
+                var t1 = new PointF(cm.X - (float)Math.Cos(an) * hl, cm.Y - (float)Math.Sin(an) * hl);
+                using (var bp2 = new Pen(Color.FromArgb(14, 16, 18), 4.2f * k)) g.DrawLine(bp2, t0, t1);
+                using (var wp2 = new Pen(Color.White, 2f * k)) g.DrawLine(wp2, t0, t1);
+            }
             // sentido de la marcha
             {
                 var a = P(X[^2], Y[^2]); var b = P(X[^1], Y[^1]);
@@ -193,13 +210,19 @@ namespace SelectOR
             if (!double.IsNaN(InitKmh)) signs.Add((0, InitKmh, InitFromMonitor));
             signs.AddRange(Limits.Select(l => (l.d, l.kmh, false)));
             float sr = 10.5f * k; var placed = new List<PointF>();
+            bool Free(PointF c) => !placed.Any(q => Math.Abs(q.X - c.X) < 2 * sr + 3 * k && Math.Abs(q.Y - c.Y) < 2 * sr + 3 * k)
+                                   && c.X - sr >= r.X + 2 && c.X + sr <= r.Right - 2 && c.Y - sr >= r.Y + 2 && c.Y + sr <= r.Bottom - 2;
             foreach (var (d, kmh, mon) in signs)
             {
                 var at = PointAtD(d, P);
-                // por encima de la vía (en la pantalla), con un palito
-                var c = new PointF(at.X, at.Y - 22 * k);
-                if (placed.Any(q => Math.Abs(q.X - c.X) < 2 * sr + 3 * k && Math.Abs(q.Y - c.Y) < 2 * sr + 3 * k)) c = new PointF(at.X, at.Y + 22 * k);
-                if (placed.Any(q => Math.Abs(q.X - c.X) < 2 * sr + 3 * k && Math.Abs(q.Y - c.Y) < 2 * sr + 3 * k)) continue;
+                // por encima de la vía (en la pantalla), con un palito; si no cabe, debajo, más lejos o a un lado (ninguna
+                // se queda sin poner: en un tramo con varios límites seguidos, se ven todos)
+                float o = 22 * k, o2 = 22 * k + 2 * sr + 4 * k, dx = 2 * sr + 4 * k;
+                var cands = new[] { new PointF(at.X, at.Y - o), new PointF(at.X, at.Y + o), new PointF(at.X, at.Y - o2), new PointF(at.X, at.Y + o2),
+                                    new PointF(at.X + dx, at.Y - o), new PointF(at.X - dx, at.Y - o), new PointF(at.X + dx, at.Y + o), new PointF(at.X - dx, at.Y + o),
+                                    new PointF(at.X + dx, at.Y - o2), new PointF(at.X - dx, at.Y - o2), new PointF(at.X + dx, at.Y + o2), new PointF(at.X - dx, at.Y + o2) };
+                var c = cands.FirstOrDefault(Free);
+                if (c.IsEmpty) c = cands[0];
                 placed.Add(c);
                 using (var lp = new Pen(Color.FromArgb(160, 230, 230, 230), 1f)) g.DrawLine(lp, at, new PointF(c.X, c.Y + (c.Y < at.Y ? sr : -sr)));
                 var cr = new RectangleF(c.X - sr, c.Y - sr, 2 * sr, 2 * sr);
@@ -284,18 +307,45 @@ namespace SelectOR
                 }
             // el exceso
             if (DEnd > DInf + 1) using (var ob = new SolidBrush(Color.FromArgb(46, Red))) g.FillRectangle(ob, Xd(DInf), a.Y, Math.Max(2, Xd(DEnd) - Xd(DInf)), a.Height);
-            // los límites, en escalones
+            // los límites, en escalones: cada tramo con su banda de color debajo y una raya donde cambia
             var steps = new List<(double d, double kmh)>();
             if (!double.IsNaN(InitKmh)) steps.Add((0, InitKmh));
             steps.AddRange(Limits);
             for (int i = 0; i < steps.Count; i++)
             {
                 double d0 = steps[i].d, d1 = i + 1 < steps.Count ? steps[i + 1].d : Len, v = steps[i].kmh;
+                using (var fb = new SolidBrush(Color.FromArgb(i % 2 == 0 ? 34 : 54, LimitColor(v))))
+                    g.FillRectangle(fb, Xd(d0), Yv(v), Math.Max(1, Xd(d1) - Xd(d0)), a.Bottom - Yv(v));
+            }
+            using (var cp2 = new Pen(Color.FromArgb(150, 220, 224, 228), 1f) { DashStyle = DashStyle.Dot })
+                for (int i = 1; i < steps.Count; i++) g.DrawLine(cp2, Xd(steps[i].d), a.Y, Xd(steps[i].d), a.Bottom);
+            var labels = new List<RectangleF>();
+            for (int i = 0; i < steps.Count; i++)
+            {
+                double d0 = steps[i].d, d1 = i + 1 < steps.Count ? steps[i + 1].d : Len, v = steps[i].kmh;
                 var col = LimitColor(v);
                 using (var lp = new Pen(col, 2.4f * k)) g.DrawLine(lp, Xd(d0), Yv(v), Xd(d1), Yv(v));
                 if (i + 1 < steps.Count) using (var vp = new Pen(Color.FromArgb(120, col), 1.2f * k)) g.DrawLine(vp, Xd(d1), Yv(v), Xd(d1), Yv(steps[i + 1].kmh));
-                if (Xd(d1) - Xd(d0) > 22 * k)
-                    TextRenderer.DrawText(g, K(v), fSmall, new Point((int)Xd(d0) + (int)(3 * k), (int)Yv(v) - (int)(14 * k)), col, TextFormatFlags.NoPadding);
+                // la cifra de cada tramo, aunque sea corto: encima de su escalón; si choca, debajo o más arriba
+                string t = K(v);
+                var sz = TextRenderer.MeasureText(g, t, fSmall, Size.Empty, TextFormatFlags.NoPadding);
+                float lx = Math.Min(Math.Max(a.X, Xd(d0) + 3 * k), a.Right - sz.Width);
+                // (debajo de su escalón si el de al lado va más rápido: encima estaría sobre la otra línea)
+                bool below = (i + 1 < steps.Count && steps[i + 1].kmh > v) || (i > 0 && steps[i - 1].kmh > v);
+                var cands = below ? new[] { Yv(v) + 3 * k, Yv(v) - 14 * k, Yv(v) + 17 * k, Yv(v) - 28 * k }
+                                  : new[] { Yv(v) - 14 * k, Yv(v) + 3 * k, Yv(v) - 28 * k, Yv(v) + 17 * k };
+                RectangleF lr = RectangleF.Empty;
+                foreach (var ly in cands)
+                {
+                    var q = new RectangleF(lx - 2 * k, ly - 1 * k, sz.Width + 4 * k, sz.Height + 2 * k);
+                    if (q.Top < a.Y - 2 || q.Bottom > a.Bottom + 2) continue;
+                    if (labels.Any(o => o.IntersectsWith(q))) continue;
+                    lr = q; break;
+                }
+                if (lr.IsEmpty) continue;
+                labels.Add(lr);
+                using (var lb = new SolidBrush(Color.FromArgb(200, Bg))) g.FillRectangle(lb, lr);
+                TextRenderer.DrawText(g, t, fSmall, new Point((int)(lr.X + 2 * k), (int)(lr.Y + 1 * k)), col, TextFormatFlags.NoPadding);
             }
             if (steps.Count == 0)
                 TextRenderer.DrawText(g, I18n.T("Sin postes de velocidad en este tramo"), fSmall, a, txt, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);

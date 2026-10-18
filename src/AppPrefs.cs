@@ -35,11 +35,13 @@ namespace SelectOR
     {
         public string LastFolder { get; set; }
         public string LastRoute { get; set; }
-        // Servidores SelectOR: la IP de la sala se escribe en el registro de Open Rails solo para lanzarlo; aquí lo que
+        // Sala compartida de CGL: la IP de la sala se escribe en el registro de Open Rails solo para lanzarlo; aquí lo que
         // había antes, para devolverlo al cerrar (y no enseñar la IP de la sala en «Servidor» la próxima vez).
         public string RoomRegHost { get; set; }
         public string RoomPrevHost { get; set; }
         public int RoomPrevPort { get; set; }
+        public bool SalaPromoHidden { get; set; }   // el aviso «Descargar la ruta» de la sala compartida, cerrado con su ✕
+        public bool SalaCgl { get; set; } = true;   // Conducción libre en CGL_V22N_RE: entrar en la sala compartida (MainMenuForm.SalaCgl.cs)
         public string MpClientHost { get; set; }   // la IP del último servidor al que se unió (al alojar, Open Rails queda con la de alojar)
         public string InstallId { get; set; }   // identificador al azar de esta instalación (usuarios conectados; no es personal)
         public string LastConsist { get; set; }
