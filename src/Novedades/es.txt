@@ -1,2 +1,6 @@
-1.2.67
-Trenes de los demás, también en 3D|En multijugador, el tren de otro jugador con varios vehículos que no tienes se ve en el 3D y en Ctrl+9, no solo en el mapa grande.
+1.2.68
+Señales de tu tren en la sala|Pide paso a la señal de delante con Tab y libera tu señal con Ctrl+Tab, también desde el mapa grande. Las demás órdenes a las señales son del administrador.
+Vuelves donde toca|Si vuelves a la sala con otro recorrido u otro tren, empiezas donde dice el nuevo; con el mismo, recuperas tu tren.
+El sol de España en CGL|En las rutas CGL amanece y anochece a la hora real de España: a las 19:00 de octubre aún es de día.
+Horarios de CGL en PDF|En la página Ruta de CGL_V22N_RE tienes los horarios de Regionales y Cercanías de GiorgioTrains para abrir o guardar.
+HUD a tu escala|En pantallas con la escala de Windows por encima del 100 %, el HUD, el mapa grande y la hoja de ruta se ven a ese tamaño.

@@ -52,6 +52,9 @@ namespace SelectOR
         public event Action<string> ChatError;  // «notin» (no estás en la sala) · «slow» (demasiados seguidos)
         // Mapa grande (servidor con «READY 4»; MainMenuForm.MapaSala.cs y RoomMap.cs): agujas, señales y trenes de la sala.
         public bool MapOk { get; private set; }
+        // Servidor con «READY 7»: pedir paso y liberar la señal de mi tren (ASKCLEAR/RELEASE, como Tab y Ctrl+Tab en Open Rails);
+        // con el despachador fijo, las órdenes a las señales son solo del administrador.
+        public bool DriverOk { get; private set; }
         public event Action<int, int, int, int> SwitchSet;          // el despachador acaba de cambiar una aguja (tx tz id posición)
         public byte[] SigStates { get; private set; }                // dos bytes por cabeza (estado + 1, dibujo + 1)
         public DateTime SigStatesAt { get; private set; }
@@ -162,6 +165,7 @@ namespace SelectOR
                 ChatOk = rv >= 3;
                 MapOk = rv >= 4;
                 AgentOk = rv >= 5;
+                DriverOk = rv >= 7;
                 Ready = true;
                 if (ChatOk) try { ChatReset?.Invoke(); } catch { }
                 return;
@@ -238,6 +242,8 @@ namespace SelectOR
         // 2 anuncio · 3 vía libre · 4 rebase autorizado).
         public void Throw(int tx, int tz, int id, int pos) { if (Ready && MapOk) Send($"THROW {tx} {tz} {id} {pos}"); }
         public void Signal(int obj, int pick) { if (Ready && MapOk) Send($"SIGNAL {obj} {pick}"); }
+        public void Pass() { if (Ready && DriverOk) Send("ASKCLEAR"); }
+        public void Release() { if (Ready && DriverOk) Send("RELEASE"); }
         public void SetHelper(string name, bool on) { if (Ready && AgentOk) Send($"SETHELPER {name} {(on ? 1 : 0)}"); }
 
         // Escribir en el chat de la sala (lo ven los demás en su HUD y en el chat de Open Rails).

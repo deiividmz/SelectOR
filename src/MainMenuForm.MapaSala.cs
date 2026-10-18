@@ -249,7 +249,11 @@ namespace SelectOR
                 // (servidor de antes: el despachador, solo con Ctrl+9)
                 if (_pilot.IsDispatcher && !_pilot.AgentOk) return Tr("Eres el despachador: las señales se cambian desde el mapa de Open Rails (Ctrl+9).");
                 if (!_pilot.IsDispatcher && !_pilot.Helper) return Tr("Pídele al despachador que te nombre ayudante: lo hace con un clic en tu nombre en la leyenda de su mapa grande.");
-                if (!RoomOnMyPath(g.Lat, g.Lon, g.Hdg)) { RoomLog($"clic en la señal {g.Obj}: fuera de mi camino, no se pide"); return Tr("Solo puedes cambiar las agujas y señales de tu camino (la línea discontinua de tu tren)."); }
+                // Sala con despachador fijo (servidor nuevo): las órdenes a las señales, solo el administrador (en toda la
+                // ruta); los demás, pedir paso y liberar la señal de su tren (Tab y Ctrl+Tab de Open Rails).
+                if (RoomDriverOnly) { RoomDriverMenu(screen, g); return null; }
+                if (!RoomFixedDispatcher || !Supa.IsSuperadmin)
+                    if (!RoomOnMyPath(g.Lat, g.Lon, g.Hdg)) { RoomLog($"clic en la señal {g.Obj}: fuera de mi camino, no se pide"); return Tr("Solo puedes cambiar las agujas y señales de tu camino (la línea discontinua de tu tren)."); }
                 RoomSignalMenu(g, screen);
                 return null;
             }
@@ -344,8 +348,38 @@ namespace SelectOR
                 (null, Color.Empty, null),
                 Item(Tr("Automática (como la pone Open Rails)"), 0, Color.Empty)
             };
+            if (!LocalMapOn && RoomFixedDispatcher) { items.Add((null, Color.Empty, null)); items.Add(RoomPassItem()); items.Add(RoomReleaseItem()); }   // (el administrador, también las de su tren)
             _serviceHud?.BigMapMenu(screen, string.Format(Tr("Señal · ahora: {0}"), state), items);
             RoomLog($"menú de la señal {g.Obj} abierto");
+        }
+
+        // ¿La sala la lleva el despachador fijo de SelectOR, con el servidor que sabe pedir paso y liberar?
+        bool RoomFixedDispatcher => _pilot != null && _pilot.DriverOk && _pilot.DispatcherName == "Despachador_SelectOR";
+        // Entonces, quien no es administrador solo tiene las de su tren.
+        bool RoomDriverOnly => RoomFixedDispatcher && !Supa.IsSuperadmin;
+
+        (string, Color, Action) RoomPassItem() => (Tr("Pedir paso a la señal de delante (Tab)"), RoomMapDraw.AspectColor(6), () =>
+        {
+            _pilot?.Pass();
+            RoomLog("pedir paso (como Tab)");
+            try { _serviceHud?.MapNotice(Tr("Paso pedido para la señal de delante de tu tren…")); } catch { }
+        });
+
+        (string, Color, Action) RoomReleaseItem() => (Tr("Liberar la señal de mi tren (Ctrl+Tab)"), RoomMapDraw.AspectColor(0), () =>
+        {
+            _pilot?.Release();
+            RoomLog("liberar la señal (como Ctrl+Tab)");
+            try { _serviceHud?.MapNotice(Tr("Pedido: liberar la señal de tu tren…")); } catch { }
+        });
+
+        // Menú de una señal para quien no es administrador: lo de su tren, como en Open Rails.
+        void RoomDriverMenu(Point screen, RoomMapGeo.Sig g)
+        {
+            int now = RoomMapNow() is RoomMapView v ? RoomMapDraw.SignalState(v, g) : -1;
+            string state = now < 0 ? Tr("sin dato") : now == 0 ? Tr("Parada") : now <= 2 ? Tr("Rebase autorizado") : now <= 5 ? Tr("Anuncio de parada") : Tr("Vía libre");
+            var items = new List<(string, Color, Action)> { RoomPassItem(), RoomReleaseItem() };
+            _serviceHud?.BigMapMenu(screen, string.Format(Tr("Señal · ahora: {0}"), state) + " · " + Tr("tu tren"), items);
+            RoomLog($"menú de mi tren abierto (señal {g.Obj})");
         }
 
         // Tras pedir «Parada»: en 15 s la foto del despachador tiene que traerla en parada.
@@ -378,6 +412,8 @@ namespace SelectOR
                 "nohelper" => Tr("Pídele al despachador que te nombre ayudante: lo hace con un clic en tu nombre en la leyenda de su mapa grande."),
                 "notdisp" => Tr("Solo el despachador puede nombrar ayudantes."),
                 "nodisp" => Tr("La sala no tiene despachador ahora mismo."),
+                "noadmin" => Tr("Las órdenes a las señales son del administrador. Para tu tren: pedir paso (Tab) o liberar su señal (Ctrl+Tab)."),
+                "nobot" => Tr("Liberar la señal solo se puede con el despachador fijo de la sala."),
                 _ => Tr("No estás dentro de la sala.")
             };
             try { _serviceHud?.MapNotice(msg); } catch { }

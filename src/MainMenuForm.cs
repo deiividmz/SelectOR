@@ -808,7 +808,7 @@ namespace SelectOR
 
             // La descripción completa sigue en esta caja (oculta): la usa la portada y el resto del programa.
             _routeDescBox = new TextBox { Visible = false, Multiline = true, ReadOnly = true };
-            page.Controls.Add(body); page.Controls.Add(gap); page.Controls.Add(_rutaHero); page.Controls.Add(_routeDescBox);
+            page.Controls.Add(body); page.Controls.Add(gap); page.Controls.Add(BuildRutaDocs()); page.Controls.Add(_rutaHero); page.Controls.Add(_routeDescBox);
             // Hasta que se elige una ruta: bienvenida con el logotipo, encima de todo.
             _rutaWelcome = new RouteWelcome
             {
@@ -876,6 +876,7 @@ namespace SelectOR
             }
             _rutaHero.SetContent(r?.Name, r?.Description, chips);
             FitRutaHero();
+            RefreshRutaDocs();   // documentos de la ruta (MainMenuForm.DocsRuta.cs)
             if (_rutaWelcome != null)
             {
                 bool show = r == null || _rutaWelcomeHold;

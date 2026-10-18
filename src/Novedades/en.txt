@@ -1,2 +1,6 @@
-1.2.67
-Others' trains, also in 3D|In multiplayer, another player's train with several vehicles you do not have shows in 3D and in Ctrl+9, not only on the big map.
+1.2.68
+Your train's signals in the room|Ask the signal ahead to clear with Tab and release your signal with Ctrl+Tab, also from the big map. Other signal orders are for the administrator.
+Back where you should be|If you come back to the room with another path or train, you start where the new one says; with the same one, you get your train back.
+Spain's sun on CGL|On the CGL routes the sun rises and sets at Spain's real time: at 19:00 in October it is still daylight.
+CGL timetables as PDF|On the Route page of CGL_V22N_RE you have GiorgioTrains' Regional and Cercanías timetables to open or save.
+HUD at your scale|On screens with Windows scaling above 100%, the HUD, the big map and the road book show at that size.
