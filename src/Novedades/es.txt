@@ -1,9 +1,4 @@
-1.2.69
-Open Rails ya no se cierra|Si se corta la conexión con la sala, Open Rails sigue abierto en vez de cerrarse de golpe, con cualquier versión de Open Rails.
-Escribir en el chat sin tocar el tren|Mientras escribes en el chat del HUD, Open Rails no recibe las teclas.
-Agujas desde el mapa grande|Las agujas se piden igual que con Ctrl+9: si el despachador no la deja, el mapa te dice por qué.
-Trenes visibles de lejos|En los mapas, los trenes no se quedan diminutos al alejarte y llevan su nombre.
-Quién está en la sala|En la página Ruta de CGL_V22N_RE ves cuántos jugadores hay en la sala compartida y quiénes son.
-Turnos en ciertos días|Los servicios programados se pueden repetir en ciertos días de la semana (por ejemplo, de lunes a viernes) y, sin tren concreto, muestran un tren de viajeros o de mercancías.
-Revisión con mapa siempre|El mapa y el diagrama de cada infracción se ven aunque no tengas la ruta instalada.
-HUD como antes|El HUD vuelve a su tamaño de siempre.
+1.2.70
+Intro y Esc ya no llegan al tren|Al enviar o cerrar el chat del HUD con Intro o Esc, Open Rails ya no recibe esas teclas.
+El chat sin teclas en todas las versiones|Mientras escribes en el chat del HUD, Open Rails no recibe las teclas también en las versiones NY, NewYear MG y Estable, no solo en Testing.
+Atardecer de CGL en todas las versiones|La salida y la puesta del sol de las rutas CGL a la hora de España se ven también en las versiones NY, NewYear MG y Estable.

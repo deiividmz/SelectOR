@@ -4,6 +4,9 @@
 // avisa de que se está escribiendo («TYPING segundos» por la conexión local, LocalLink.cs; caduca solo si deja de
 // avisar), aquí el teclado de Open Rails se ve vacío en cada vuelta (UserInput.Update): no le llega ninguna tecla y no se
 // queda ninguna pegada. Los mandos (palancas y botones) siguen yendo.
+// Al terminar (Intro para enviar, Esc para cerrar) la cajita se cierra con la tecla aún pulsada: si se soltara el teclado
+// en ese momento, Open Rails la vería como una pulsación nueva (Esc le abría el menú de pausa). Por eso sigue vacío hasta
+// que no quede ninguna tecla pulsada (como mucho 3 s).
 // Con Harmony, en memoria (no cambia ningún archivo de Open Rails).
 
 using System;
@@ -15,7 +18,9 @@ namespace SelectOR.MapAgent
     public static class Teclado
     {
         public static DateTime TypingUntil = DateTime.MinValue;
+        static DateTime _drainUntil = DateTime.MinValue;   // después de escribir, hasta que se suelten las teclas
         static FieldInfo _kb;
+        static MethodInfo _pressed;
         static object _empty;
 
         // (desde Agent.Install) 1 = puesto.
@@ -28,6 +33,7 @@ namespace SelectOR.MapAgent
                 _kb = t == null ? null : AccessTools.Field(t, "KeyboardState");
                 if (m == null || _kb == null) return 0;
                 _empty = Activator.CreateInstance(_kb.FieldType);
+                _pressed = AccessTools.Method(_kb.FieldType, "GetPressedKeys", Type.EmptyTypes);
                 h.Patch(m, postfix: new HarmonyMethod(typeof(Teclado), nameof(After)));
                 return 1;
             }
@@ -42,8 +48,22 @@ namespace SelectOR.MapAgent
 
         static void After()
         {
-            if (DateTime.UtcNow >= TypingUntil) return;
+            var now = DateTime.UtcNow;
+            if (now < TypingUntil) { _drainUntil = now.AddSeconds(3); Clear(); return; }
+            if (now >= _drainUntil) return;
+            if (AnyKeyDown()) { Clear(); return; }   // (lo que Open Rails acaba de leer del teclado de verdad)
+            _drainUntil = DateTime.MinValue;
+        }
+
+        static void Clear()
+        {
             try { _kb.SetValue(null, _empty); } catch { }
+        }
+
+        static bool AnyKeyDown()
+        {
+            try { return _pressed != null && _pressed.Invoke(_kb.GetValue(null), null) is Array a && a.Length > 0; }
+            catch { return false; }
         }
     }
 }

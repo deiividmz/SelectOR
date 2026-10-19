@@ -1,9 +1,4 @@
-1.2.69
-Open Rails no longer closes|If the connection to the room drops, Open Rails stays open instead of closing suddenly, with any Open Rails version.
-Typing in the chat without touching the train|While you type in the HUD chat, Open Rails doesn't receive the keys.
-Switches from the big map|Switches are requested just like with Ctrl+9: if the dispatcher refuses one, the map tells you why.
-Trains visible from afar|On the maps, trains don't become tiny when you zoom out and they show their name.
-Who is in the room|On the Route page of CGL_V22N_RE you see how many players are in the shared room and who they are.
-Shifts on certain days|Scheduled services can repeat on certain weekdays (for example, Monday to Friday) and, without a specific train, show a passenger or freight train.
-Review always with a map|Each infraction's map and diagram show even if you don't have the route installed.
-HUD as before|The HUD is back to its usual size.
+1.2.70
+Enter and Esc no longer reach the train|When you send or close the HUD chat with Enter or Esc, Open Rails no longer receives those keys.
+Chat without keys in every version|While you type in the HUD chat, Open Rails doesn't receive the keys in the NY, NewYear MG and Stable versions too, not just in Testing.
+CGL sunset in every version|Sunrise and sunset on the CGL routes at Spanish time also show in the NY, NewYear MG and Stable versions.

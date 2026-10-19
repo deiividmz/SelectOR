@@ -61,6 +61,35 @@ namespace SelectOR.MapAgent
             int threads = Hilos.Install(h);      // .NET 6: que un corte de la sala no cierre Open Rails (Hilos.cs)
             int keys = Teclado.Install(h);       // escribir en el chat del HUD sin que Open Rails lo reciba (Teclado.cs)
             Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            if (sun == 0 || keys == 0) Later(h, sun == 0, keys == 0);
+        }
+
+        // En los Open Rails de .NET Framework el agente entra antes de que se cargue RunActivity.exe, que es donde están el
+        // teclado (UserInput) y el sol (SunMoonPos): no se encontraban y no se ponían nunca (1.2.69). Se ponen en cuanto
+        // Open Rails carga ese ensamblado.
+        static void Later(Harmony h, bool sun, bool keys)
+        {
+            AssemblyLoadEventHandler onLoad = null;
+            bool busy = false;
+            void Try(System.Reflection.Assembly a)
+            {
+                if (busy) return;
+                busy = true;
+                try
+                {
+                    string got = "";
+                    bool Has(string type) => (a == null ? AccessTools.TypeByName(type) : a.GetType(type, false)) != null;
+                    if (sun && Has("Orts.Viewer3D.Common.SunMoonPos")) { sun = false; if (Sol.Install(h) > 0) got += " + sol"; }
+                    if (keys && Has("Orts.Viewer3D.UserInput")) { keys = false; if (Teclado.Install(h) > 0) got += " + teclado"; }
+                    if (got != "") Log("instalado al cargar el 3D:" + got);
+                    if (!sun && !keys) AppDomain.CurrentDomain.AssemblyLoad -= onLoad;
+                }
+                catch (Exception ex) { Log("al cargar el 3D: " + ex.GetType().Name + " " + ex.Message); }
+                finally { busy = false; }
+            }
+            onLoad = (s, e) => Try(e.LoadedAssembly);
+            AppDomain.CurrentDomain.AssemblyLoad += onLoad;
+            Try(null);   // (por si ya estaba)
         }
 
         static string ProcessPath()
