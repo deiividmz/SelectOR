@@ -161,7 +161,7 @@ namespace SelectOR
     {
         public const double MaxMPerPx = 6;   // más lejos, sin agujas ni señales (no cabrían)
 
-        static readonly Color SwOn = Color.FromArgb(245, 247, 248), SwOff = Color.FromArgb(90, 150, 158, 166), SwHidden = Color.FromArgb(120, 150, 158, 166);
+        static readonly Color SwOn = Color.FromArgb(245, 247, 248), SwOff = Color.FromArgb(90, 150, 158, 166), SwUnknown = Color.FromArgb(200, 150, 158, 166);
         public static readonly Color SwLocked = Color.FromArgb(0, 176, 255);    // aguja enclavada (azul vivo: los andenes son de otro azul)
 
         public static bool IsLocked(RoomMapView v, RouteGraph.SwitchGeo s) { char c = v?.SwitchLock?.Invoke(s) ?? '.'; return c == 'S' || c == 'T' || c == 'O'; }
@@ -228,7 +228,7 @@ namespace SelectOR
                 {
                     var c = pj(s.Lat, s.Lon);
                     if (!view.Contains(c)) continue;
-                    int pos = s.Hidden ? -1 : v.SwitchPos?.Invoke(s) ?? -1;
+                    int pos = v.SwitchPos?.Invoke(s) ?? -1;   // (también los de una travesía: la foto de agujas los trae todos)
                     bool locked = IsLocked(v, s);   // enclavada: la rama puesta y el punto, en azul, con un candado
                     for (int k = 0; k < 2; k++)
                     {
@@ -241,7 +241,7 @@ namespace SelectOR
                         g.DrawLines(pen, pts);
                     }
                     float r = 4f;
-                    var dot = locked ? SwLocked : s.Hidden ? SwHidden : pos < 0 ? Color.FromArgb(200, 150, 158, 166) : SwOn;
+                    var dot = locked ? SwLocked : pos < 0 ? SwUnknown : SwOn;
                     using (var b = new SolidBrush(dot)) g.FillEllipse(b, c.X - r, c.Y - r, 2 * r, 2 * r);
                     using (var o = new Pen(Color.FromArgb(200, 20, 22, 24), 1.2f)) g.DrawEllipse(o, c.X - r, c.Y - r, 2 * r, 2 * r);
                     if (locked) Padlock(g, c.X - 14, c.Y - 14);   // (a la izquierda: los nombres de estación van a la derecha)
@@ -305,7 +305,8 @@ namespace SelectOR
             { g.FillRectangle(b, body); g.DrawRectangle(o, body.X, body.Y, body.Width, body.Height); }
         }
 
-        // Lo que hay bajo el ratón: una aguja o una señal (null si nada).
+        // Lo que hay bajo el ratón: una aguja o una señal (null si nada). Si caen varias agujas bajo el ratón (los cuatro
+        // desvíos de una travesía están a 2 o 3 m), la lista de todas, de izquierda a derecha en la pantalla, para elegir.
         public static object Hit(RoomMapView v, Func<double, double, PointF> pj, double mPerPx, Point at)
         {
             if (v?.Geo == null || pj == null || mPerPx > MaxMPerPx) return null;
@@ -316,11 +317,14 @@ namespace SelectOR
                     var m = SigMarker(s, pj); double d = (m.X - at.X) * (m.X - at.X) + (m.Y - at.Y) * (m.Y - at.Y);
                     if (d < bd) { bd = d; best = s; }
                 }
+            var under = new List<(RouteGraph.SwitchGeo s, float x)>();
             foreach (var s in v.Geo.Switches)
             {
                 var c = pj(s.Lat, s.Lon); double d = (c.X - at.X) * (c.X - at.X) + (c.Y - at.Y) * (c.Y - at.Y);
+                if (d < 10 * 10) under.Add((s, c.X));
                 if (d < bd) { bd = d; best = s; }
             }
+            if (best is RouteGraph.SwitchGeo && under.Count > 1) return under.OrderBy(u => u.x).Select(u => u.s).ToList();
             return best;
         }
     }

@@ -1,4 +1,3 @@
-1.2.70
-Intro y Esc ya no llegan al tren|Al enviar o cerrar el chat del HUD con Intro o Esc, Open Rails ya no recibe esas teclas.
-El chat sin teclas en todas las versiones|Mientras escribes en el chat del HUD, Open Rails no recibe las teclas también en las versiones NY, NewYear MG y Estable, no solo en Testing.
-Atardecer de CGL en todas las versiones|La salida y la puesta del sol de las rutas CGL a la hora de España se ven también en las versiones NY, NewYear MG y Estable.
+1.2.71
+Agujas y señales de toda la ruta|En la sala compartida, cualquier jugador cambia agujas y da órdenes a las señales de toda la ruta desde el mapa grande del HUD, no solo las de su camino; en el menú de una señal siguen Pedir paso y Liberar la señal de tu tren.
+Travesías aguja a aguja|Los cuatro accionamientos de una travesía se cambian uno a uno y se ve cómo está cada uno; si quedan varias agujas bajo el ratón, un menú te deja elegir cuál.

@@ -220,11 +220,13 @@ namespace SelectOR
         // Un clic en el mapa grande sobre una aguja o una señal. Devuelve el aviso que se enseña (o null).
         string RoomMapClick(object hit, Point screen)
         {
+            if (hit is List<RouteGraph.SwitchGeo> many) { SwitchChooser(many, screen); return null; }
             if (LocalMapOn) return LocalMapClick(hit, screen);
             if (!RoomMapOn) return null;
             if (hit is RouteGraph.SwitchGeo s)
             {
-                if (s.Hidden) return Tr("Esta aguja va unida a otra (un escape): se cambia con la otra.");
+                // las de una travesía o un escape (comparten identificador): por su nodo, solo con el despachador fijo
+                if (s.Hidden && !RoomFixedDispatcher) return Tr("Esta aguja va unida a otra (un escape): se cambia con la otra.");
                 // (1.2.69) Si está o no en tu camino lo decide el despachador, como con Ctrl+9: el cálculo de aquí no coincidía
                 // con el suyo y rechazaba agujas que Ctrl+9 sí dejaba. Si no la deja, el aviso sale en Open Rails.
                 if (!RoomOnMyPath(s.Lat, s.Lon, null)) RoomLog($"clic en la aguja {s.Tx} {s.Tz} {s.Id}: el mapa no la ve en mi camino, decide el despachador");
@@ -239,9 +241,10 @@ namespace SelectOR
                          : lk == 'O' ? Tr("Aguja enclavada: hay un tren encima.")
                          : Tr("Aguja enclavada: la tiene reservada un tren para su ruta.");
                 }
-                _pilot.Throw(s.Tx, s.Tz, s.Id, pos == 1 ? 0 : 1);
+                if (s.Hidden) _pilot.ThrowNode(s.Node, pos == 1 ? 0 : 1);
+                else _pilot.Throw(s.Tx, s.Tz, s.Id, pos == 1 ? 0 : 1);
                 _roomAsked[s.Order] = (pos == 1 ? 0 : 1, DateTime.UtcNow);
-                RoomLog($"clic en la aguja {s.Tx} {s.Tz} {s.Id} (está en {pos}): se pide {(pos == 1 ? 0 : 1)}" + (_pilot.IsDispatcher ? " · soy el despachador" : ""));
+                RoomLog($"clic en la aguja {s.Tx} {s.Tz} {s.Id}{(s.Hidden ? $" (nodo {s.Node}, de una travesía)" : "")} (está en {pos}): se pide {(pos == 1 ? 0 : 1)}" + (_pilot.IsDispatcher ? " · soy el despachador" : ""));
                 return Tr("Aguja pedida al despachador…");
             }
             if (hit is RoomMapGeo.Sig g)
@@ -251,15 +254,34 @@ namespace SelectOR
                 // (servidor de antes: el despachador, solo con Ctrl+9)
                 if (_pilot.IsDispatcher && !_pilot.AgentOk) return Tr("Eres el despachador: las señales se cambian desde el mapa de Open Rails (Ctrl+9).");
                 if (!_pilot.IsDispatcher && !_pilot.Helper) return Tr("Pídele al despachador que te nombre ayudante: lo hace con un clic en tu nombre en la leyenda de su mapa grande.");
-                // Sala con despachador fijo (servidor nuevo): las órdenes a las señales, solo el administrador (en toda la
-                // ruta); los demás, pedir paso y liberar la señal de su tren (Tab y Ctrl+Tab de Open Rails).
-                if (RoomDriverOnly) { RoomDriverMenu(screen, g); return null; }
-                if (!RoomFixedDispatcher || !Supa.IsSuperadmin)
-                    if (!RoomOnMyPath(g.Lat, g.Lon, g.Hdg)) { RoomLog($"clic en la señal {g.Obj}: fuera de mi camino, no se pide"); return Tr("Solo puedes cambiar las agujas y señales de tu camino (la línea discontinua de tu tren)."); }
+                // (1.2.71) cualquier señal de la ruta, con todas las órdenes (y, con el despachador fijo, las de tu tren)
+                if (!RoomOnMyPath(g.Lat, g.Lon, g.Hdg)) RoomLog($"clic en la señal {g.Obj}: fuera de mi camino (se deja igual)");
                 RoomSignalMenu(g, screen);
                 return null;
             }
             return null;
+        }
+
+        // Varias agujas bajo el ratón (los cuatro desvíos de una travesía están a 2 o 3 m): un menú para elegir cuál,
+        // de izquierda a derecha en la pantalla, con cómo está cada una; al elegir, como un clic en ella.
+        void SwitchChooser(List<RouteGraph.SwitchGeo> list, Point screen)
+        {
+            var v = RoomMapNow();
+            var items = new List<(string, Color, Action)>();
+            for (int i = 0; i < list.Count; i++)
+            {
+                var s = list[i];
+                int pos = v?.SwitchPos?.Invoke(s) ?? -1;
+                string how = pos == 0 ? Tr("vía directa") : pos == 1 ? Tr("vía desviada") : Tr("sin dato");
+                if (v != null && RoomMapDraw.IsLocked(v, s)) how += " · " + Tr("enclavada");
+                items.Add((string.Format(Tr("Aguja {0}: {1}"), i + 1, how), Color.Empty, () =>
+                {
+                    string msg = RoomMapClick(s, screen);
+                    if (msg != null) try { _serviceHud?.MapNotice(msg); } catch { }
+                }));
+            }
+            _serviceHud?.BigMapMenu(screen, string.Format(Tr("{0} agujas aquí (de izquierda a derecha)"), list.Count), items);
+            RoomLog($"varias agujas bajo el ratón: {string.Join(", ", list.Select(s => s.Node))}");
         }
 
         // Sala compartida (despachador fijo): cada jugador solo cambia lo que está en el camino de su tren, la línea
@@ -350,15 +372,14 @@ namespace SelectOR
                 (null, Color.Empty, null),
                 Item(Tr("Automática (como la pone Open Rails)"), 0, Color.Empty)
             };
-            if (!LocalMapOn && RoomFixedDispatcher) { items.Add((null, Color.Empty, null)); items.Add(RoomPassItem()); items.Add(RoomReleaseItem()); }   // (el administrador, también las de su tren)
+            if (!LocalMapOn && RoomFixedDispatcher) { items.Add((null, Color.Empty, null)); items.Add(RoomPassItem()); items.Add(RoomReleaseItem()); }   // (y las de tu tren: Tab y Ctrl+Tab)
             _serviceHud?.BigMapMenu(screen, string.Format(Tr("Señal · ahora: {0}"), state), items);
             RoomLog($"menú de la señal {g.Obj} abierto");
         }
 
-        // ¿La sala la lleva el despachador fijo de SelectOR, con el servidor que sabe pedir paso y liberar?
+        // ¿La sala la lleva el despachador fijo de SelectOR, con el servidor que sabe pedir paso, liberar y cambiar un desvío
+        // por su nodo?
         bool RoomFixedDispatcher => _pilot != null && _pilot.DriverOk && _pilot.DispatcherName == "Despachador_SelectOR";
-        // Entonces, quien no es administrador solo tiene las de su tren.
-        bool RoomDriverOnly => RoomFixedDispatcher && !Supa.IsSuperadmin;
 
         (string, Color, Action) RoomPassItem() => (Tr("Pedir paso a la señal de delante (Tab)"), RoomMapDraw.AspectColor(6), () =>
         {
@@ -373,16 +394,6 @@ namespace SelectOR
             RoomLog("liberar la señal (como Ctrl+Tab)");
             try { _serviceHud?.MapNotice(Tr("Pedido: liberar la señal de tu tren…")); } catch { }
         });
-
-        // Menú de una señal para quien no es administrador: lo de su tren, como en Open Rails.
-        void RoomDriverMenu(Point screen, RoomMapGeo.Sig g)
-        {
-            int now = RoomMapNow() is RoomMapView v ? RoomMapDraw.SignalState(v, g) : -1;
-            string state = now < 0 ? Tr("sin dato") : now == 0 ? Tr("Parada") : now <= 2 ? Tr("Rebase autorizado") : now <= 5 ? Tr("Anuncio de parada") : Tr("Vía libre");
-            var items = new List<(string, Color, Action)> { RoomPassItem(), RoomReleaseItem() };
-            _serviceHud?.BigMapMenu(screen, string.Format(Tr("Señal · ahora: {0}"), state) + " · " + Tr("tu tren"), items);
-            RoomLog($"menú de mi tren abierto (señal {g.Obj})");
-        }
 
         // Tras pedir «Parada»: en 15 s la foto del despachador tiene que traerla en parada.
         void RoomSignalCheck()
@@ -416,6 +427,7 @@ namespace SelectOR
                 "nodisp" => Tr("La sala no tiene despachador ahora mismo."),
                 "noadmin" => Tr("Las órdenes a las señales son del administrador. Para tu tren: pedir paso (Tab) o liberar su señal (Ctrl+Tab)."),
                 "nobot" => Tr("Liberar la señal solo se puede con el despachador fijo de la sala."),
+                "nobotsw" => Tr("Esta aguja va unida a otra (un escape): se cambia con la otra."),
                 "notpath" => Tr("El despachador no la deja: no está en tu camino (la línea discontinua de tu tren)."),
                 _ => Tr("No estás dentro de la sala.")
             };

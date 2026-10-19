@@ -241,6 +241,9 @@ namespace SelectOR
         // Mapa grande: cambiar una aguja (como desde Ctrl+9) o una señal (solo ayudantes; orden: 0 normal · 1 parada ·
         // 2 anuncio · 3 vía libre · 4 rebase autorizado).
         public void Throw(int tx, int tz, int id, int pos) { if (Ready && MapOk) Send($"THROW {tx} {tz} {id} {pos}"); }
+        // Un desvío concreto del .tdb, por su nodo: los de una travesía o un escape comparten identificador y por THROW solo
+        // cambia el primero (solo con el despachador fijo, 1.2.71).
+        public void ThrowNode(int node, int pos) { if (Ready && DriverOk) Send($"THROWNODE {node} {pos}"); }
         public void Signal(int obj, int pick) { if (Ready && MapOk) Send($"SIGNAL {obj} {pick}"); }
         public void Pass() { if (Ready && DriverOk) Send("ASKCLEAR"); }
         public void Release() { if (Ready && DriverOk) Send("RELEASE"); }

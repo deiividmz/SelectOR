@@ -44,8 +44,9 @@ namespace SelectOR
         readonly Dictionary<int, Junc> _junc = new();
         // Desvíos en el orden de su índice del .tdb: así manda Open Rails sus posiciones (SWITCHSTATES, un byte cada uno).
         public int[] JunctionOrder = Array.Empty<int>();
-        // Varios desvíos de un mismo objeto (escapes, bretelles…) comparten identificador; Open Rails, al pedirlo por
-        // multijugador, cambia el PRIMERO del .tdb (TDB.GetTrJunctionNode). Los demás no se pueden pedir.
+        // Varios desvíos de un mismo objeto (escapes, travesías…) comparten identificador; Open Rails, al pedirlo por
+        // multijugador (SWITCH), cambia el PRIMERO del .tdb (TDB.GetTrJunctionNode). Los demás se piden por su nodo
+        // (THROWNODE, con el despachador fijo; en conducción libre, por su número, como todos).
         readonly HashSet<int> _juncHidden = new();
         public bool SwitchHidden(int node) => _juncHidden.Contains(node);
 

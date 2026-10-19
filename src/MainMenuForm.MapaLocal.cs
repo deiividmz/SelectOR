@@ -111,8 +111,7 @@ namespace SelectOR
         {
             if (hit is RouteGraph.SwitchGeo s)
             {
-                if (s.Hidden) return Tr("Esta aguja va unida a otra (un escape): se cambia con la otra.");
-                var v = LocalMapNow();
+                var v = LocalMapNow();   // (también las de una travesía: aquí se piden por su número)
                 int pos = v?.SwitchPos?.Invoke(s) ?? -1;
                 if (pos < 0) return Tr("Todavía no se sabe cómo está esta aguja.");
                 char lk = v.SwitchLock?.Invoke(s) ?? '.';

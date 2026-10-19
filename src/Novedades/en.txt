@@ -1,4 +1,3 @@
-1.2.70
-Enter and Esc no longer reach the train|When you send or close the HUD chat with Enter or Esc, Open Rails no longer receives those keys.
-Chat without keys in every version|While you type in the HUD chat, Open Rails doesn't receive the keys in the NY, NewYear MG and Stable versions too, not just in Testing.
-CGL sunset in every version|Sunrise and sunset on the CGL routes at Spanish time also show in the NY, NewYear MG and Stable versions.
+1.2.71
+Switches and signals on the whole route|In the shared room, any player throws switches and gives orders to signals on the whole route from the big HUD map, not just those on their path; the signal menu still has Ask for clearance and Release your train's signal.
+Crossings switch by switch|The four switches of a double crossing are thrown one by one and you see how each one is set; if several switches fall under the mouse, a menu lets you choose which.
