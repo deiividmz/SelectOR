@@ -58,7 +58,9 @@ namespace SelectOR.MapAgent
             int remote = Remotos.Install(h);    // los trenes de los demás: vehículos que faltan y por qué no se ve uno (Remotos.cs)
             int release = Liberar.Install(h);   // Ctrl+Tab en multijugador: liberar la señal de tu tren (Liberar.cs)
             int sun = Sol.Install(h);            // el sol de las rutas CGL a la hora de España (Sol.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            int threads = Hilos.Install(h);      // .NET 6: que un corte de la sala no cierre Open Rails (Hilos.cs)
+            int keys = Teclado.Install(h);       // escribir en el chat del HUD sin que Open Rails lo reciba (Teclado.cs)
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
         }
 
         static string ProcessPath()

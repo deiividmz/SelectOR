@@ -1,11 +1,12 @@
 // Dónde se cometió cada infracción del carné (para el mapa de Revisión): al registrar el servicio, el rastro del tren
 // (_svcTrail, con el segundo del servicio en cada punto) da el punto de la infracción y el tramo que recorrió el tren,
 // 2 km antes y 2 km después, con margen (en un exceso de velocidad, después de que acabara). Va en el propio detalle de la
-// infracción (lo guarda report_infractions tal cual, hasta 2 000 caracteres; sin SQL nuevo):
+// infracción (lo guarda report_infractions tal cual, hasta 2 000 caracteres; 8 000 con infracciones-mapa.sql):
 //   lat, lon   el punto de la infracción;
 //   trail      el tramo recorrido (polilínea codificada, como el recorrido del servicio);
 //   d0, d1     metros desde el principio del tramo hasta la infracción y hasta donde acabó;
-//   rdir       la carpeta de la ruta (para buscarla instalada; el servicio guarda su nombre).
+//   rdir       la carpeta de la ruta (para buscarla instalada; el servicio guarda su nombre);
+//   map        (1.2.69) el mapa del tramo ya preparado (InfrMap.ToCompact), para verlo sin la ruta instalada.
 // Las infracciones de antes de la 1.2.64 no lo llevan.
 
 using System;
@@ -62,6 +63,40 @@ namespace SelectOR
             catch { }
         }
 
+        // (1.2.69) El mapa del tramo, ya preparado aquí (que se tiene la ruta), en el detalle («map»): Revisión lo dibuja aunque
+        // el administrador no tenga la ruta. Solo si el servidor admite detalles grandes (infracciones-mapa.sql:
+        // infr_detail_max ≥ 8 000); si no cabe entero, con menos vías de alrededor, y si aun así no, sin mapa.
+        int _infrDetailMax;   // 0 = sin preguntar
+
+        async Task InfrAddMap(Dictionary<string, object> det)
+        {
+            try
+            {
+                if (det == null || !det.ContainsKey("trail") || string.IsNullOrEmpty(_curRoute?.Path)) return;
+                if (_infrDetailMax == 0)
+                {
+                    var (j, e) = await Supa.RpcAsync("infr_detail_max", new { });
+                    _infrDetailMax = e == null && int.TryParse((j ?? "").Trim().Trim('"'), out int mx) ? mx : 2000;
+                }
+                if (_infrDetailMax < 8000) return;
+                var g = await RouteGraphFor(_curRoute.Path);
+                if (g == null) return;
+                using var doc = JsonDocument.Parse(JsonSerializer.Serialize(det));
+                var place = InfrPlace.From(doc.RootElement);
+                if (place == null) return;
+                string dir = _curRoute.Path;
+                var (map, _) = await Task.Run(() => InfrMap.Build(g, dir, place));
+                if (map == null) return;
+                foreach (var (step, ctx) in new[] { (20.0, 260), (20.0, 120), (30.0, 60), (40.0, 0) })
+                {
+                    det["map"] = map.ToCompact(step, ctx);
+                    if (JsonSerializer.Serialize(det).Length <= _infrDetailMax - 100) return;
+                }
+                det.Remove("map");
+            }
+            catch { det?.Remove("map"); }
+        }
+
         // Revisión: el mapa de una infracción, con la ruta instalada en esta carpeta de contenido (por su carpeta, que
         // guarda la infracción, o por su nombre). Se hace una vez por tarjeta y se repinta la lista al acabar.
         async Task RevBuildMap(ReviewItem it)
@@ -74,9 +109,16 @@ namespace SelectOR
                 if (p == null) return;
                 var rt = _routesAll.FirstOrDefault(r => p.RDir.Length > 0 && string.Equals(Path.GetFileName((r.Path ?? "").TrimEnd('\\', '/')), p.RDir, StringComparison.OrdinalIgnoreCase))
                       ?? _routesAll.FirstOrDefault(r => string.Equals(r.Name, it.Route, StringComparison.OrdinalIgnoreCase));
-                if (rt == null) { it.MapNote = string.Format(Tr("Sin mapa: no tienes la ruta «{0}» en esta carpeta de contenido."), it.Route); return; }
+                // sin la ruta (o sin poder leerla): el mapa que guardó el equipo del maquinista, si lo guardó (1.2.69)
+                InfrMap Saved() => p.MapJson == null ? null : InfrMap.FromCompact(p.MapJson, p.MaxKmh);
+                if (rt == null)
+                {
+                    var sm = Saved();
+                    if (sm != null) { it.Map = sm; return; }
+                    it.MapNote = string.Format(Tr("Sin mapa: no tienes la ruta «{0}» en esta carpeta de contenido."), it.Route); return;
+                }
                 var g = await RouteGraphFor(rt.Path);
-                if (g == null) { it.MapNote = Tr("Sin mapa: no se ha podido leer la vía de la ruta."); return; }
+                if (g == null) { var sm = Saved(); if (sm != null) { it.Map = sm; return; } it.MapNote = Tr("Sin mapa: no se ha podido leer la vía de la ruta."); return; }
                 var (map, why) = await Task.Run(() => InfrMap.Build(g, rt.Path, p));
                 if (map != null) it.Map = map; else it.MapNote = Tr("Sin mapa: ") + why;
             }

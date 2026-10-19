@@ -50,6 +50,7 @@ namespace SelectOR
             var box = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(14, 8, 14, 10) };
             var head = new Label { Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Text = Tr("DOCUMENTOS DE LA RUTA") };
             _rutaDocsFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, WrapContents = false, AutoScroll = false, Margin = new Padding(0) };
+            _rutaDocsFlow.Resize += (s, e) => FitDocCards();
             box.Controls.Add(_rutaDocsFlow); box.Controls.Add(head);
             _rutaDocs.Controls.Add(box);
             return _rutaDocs;
@@ -96,7 +97,24 @@ namespace SelectOR
             _rutaDocsFlow.SuspendLayout();
             foreach (Control c in _rutaDocsFlow.Controls.Cast<Control>().ToList()) c.Dispose();
             foreach (var d in list) _rutaDocsFlow.Controls.Add(DocCard(route, d));
+            FitDocCards();
             _rutaDocsFlow.ResumeLayout();
+        }
+
+        // El ancho de las tarjetas, repartido entre las que hay (entre 300 y 400 px): que quepan todas en la fila.
+        void FitDocCards()
+        {
+            var cards = _rutaDocsFlow?.Controls.Cast<Control>().ToList();
+            if (cards == null || cards.Count == 0) return;
+            int w = Math.Max(300, Math.Min(400, (_rutaDocsFlow.ClientSize.Width - 12 * (cards.Count - 1)) / cards.Count));
+            foreach (var c in cards)
+            {
+                if (c.Width == w) continue;
+                c.Width = w;
+                foreach (Control k in c.Controls)
+                    if (k is Label) k.Width = w - 78;
+                    else if (k is RoundButton rb && rb.Left > 100) rb.Width = w - 176;
+            }
         }
 
         // (solo «carpeta/archivo» sin subir de carpeta)

@@ -17,7 +17,8 @@ namespace SelectOR
     {
         public sealed class Result
         {
-            public string Route, TrainId, Kind, Repeat, Note;   // Kind pax/freight/null · Repeat none/daily/weekly
+            public string Route, TrainId, Kind, Repeat, Note;   // Kind pax/freight/null · Repeat none/daily/weekly/days
+            public int[] Offsets;   // (Repeat = days) los días que pasan desde la primera salida, con el calendario de este equipo
             public SavedItinerary Itinerary;   // el que se cargará en la hoja de ruta del maquinista (el recorrido lo elige él)
             public DateTime Start, End; public int Count;
         }
@@ -32,7 +33,8 @@ namespace SelectOR
         readonly ThemeCombo _route, _itin, _train, _day;
         readonly List<SavedItinerary> _itins = new();
         readonly RoundedInput _from, _to, _count, _note;
-        readonly FlowLayoutPanel _kindChips, _repChips;
+        readonly FlowLayoutPanel _kindChips, _repChips, _dayChips;
+        readonly bool[] _days = { true, true, true, true, true, false, false };   // lunes … domingo (ciertos días)
         readonly Label _countLbl, _err;
         readonly RoundButton _ok;
         readonly Ticket _ticket;
@@ -48,7 +50,7 @@ namespace SelectOR
             BackColor = Theme.Bg; ForeColor = Theme.Text; Font = Theme.Font(9.5f);
             StartPosition = FormStartPosition.CenterParent; FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
-            ClientSize = new Size(Theme.Px(920), Theme.Px(640));
+            ClientSize = new Size(Theme.Px(920), Theme.Px(684));
             DialogKit.Dress(this);
 
             // ---- cabecera ----
@@ -128,13 +130,31 @@ namespace SelectOR
 
             // 4 · repetición
             Step(4, T("REPETICIÓN"));
-            _repChips = Chips(new[] { T("Una vez"), T("A diario"), T("Cada semana") }, i => { _rep = i; _count.Enabled = i > 0; if (i == 1 && Cnt() > 14) _count.Box.Text = "14"; if (i == 2 && Cnt() > 8) _count.Box.Text = "8"; Refresh_(); });
+            _repChips = Chips(new[] { T("Una vez"), T("A diario"), T("Cada semana"), T("Ciertos días") }, i =>
+            {
+                _rep = i; _count.Enabled = i > 0; if (i == 1 && Cnt() > 14) _count.Box.Text = "14"; if (i >= 2 && Cnt() > 8) _count.Box.Text = "8";
+                _countLbl.Text = T(i == 3 ? "semanas" : "salidas"); _dayChips.Visible = i == 3; Refresh_();
+            });
             _repChips.Location = new Point(x - Theme.Px(2), y); body.Controls.Add(_repChips);
+            y += Theme.Px(42);
+            // segunda fila: los días (ciertos días) a la izquierda y cuántas salidas o semanas a la derecha
             _count = Input(x + W - Theme.Px(150), Theme.Px(56), "5"); _count.Box.Text = "5"; _count.Box.TextAlign = HorizontalAlignment.Center; _count.Enabled = false;
             _count.Top = y - Theme.Px(2);
             _countLbl = new Label { Text = T("salidas"), Location = new Point(x + W - Theme.Px(88), y + Theme.Px(6)), Size = new Size(Theme.Px(88), Theme.Px(20)), ForeColor = Theme.Subtle, Font = Theme.Font(9f) };
             body.Controls.Add(_countLbl);
-            y += Theme.Px(48);
+            // ciertos días: lunes … domingo, cada uno se enciende o se apaga (de lunes a viernes, de entrada)
+            _dayChips = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Location = new Point(x - Theme.Px(2), y), Visible = false };
+            string[] dn = I18n.English ? new[] { "M", "T", "W", "T", "F", "S", "S" } : new[] { "L", "M", "X", "J", "V", "S", "D" };
+            for (int k = 0; k < 7; k++)
+            {
+                int idx = k;
+                var b = new RoundButton { Text = dn[k], Width = Theme.Px(38), Height = Theme.Px(30), Radius = 15, FontSize = 9.5f, FontStyle = FontStyle.Bold, Margin = new Padding(Theme.Px(2), 0, Theme.Px(6), 0),
+                                          Active = _days[k], BaseColor = Theme.Surface, HoverColor = Theme.SurfaceHi, TextColor = Theme.Subtle };
+                b.Click += (s, e) => { _days[idx] = !_days[idx]; b.Active = _days[idx]; b.Invalidate(); Refresh_(); };
+                _dayChips.Controls.Add(b);
+            }
+            body.Controls.Add(_dayChips);
+            y += Theme.Px(44);
 
             // 5 · nota
             Step(5, T("NOTA (OPCIONAL)"));
@@ -187,6 +207,15 @@ namespace SelectOR
 
         int Times() => _rep == 0 ? 1 : Math.Max(1, Math.Min(_rep == 1 ? 14 : 8, Cnt()));
 
+        // Ciertos días: los días (desde el de la salida) de las «Times()» semanas que caen en los días elegidos.
+        int[] Offsets(DateTime start)
+        {
+            var l = new List<int>();
+            if (start == DateTime.MinValue) return l.ToArray();
+            for (int d = 0; d < Times() * 7; d++) if (_days[((int)start.AddDays(d).DayOfWeek + 6) % 7]) l.Add(d);
+            return l.ToArray();
+        }
+
         Result Collect()
         {
             var w = Window();
@@ -196,7 +225,8 @@ namespace SelectOR
                 Itinerary = _itin.SelectedIndex > 0 && _itin.SelectedIndex - 1 < _itins.Count ? _itins[_itin.SelectedIndex - 1] : null,
                 TrainId = _kind == 3 && _trains.Count > 0 && _train.SelectedIndex >= 0 ? _trains[_train.SelectedIndex].id : null,
                 Kind = _kind == 1 ? "pax" : _kind == 2 ? "freight" : null,
-                Repeat = _rep == 1 ? "daily" : _rep == 2 ? "weekly" : "none",
+                Repeat = _rep == 1 ? "daily" : _rep == 2 ? "weekly" : _rep == 3 ? "days" : "none",
+                Offsets = _rep == 3 ? Offsets(w?.start ?? DateTime.MinValue) : null,
                 Count = Times(), Note = _note.Box.Text.Trim(),
                 Start = w?.start ?? DateTime.MinValue, End = w?.end ?? DateTime.MinValue
             };
@@ -270,7 +300,15 @@ namespace SelectOR
                 _ticket.When = "";
             }
             int n = r.Count;
-            if (r.Repeat == "none" || r.Start == DateTime.MinValue) _ticket.Repeat = T("Una sola salida");
+            if (r.Repeat == "days" && r.Start != DateTime.MinValue)
+            {
+                string[] dn = I18n.English ? new[] { "M", "T", "W", "T", "F", "S", "S" } : new[] { "L", "M", "X", "J", "V", "S", "D" };
+                string which = string.Join("·", Enumerable.Range(0, 7).Where(k => _days[k]).Select(k => dn[k]));
+                var o = r.Offsets ?? Array.Empty<int>();
+                _ticket.Repeat = o.Length == 0 ? T("Elige al menos un día de la semana")
+                               : string.Format(T("{0} salidas ({1}), {2} semanas, hasta el {3}"), o.Length, which, n, r.Start.AddDays(o[^1]).ToString("ddd d MMM", Ci));
+            }
+            else if (r.Repeat == "none" || r.Start == DateTime.MinValue) _ticket.Repeat = T("Una sola salida");
             else
             {
                 var last = r.Start.AddDays((r.Repeat == "daily" ? 1 : 7) * (n - 1));
@@ -292,6 +330,7 @@ namespace SelectOR
             else if ((r.End - r.Start).TotalHours > 12) err = T("La franja de salida no puede pasar de 12 horas.");
             else if (r.End <= DateTime.Now) err = T("Esa franja ya ha pasado.");
             else if (_kind == 3 && r.TrainId == null) err = T("La empresa aún no tiene trenes");
+            else if (r.Repeat == "days" && (r.Offsets == null || r.Offsets.Length == 0)) err = T("Elige al menos un día de la semana");
             if (err == null && Submit != null)
             {
                 _ok.Enabled = false; _err.ForeColor = Theme.Subtle; _err.Text = T("Programando…");
@@ -369,7 +408,7 @@ namespace SelectOR
                 TextRenderer.DrawText(g, I18n.T("TREN"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
                 TextRenderer.DrawText(g, TrainText, _fVal, new Rectangle(x, y, w, Theme.Px(18)), Ink, L); y += Theme.Px(22);
                 var strip = new Rectangle(x, y, w, Theme.Px(44));
-                SchedBoard.Strip(g, strip, Fleet ? Image : null,
+                SchedBoard.Strip(g, strip, Fleet ? Image : TrainFigures.For(Kind == "" ? null : Kind, Math.Min(Theme.Px(40), strip.Height - Theme.Px(6))),
                                 Fleet && Loading ? I18n.T("dibujando…") : Fleet && Image == null ? "🚆  " + I18n.T("sin composición 2D") : !Fleet ? "🚆  " + I18n.T("sin tren asignado") : null, _fSmall);
                 y = strip.Bottom + Theme.Px(14);
                 // salida

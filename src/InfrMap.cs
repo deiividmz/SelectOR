@@ -23,6 +23,7 @@ namespace SelectOR
     {
         public double Lat = double.NaN, Lon = double.NaN, D0, D1, MaxKmh = double.NaN, LimitKmh = double.NaN;
         public string Trail = "", RDir = "";
+        public string MapJson;   // el mapa ya preparado por el equipo del maquinista («map», 1.2.69): sin la ruta instalada
 
         public static InfrPlace From(JsonElement d)
         {
@@ -30,6 +31,7 @@ namespace SelectOR
             double N(string k) => d.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : double.NaN;
             var p = new InfrPlace { Trail = t.GetString() ?? "", Lat = N("lat"), Lon = N("lon"), D0 = N("d0"), D1 = N("d1"), MaxKmh = N("max_kmh"), LimitKmh = N("limit_kmh") };
             if (d.TryGetProperty("rdir", out var r) && r.ValueKind == JsonValueKind.String) p.RDir = r.GetString() ?? "";
+            if (d.TryGetProperty("map", out var mj) && mj.ValueKind == JsonValueKind.Object) p.MapJson = mj.GetRawText();
             if (double.IsNaN(p.D0)) p.D0 = 0;
             if (double.IsNaN(p.D1) || p.D1 < p.D0) p.D1 = p.D0;
             return p.Trail.Length > 0 ? p : null;
@@ -127,6 +129,94 @@ namespace SelectOR
                 if (inBox) m.Context.Add((e.X, e.Y));
             }
             return (m, null);
+        }
+
+        // ---------------------------------------------------------------- guardado con la infracción (1.2.69)
+        // El mapa en pocos caracteres, para el detalle de la infracción (hasta 8 000 con el SQL infracciones-mapa.sql): metros
+        // enteros desde el primer punto; la vía cada «step» m, los postes, el límite del principio y las vías de alrededor
+        // simplificadas (como mucho «ctxPts» puntos, las más cercanas primero). Revisión lo dibuja sin la ruta instalada.
+        public Dictionary<string, object> ToCompact(double step = 20, int ctxPts = 260)
+        {
+            double ox = X[0], oy = Y[0];
+            var xs = new List<int>(); var ys = new List<int>(); double last = -1e9;
+            for (int i = 0; i < X.Length; i++)
+                if (D[i] - last >= step - 0.01 || i == X.Length - 1) { xs.Add((int)Math.Round(X[i] - ox)); ys.Add((int)Math.Round(Y[i] - oy)); last = D[i]; }
+            var ctx = new List<int[]>(); int used = 0;
+            double cx = (X.Min() + X.Max()) / 2, cy = (Y.Min() + Y.Max()) / 2;
+            foreach (var (ex, ey) in Context.OrderBy(c => c.x.Zip(c.y, (a, b) => (a - cx) * (a - cx) + (b - cy) * (b - cy)).Min()))
+            {
+                var keep = Simplify(ex, ey, 6);
+                if (used + keep.Count > ctxPts) continue;
+                var arr = new int[keep.Count * 2];
+                for (int k = 0; k < keep.Count; k++) { arr[2 * k] = (int)Math.Round(ex[keep[k]] - ox); arr[2 * k + 1] = (int)Math.Round(ey[keep[k]] - oy); }
+                ctx.Add(arr); used += keep.Count;
+            }
+            var m = new Dictionary<string, object>
+            {
+                ["x"] = xs, ["y"] = ys, ["len"] = (int)Math.Round(Len), ["di"] = (int)Math.Round(DInf), ["de"] = (int)Math.Round(DEnd),
+                ["lim"] = Limits.Select(l => new[] { (int)Math.Round(l.d), (int)Math.Round(l.kmh) }).ToList(),
+                ["ctx"] = ctx
+            };
+            if (!double.IsNaN(InitKmh)) m["ini"] = (int)Math.Round(InitKmh);
+            if (InitFromMonitor) m["mon"] = 1;
+            return m;
+        }
+
+        public static InfrMap FromCompact(string json, double trainKmh)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var r = doc.RootElement;
+                int[] Ints(string k) => r.TryGetProperty(k, out var a) && a.ValueKind == JsonValueKind.Array ? a.EnumerateArray().Select(v => v.GetInt32()).ToArray() : Array.Empty<int>();
+                var xs = Ints("x"); var ys = Ints("y");
+                if (xs.Length < 2 || xs.Length != ys.Length) return null;
+                var m = new InfrMap { TrainKmh = trainKmh };
+                m.X = xs.Select(v => (double)v).ToArray(); m.Y = ys.Select(v => (double)v).ToArray();
+                var d = new double[xs.Length];
+                for (int i = 1; i < d.Length; i++) d[i] = d[i - 1] + Math.Sqrt((m.X[i] - m.X[i - 1]) * (m.X[i] - m.X[i - 1]) + (m.Y[i] - m.Y[i - 1]) * (m.Y[i] - m.Y[i - 1]));
+                double len = r.TryGetProperty("len", out var lv) ? lv.GetDouble() : d[^1];
+                double k = d[^1] > 0 ? len / d[^1] : 1;   // (la vía muestreada mide un poco menos que la de verdad)
+                for (int i = 0; i < d.Length; i++) d[i] *= k;
+                m.D = d; m.Len = len;
+                m.DInf = r.TryGetProperty("di", out var di) ? di.GetDouble() : 0;
+                m.DEnd = r.TryGetProperty("de", out var de) ? de.GetDouble() : m.DInf;
+                if (r.TryGetProperty("lim", out var lim) && lim.ValueKind == JsonValueKind.Array)
+                    foreach (var l in lim.EnumerateArray()) if (l.GetArrayLength() >= 2) m.Limits.Add((l[0].GetDouble(), l[1].GetDouble()));
+                if (r.TryGetProperty("ini", out var ini)) m.InitKmh = ini.GetDouble();
+                m.InitFromMonitor = r.TryGetProperty("mon", out _);
+                if (r.TryGetProperty("ctx", out var ctx) && ctx.ValueKind == JsonValueKind.Array)
+                    foreach (var c in ctx.EnumerateArray())
+                    {
+                        var v = c.EnumerateArray().Select(q => (float)q.GetInt32()).ToArray();
+                        if (v.Length < 4) continue;
+                        var cxs = new float[v.Length / 2]; var cys = new float[v.Length / 2];
+                        for (int i = 0; i < cxs.Length; i++) { cxs[i] = v[2 * i]; cys[i] = v[2 * i + 1]; }
+                        m.Context.Add((cxs, cys));
+                    }
+                return m;
+            }
+            catch { return null; }
+        }
+
+        // Douglas-Peucker: los índices que quedan (tolerancia en metros)
+        static List<int> Simplify(float[] x, float[] y, double tol)
+        {
+            var keep = new List<int> { 0 };
+            void Rec(int a, int b)
+            {
+                double best = 0; int bi = -1;
+                double dx = x[b] - x[a], dy = y[b] - y[a], L2 = dx * dx + dy * dy;
+                for (int i = a + 1; i < b; i++)
+                {
+                    double t = L2 > 0 ? Math.Max(0, Math.Min(1, ((x[i] - x[a]) * dx + (y[i] - y[a]) * dy) / L2)) : 0;
+                    double px = x[a] + t * dx - x[i], py = y[a] + t * dy - y[i], q = px * px + py * py;
+                    if (q > best) { best = q; bi = i; }
+                }
+                if (bi >= 0 && best > tol * tol) { Rec(a, bi); keep.Add(bi); Rec(bi, b); }
+            }
+            if (x.Length > 1) { Rec(0, x.Length - 1); keep.Add(x.Length - 1); }
+            return keep;
         }
 
         // ---------------------------------------------------------------- dibujo

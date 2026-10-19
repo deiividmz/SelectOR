@@ -383,13 +383,22 @@ namespace SelectOR
             string done = null;
             dlg.Submit = async r =>
             {
-                var (json, err) = await Supa.RpcAsync("sched_create", new
-                {
-                    p_company = co.Id, p_route = r.Route, p_path = (string)null, p_train = r.TrainId, p_kind = r.Kind,
-                    p_start = r.Start.ToUniversalTime().ToString("o"), p_end = r.End.ToUniversalTime().ToString("o"),
-                    p_repeat = r.Repeat, p_count = r.Count, p_note = r.Note,
-                    p_itinerary = new { r.Itinerary.Name, r.Itinerary.Km, r.Itinerary.Points, r.Itinerary.Halts }
-                });
+                var itin = new { r.Itinerary.Name, r.Itinerary.Km, r.Itinerary.Points, r.Itinerary.Halts };
+                string st = r.Start.ToUniversalTime().ToString("o"), en = r.End.ToUniversalTime().ToString("o");
+                // (ciertos días: con los días; las demás, como antes, para que valga también sin servicios-programados-dias.sql)
+                var (json, err) = r.Repeat == "days"
+                    ? await Supa.RpcAsync("sched_create", new
+                    {
+                        p_company = co.Id, p_route = r.Route, p_path = (string)null, p_train = r.TrainId, p_kind = r.Kind,
+                        p_start = st, p_end = en, p_repeat = r.Repeat, p_count = r.Count, p_note = r.Note, p_itinerary = itin, p_offsets = r.Offsets
+                    })
+                    : await Supa.RpcAsync("sched_create", new
+                    {
+                        p_company = co.Id, p_route = r.Route, p_path = (string)null, p_train = r.TrainId, p_kind = r.Kind,
+                        p_start = st, p_end = en, p_repeat = r.Repeat, p_count = r.Count, p_note = r.Note, p_itinerary = itin
+                    });
+                if (err != null && r.Repeat == "days" && (err.Contains("p_offsets") || err.Contains("PGRST202")))
+                    return Tr("El servidor aún no programa en ciertos días de la semana (falta servicios-programados-dias.sql).");
                 if (err != null && (err.Contains("p_itinerary") || err.Contains("PGRST202")))
                     return Tr("El servidor aún no guarda el itinerario de los turnos (falta servicios-programados-itinerario.sql).");
                 if (err != null) return NoSchedOnServer(err) ? Tr("El servidor aún no tiene los servicios programados (falta servicios-programados.sql).") : err;

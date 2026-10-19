@@ -1,6 +1,9 @@
-1.2.68
-Señales de tu tren en la sala|Pide paso a la señal de delante con Tab y libera tu señal con Ctrl+Tab, también desde el mapa grande. Las demás órdenes a las señales son del administrador.
-Vuelves donde toca|Si vuelves a la sala con otro recorrido u otro tren, empiezas donde dice el nuevo; con el mismo, recuperas tu tren.
-El sol de España en CGL|En las rutas CGL amanece y anochece a la hora real de España: a las 19:00 de octubre aún es de día.
-Horarios de CGL en PDF|En la página Ruta de CGL_V22N_RE tienes los horarios de Regionales y Cercanías de GiorgioTrains para abrir o guardar.
-HUD a tu escala|En pantallas con la escala de Windows por encima del 100 %, el HUD, el mapa grande y la hoja de ruta se ven a ese tamaño.
+1.2.69
+Open Rails ya no se cierra|Si se corta la conexión con la sala, Open Rails sigue abierto en vez de cerrarse de golpe, con cualquier versión de Open Rails.
+Escribir en el chat sin tocar el tren|Mientras escribes en el chat del HUD, Open Rails no recibe las teclas.
+Agujas desde el mapa grande|Las agujas se piden igual que con Ctrl+9: si el despachador no la deja, el mapa te dice por qué.
+Trenes visibles de lejos|En los mapas, los trenes no se quedan diminutos al alejarte y llevan su nombre.
+Quién está en la sala|En la página Ruta de CGL_V22N_RE ves cuántos jugadores hay en la sala compartida y quiénes son.
+Turnos en ciertos días|Los servicios programados se pueden repetir en ciertos días de la semana (por ejemplo, de lunes a viernes) y, sin tren concreto, muestran un tren de viajeros o de mercancías.
+Revisión con mapa siempre|El mapa y el diagrama de cada infracción se ven aunque no tengas la ruta instalada.
+HUD como antes|El HUD vuelve a su tamaño de siempre.

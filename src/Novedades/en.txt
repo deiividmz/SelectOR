@@ -1,6 +1,9 @@
-1.2.68
-Your train's signals in the room|Ask the signal ahead to clear with Tab and release your signal with Ctrl+Tab, also from the big map. Other signal orders are for the administrator.
-Back where you should be|If you come back to the room with another path or train, you start where the new one says; with the same one, you get your train back.
-Spain's sun on CGL|On the CGL routes the sun rises and sets at Spain's real time: at 19:00 in October it is still daylight.
-CGL timetables as PDF|On the Route page of CGL_V22N_RE you have GiorgioTrains' Regional and Cercanías timetables to open or save.
-HUD at your scale|On screens with Windows scaling above 100%, the HUD, the big map and the road book show at that size.
+1.2.69
+Open Rails no longer closes|If the connection to the room drops, Open Rails stays open instead of closing suddenly, with any Open Rails version.
+Typing in the chat without touching the train|While you type in the HUD chat, Open Rails doesn't receive the keys.
+Switches from the big map|Switches are requested just like with Ctrl+9: if the dispatcher refuses one, the map tells you why.
+Trains visible from afar|On the maps, trains don't become tiny when you zoom out and they show their name.
+Who is in the room|On the Route page of CGL_V22N_RE you see how many players are in the shared room and who they are.
+Shifts on certain days|Scheduled services can repeat on certain weekdays (for example, Monday to Friday) and, without a specific train, show a passenger or freight train.
+Review always with a map|Each infraction's map and diagram show even if you don't have the route installed.
+HUD as before|The HUD is back to its usual size.

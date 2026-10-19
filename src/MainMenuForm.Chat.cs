@@ -616,6 +616,13 @@ namespace SelectOR
                 var box = edit == null
                     ? new ChatComposeBox(_chatHud.ComposeScreenRect(), r.Name, t => ChatSendText(r, t))
                     : new ChatComposeBox(_chatHud.ComposeScreenRect(), r.Name, t => ChatEditText(r, edit, t), edit.Body);
+                // Mientras se escribe, Open Rails no atiende al teclado (aunque Windows no le haya quitado el foco): se le
+                // avisa al agente cada 3 s y caduca solo a los 8 (MapAgent\Teclado.cs).
+                var typing = new Timer { Interval = 3000 };
+                void Tell(int s) { try { if (_localMap != null && _localMap.Connected) _localMap.Send("TYPING " + s); } catch { } }
+                typing.Tick += (s, e) => Tell(8);
+                box.FormClosed += (s, e) => { typing.Stop(); typing.Dispose(); Tell(0); };
+                Tell(8); typing.Start();
                 box.Show();
             }
             catch { }

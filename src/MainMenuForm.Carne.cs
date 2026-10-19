@@ -425,7 +425,7 @@ namespace SelectOR
             if (shortTrip) _infrItems.Clear();
             if (_infrItems.Count == 0) return rep;
             var items = new List<object>();
-            foreach (var (code, detail) in _infrItems) { InfrAddPlace(detail); items.Add(new { code, detail }); }   // (con dónde fue: MainMenuForm.InfrLugar.cs)
+            foreach (var (code, detail) in _infrItems) { InfrAddPlace(detail); await InfrAddMap(detail); items.Add(new { code, detail }); }   // (con dónde fue y su mapa: MainMenuForm.InfrLugar.cs)
             var (json, err) = await Supa.RpcAsync("report_infractions",
                 new { p_service = svc, p_items = items, p_km = Math.Round(km, 1), p_duration_s = durationS });
             // Servidor sin carne-revision-superadmin.sql: sin los km ni la duración.

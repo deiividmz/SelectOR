@@ -215,6 +215,15 @@ namespace SelectOR
             double ang = (hasHeading ? heading : axis ?? 90) - 90;
             var st = g.Save();
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            // pequeña (mapa alejado): un círculo de su color alrededor, para que se vea entre las vías
+            if (W <= 16f && txt == null)
+            {
+                var (ccx, ccy) = hasHeading ? ((float)(p.X - Math.Sin(heading * Math.PI / 180) * L / 2), (float)(p.Y + Math.Cos(heading * Math.PI / 180) * L / 2)) : (p.X, p.Y);
+                float rr = Math.Max(L, W) * 0.62f + 4;
+                using (var fb = new SolidBrush(Color.FromArgb(70, c))) g.FillEllipse(fb, ccx - rr, ccy - rr, 2 * rr, 2 * rr);
+                using (var rp = new Pen(Color.FromArgb(230, c), 2f)) g.DrawEllipse(rp, ccx - rr, ccy - rr, 2 * rr, 2 * rr);
+                using (var rp2 = new Pen(Color.FromArgb(200, 15, 17, 19), 1f)) g.DrawEllipse(rp2, ccx - rr - 1.5f, ccy - rr - 1.5f, 2 * rr + 3, 2 * rr + 3);
+            }
             g.TranslateTransform(p.X, p.Y);
             g.RotateTransform((float)ang);
             float r = W * 0.28f;

@@ -75,39 +75,8 @@ namespace SelectOR
             catch { DpiComp = 1f; }
         }
 
-        public static Font Font(float size) => new Font(FontFamily, Math.Max(5f, size * UiScale) * Comp());
-        public static Font Font(float size, FontStyle style) => new Font(FontFamily, Math.Max(5f, size * UiScale) * Comp(), style);
-
-        // ---- HUD en pantallas de alta resolución (1.2.68) ----
-        // Las ventanas del HUD (servicio, mapa grande, hoja de ruta) se crean «sin escala propia» (DPI unaware): Windows
-        // las amplía enteras con la escala de pantalla (150 % en una 4K → 1,5 veces), letras, cajas y clics a la vez. Solo
-        // si la escala es mayor de 100 % (si no, se quedan nítidas como siempre); SELECTOR_HUD_DPI=nativo lo apaga.
-        // Dentro de esas ventanas las letras no se compensan (Windows ya las pinta a 96 ppp y las amplía).
-        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);
-        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetThreadDpiAwarenessContext();
-        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern int GetAwarenessFromDpiAwarenessContext(IntPtr ctx);
-        static readonly IntPtr DpiUnaware = new IntPtr(-1);
-
-        static float Comp()
-        {
-            if (DpiComp >= 0.999f) return DpiComp;
-            try { return GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext()) == 0 ? 1f : DpiComp; }   // 0 = DPI_AWARENESS_UNAWARE
-            catch { return DpiComp; }
-        }
-
-        // using (Theme.HudDpiScope()) { …crear la ventana del HUD y su Handle… }
-        public static IDisposable HudDpiScope()
-        {
-            if (DpiComp >= 0.999f || string.Equals(Environment.GetEnvironmentVariable("SELECTOR_HUD_DPI"), "nativo", StringComparison.OrdinalIgnoreCase)) return new Scope(IntPtr.Zero);
-            try { return new Scope(SetThreadDpiAwarenessContext(DpiUnaware)); } catch { return new Scope(IntPtr.Zero); }
-        }
-
-        sealed class Scope : IDisposable
-        {
-            IntPtr _old;
-            public Scope(IntPtr old) { _old = old; }
-            public void Dispose() { if (_old != IntPtr.Zero) try { SetThreadDpiAwarenessContext(_old); } catch { } _old = IntPtr.Zero; }
-        }
+        public static Font Font(float size) => new Font(FontFamily, Math.Max(5f, size * UiScale) * DpiComp);
+        public static Font Font(float size, FontStyle style) => new Font(FontFamily, Math.Max(5f, size * UiScale) * DpiComp, style);
 
         // Medida en píxeles a la escala actual (para los tamaños que se calculan en ejecución).
         public static int Px(double v) => (int)Math.Round(v * UiScale);

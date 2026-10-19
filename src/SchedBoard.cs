@@ -209,9 +209,10 @@ namespace SelectOR
             var track = new Rectangle(cx[2], yB, cw[2], BandB);
             Bitmap bmp = null;
             if (r.HasTrain && !_img.TryGetValue(r.Id, out bmp) && !_asked.Contains(r.Id)) RequestImage(r);
+            if (!r.HasTrain) bmp = TrainFigures.For(r.Kind, Math.Min(Theme.Px(40), track.Height - Theme.Px(6)));   // (sin tren concreto: la figura de su tipo)
             bool loading = r.HasTrain && _loading.Contains(r.Id);
             string empty = loading ? LblDrawing : bmp == null ? "🚆  " + (r.HasTrain ? LblNoImage : LblNoTrain) : null;
-            Strip(g, track, Fit(r.Id, bmp, track.Width - Theme.Px(16)), empty, _fWho);
+            Strip(g, track, r.HasTrain ? Fit(r.Id, bmp, track.Width - Theme.Px(16)) : bmp, empty, _fWho);
             if (r.Past)   // cumplido o caducado: apagado
                 using (var b = new SolidBrush(Color.FromArgb(120, BoardBg))) g.FillRectangle(b, track);
 

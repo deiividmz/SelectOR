@@ -13,9 +13,9 @@
     <AssemblyTitle>SelectOR</AssemblyTitle>
     <Company>David MZP</Company>
     <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
-    <Version>1.2.68</Version>
-    <AssemblyVersion>1.2.68.0</AssemblyVersion>
-    <FileVersion>1.2.68.0</FileVersion>
+    <Version>1.2.69</Version>
+    <AssemblyVersion>1.2.69.0</AssemblyVersion>
+    <FileVersion>1.2.69.0</FileVersion>
 
     <!-- Carpeta de una instalación de Open Rails (la que contiene OpenRails.exe). Por defecto,
          «OR Desplegado» junto a esta carpeta; se cambia al compilar con
@@ -48,6 +48,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Pictogramas\*.png" LogicalName="pict.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Novedades\*.txt" LogicalName="novedades.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Figuras\*.png" LogicalName="figura.%(Filename)%(Extension)" />
     <!-- ReShade (BSD, © Patrick Mours) y el efecto de SelectOR: se ponen junto a Open Rails al conducir (ReShadeFiles.cs) -->
     <EmbeddedResource Include="ReShade\ReShade64.dll" LogicalName="reshade.dxgi.dll" />
     <EmbeddedResource Include="ReShade\*.fx;ReShade\*.fxh" LogicalName="reshade.shaders.%(Filename)%(Extension)" />

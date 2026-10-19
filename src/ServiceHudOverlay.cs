@@ -1076,8 +1076,9 @@ namespace SelectOR
                 var q0 = Proj(cla, clo); var q1 = Proj(cla + 100 / 111320.0, clo);
                 viewPx = Math.Max(1e-4, Math.Sqrt((q1.X - q0.X) * (q1.X - q0.X) + (q1.Y - q0.Y) * (q1.Y - q0.Y)) / 100);
             }
-            float locoW = mateDetail ? (float)Math.Max(7, Math.Min(30, 13 * Math.Sqrt(viewPx / 1.5)))
-                                     : (float)Math.Max(6, Math.Min(12, 7.5 * Math.Sqrt(viewPx / BaseScale)));
+            // (1.2.69: de lejos no bajan de 12 px en el mapa grande ni de 8 en el pequeño, y llevan un círculo: LiveMapDraw.Loco)
+            float locoW = mateDetail ? (float)Math.Max(12, Math.Min(30, 13 * Math.Sqrt(viewPx / 1.5)))
+                                     : (float)Math.Max(8, Math.Min(12, 7.5 * Math.Sqrt(viewPx / BaseScale)));
             float locoA = locoW / 7.5f; bool locoNames = mateDetail && locoW >= 11;
             double? TrackAxisAt(double la, double lo) => haveSeg && TrackAxis(segLat, segLon, la, lo, 40, out double b) ? b : null;
 

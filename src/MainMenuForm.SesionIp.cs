@@ -50,7 +50,7 @@ namespace SelectOR
             Supa.SignOut();
             _empAutoTried = true;   // no volver a entrar solo en esta ejecución
             _empLoaded = false;
-            string body = Tr("Otra cuenta ha iniciado sesión desde esta misma conexión a Internet. Solo se permite una sesión por conexión.");
+            string body = Tr("Hay demasiadas cuentas con la sesión abierta desde esta misma conexión a Internet (el máximo son 3) y se ha cerrado la tuya, que llevaba más tiempo sin usarse.");
             try { RefreshEmpresasView(); } catch { }
             try { if (_empAuthMsg != null) Msg(_empAuthMsg, Tr("Se ha cerrado tu sesión de Empresas.") + " " + body, true); } catch { }
             try
@@ -63,6 +63,7 @@ namespace SelectOR
 
         // Registro rechazado por el servidor: ya hay una cuenta creada desde esta conexión.
         static bool IsOneAccountPerIpError(string err) =>
-            err != null && err.IndexOf("una cuenta desde esta conexi", StringComparison.OrdinalIgnoreCase) >= 0;
+            err != null && (err.IndexOf("una cuenta desde esta conexi", StringComparison.OrdinalIgnoreCase) >= 0
+                            || err.IndexOf("cuentas, el máximo", StringComparison.OrdinalIgnoreCase) >= 0);   // (tres-por-ip.sql)
     }
 }

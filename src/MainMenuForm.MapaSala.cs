@@ -225,7 +225,9 @@ namespace SelectOR
             if (hit is RouteGraph.SwitchGeo s)
             {
                 if (s.Hidden) return Tr("Esta aguja va unida a otra (un escape): se cambia con la otra.");
-                if (!RoomOnMyPath(s.Lat, s.Lon, null)) { RoomLog($"clic en la aguja {s.Tx} {s.Tz} {s.Id}: fuera de mi camino, no se pide"); return Tr("Solo puedes cambiar las agujas y señales de tu camino (la línea discontinua de tu tren)."); }
+                // (1.2.69) Si está o no en tu camino lo decide el despachador, como con Ctrl+9: el cálculo de aquí no coincidía
+                // con el suyo y rechazaba agujas que Ctrl+9 sí dejaba. Si no la deja, el aviso sale en Open Rails.
+                if (!RoomOnMyPath(s.Lat, s.Lon, null)) RoomLog($"clic en la aguja {s.Tx} {s.Tz} {s.Id}: el mapa no la ve en mi camino, decide el despachador");
                 var v = RoomMapNow();
                 int pos = v?.SwitchPos?.Invoke(s) ?? -1;
                 // enclavada en Open Rails (lo dice el agente del despachador): no se pide
@@ -414,6 +416,7 @@ namespace SelectOR
                 "nodisp" => Tr("La sala no tiene despachador ahora mismo."),
                 "noadmin" => Tr("Las órdenes a las señales son del administrador. Para tu tren: pedir paso (Tab) o liberar su señal (Ctrl+Tab)."),
                 "nobot" => Tr("Liberar la señal solo se puede con el despachador fijo de la sala."),
+                "notpath" => Tr("El despachador no la deja: no está en tu camino (la línea discontinua de tu tren)."),
                 _ => Tr("No estás dentro de la sala.")
             };
             try { _serviceHud?.MapNotice(msg); } catch { }

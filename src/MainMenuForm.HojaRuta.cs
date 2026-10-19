@@ -329,7 +329,6 @@ namespace SelectOR
             if (RoadHudAlive) { if (!_roadHud.Visible) _roadHud.Show(); return; }
             try
             {
-                using var hudDpi = Theme.HudDpiScope();   // pantallas de alta resolución: Windows amplía el HUD (Theme.cs)
                 _roadHud = new RoadBookHud(_prefs, _road)
                 {
                     GameNow = RoadGameNow,

@@ -1949,7 +1949,7 @@ namespace SelectOR
                           || err.IndexOf("already", StringComparison.OrdinalIgnoreCase) >= 0
                           || err.IndexOf("duplicate", StringComparison.OrdinalIgnoreCase) >= 0;
                 Msg(_empAuthMsg, taken ? Tr("Ese nombre de usuario ya existe. Elige otro.")
-                                 : IsOneAccountPerIpError(err) ? Tr("Ya se ha creado una cuenta desde esta conexión a Internet. Solo se permite una cuenta por conexión.")
+                                 : IsOneAccountPerIpError(err) ? Tr("Desde esta conexión a Internet ya se ha creado el máximo de cuentas (3). Si en tu casa sois más, escribe al administrador de SelectOR.")
                                  : (Tr("No se pudo registrar: ") + err), true);
                 return;
             }
@@ -3034,7 +3034,6 @@ namespace SelectOR
                     company = _empOnDutyCompany.Name;
                     logo = LogoFor(_empOnDutyCompany.Id, _empOnDutyCompany.Logo) ?? PlaceholderLogo(_empOnDutyCompany.Name);
                 }
-                using var hudDpi = Theme.HudDpiScope();   // pantallas de alta resolución: Windows amplía el HUD (Theme.cs)
                 _serviceHud = new ServiceHudOverlay(company, logo,
                     CurrentConsistLabel(), _curRoute?.Name ?? "", SvcVirtualStart, _prefs, service,
                     () => (_paxOnboard, _paxBoarded, _paxCapacity),   // viajeros en vivo (solo servicio)
@@ -3055,7 +3054,6 @@ namespace SelectOR
                 _serviceHud.Net = HudNetStatus;    // multijugador: ¿conectado al servidor? (MainMenuForm.Online.cs)
                 WireRoadToHud();                   // hoja de ruta: itinerario en el mapa grande
                 var _ = _serviceHud.Handle;   // la ventana existe ya (el trazado del mapa se le pasa aunque esté oculta)
-                hudDpi.Dispose();
                 if (_scenarioReady || force) _serviceHud.Show(); else _hudWaiting = true;
                 PushHudMap();   // descarga el trazado de la ruta y lo pasa al HUD
                 PushHudDetail();   // mapa grande: vía, andenes, PK, pasos a nivel… (del .tdb)
