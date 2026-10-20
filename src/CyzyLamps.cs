@@ -26,8 +26,8 @@ namespace SelectOR
         {
             ("CGL", Mark + @" para CGL (se pone al conducir con CYZYRails y se quita al volver)
 # forma .s                 x      y      z      lumen  kelvin  tipo
-# focos de túnel (bombilla naranja, 382 en la ruta)
-focotunel.s                0.22   0.23   0.20   3000   2000    omni
+# focos de túnel (bombilla naranja, 382 en la ruta; luz tenue)
+focotunel.s                0.22   0.23   0.20    100   2000    omni
 # farolas de forja (las tres del mismo modelo; la cabeza arriba del poste)
 farola-gb.s                0.00   4.20   0.00   5000   3000    down
 farola-gris-forjado.s      0.00   4.20   0.00   5000   3000    down
@@ -37,16 +37,16 @@ farolasud.s                0.00   4.25   0.00   4000   5000    down
 # báculos con brazo (el poste en x = 2; la luminaria al final del brazo, hacia x = 0,3)
 cplamp1ti.s                0.45   6.80   0.00   8000   2200    down
 cplamp3ti.s                0.45   3.96   0.00   4000   2200    down
-# fluorescentes del techo de las estaciones (tiras de 29 y 21 m: unas cuantas luces a lo largo)
-piezaluzcipriano.s         0.20   0.00   0.50   4000   4000    down
-piezaluzcipriano.s         0.20   0.00  -6.00   4000   4000    down
-piezaluzcipriano.s         0.20   0.00 -12.50   4000   4000    down
-piezaluzcipriano.s         0.20   0.00 -19.00   4000   4000    down
-piezaluzcipriano.s         0.20   0.00 -24.50   4000   4000    down
-piezaluzcolombia3.s        0.20   0.00   0.50   4000   4000    down
-piezaluzcolombia3.s        0.20   0.00  -5.50   4000   4000    down
-piezaluzcolombia3.s        0.20   0.00 -11.50   4000   4000    down
-piezaluzcolombia3.s        0.20   0.00 -16.50   4000   4000    down
+# fluorescentes del techo de las estaciones (tiras de 29 y 21 m: unas cuantas luces a lo largo; omni: también alumbran el techo)
+piezaluzcipriano.s         0.20   0.00   0.50   4000   4000    omni
+piezaluzcipriano.s         0.20   0.00  -6.00   4000   4000    omni
+piezaluzcipriano.s         0.20   0.00 -12.50   4000   4000    omni
+piezaluzcipriano.s         0.20   0.00 -19.00   4000   4000    omni
+piezaluzcipriano.s         0.20   0.00 -24.50   4000   4000    omni
+piezaluzcolombia3.s        0.20   0.00   0.50   4000   4000    omni
+piezaluzcolombia3.s        0.20   0.00  -5.50   4000   4000    omni
+piezaluzcolombia3.s        0.20   0.00 -11.50   4000   4000    omni
+piezaluzcolombia3.s        0.20   0.00 -16.50   4000   4000    omni
 # marquesinas de estaciones (1.2.72): luz neutra (4000 K) hacia abajo, cada 4-14 m
 # MarqueSur (25 en la ruta): el fluorescente, 98 m a lo largo
 marquesur.s                          6.00   4.15   -0.10   3500   4000    down
@@ -240,6 +240,75 @@ susanaedif.s                        16.00   5.25   29.00   3000   4000    down
 susanaedif.s                         6.30   4.50   12.00   3000   4000    down
 susanaedif.s                         6.30   4.50   20.00   3000   4000    down
 susanaedif.s                         6.30   4.50   28.00   3000   4000    down
+# Marquesina de Cercanías sencilla (7 en la ruta): su fluorescente, 3,5 m
+marquesina_cercanias_simple.s       -0.02   2.90    1.40   1500   4000    down
+marquesina_cercanias_simple.s       -0.02   2.90    3.50   1500   4000    down
+# Marquesina de Cercanías larga (2 en la ruta): su fluorescente, 8 m
+marquesina_cercanias_larga.s         0.00   2.83   -2.80   1500   4000    down
+marquesina_cercanias_larga.s         0.00   2.83    0.20   1500   4000    down
+marquesina_cercanias_larga.s         0.00   2.83    3.20   1500   4000    down
+# Marquesina de Cercanías larga C4 (4 en la ruta): su fluorescente, 8 m
+marquesina_cercanias_larga_c4.s      0.00   2.83   -2.80   1500   4000    down
+marquesina_cercanias_larga_c4.s      0.00   2.83    0.20   1500   4000    down
+marquesina_cercanias_larga_c4.s      0.00   2.83    3.20   1500   4000    down
+# NovoEdificio: la marquesina delante del edificio (19 × 4 m, a 4,5 m)
+novoedificio.s                       2.00   4.40   11.20   3000   4000    down
+novoedificio.s                       7.00   4.40   11.20   3000   4000    down
+novoedificio.s                      12.00   4.40   11.20   3000   4000    down
+novoedificio.s                      17.00   4.40   11.20   3000   4000    down
+# Central (apeadero): bajo el alero de la caseta blanca
+central_apeadero.s                   1.20   2.25   25.00   2000   4000    down
+# EdifSur: la gran marquesina (22 × 112 m), fila x = 10
+edifsur.s                           10.00   4.75    7.00   3500   4000    down
+edifsur.s                           10.00   4.75   20.75   3500   4000    down
+edifsur.s                           10.00   4.75   34.50   3500   4000    down
+edifsur.s                           10.00   4.75   48.25   3500   4000    down
+edifsur.s                           10.00   4.75   62.00   3500   4000    down
+edifsur.s                           10.00   4.75   75.75   3500   4000    down
+edifsur.s                           10.00   4.75   89.50   3500   4000    down
+edifsur.s                           10.00   4.75  103.25   3500   4000    down
+edifsur.s                           10.00   4.75  117.00   3500   4000    down
+# EdifSur: la gran marquesina (22 × 112 m), fila x = 20
+edifsur.s                           20.00   4.75    7.00   3500   4000    down
+edifsur.s                           20.00   4.75   20.75   3500   4000    down
+edifsur.s                           20.00   4.75   34.50   3500   4000    down
+edifsur.s                           20.00   4.75   48.25   3500   4000    down
+edifsur.s                           20.00   4.75   62.00   3500   4000    down
+edifsur.s                           20.00   4.75   75.75   3500   4000    down
+edifsur.s                           20.00   4.75   89.50   3500   4000    down
+edifsur.s                           20.00   4.75  103.25   3500   4000    down
+edifsur.s                           20.00   4.75  117.00   3500   4000    down
+# HermanosEdif: marquesina del andén x = 0.7 (a 2,4 m)
+hermanosedif.s                       0.70   2.35   25.00   2500   4000    down
+hermanosedif.s                       0.70   2.35   31.00   2500   4000    down
+hermanosedif.s                       0.70   2.35   37.00   2500   4000    down
+hermanosedif.s                       0.70   2.35   43.00   2500   4000    down
+# HermanosEdif: marquesina del andén x = 27.7 (a 2,4 m)
+hermanosedif.s                      27.70   2.35   25.00   2500   4000    down
+hermanosedif.s                      27.70   2.35   31.00   2500   4000    down
+hermanosedif.s                      27.70   2.35   37.00   2500   4000    down
+hermanosedif.s                      27.70   2.35   43.00   2500   4000    down
+# MarqueGenzor (12 en la ruta): su fluorescente
+marquegenzor.s                       2.05   3.42    2.50   2500   4000    down
+marquegenzor.s                       2.05   3.42    7.20   2500   4000    down
+# Aranda: marquesina del andén x = 4.9 (6 × 80 m, a 6 m)
+aranda.s                             4.90   5.90   17.00   3500   4000    down
+aranda.s                             4.90   5.90   27.86   3500   4000    down
+aranda.s                             4.90   5.90   38.71   3500   4000    down
+aranda.s                             4.90   5.90   49.57   3500   4000    down
+aranda.s                             4.90   5.90   60.43   3500   4000    down
+aranda.s                             4.90   5.90   71.29   3500   4000    down
+aranda.s                             4.90   5.90   82.14   3500   4000    down
+aranda.s                             4.90   5.90   93.00   3500   4000    down
+# Aranda: marquesina del andén x = 22.9 (6 × 80 m, a 6 m)
+aranda.s                            22.90   5.90   17.00   3500   4000    down
+aranda.s                            22.90   5.90   27.86   3500   4000    down
+aranda.s                            22.90   5.90   38.71   3500   4000    down
+aranda.s                            22.90   5.90   49.57   3500   4000    down
+aranda.s                            22.90   5.90   60.43   3500   4000    down
+aranda.s                            22.90   5.90   71.29   3500   4000    down
+aranda.s                            22.90   5.90   82.14   3500   4000    down
+aranda.s                            22.90   5.90   93.00   3500   4000    down
 "),
         };
 

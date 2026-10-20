@@ -1,6 +1,3 @@
-1.2.72
-New trains on the maps|On the HUD minimap your train is a navigation arrow; on the big map each train is drawn to scale along the track, with its length and its cars; on the «Route» tab, a round badge with the driver's initials or photo.
-Your photo on the maps|In My profile, click your photo to turn on «Show my photo on the maps» so it appears on your train's badge.
-Works with CYZYRails|SelectOR runs inside CYZYRails, the Open Rails variant with enhanced graphics: street lamps that light up the scenery on all your routes and, on CGL, lit station canopies too and the sun at the real time in Spain. ReShade is not added to it, since it has its own post-processing.
-Chat without keys in the simulator|While you type in the HUD chat, Esc, Enter, Backspace and the other keys no longer reach Open Rails.
-Join the room without warnings|In the shared room there is no longer a warning about another train on your starting track: you join straight away.
+1.2.73
+Horn, doors and lights across versions|In the shared room you now hear and see everyone's horn, bell, doors, lights and pantographs, even if some of you use the New Year builds and others CYZYRails, Testing or the official release.
+More lit stations on CGL|With CYZYRails more station canopies and buildings on CGL light up too, such as the red Cercanías shelters and Aranda station; and the tunnel lamps now give a dim light.
