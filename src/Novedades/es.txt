@@ -1,3 +1,3 @@
-1.2.73
-Bocina, puertas y luces entre versiones|En la sala compartida ya se oyen y se ven la bocina, la campana, las puertas, las luces y los pantógrafos de todos, aunque unos uséis las New Year y otros CYZYRails, la Testing o la oficial.
-Más estaciones iluminadas en CGL|Con CYZYRails se iluminan también más marquesinas y edificios de estaciones de CGL, como las marquesinas rojas de Cercanías y la estación de Aranda; y los focos de los túneles dan ahora una luz tenue.
+1.2.74
+Clima y hora de la sala compartida|En la sala compartida de CGL todos conducís con la misma estación, el mismo tiempo (despejado, lluvia o nieve, nubes y niebla) y la misma hora, que puede ir adelantada o retrasada respecto a la de España. Los cambios os llegan al momento aunque ya estéis dentro, y debajo de «Conducir en la sala compartida» ves cómo está la sala.
+Más estaciones iluminadas en CGL|Con CYZYRails se ilumina también la marquesina de Pere Comas.

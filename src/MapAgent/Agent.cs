@@ -61,7 +61,8 @@ namespace SelectOR.MapAgent
             int threads = Hilos.Install(h);      // .NET 6: que un corte de la sala no cierre Open Rails (Hilos.cs)
             int keys = Teclado.Install(h);       // escribir en el chat del HUD sin que Open Rails lo reciba (Teclado.cs)
             int events = SelectOR.Comun.Eventos.Install(h, Log);   // bocina, puertas, luces… de otras versiones de Open Rails (Eventos.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            int clock = SelectOR.Comun.Hora.Install(h, Log);       // la hora de la sala, también a los que ya están dentro (Hora.cs)
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
             if (sun == 0 || keys == 0) Later(h, sun == 0, keys == 0);
         }
 

@@ -309,6 +309,24 @@ aranda.s                            22.90   5.90   60.43   3500   4000    down
 aranda.s                            22.90   5.90   71.29   3500   4000    down
 aranda.s                            22.90   5.90   82.14   3500   4000    down
 aranda.s                            22.90   5.90   93.00   3500   4000    down
+# Pere_Comas: el fluorescente de la marquesina del andén x = 2.8 (80 m, a 4,3 m)
+pere_comas.s                         2.82   4.22    7.00   3000   4000    down
+pere_comas.s                         2.82   4.22   17.86   3000   4000    down
+pere_comas.s                         2.82   4.22   28.71   3000   4000    down
+pere_comas.s                         2.82   4.22   39.57   3000   4000    down
+pere_comas.s                         2.82   4.22   50.43   3000   4000    down
+pere_comas.s                         2.82   4.22   61.29   3000   4000    down
+pere_comas.s                         2.82   4.22   72.14   3000   4000    down
+pere_comas.s                         2.82   4.22   83.00   3000   4000    down
+# Pere_Comas: el fluorescente de la marquesina del andén x = 14.8 (80 m, a 4,3 m)
+pere_comas.s                        14.85   4.22    7.00   3000   4000    down
+pere_comas.s                        14.85   4.22   17.86   3000   4000    down
+pere_comas.s                        14.85   4.22   28.71   3000   4000    down
+pere_comas.s                        14.85   4.22   39.57   3000   4000    down
+pere_comas.s                        14.85   4.22   50.43   3000   4000    down
+pere_comas.s                        14.85   4.22   61.29   3000   4000    down
+pere_comas.s                        14.85   4.22   72.14   3000   4000    down
+pere_comas.s                        14.85   4.22   83.00   3000   4000    down
 "),
         };
 

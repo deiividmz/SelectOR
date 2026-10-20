@@ -6,7 +6,8 @@
 //    ruta es la misma versión (la huella del .tdb, la que comprueba Open Rails: con otra no deja entrar), si ya hay
 //    alguien con tu nombre (desde la 1.2.72 ya no se avisa si en la vía de salida hay un tren de otro jugador: se entra
 //    igualmente);
-//  · la hora es la de España en ese momento y el tiempo, despejado (la sala es la misma para todos);
+//  · la hora es la de España en ese momento; la estación y el tiempo, los de la sala (los elige el administrador:
+//    MainMenuForm.ClimaSala.cs; si no, la estación de España y despejado);
 //  · se entra como cliente (-multiplayerclient); el chat de la sala, el mapa grande y los papeles van por la conexión
 //    de siempre (SwitchPilot, MainMenuForm.Agujas.cs). Al cerrar Open Rails se devuelven el servidor y el puerto que
 //    había en los ajustes de Open Rails.
@@ -76,6 +77,7 @@ namespace SelectOR
             _salaHost.Resize += (s, e) => place();
             _salaHost.HandleCreated += (s, e) => place();
             _salaHost.Controls.Add(_chkSala); _salaHost.Controls.Add(sub);
+            BuildSalaWeatherButton();   // ⛅ el clima de la sala, para el administrador (MainMenuForm.ClimaSala.cs)
             return _salaHost;
         }
 
@@ -85,11 +87,17 @@ namespace SelectOR
             if (_salaHost == null) return;
             if (!_salaSynced && _prefs != null) { _chkSala.Checked = _prefs.SalaCgl; _salaSynced = true; }
             _salaHost.Visible = _activePage == 2 && SalaRouteHere;
+            SalaWeatherButtonUpdate();
             if (_salaHost.Visible) SalaVersionRefresh();
         }
 
-        string SalaSubText() => Tr("Con los demás jugadores · hora de España")
-                                + (_salaOrVersion != null ? "\n" + string.Format(Tr("Sala con Open Rails {0}"), _salaOrVersion) : "");
+        string SalaSubText()
+        {
+            // 2.ª línea: el tiempo de la sala (MainMenuForm.ClimaSala.cs) y su versión de Open Rails
+            string wx = SalaWeatherText(), ver = _salaOrVersion == null ? null : string.Format(Tr(wx.Length > 0 ? "Open Rails {0}" : "Sala con Open Rails {0}"), _salaOrVersion);
+            string second = string.Join(" · ", new[] { wx, ver }.Where(x => !string.IsNullOrEmpty(x)));
+            return Tr("Con los demás jugadores") + " · " + SalaClockText() + (second.Length > 0 ? "\n" + second : "");
+        }
 
         // La tarjeta de la ruta de la sala: el distintivo.
         (string text, Color color)? SalaRouteBadge(ORTS.Menu.Route r)
@@ -143,6 +151,7 @@ namespace SelectOR
                 var info = await SalaPeek(MPUserValid(me) ? me : "SelectOR");
                 _salaVersionAt = DateTime.UtcNow;
                 if (info?.OrVersion != null) _salaOrVersion = info.OrVersion;
+                if (info != null && info.Season >= 0) { _salaSeason = info.Season; _salaWeather = info.Weather; _salaOffset = info.Offset; }
             }
             catch { }
             finally { _salaVersionAsking = false; }
@@ -194,8 +203,10 @@ namespace SelectOR
             }
             // (desde la 1.2.72 no se mira si hay otro tren en la vía de salida: se entra igualmente)
 
-            var (time, season) = SpainNow();
-            string args = $"-multiplayerclient -explorer \"{p.FilePath}\" \"{c.FilePath}\" {time} {season} 0";
+            var (time, season) = SpainNow(info.Offset);   // con el adelanto o retraso de la sala
+            int weather = 0;
+            if (info.Season >= 0) { season = info.Season; weather = info.Weather; }   // el clima de la sala (Open Rails carga la estación al empezar)
+            string args = $"-multiplayerclient -explorer \"{p.FilePath}\" \"{c.FilePath}\" {time} {season} {weather}";
             if (SalaLaunchHook != null) { SalaLaunchHook(args); return; }
             // a la sala: su servidor en los ajustes de Open Rails (se devuelve lo de antes al salir), modo cliente
             _roomHost = SalaHost; _roomPort = SalaPort; _roomName = title; _roomPending = "cgl";
@@ -224,7 +235,8 @@ namespace SelectOR
 
         // La hora de España ahora mismo («HH:mm:ss», como la entiende Open Rails) y la estación (0 primavera · 1 verano ·
         // 2 otoño · 3 invierno), como el despachador de la sala.
-        internal static (string time, int season) SpainNow()
+        // offsetMin: el adelanto (+) o retraso (−) de la hora de la sala, en minutos (la estación es la del día de verdad)
+        internal static (string time, int season) SpainNow(int offsetMin = 0)
         {
             DateTime t;
             try { t = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Romance Standard Time")); }
@@ -235,13 +247,15 @@ namespace SelectOR
             }
             int m = t.Month;
             int season = m >= 3 && m <= 5 ? 0 : m >= 6 && m <= 8 ? 1 : m >= 9 && m <= 11 ? 2 : 3;
-            return (t.ToString("HH:mm:ss", CultureInfo.InvariantCulture), season);
+            return (t.AddMinutes(offsetMin).ToString("HH:mm:ss", CultureInfo.InvariantCulture), season);
         }
 
         // ---------------- lo que dice la sala antes de entrar ----------------
         public sealed class SalaInfo
         {
             public string Route, Tdb, Disp, OrVersion; public int Players;
+            public int Season = -1, Weather = -1;   // el clima de la sala (−1: un servidor de antes, que no lo dice)
+            public int Offset;                       // la hora de la sala: minutos de adelanto (+) o retraso (−) sobre la de España
             public List<(string name, int tx, int tz, double x, double z, bool player)> Trains = new();
             public Dictionary<string, (int node, int mu, int dir, double len)> Track = new(StringComparer.Ordinal);
         }
@@ -285,6 +299,13 @@ namespace SelectOR
                                 Players = t.Length > 3 && int.TryParse(t[3], out int np) ? np : 0,
                                 OrVersion = t.Length > 4 && t[4] != "-" ? t[4].Replace('_', ' ') : null   // (servidor de antes: sin ella)
                             };
+                            // «estación,tiempo,adelanto» (1.2.74; el adelanto de la hora, en minutos)
+                            var wx = t.Length > 5 ? t[5].Split(',') : new string[0];
+                            if (wx.Length >= 2 && int.TryParse(wx[0], out int ws) && int.TryParse(wx[1], out int ww) && ws is >= 0 and <= 3 && ww is >= 0 and <= 2)
+                            {
+                                info.Season = ws; info.Weather = ww;
+                                if (wx.Length >= 3 && int.TryParse(wx[2], out int wo) && wo is >= -720 and <= 720) info.Offset = wo;
+                            }
                         }
                         else if (f.StartsWith("SELECTOR TRAINS ", StringComparison.Ordinal) && info != null)
                         {

@@ -1,3 +1,3 @@
-1.2.73
-Horn, doors and lights across versions|In the shared room you now hear and see everyone's horn, bell, doors, lights and pantographs, even if some of you use the New Year builds and others CYZYRails, Testing or the official release.
-More lit stations on CGL|With CYZYRails more station canopies and buildings on CGL light up too, such as the red Cercanías shelters and Aranda station; and the tunnel lamps now give a dim light.
+1.2.74
+Weather and time in the shared room|In the CGL shared room you all drive with the same season, the same weather (clear, rain or snow, clouds and fog) and the same time, which can be ahead of or behind Spanish time. Changes reach you straight away even if you are already inside, and under «Drive in the shared room» you can see how the room is.
+More lit stations on CGL|With CYZYRails the Pere Comas canopy lights up too.

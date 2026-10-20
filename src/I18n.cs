@@ -41,6 +41,22 @@ namespace SelectOR
             ["Hora"] = "Time",
             ["Estación"] = "Season",
             ["Clima"] = "Weather",
+            // clima de la sala compartida (1.2.74: MainMenuForm.ClimaSala.cs)
+            ["Clima de la sala (administrador)"] = "Room weather (administrator)", ["Clima de la sala"] = "Room weather",
+            ["El servidor aún no tiene el clima de la sala (falta clima-sala.sql)."] = "The server does not have the room weather yet (clima-sala.sql is missing).",
+            ["Automática (la de España)"] = "Automatic (Spain's)", ["Sin nubes"] = "No clouds", ["Algunas nubes"] = "Some clouds",
+            ["Nuboso"] = "Cloudy", ["Cubierto"] = "Overcast", ["Ligera"] = "Light", ["Moderada"] = "Moderate", ["Fuerte"] = "Heavy",
+            ["Buena (40 km)"] = "Good (40 km)", ["Calima (10 km)"] = "Haze (10 km)", ["Neblina (3 km)"] = "Mist (3 km)",
+            ["Niebla (1 km)"] = "Fog (1 km)", ["Niebla densa (300 m)"] = "Thick fog (300 m)",
+            ["Para todos los de la sala compartida de CGL"] = "For everyone in the CGL shared room", ["Tiempo"] = "Weather",
+            ["Lluvia o nieve"] = "Rain or snow", ["Visibilidad"] = "Visibility",
+            ["Las nubes, la lluvia o la nieve y la niebla cambian al momento para todos los que están dentro (en unos 10 s). La estación la ve cada uno al entrar en la sala: quien ya está dentro, la próxima vez que entre."]
+                = "Clouds, rain or snow and fog change straight away for everyone inside (within about 10 s). Each player sees the season when they join the room: those already inside, next time they join.",
+            ["despejado"] = "clear", ["nieve"] = "snow", ["lluvia"] = "rain", ["Open Rails {0}"] = "Open Rails {0}",
+            ["Con los demás jugadores"] = "With the other players", ["hora de España"] = "Spanish time", ["hora de España {0} h"] = "Spanish time {0} h",
+            ["La de España"] = "Spain's", ["{0} h sobre la de España"] = "{0} h on Spain's time",
+            ["Las nubes, la lluvia o la nieve, la niebla y la hora cambian para todos los que están dentro (en unos 10 s; la hora, con SelectOR 1.2.74). La estación la ve cada uno al entrar en la sala: quien ya está dentro, la próxima vez que entre."]
+                = "Clouds, rain or snow, fog and the time change for everyone inside (within about 10 s; the time, with SelectOR 1.2.74). Each player sees the season when they join the room: those already inside, next time they join.",
             ["Explorar en modo actividad"] = "Explore in activity mode",
             ["TREN SELECCIONADO"] = "SELECTED TRAIN",
             ["Ver composición 2D"] = "View 2D consist",
