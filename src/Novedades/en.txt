@@ -1,3 +1,6 @@
-1.2.71
-Switches and signals on the whole route|In the shared room, any player throws switches and gives orders to signals on the whole route from the big HUD map, not just those on their path; the signal menu still has Ask for clearance and Release your train's signal.
-Crossings switch by switch|The four switches of a double crossing are thrown one by one and you see how each one is set; if several switches fall under the mouse, a menu lets you choose which.
+1.2.72
+New trains on the maps|On the HUD minimap your train is a navigation arrow; on the big map each train is drawn to scale along the track, with its length and its cars; on the «Route» tab, a round badge with the driver's initials or photo.
+Your photo on the maps|In My profile, click your photo to turn on «Show my photo on the maps» so it appears on your train's badge.
+Works with CYZYRails|SelectOR runs inside CYZYRails, the Open Rails variant with enhanced graphics: street lamps that light up the scenery on all your routes and, on CGL, lit station canopies too and the sun at the real time in Spain. ReShade is not added to it, since it has its own post-processing.
+Chat without keys in the simulator|While you type in the HUD chat, Esc, Enter, Backspace and the other keys no longer reach Open Rails.
+Join the room without warnings|In the shared room there is no longer a warning about another train on your starting track: you join straight away.

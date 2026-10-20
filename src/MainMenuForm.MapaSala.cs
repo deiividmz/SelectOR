@@ -157,7 +157,7 @@ namespace SelectOR
                 if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
                 var c = RoomColor(t.name);
                 // en la cabeza (Open Rails manda la cola) y con su rumbo: los primeros metros por la vía en el sentido de la marcha
-                bool hasHdg = false; double hdg = 0;
+                bool hasHdg = false; double hdg = 0; double lenM = 0; List<(double lat, double lon)> body = null;
                 try
                 {
                     if (_roomGeo?.Graph != null && _pilot.TrainTrack.TryGetValue(t.name, out var k))
@@ -165,6 +165,9 @@ namespace SelectOR
                         var geo = _roomGeo; var st = _pilot.States; var stAt = _pilot.StatesAt;
                         int Pos(int n) => !geo.OrderOf.TryGetValue(n, out int o) ? -1
                                           : _roomSwSet.TryGetValue(o, out var ch) && ch.at > stAt ? ch.pos : st != null && o < st.Length ? st[o] : -1;
+                        // el tren por la vía, de la cola a la cabeza (el mapa grande lo dibuja a escala: LiveMapDraw.Scaled)
+                        lenM = k.len;
+                        try { var b = geo.Graph.PathAhead(k.node, la, lo, k.dir, k.mu, 0, k.len, Pos, out _); if (b != null && b.Count >= 2) body = b; } catch { }
                         var pts = geo.Graph.PathAhead(k.node, la, lo, k.dir, k.mu, k.len, 25, Pos, out _);
                         if (pts != null && pts.Count >= 2) { (la, lo) = pts[0]; hdg = LiveMates.Bearing(pts[0].lat, pts[0].lon, pts[^1].lat, pts[^1].lon); hasHdg = true; }
                     }
@@ -174,7 +177,8 @@ namespace SelectOR
                 string role = disp ? " · " + Tr("despachador") : helper ? " · " + Tr("ayudante") : "";
                 l.Add(new LiveMarker { Id = "@mp:" + t.name, Name = t.name, Short = t.name, Train = "", Company = "", Room = true, HasHeading = hasHdg, Heading = hdg,
                                        Role = disp ? Tr("Despachador de la sala") : helper ? Tr("Ayudante del despachador") : Tr("Jugador de la sala"),
-                                       Status = (t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado")) + role, Lat = la, Lon = lo, SpeedKmh = t.kmh, Color = c });
+                                       Status = (t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado")) + role, Lat = la, Lon = lo, SpeedKmh = t.kmh, Color = c,
+                                       LengthM = lenM, Body = body });
             }
             return l;
         }

@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace SelectOR
@@ -21,6 +22,8 @@ namespace SelectOR
         public bool Room;          // jugador de la sala de Servidores SelectOR (su nombre en Open Rails)
         public string Status;      // lo que dice la leyenda a su lado (si no, la empresa o «Conducción libre»)
         public string Role;        // en una sala: su papel (despachador, ayudante, jugador), en su tarjeta del mapa
+        public double LengthM;     // largo del tren (0: no se sabe; el mapa grande lo dibuja de unos 80 m)
+        public List<(double lat, double lon)> Body;   // el tren por la vía, de la cola a la cabeza (en una sala; si no, se calcula)
     }
 
     // Lo que llega del servidor en cada consulta.
@@ -161,26 +164,44 @@ namespace SelectOR
         const TextFormatFlags TF = TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine
                                    | TextFormatFlags.PreserveGraphicsClipping;   // el texto respeta el marco del mapa (TextRenderer no lo hace si no)
 
-        // Flechas y etiquetas. detail=false (minimapa): solo el nombre corto; detail=true (mapa grande):
+        // Cómo se dibujan los trenes en cada mapa (1.2.72):
+        //  · Mini (minimapa del HUD): tu tren, una flecha de navegador; los demás, fichas redondas pequeñas, sin nombres;
+        //  · Big (mapa grande del HUD): el tren a escala por la vía (su largo y sus coches); muy alejado, la ficha redonda;
+        //  · Route (pestaña «Ruta»): fichas redondas con la foto del maquinista (si la enseña: MapPhotos) o sus iniciales.
+        public enum TrainStyle { Big, Mini, Route }
+        public static double MyTrainLengthM;   // largo de tu tren (lo pone SelectOR al lanzar: TrainSpec.LengthM)
+        public static readonly Color MyColor = Color.FromArgb(120, 210, 150);
+
+        // Trenes y etiquetas. detail=false (minimapa): sin etiquetas; detail=true (mapa grande, «Ruta»):
         // nombre, tren con velocidad (o «parado en …») y empresa de servicio o «Conducción libre».
         public static void Draw(Graphics g, Rectangle area, Func<double, double, PointF> proj, IReadOnlyList<LiveMarker> mates,
                                 float arrowScale, bool detail, double[] stLat, double[] stLon, string[] stName,
-                                float locoA = 0, bool names = true,   // locoA: escala de las locomotoras según el zoom (0 = la de siempre)
-                                Func<double, double, double?> trackAxis = null)   // rumbo de la vía en un punto (los que no tienen rumbo)
+                                float locoA = 0, bool names = true,   // locoA: escala de los trenes según el zoom (0 = la de siempre)
+                                Func<double, double, double?> trackAxis = null,   // rumbo de la vía en un punto (los que no tienen rumbo)
+                                TrainStyle style = TrainStyle.Big)
         {
             if (mates == null || mates.Count == 0) return;
-            float a = arrowScale * (detail ? 0.875f : 0.95f);
+            if (style != TrainStyle.Mini) MapPhotos.Want(mates);
+            float a = arrowScale * (detail ? 0.875f : 0.95f), k = locoA > 0 ? locoA : a;
             var vis = RectangleF.Inflate(area, 20, 20);
             var pts = new PointF[mates.Count];
-            var placed = new List<Rectangle>();   // locomotoras y etiquetas ya puestas (para no pisarse)
+            var placed = new List<Rectangle>();   // trenes y etiquetas ya puestos (para no pisarse)
             for (int i = 0; i < mates.Count; i++)
             {
-                pts[i] = proj(mates[i].Lat, mates[i].Lon);
+                var m = mates[i];
+                pts[i] = proj(m.Lat, m.Lon);
                 if (!vis.Contains(pts[i])) continue;
-                double? ax = mates[i].HasHeading ? null : trackAxis?.Invoke(mates[i].Lat, mates[i].Lon);
-                placed.Add(Rectangle.Round(Loco(g, pts[i], mates[i].HasHeading, mates[i].Heading, mates[i].Color, detail && names ? mates[i].Short ?? mates[i].Name : null, locoA > 0 ? locoA : a, ax)));
+                double? ax = m.HasHeading ? null : trackAxis?.Invoke(m.Lat, m.Lon);
+                RectangleF r = style switch
+                {
+                    TrainStyle.Mini => Ficha(g, pts[i], m.HasHeading, m.Heading, m.Color, null, null, Math.Max(4.5f, Math.Min(6.5f, 5f * k))),
+                    TrainStyle.Route => Ficha(g, pts[i], m.HasHeading, m.Heading, m.Color, Initials(m.Name), MapPhotos.Get(m), Math.Max(9f, Math.Min(14f, 10.5f * k))),
+                    _ => Scaled(g, proj, m.Lat, m.Lon, m.HasHeading, m.Heading, m.LengthM, m.Body, trackAxis, m.Color, Initials(m.Name), MapPhotos.Get(m), k),
+                };
+                placed.Add(Rectangle.Round(r));
             }
-            // Etiquetas encima de todas las locomotoras.
+            if (style == TrainStyle.Mini) return;   // (el minimapa, sin etiquetas: no caben)
+            // Etiquetas encima de todos los trenes.
             using var fN = Theme.Font(detail ? 9.5f : 7.5f, FontStyle.Bold);
             using var fS = Theme.Font(8.5f);
             for (int i = 0; i < mates.Count; i++)
@@ -277,6 +298,178 @@ namespace SelectOR
                 minX = Math.Min(minX, sx); maxX = Math.Max(maxX, sx); minY = Math.Min(minY, sy); maxY = Math.Max(maxY, sy);
             }
             return RectangleF.FromLTRB(minX, minY, maxX, maxY);
+        }
+
+        // Iniciales para la ficha: las dos primeras palabras («Ana Ruiz» → AR; «DavidMZP» → DA).
+        public static string Initials(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "?";
+            var parts = name.Trim().Split(new[] { ' ', '_', '-', '.' }, StringSplitOptions.RemoveEmptyEntries);
+            string s = parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}" : parts[0].Length >= 2 ? parts[0].Substring(0, 2) : parts[0];
+            return s.ToUpperInvariant();
+        }
+
+        static Color Dark(Color c) => Color.FromArgb(235, (int)(c.R * 0.18), (int)(c.G * 0.18), (int)(c.B * 0.18));
+
+        // Ficha redonda (r: radio en px): del color del tren, con la foto del maquinista (recortada en círculo) o sus
+        // iniciales, aro blanco y una muesca fuera del círculo hacia donde va (sin rumbo, sin muesca).
+        public static RectangleF Ficha(Graphics g, PointF p, bool hasHeading, double heading, Color c, string initials, Image photo, float r)
+        {
+            var st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            if (hasHeading)
+            {
+                var tr = g.Save();
+                g.TranslateTransform(p.X, p.Y); g.RotateTransform((float)heading);
+                float tip = r + Math.Max(6.5f, r * 0.8f), half = Math.Max(4f, r * 0.66f);
+                var notch = new[] { new PointF(-half, -r * 0.7f), new PointF(0, -tip), new PointF(half, -r * 0.7f) };
+                using (var b = new SolidBrush(c)) g.FillPolygon(b, notch);
+                using (var pen = new Pen(Dark(c), Math.Max(1f, r * 0.1f)) { LineJoin = LineJoin.Round }) g.DrawPolygon(pen, notch);
+                g.Restore(tr);
+            }
+            var box = new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r);
+            using (var b = new SolidBrush(c)) g.FillEllipse(b, box);
+            if (photo != null && r >= 7)
+            {
+                using var clip = new GraphicsPath();
+                var inner = RectangleF.Inflate(box, -Math.Max(1.5f, r * 0.16f), -Math.Max(1.5f, r * 0.16f));
+                clip.AddEllipse(inner);
+                var cs = g.Save();
+                g.SetClip(clip, CombineMode.Intersect);
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(photo, inner);
+                g.Restore(cs);
+            }
+            else if (!string.IsNullOrEmpty(initials) && r >= 7)
+            {
+                using var f = new Font(Theme.Font(9f).FontFamily, Math.Max(7f, r * 0.82f), FontStyle.Bold, GraphicsUnit.Pixel);
+                using var sf = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                using var tb = new SolidBrush(Dark(c));
+                g.DrawString(initials, f, tb, new PointF(p.X, p.Y + r * 0.04f), sf);
+            }
+            using (var pen = new Pen(Color.White, Math.Max(1.2f, r * 0.14f))) g.DrawEllipse(pen, box);
+            using (var pen = new Pen(Color.FromArgb(200, 15, 17, 19), 1f)) g.DrawEllipse(pen, RectangleF.Inflate(box, Math.Max(1.2f, r * 0.14f) / 2 + 0.6f, Math.Max(1.2f, r * 0.14f) / 2 + 0.6f));
+            g.Restore(st);
+            return RectangleF.Inflate(box, Math.Max(4.5f, r * 0.75f), Math.Max(4.5f, r * 0.75f));
+        }
+
+        // Flecha de navegador (tu tren en el minimapa): punta hacia donde va, borde blanco y un halo de su color; sin rumbo,
+        // a lo largo de la vía (axis) o, si tampoco, un punto.
+        public static RectangleF NavArrow(Graphics g, PointF p, bool hasHeading, double heading, Color c, float a, double? axis = null)
+        {
+            float s = 7f * a;
+            var st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TranslateTransform(p.X, p.Y);
+            using (var halo = new SolidBrush(Color.FromArgb(60, c))) g.FillEllipse(halo, -1.8f * s, -1.8f * s, 3.6f * s, 3.6f * s);
+            if (!hasHeading && axis == null)
+            {
+                using (var b = new SolidBrush(c)) g.FillEllipse(b, -0.8f * s, -0.8f * s, 1.6f * s, 1.6f * s);
+                using (var pen = new Pen(Color.White, Math.Max(1.6f, s * 0.24f))) g.DrawEllipse(pen, -0.8f * s, -0.8f * s, 1.6f * s, 1.6f * s);
+            }
+            else
+            {
+                g.RotateTransform((float)(hasHeading ? heading : axis.Value));
+                var tri = new[] { new PointF(0, -1.35f * s), new PointF(1f * s, 1f * s), new PointF(0, 0.5f * s), new PointF(-1f * s, 1f * s) };
+                using (var b = new SolidBrush(c)) g.FillPolygon(b, tri);
+                using (var pen = new Pen(Color.White, Math.Max(1.6f, s * 0.24f)) { LineJoin = LineJoin.Round }) g.DrawPolygon(pen, tri);
+            }
+            g.Restore(st);
+            return new RectangleF(p.X - 1.8f * s, p.Y - 1.8f * s, 3.6f * s, 3.6f * s);
+        }
+
+        // Tren a escala (mapa grande): su cuerpo por la vía (body, de la cola a la cabeza; si no se sabe, se sigue la vía
+        // hacia atrás desde la cabeza con su largo) en coches de unos 20 m, la cabeza del color del tren con la punta hacia
+        // donde va. Si en pantalla mide menos de 34 px (mapa alejado: no se vería) o no se sabe hacia dónde va, la ficha redonda.
+        public static RectangleF Scaled(Graphics g, Func<double, double, PointF> proj, double lat, double lon, bool hasHeading, double heading,
+                                        double lengthM, List<(double lat, double lon)> body, Func<double, double, double?> trackAxis,
+                                        Color c, string initials, Image photo, float k)
+        {
+            var p = proj(lat, lon);
+            double L = lengthM > 5 ? lengthM : 80;
+            var ll = body != null && body.Count >= 2 ? body : hasHeading ? WalkBack(lat, lon, heading, L, trackAxis) : null;
+            if (ll != null)
+            {
+                var px = ll.Select(q => proj(q.lat, q.lon)).ToList();
+                float len = 0; for (int i = 1; i < px.Count; i++) len += Dist(px[i - 1], px[i]);
+                if (len >= 34) return ScaleTrain(g, px, len, L, c);
+            }
+            return Ficha(g, p, hasHeading, heading, c, initials, photo, Math.Max(8f, Math.Min(14f, 10f * k)));
+        }
+
+        static float Dist(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+        // Desde la cabeza, hacia atrás por la vía (cada 5 m, girando como mucho 25° por paso hacia el rumbo de la vía más
+        // cercana); sin vía cerca, en línea recta. De la cola a la cabeza.
+        static List<(double lat, double lon)> WalkBack(double lat, double lon, double heading, double L, Func<double, double, double?> axis)
+        {
+            var res = new List<(double lat, double lon)> { (lat, lon) };
+            double b = (heading + 180) % 360, la = lat, lo = lon;
+            const double step = 5;
+            for (double d = 0; d < L; d += step)
+            {
+                double s = Math.Min(step, L - d);
+                la += s * Math.Cos(b * Math.PI / 180) / 111320.0;
+                lo += s * Math.Sin(b * Math.PI / 180) / (111320.0 * Math.Max(0.1, Math.Cos(la * Math.PI / 180)));
+                res.Add((la, lo));
+                var ax = axis?.Invoke(la, lo);
+                if (ax != null)
+                {
+                    double best = ax.Value;
+                    if (Math.Abs(AngDiff(ax.Value + 180, b)) < Math.Abs(AngDiff(ax.Value, b))) best = ax.Value + 180;
+                    double turn = Math.Max(-25, Math.Min(25, AngDiff(best, b)));
+                    b = ((b + turn) % 360 + 360) % 360;
+                }
+            }
+            res.Reverse();
+            return res;
+        }
+
+        static double AngDiff(double to, double from) { double d = ((to - from) % 360 + 540) % 360 - 180; return d; }
+
+        // El tren a escala en pantalla (pts: de la cola a la cabeza; len: su largo en px; lengthM: en metros).
+        static RectangleF ScaleTrain(Graphics g, List<PointF> pts, float len, double lengthM, Color c)
+        {
+            float pxPerM = (float)(len / lengthM);
+            float W = Math.Max(5f, Math.Min(11f, 3.1f * pxPerM));
+            int cars = (int)Math.Max(1, Math.Min(40, Math.Round(lengthM / 20.0)));
+            float carL = len / cars, gap = Math.Min(2f, carL * 0.12f);
+            // un punto del cuerpo a una distancia desde la cola
+            PointF At(float s)
+            {
+                s = Math.Max(0, Math.Min(len, s));
+                for (int i = 1; i < pts.Count; i++)
+                {
+                    float d = Dist(pts[i - 1], pts[i]);
+                    if (s <= d || i == pts.Count - 1) { float t = d < 1e-3f ? 0 : Math.Min(1, s / d); return new PointF(pts[i - 1].X + (pts[i].X - pts[i - 1].X) * t, pts[i - 1].Y + (pts[i].Y - pts[i - 1].Y) * t); }
+                    s -= d;
+                }
+                return pts[^1];
+            }
+            var st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var light = Color.FromArgb(c.A, c.R + (255 - c.R) * 35 / 100, c.G + (255 - c.G) * 35 / 100, c.B + (255 - c.B) * 35 / 100);
+            using var pen = new Pen(Dark(c), 1.1f) { LineJoin = LineJoin.Round };
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            for (int i = cars - 1; i >= 0; i--)   // (de la cola a la cabeza: la cabeza, encima)
+            {
+                float s0 = i * carL + (i > 0 ? gap / 2 : 0), s1 = (i + 1) * carL - (i < cars - 1 ? gap / 2 : 0);
+                var a0 = At(s0); var a1 = At(s1);
+                float dx = a1.X - a0.X, dy = a1.Y - a0.Y, dl = (float)Math.Sqrt(dx * dx + dy * dy);
+                if (dl < 0.5f) continue;
+                float ux = dx / dl, uy = dy / dl, nx = -uy * W / 2, ny = ux * W / 2;
+                bool head = i == cars - 1;
+                PointF[] poly = head
+                    ? new[] { new PointF(a0.X + nx, a0.Y + ny), new PointF(a1.X - ux * W * 0.7f + nx, a1.Y - uy * W * 0.7f + ny), a1,
+                              new PointF(a1.X - ux * W * 0.7f - nx, a1.Y - uy * W * 0.7f - ny), new PointF(a0.X - nx, a0.Y - ny) }
+                    : new[] { new PointF(a0.X + nx, a0.Y + ny), new PointF(a1.X + nx, a1.Y + ny), new PointF(a1.X - nx, a1.Y - ny), new PointF(a0.X - nx, a0.Y - ny) };
+                using (var b = new SolidBrush(head ? c : light)) g.FillPolygon(b, poly);
+                g.DrawPolygon(pen, poly);
+                foreach (var q in poly) { minX = Math.Min(minX, q.X); minY = Math.Min(minY, q.Y); maxX = Math.Max(maxX, q.X); maxY = Math.Max(maxY, q.Y); }
+            }
+            g.Restore(st);
+            return minX > maxX ? RectangleF.Empty : RectangleF.FromLTRB(minX, minY, maxX, maxY);
         }
 
         static void Arrow(Graphics g, PointF p, LiveMarker m, float a)

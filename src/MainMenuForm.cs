@@ -218,7 +218,8 @@ namespace SelectOR
             Shown += (s, e) => { ApplyResponsiveChrome(); ApplyAdaptiveTexts(); ApplyTabIcons(); LayoutBottomBar(); };
             Shown += (s, e) => StartPresence();      // usuarios conectados en la portada (MainMenuForm.Conectados.cs)
             Shown += (s, e) => ReShadeFiles.Remove();   // gráficos: si quedó el dxgi.dll de ReShade de otra vez, fuera (ReShadeFiles.cs)
-            Shown += (s, e) => { ClimaFiles.Remove(); ClimaSyncSoon(); };   // clima: las imágenes de Open Rails en su sitio y el clima al día
+            Shown += (s, e) => { ClimaFiles.Remove(); ClimaSyncSoon(); };
+            Shown += (s, e) => CyzyLamps.Remove();   // farolas de CYZYRails: si quedó el archivo de otra vez, fuera (CyzyLamps.cs)   // clima: las imágenes de Open Rails en su sitio y el clima al día
             Shown += (s, e) => StartUpdateChecks();   // aviso de nueva versión (al arrancar y cada 3 h)            LayoutBottomBar();
         }
 
@@ -3371,6 +3372,14 @@ namespace SelectOR
             _prefs.Save();
             _schedDriving = false;   // (si es un turno, lo dice SchedBeforeLaunchAsync)
             EnsureOrWebServer();   // el HUD, el pupitre, los viajeros y el carné lo necesitan desde el arranque
+            // CYZYRails: las farolas de la ruta, si aún no se han buscado (CyzyLamps.cs; con las rutas grandes, unos segundos)
+            if (CyzyLamps.NeedsScan(args))
+            {
+                SetBusy(Tr("Preparando las farolas de la ruta para CYZYRails…"));
+                string what = await System.Threading.Tasks.Task.Run(() => CyzyLamps.Prepare(args));
+                SetIdle();
+                if (what != null) RoomLog(what);
+            }
             // Teleindicador: el destino elegido para este tren se pone en su carpeta antes de que OR lo cargue.
             if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase) || args.IndexOf("-explore", StringComparison.OrdinalIgnoreCase) >= 0)
                 TeleApplyForLaunch(CurrentDrivenConsist());
@@ -3410,6 +3419,8 @@ namespace SelectOR
                 { string why = ReShadeFiles.Install(_prefs); if (why != null) RoomLog("gráficos: sin ReShade: " + why); }
                 // Clima: las imágenes de clima de SelectOR en Content mientras se conduce (ClimaFiles.cs; se quitan al volver)
                 { string why = ClimaFiles.Install(_prefs); if (why != null) RoomLog("clima: sin el de SelectOR: " + why); }
+                // CYZYRails: las farolas de la ruta que iluminan (CyzyLamps.cs; se quitan al volver)
+                { string what = CyzyLamps.Install(args); if (what != null) RoomLog(what); }
                 var p = Process.Start(psi);
                 _preLaunchState = WindowState;   // al volver del simulador se deja exactamente así
                 WindowState = FormWindowState.Minimized;

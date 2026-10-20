@@ -16,6 +16,7 @@ namespace SelectOR
     public sealed partial class SelectorSettingsDialog
     {
         ThemeCheck _chkGfx, _chkAA;
+        Label _lblCyzy;
         readonly List<RoundButton> _presetBtns = new();
         readonly List<(GfxSlider s, Func<double> get, Action<double> set)> _sliders = new();
         PreviewBox _preview;
@@ -40,6 +41,15 @@ namespace SelectOR
                 Text = I18n.T("Se pone junto a Open Rails solo mientras conduces desde SelectOR y se quita al volver. Vale desde la próxima vez que conduzcas. Dentro del juego: Inicio abre el menú de ReShade y Bloq Despl activa o quita los efectos."),
                 Dock = DockStyle.Top, Height = Theme.Px(40), ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8.75f)
             };
+            // en CYZYRails (OrFlavor): ReShade no se pone nunca (trae su propio posproceso); aquí solo se dice
+            Panel cyzy = null;
+            if (OrFlavor.IsCyzy(ReShadeFiles.OrDir))
+            {
+                cyzy = new Panel { Dock = DockStyle.Top, Height = Theme.Px(30), BackColor = Theme.Bg };
+                _lblCyzy = new Label { Text = I18n.T("Este Open Rails es CYZYRails, que ya trae su propio bloom, exposición y color: con él no se pone ReShade."),
+                                       Dock = DockStyle.Fill, ForeColor = Color.FromArgb(255, 183, 77), BackColor = Theme.Bg, Font = Theme.Font(9f, FontStyle.Bold) };
+                cyzy.Controls.Add(_lblCyzy);
+            }
             _lblGfxWarn = new Label { Dock = DockStyle.Top, Height = Theme.Px(24), ForeColor = Color.FromArgb(255, 183, 77), BackColor = Theme.Bg, Font = Theme.Font(9f, FontStyle.Bold), Visible = false,
                                       Text = I18n.T("Ya hay otro dxgi.dll junto a Open Rails (¿tu propio ReShade?): SelectOR no lo toca y no pondrá el suyo.") };
 
@@ -82,7 +92,7 @@ namespace SelectOR
             _preview = new PreviewBox { Dock = DockStyle.Fill, Margin = new Padding(Theme.Px(12), 0, 0, 0) };
             cols.Controls.Add(left, 0, 0); cols.Controls.Add(_preview, 1, 0);
 
-            page.Controls.Add(cols); page.Controls.Add(presets); page.Controls.Add(_lblGfxWarn); page.Controls.Add(info); page.Controls.Add(top);
+            page.Controls.Add(cols); page.Controls.Add(presets); page.Controls.Add(_lblGfxWarn); if (cyzy != null) page.Controls.Add(cyzy); page.Controls.Add(info); page.Controls.Add(top);
 
             _previewTimer = new Timer { Interval = 140 };
             _previewTimer.Tick += (s, e) => { _previewTimer.Stop(); RenderPreview(); };

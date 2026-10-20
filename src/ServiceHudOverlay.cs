@@ -825,7 +825,8 @@ namespace SelectOR
             var mates = CurMates();
             HudMapRender.Draw(g, area, _segLat, _segLon, _trkLat, _trkLon, _stLat, _stLon, _stName, _crumb,
                 _hasPos, _curLat, _curLon, _hasHeading, _heading, anchoM, 7.5f, 1f, I18n.T("Cargando mapa…"), mates: mates, book: Book,
-                detail: _detail);   // el mismo detalle del .tdb que el mapa grande
+                detail: _detail,   // el mismo detalle del .tdb que el mapa grande
+                trainStyle: LiveMapDraw.TrainStyle.Mini);
             // Cuántos usuarios hay en la ruta (arriba a la derecha; mientras se enseña el zoom, no).
             if (mates != null && mates.Count > 0 && DateTime.UtcNow >= _zoomShownUntil) LiveMapDraw.Chip(g, area, mates.Count);
 
@@ -1015,7 +1016,8 @@ namespace SelectOR
             double worldWidthM, float labelPt, float arrowScale, string loadingText,
             double viewCenterLat = double.NaN, double viewCenterLon = double.NaN, double viewPxPerM = 0,
             IReadOnlyList<LiveMarker> mates = null, bool mateDetail = false, RoadBook book = null,
-            HudMapDetail detail = null, string meName = null, Action<Func<double, double, PointF>> underTrains = null)
+            HudMapDetail detail = null, string meName = null, Action<Func<double, double, PointF>> underTrains = null,
+            LiveMapDraw.TrainStyle trainStyle = LiveMapDraw.TrainStyle.Big)
         {
             segLat ??= Array.Empty<double[]>(); segLon ??= Array.Empty<double[]>();
             trkLat ??= Array.Empty<double>(); trkLon ??= Array.Empty<double>();
@@ -1222,13 +1224,21 @@ namespace SelectOR
             try { underTrains?.Invoke(Proj); } catch { }
             // Los demás usuarios de la ruta, debajo de la flecha propia.
             if (mates != null && mates.Count > 0)
-                LiveMapDraw.Draw(g, area, Proj, mates, arrowScale, mateDetail, stLat, stLon, stName, locoA, locoNames, TrackAxisAt);
+                LiveMapDraw.Draw(g, area, Proj, mates, arrowScale, mateDetail, stLat, stLon, stName, locoA, locoNames, TrackAxisAt, trainStyle);
 
             if (hasPos)
             {
-                // tu tren: una locomotora vista desde arriba (LiveMapDraw.Loco), con tu nombre dentro en el mapa grande
+                // tu tren (LiveMapDraw.TrainStyle): en el minimapa, una flecha de navegador; en el mapa grande, a escala por la vía
+                // (alejado, tu ficha con tu foto o tus iniciales)
                 var p = Proj(curLat, curLon);
-                LiveMapDraw.Loco(g, p, hasHeading, heading, Color.FromArgb(120, 210, 150), locoNames ? meName : null, locoA, hasHeading ? null : TrackAxisAt(curLat, curLon));
+                if (trainStyle == LiveMapDraw.TrainStyle.Mini)
+                    LiveMapDraw.NavArrow(g, p, hasHeading, heading, LiveMapDraw.MyColor, arrowScale, hasHeading ? null : TrackAxisAt(curLat, curLon));
+                else
+                {
+                    MapPhotos.Want(null, me: true);
+                    LiveMapDraw.Scaled(g, Proj, curLat, curLon, hasHeading, heading, LiveMapDraw.MyTrainLengthM, null, TrackAxisAt, LiveMapDraw.MyColor,
+                                       LiveMapDraw.Initials(meName ?? Supa.Username), MapPhotos.Mine(), locoA > 0 ? locoA : arrowScale * 0.875f);
+                }
             }
 
             g.Clip = oldClip;

@@ -7,6 +7,7 @@
 //    con los valores elegidos);
 //  · al volver (y al abrir SelectOR) se quita el dxgi.dll: así nada más lo carga (p. ej. RunActivity32, de 32 bits, no
 //    arrancaría con él). Un dxgi.dll que no es el nuestro (otro ReShade del usuario, otro programa) no se toca nunca.
+//  · en CYZYRails (OrFlavor), que trae su propio posproceso, nunca.
 
 using System;
 using System.Globalization;
@@ -51,6 +52,8 @@ namespace SelectOR
             try
             {
                 if (p == null || !p.GfxEnabled) { Remove(); return null; }
+                // CYZYRails ya trae bloom, exposición y corrección de color: ReShade encima los duplicaría; con él, nunca
+                if (OrFlavor.IsCyzy(OrDir)) { Remove(); return "CYZYRails trae su propio posproceso"; }
                 if (Dll == null) return "ReShade no está dentro de SelectOR";
                 if (Foreign) return "ya hay otro dxgi.dll junto a Open Rails";
                 string dir = Path.Combine(OrDir, Folder), sh = Path.Combine(dir, "Shaders");

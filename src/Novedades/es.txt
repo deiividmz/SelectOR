@@ -1,3 +1,6 @@
-1.2.71
-Agujas y señales de toda la ruta|En la sala compartida, cualquier jugador cambia agujas y da órdenes a las señales de toda la ruta desde el mapa grande del HUD, no solo las de su camino; en el menú de una señal siguen Pedir paso y Liberar la señal de tu tren.
-Travesías aguja a aguja|Los cuatro accionamientos de una travesía se cambian uno a uno y se ve cómo está cada uno; si quedan varias agujas bajo el ratón, un menú te deja elegir cuál.
+1.2.72
+Trenes nuevos en los mapas|En el minimapa del HUD tu tren es una flecha de navegador; en el mapa grande cada tren se ve a escala por la vía, con su largo y sus coches; en la pestaña «Ruta», una ficha redonda con las iniciales o la foto del maquinista.
+Tu foto en los mapas|En Mi perfil, al pulsar tu foto, puedes activar «Mostrar mi foto en los mapas» para que salga en la ficha de tu tren.
+Compatible con CYZYRails|SelectOR funciona dentro de CYZYRails, la variante de Open Rails con gráficos mejorados: farolas que iluminan en todas tus rutas y, en CGL, también las marquesinas de las estaciones y el sol a la hora real de España. Con ella no se pone ReShade, porque trae su propio posproceso.
+Chat sin teclas en el simulador|Mientras escribes en el chat del HUD, Esc, Intro, Retroceso y las demás teclas ya no llegan a Open Rails.
+Entrar en la sala sin avisos|En la sala compartida ya no sale el aviso de otro tren en tu vía de salida: entras directamente.

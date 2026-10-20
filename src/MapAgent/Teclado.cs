@@ -7,10 +7,14 @@
 // Al terminar (Intro para enviar, Esc para cerrar) la cajita se cierra con la tecla aún pulsada: si se soltara el teclado
 // en ese momento, Open Rails la vería como una pulsación nueva (Esc le abría el menú de pausa). Por eso sigue vacío hasta
 // que no quede ninguna tecla pulsada (como mucho 3 s).
+// (1.2.72) Y, aunque no llegue el aviso, mientras la ventana de Open Rails no esté en primer plano (la cajita del chat,
+// otro programa) su teclado también se ve vacío: algunos Open Rails seguían leyendo Esc, Intro, Retroceso… con la
+// cajita del chat delante. Al volver, igual: vacío hasta que se suelten todas las teclas.
 // Con Harmony, en memoria (no cambia ningún archivo de Open Rails).
 
 using System;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using HarmonyLib;
 
 namespace SelectOR.MapAgent
@@ -22,6 +26,20 @@ namespace SelectOR.MapAgent
         static FieldInfo _kb;
         static MethodInfo _pressed;
         static object _empty;
+        static bool _saidTyping, _saidAway;
+
+        // ¿La ventana de primer plano es de Open Rails (este proceso)? (las pruebas lo cambian)
+        public static Func<bool> Foreground = OrInFront;
+        static readonly uint _pid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+        static bool OrInFront()
+        {
+            IntPtr w = GetForegroundWindow();
+            if (w == IntPtr.Zero) return true;   // (no se sabe: como siempre)
+            GetWindowThreadProcessId(w, out uint pid);
+            return pid == _pid;
+        }
 
         // (desde Agent.Install) 1 = puesto.
         public static int Install(Harmony h)
@@ -44,12 +62,19 @@ namespace SelectOR.MapAgent
         public static void Typing(int seconds)
         {
             TypingUntil = seconds > 0 ? DateTime.UtcNow.AddSeconds(Math.Min(seconds, 30)) : DateTime.MinValue;
+            if (seconds > 0 && !_saidTyping) { _saidTyping = true; Agent.Log("chat: escribiendo, Open Rails no recibe el teclado"); }
         }
 
         static void After()
         {
             var now = DateTime.UtcNow;
-            if (now < TypingUntil) { _drainUntil = now.AddSeconds(3); Clear(); return; }
+            bool typing = now < TypingUntil, away = false;
+            if (!typing) try { away = !Foreground(); } catch { }
+            if (typing || away)
+            {
+                if (away && !_saidAway && AnyKeyDown()) { _saidAway = true; Agent.Log("teclado: Open Rails leía teclas sin estar en primer plano; no le llegan"); }
+                _drainUntil = now.AddSeconds(3); Clear(); return;
+            }
             if (now >= _drainUntil) return;
             if (AnyKeyDown()) { Clear(); return; }   // (lo que Open Rails acaba de leer del teclado de verdad)
             _drainUntil = DateTime.MinValue;

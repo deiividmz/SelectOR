@@ -2803,6 +2803,21 @@ namespace SelectOR
             _profHero.Photo = _memberPhotos.TryGetValue(Supa.UserId ?? "", out var p) ? p.img : null;
             _profHero.Invalidate();
             UpdateRailAvatar();
+            // ¿la enseña en los mapas? (sql/fotos-mapas.sql; sin él, la opción no sale)
+            var (oj, oe) = await Supa.RpcAsync("my_photo_on_maps", new { });
+            _photoOnMaps = oe == null && oj != null ? oj.Trim() == "true" : null;
+        }
+
+        // «Mostrar mi foto en los mapas» (sql/fotos-mapas.sql): null = sin el SQL
+        bool? _photoOnMaps;
+
+        async void SetPhotoOnMaps(bool on)
+        {
+            var (_, err) = await Supa.RpcAsync("set_photo_on_maps", new { p_on = on });
+            if (err != null) { Msg(_empHomeMsg, Tr("Error: ") + err, true); return; }
+            _photoOnMaps = on;
+            MapPhotos.Forget();
+            Msg(_empHomeMsg, on ? Tr("Tu foto saldrá en los mapas de los demás maquinistas.") : Tr("Tu foto ya no saldrá en los mapas (salvo para tus compañeros de empresa)."), false);
         }
 
         void ShowPhotoMenu(Point screen)
@@ -2810,6 +2825,11 @@ namespace SelectOR
             var menu = MenuStyle.Apply(new ContextMenuStrip() { ShowImageMargin = false });
             menu.Items.Add("📷  " + (_profHero.Photo == null ? Tr("Elegir foto…") : Tr("Cambiar foto…")), null, (s, e) => ChoosePhoto());
             if (_profHero.Photo != null) menu.Items.Add("✕  " + Tr("Quitar foto"), null, (s, e) => SavePhoto(null));
+            if (_photoOnMaps is bool onMaps)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add((onMaps ? "✓  " : "      ") + Tr("Mostrar mi foto en los mapas"), null, (s, e) => SetPhotoOnMaps(!onMaps));
+            }
             menu.Closed += (s, e) => BeginInvoke((Action)menu.Dispose);
             menu.Show(screen);
         }
@@ -2861,6 +2881,7 @@ namespace SelectOR
                 return;
             }
             SetMemberPhoto(Supa.UserId, dataUri);
+            MapPhotos.Forget();   // (la de los mapas, también nueva)
             _profHero.Photo = _memberPhotos.TryGetValue(Supa.UserId ?? "", out var p) ? p.img : null;
             _profHero.Invalidate();
             FillMemberCards();
@@ -3028,6 +3049,14 @@ namespace SelectOR
             {
                 if (_prefs == null || (!_prefs.ServiceHud && !force)) return;
                 CloseServiceHud();
+                // el largo de tu tren, para dibujarlo a escala en el mapa grande (LiveMapDraw.Scaled)
+                LiveMapDraw.MyTrainLengthM = 0;
+                try
+                {
+                    var tc = _drivenConsist ?? CurrentDrivenConsist();
+                    if (tc != null) TrainSpecAsync(tc).ContinueWith(t => { if (t.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && t.Result != null) LiveMapDraw.MyTrainLengthM = t.Result.LengthM; });
+                }
+                catch { }
                 Image logo = null; string company = "";
                 if (service && _empOnDutyCompany != null)
                 {
@@ -3821,6 +3850,7 @@ namespace SelectOR
             LocalMapStop();      // conducción libre: la conexión con el agente del mapa
             ReShadeFiles.Remove();   // gráficos: fuera el dxgi.dll de ReShade (solo mientras se conduce)
             ClimaFiles.Remove();     // clima: las imágenes de Open Rails otra vez en Content
+            CyzyLamps.Remove();      // farolas de CYZYRails: fuera de la ruta
             CloseServiceHud();   // cerrar el HUD al volver de conducir
             CloseCabHud();       // y el pupitre
             CloseChatHud();      // y el chat

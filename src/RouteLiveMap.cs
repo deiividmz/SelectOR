@@ -657,7 +657,7 @@ namespace SelectOR
                 }
             }
             LiveMapDraw.Draw(g, rect, ScrLL, _marks, 1.15f, true, _d.StLat, _d.StLon, _d.StName, locoA, locoNames,
-                             (la, lo) => _d.TrackBearing(la, lo, 40, out double b) ? b : null);
+                             (la, lo) => _d.TrackBearing(la, lo, 40, out double b) ? b : null, LiveMapDraw.TrainStyle.Route);   // fichas redondas (foto o iniciales)
             _hits = LiveMapDraw.Legend(g, rect, null, null, _marks, out _legendBox, includeMe: false);
 
             DrawChip(g);

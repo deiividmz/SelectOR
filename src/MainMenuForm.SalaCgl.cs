@@ -4,8 +4,8 @@
 // sala compartida» (junto al botón; activada de serie, _prefs.SalaCgl):
 //  · antes de lanzar Open Rails se le pregunta a la sala («SELECTOR PEEK» por una conexión corta): si se llega, si la
 //    ruta es la misma versión (la huella del .tdb, la que comprueba Open Rails: con otra no deja entrar), si ya hay
-//    alguien con tu nombre y si en la vía de salida del recorrido hay un tren de otro jugador (se avisa y se elige:
-//    salir igualmente, conducir solo o elegir otro recorrido);
+//    alguien con tu nombre (desde la 1.2.72 ya no se avisa si en la vía de salida hay un tren de otro jugador: se entra
+//    igualmente);
 //  · la hora es la de España en ese momento y el tiempo, despejado (la sala es la misma para todos);
 //  · se entra como cliente (-multiplayerclient); el chat de la sala, el mapa grande y los papeles van por la conexión
 //    de siempre (SwitchPilot, MainMenuForm.Agujas.cs). Al cerrar Open Rails se devuelven el servidor y el puerto que
@@ -166,7 +166,7 @@ namespace SelectOR
             if (me == null) return;
 
             SetBusy(Tr("Comprobando la sala compartida…"));
-            SalaInfo info; string mine; string occ = null;
+            SalaInfo info; string mine;
             try
             {
                 info = await SalaPeek(me);
@@ -192,16 +192,7 @@ namespace SelectOR
                 ThemedBox.Show(this, string.Format(Tr("En la sala ya hay un jugador «{0}»: será tu conexión anterior, que la sala aún no ha soltado. Espera un momento y vuelve a intentarlo."), me), title, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            try { occ = await SalaOccupiedBy(p, info, me); } catch { occ = null; }
-            if (occ != null)
-            {
-                var r = ThemedBox.Show(this,
-                    string.Format(Tr("En la vía de salida de «{0}» hay un tren de {1}. Si sales igualmente, los dos trenes empezarán uno encima del otro."), p.Name, occ),
-                    title, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning,
-                    new[] { Tr("Salir igualmente"), Tr("Conducir solo"), Tr("Elegir otro recorrido") }, 2);
-                if (r == DialogResult.Cancel) return;
-                if (r == DialogResult.No) { LaunchSolo(); return; }
-            }
+            // (desde la 1.2.72 no se mira si hay otro tren en la vía de salida: se entra igualmente)
 
             var (time, season) = SpainNow();
             string args = $"-multiplayerclient -explorer \"{p.FilePath}\" \"{c.FilePath}\" {time} {season} 0";
@@ -343,30 +334,6 @@ namespace SelectOR
                 return Convert.ToHexString(Encoding.Unicode.GetBytes(Encoding.Unicode.GetString(h))).ToLowerInvariant();
             }
             catch { return null; }
-        }
-
-        // ¿Hay un tren de otro jugador en la vía de salida del recorrido? El nombre (o null). Su tren va de la cola (lo
-        // que manda Open Rails) a la cabeza por la vía (RouteGraph.PathAhead con su largo); cuenta si pasa a menos de
-        // 40 m del punto de salida del .pat.
-        async Task<string> SalaOccupiedBy(OrPath p, SalaInfo info, string me)
-        {
-            var others = info.Trains.Where(t => t.player && !string.Equals(t.name, me, StringComparison.Ordinal)).ToList();
-            if (others.Count == 0) return null;
-            var pts = PatWorldPoints(p.FilePath);
-            if (pts.Count == 0 || !OrGeo.TryLatLon(pts[0].x, pts[0].z, out double sla, out double slo)) return null;
-            RouteGraph g = null;
-            try { g = await RouteGraphFor(_curRoute.Path); } catch { }
-            foreach (var t in others)
-            {
-                if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
-                var line = new List<(double lat, double lon)> { (la, lo) };
-                if (g != null && info.Track.TryGetValue(t.name, out var k))
-                {
-                    try { var body = g.PathAhead(k.node, la, lo, k.dir, k.mu, k.len, 0, n => -1, out _); if (body != null && body.Count > 0) line = body; } catch { }
-                }
-                if (DistToLineM(sla, slo, line) < 40) return t.name;
-            }
-            return null;
         }
 
         static double DistToLineM(double lat, double lon, List<(double lat, double lon)> line)

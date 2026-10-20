@@ -46,6 +46,7 @@
     <Reference Include="Orts.Simulation"><HintPath>$(OrRef)Orts.Simulation.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Orts.Formats.Msts"><HintPath>$(OrRef)Orts.Formats.Msts.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Orts.Common"><HintPath>$(OrRef)Orts.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MonoGame.Framework"><HintPath>$(OrRef)MonoGame.Framework.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
     <Reference Include="System.Windows.Forms" />
