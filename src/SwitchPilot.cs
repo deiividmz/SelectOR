@@ -1,4 +1,4 @@
-// Conexión aparte con el servidor de una sala de «Servidores SelectOR» (no es un jugador: el servidor la reconoce por su
+﻿// Conexión aparte con el servidor de una sala de «Servidores SelectOR» (no es un jugador: el servidor la reconoce por su
 // primer mensaje, «SELECTOR HELLO»). Hoy sirve para el HUD (WHO → «SELECTOR YOU»: dentro / entrando / fuera y si eres
 // el despachador), para la contraseña de las salas libres (GATE OWNER) y para el chat de la sala (SAY → «SELECTOR
 // CHAT»; servidor con «READY 3»; ver «SelectOR Servidor MP\Chat.cs»). Sabe también pedir desvíos (WANT / PASSED /
@@ -63,6 +63,24 @@ namespace SelectOR
         public Dictionary<string, (int node, int mu, int dir, double len)> TrainTrack { get; private set; } = new();
         public bool Helper { get; private set; }                     // el despachador te ha nombrado ayudante (señales)
         public event Action<string> MapError;                        // busy · nohelper · notin · nodisp · far · locked · notdisp
+        public event Action<string, int, int, string> TabAsked;      // (puesto de mando) un maquinista pide paso: quién, señal, 0 no · 1 sí · 2 espera al jefe, motivo
+        // jefes de circulación (1.2.75): quién manda en cada estación, y en cada señal y aguja
+        public sealed class JefeZone { public string Zone, Name; public int[] Sigs, Nodes; public bool Manual; }   // Manual: mando manual (1.2.75)
+        // (1.2.75) itinerarios de la sala: de qué señal a cuál, de quién, en qué estado y qué agujas tiene enclavadas
+        public sealed class Itin { public int Origin, Dest; public string Owner, Role, State, Train; public int Left, Queue; public (int node, int pos)[] Switches = Array.Empty<(int, int)>(); }   // State: set · in · cancel · queue (Queue: lugar)
+        public IReadOnlyList<Itin> Itins { get; private set; } = Array.Empty<Itin>();
+        public DateTime ItinsAt { get; private set; }
+        public event Action ItinsChanged;
+        public event Action<string, bool, int, string> ItinReply;   // quién, bien o no, señal de origen, texto (es · en)
+        public Itin ItinFrom(int sig) => Itins.FirstOrDefault(i => i.Origin == sig);
+        public IReadOnlyList<JefeZone> JefeZones { get; private set; } = Array.Empty<JefeZone>();
+        Dictionary<int, string> _sigJefe = new(), _nodeJefe = new();
+        public string JefeOfSig(int sig) => _sigJefe.TryGetValue(sig, out var n) ? n : null;
+        public string JefeOfNode(int node) => _nodeJefe.TryGetValue(node, out var n) ? n : null;
+        public string JefeOfZone(string zone) => JefeZones.FirstOrDefault(z => z.Zone == zone)?.Name;
+        public string JefeMe { get; private set; }                   // yo, como jefe (tras JEFEOK)
+        public event Action JefeChanged;
+        public event Action<string> JefeError;                       // ticket · busy estación nombre · offline · notake
         // Servidor con «READY 5»: el despachador también pide señales desde el mapa (con el agente del mapa en su Open Rails)
         // y nombra ayudantes desde él; quién es quién en la sala.
         public bool AgentOk { get; private set; }
@@ -146,11 +164,68 @@ namespace SelectOR
             return body;
         }
 
+        void OnJefes(string json)
+        {
+            try
+            {
+                var l = new List<JefeZone>();
+                using (var d = System.Text.Json.JsonDocument.Parse(json))
+                    foreach (var e in d.RootElement.EnumerateArray())
+                        l.Add(new JefeZone
+                        {
+                            Zone = e.GetProperty("z").GetString(), Name = e.GetProperty("n").GetString(),
+                            Sigs = e.GetProperty("s").EnumerateArray().Select(x => x.GetInt32()).ToArray(),
+                            Nodes = e.GetProperty("w").EnumerateArray().Select(x => x.GetInt32()).ToArray(),
+                            Manual = e.TryGetProperty("m", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.True
+                        });
+                var sj = new Dictionary<int, string>(); var nj = new Dictionary<int, string>();
+                foreach (var z in l) { foreach (int s in z.Sigs) sj[s] = z.Name; foreach (int n in z.Nodes) nj[n] = z.Name; }
+                _sigJefe = sj; _nodeJefe = nj; JefeZones = l;
+                try { JefeChanged?.Invoke(); } catch { }
+            }
+            catch { }
+        }
+
+        void OnItins(string json)
+        {
+            try
+            {
+                var l = new List<Itin>();
+                using (var d = System.Text.Json.JsonDocument.Parse(json))
+                    foreach (var e in d.RootElement.EnumerateArray())
+                        l.Add(new Itin
+                        {
+                            Origin = e.GetProperty("o").GetInt32(), Dest = e.GetProperty("d").GetInt32(),
+                            Owner = e.GetProperty("n").GetString(), Role = e.GetProperty("r").GetString(), State = e.GetProperty("st").GetString(),
+                            Left = e.GetProperty("t").GetInt32(), Train = e.TryGetProperty("tr", out var tr) ? tr.GetString() : null,
+                            Queue = e.TryGetProperty("q", out var q) ? q.GetInt32() : 0,
+                            Switches = e.GetProperty("w").EnumerateArray().Select(x => (x[0].GetInt32(), x[1].GetInt32())).ToArray()
+                        });
+                Itins = l; ItinsAt = DateTime.UtcNow;
+                try { ItinsChanged?.Invoke(); } catch { }
+            }
+            catch { }
+        }
+
         void OnMessage(string body)
         {
             if (!body.StartsWith("SELECTOR ", StringComparison.Ordinal)) return;
             if (body.StartsWith("SELECTOR CHAT ", StringComparison.Ordinal)) { OnChat(body.Substring(14)); return; }
             if (body.StartsWith("SELECTOR TRAINS ", StringComparison.Ordinal)) { OnTrains(body.Substring(16)); return; }
+            if (body.StartsWith("SELECTOR TAB ", StringComparison.Ordinal))
+            {
+                var f = body.Substring(13).Split(' ', 4);
+                if (f.Length >= 3 && int.TryParse(f[1], out int sig) && int.TryParse(f[2], out int tst)) try { TabAsked?.Invoke(f[0], sig, tst, f.Length > 3 ? f[3] : ""); } catch { }
+                return;
+            }
+            if (body.StartsWith("SELECTOR JEFES ", StringComparison.Ordinal)) { OnJefes(body.Substring(15)); return; }
+            if (body.StartsWith("SELECTOR ITINS ", StringComparison.Ordinal)) { OnItins(body.Substring(15)); return; }
+            if (body.StartsWith("SELECTOR ITIN ", StringComparison.Ordinal))
+            {
+                var f = body.Substring(14).Split(' ', 4);
+                if (f.Length >= 3 && int.TryParse(f[2], out int og)) try { ItinReply?.Invoke(f[0], f[1] == "1", og, f.Length > 3 ? f[3] : ""); } catch { }
+                return;
+            }
             if (body.StartsWith("SELECTOR SIGS ", StringComparison.Ordinal))
             {
                 var st = DecodeStates(body.Substring(14).Trim());
@@ -172,13 +247,16 @@ namespace SelectOR
             }
             if (t[0] == "CHATERR" && t.Length > 1) { try { ChatError?.Invoke(t[1]); } catch { } return; }
             if (t[0] == "HELPER" && t.Length > 1) { Helper = t[1] == "1"; return; }
+            if (t[0] == "JEFEOK" && t.Length > 1) { JefeMe = t[1]; try { JefeChanged?.Invoke(); } catch { } return; }
+            if (t[0] == "JEFEERR" && t.Length > 1) { try { JefeError?.Invoke(string.Join(" ", t.Skip(1))); } catch { } return; }
             if (t[0] == "ROLES" && t.Length > 2)
             {
                 DispatcherName = t[1] == "-" ? null : t[1];
                 Helpers = new HashSet<string>(t[2] == "-" ? Array.Empty<string>() : t[2].Split(',', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
                 return;
             }
-            if (t[0] == "MAPERR" && t.Length > 1) { try { MapError?.Invoke(t[1]); } catch { } return; }
+            // (1.2.75) con lo que venga detrás: «busy motivo», «jefe nombre»
+            if (t[0] == "MAPERR" && t.Length > 1) { try { MapError?.Invoke(string.Join(" ", t.Skip(1))); } catch { } return; }
             if (t[0] == "BLOCKED" && t.Length > 1) { Blocked = t[1] == "-" ? null : t[1]; return; }
             if (t[0] == "SW" && t.Length >= 5 && int.TryParse(t[1], out int sx) && int.TryParse(t[2], out int sz) && int.TryParse(t[3], out int sid) && int.TryParse(t[4], out int sp))
             { try { SwitchSet?.Invoke(sx, sz, sid, sp); } catch { } return; }
@@ -252,6 +330,30 @@ namespace SelectOR
         // Escribir en el chat de la sala (lo ven los demás en su HUD y en el chat de Open Rails).
         public void Say(string text) { if (Ready && ChatOk) Send("SAY " + text); }
 
+        // jefe de circulación (1.2.75): vale de Supabase (dispatch_ticket_issue)
+        public void JefeTake(string ticket) { if (Ready) Send("JEFE TAKE " + ticket); }
+        public void JefeAdd(string zone, IEnumerable<int> sigs, IEnumerable<int> nodes, IEnumerable<string> keys, bool force)
+        {
+            static string Csv<T>(IEnumerable<T> l) { var s = string.Join(",", l); return s.Length == 0 ? "-" : s; }
+            if (Ready) Send($"JEFE ADD {Uri.EscapeDataString(zone)} {Csv(sigs)} {Csv(nodes)} {Csv(keys)}" + (force ? " force" : ""));
+        }
+        public void JefeDel(string zone) { if (Ready) Send("JEFE DEL " + Uri.EscapeDataString(zone)); }
+        public void JefeLeave() { if (Ready) Send("JEFE LEAVE"); JefeMe = null; }
+        public void JefeDrop(string ticket, string name) { if (Ready) Send("JEFE DROP " + ticket + " " + name); }
+        public void TabAnswer(string user, int sig, bool ok) { if (Ready) Send($"JEFE {(ok ? "TABOK" : "TABNO")} {user} {sig}"); }
+        // el jefe: agujas y señales aunque no esté conduciendo (el servidor lo deja solo a él)
+        public void JefeThrowNode(int node, int pos) { if (Ready) Send($"THROWNODE {node} {pos}"); }
+        public void JefeSignal(int obj, int pick) { if (Ready) Send($"SIGNAL {obj} {pick}"); }
+        public void JefeManual(string zone, bool on) { if (Ready) Send($"JEFE MANUAL {Uri.EscapeDataString(zone)} {(on ? 1 : 0)}"); }
+        // (1.2.75) itinerarios: de la señal origen a la destino (−1: topera) con esas agujas (nodo del .tdb, posición); anular
+        public void ItinSet(int origin, int dest, IEnumerable<(int node, int pos)> switches)
+        {
+            var w = string.Join(",", switches.Select(x => x.node + ":" + x.pos));
+            if (Ready) Send($"ITIN SET {origin} {dest} {(w.Length == 0 ? "-" : w)}");
+        }
+        public void ItinDel(int origin) { if (Ready) Send($"ITIN DEL {origin}"); }
+        public void ItinFirst(int origin) { if (Ready) Send($"ITIN FIRST {origin}"); }   // (el jefe: el primero de la cola)
+
         // Como lo lee Open Rails (MSGSwitchStatus / MSGSignalStatus): base64 de [int32 cuántos][gzip con los bytes de estado (+ textos)].
         static byte[] DecodeStates(string b64)
         {
@@ -313,6 +415,7 @@ namespace SelectOR
             try { _cts?.Cancel(); } catch { }
             try { _tcp?.Close(); } catch { }
             lock (_wl) { _tcp = null; _ns = null; Ready = false; _asked.Clear(); }
+            JefeMe = null;   // (al volver, el puesto vuelve a entrar como jefe)
             Presence = null;
         }
 

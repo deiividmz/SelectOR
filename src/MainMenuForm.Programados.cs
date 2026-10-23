@@ -1,4 +1,4 @@
-// SERVICIOS PROGRAMADOS (turnos), en Empresas → Servicios → «Programados» (servicios-programados.sql).
+﻿// SERVICIOS PROGRAMADOS (turnos), en Empresas → Servicios → «Programados» (servicios-programados.sql).
 // El gerente, un gestor o el administrador programan servicios: ruta, un ITINERARIO hecho en el planificador (con sus
 // paradas), un tren de la flota o cualquiera de viajeros / mercancías, la franja de salida y si se repite. Cualquier
 // socio reserva un turno libre; «Preparar» deja Conducción libre con esa ruta y ese tren, y el itinerario del turno
@@ -374,6 +374,7 @@ namespace SelectOR
                 return (_prefs.SavedItineraries ?? new List<SavedItinerary>()).Where(x => string.Equals(x.Route, key, StringComparison.OrdinalIgnoreCase))
                                                                              .OrderByDescending(x => x.Created).ToList();
             };
+            dlg.ItineraryDeleted = id => _deletedItins.Contains(id);
             dlg.PlanItinerary = (name, cur) =>
             {
                 var route = _routesAll.Find(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));

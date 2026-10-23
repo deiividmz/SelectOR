@@ -1,4 +1,4 @@
-// Mandar órdenes a Open Rails desde el pupitre: se pulsa la MISMA tecla que usaría el maquinista,
+﻿// Mandar órdenes a Open Rails desde el pupitre: se pulsa la MISMA tecla que usaría el maquinista,
 // tomada de la configuración de teclado de Open Rails del propio usuario (Opciones → Teclado), así
 // que si la ha cambiado, se respeta. Se envía como pulsación real (SendInput con código de
 // exploración) a la ventana del simulador, que sigue siendo la activa porque el pupitre no roba el
@@ -27,7 +27,19 @@ namespace SelectOR
         // servidor web de OR responde desde otro hilo leyendo el estado del tren, y leerlo justo
         // cuando la orden lo está cambiando (luces, pantógrafo…) puede hacer fallar al simulador.
         static long _quietUntil;
-        public static bool Quiet => Environment.TickCount64 < System.Threading.Interlocked.Read(ref _quietUntil);
+        public static bool Quiet => _heldCount > 0 || Environment.TickCount64 < System.Threading.Interlocked.Read(ref _quietUntil);
+        static volatile int _heldCount;   // teclas que el pupitre mantiene pulsadas: mientras tanto, silencio
+
+        // Cuánto silencio tras cada orden. Las que cambian el estado del tren durante un rato (el pantógrafo sube y baja
+        // en unos segundos y con él la alimentación y las luces; el arenero; los faros) llevan más (1.2.75: Open Rails
+        // CYZY se cerraba al usarlas desde el pupitre).
+        public static int CalmFor(string c, bool up)
+        {
+            if (c.StartsWith("ControlPantograph", StringComparison.Ordinal)) return 4000;
+            if (c.StartsWith("ControlSander", StringComparison.Ordinal) || c.StartsWith("ControlHeadlight", StringComparison.Ordinal)
+                || c.StartsWith("ControlCircuitBreaker", StringComparison.Ordinal)) return 1500;
+            return up ? 500 : 600;
+        }
         public static void Calm(int ms)
         {
             long t = Environment.TickCount64 + ms;
@@ -65,7 +77,7 @@ namespace SelectOR
         public static bool Down(string c)
         {
             var k = Key(c); if (k == null) return false;
-            Calm(600);
+            Calm(CalmFor(c, false));
             FocusSimulator();
             var ins = new List<INPUT>();
             if (k.Control) ins.Add(Scan(0x1D, false));
@@ -73,20 +85,20 @@ namespace SelectOR
             if (k.Alt) ins.Add(Scan(0x38, false));
             ins.Add(Scan(k.ScanCode, false));
             Send(ins);
-            lock (_held) _held.Add(c);
+            lock (_held) { _held.Add(c); _heldCount = _held.Count; }
             return true;
         }
 
         public static void Up(string c)
         {
             var k = Key(c); if (k == null) return;
-            Calm(500);
+            Calm(CalmFor(c, true));
             var ins = new List<INPUT> { Scan(k.ScanCode, true) };
             if (k.Alt) ins.Add(Scan(0x38, true));
             if (k.Shift) ins.Add(Scan(0x2A, true));
             if (k.Control) ins.Add(Scan(0x1D, true));
             Send(ins);
-            lock (_held) _held.Remove(c);
+            lock (_held) { _held.Remove(c); _heldCount = _held.Count; }
         }
 
         // Pulsación corta (el simulador lee el teclado una vez por fotograma: 120 ms bastan).

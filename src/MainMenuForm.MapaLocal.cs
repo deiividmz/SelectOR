@@ -1,4 +1,4 @@
-// Mapa grande en Conducción libre (sin multijugador), como el mapa de Open Rails (Ctrl+9): agujas, señales y trenes
+﻿// Mapa grande en Conducción libre (sin multijugador), como el mapa de Open Rails (Ctrl+9): agujas, señales y trenes
 // de la IA, y cambiarlas desde él. Lo hace el agente del mapa dentro de Open Rails (MapAgent\LocalLink.cs), por una
 // conexión con SelectOR en este mismo ordenador (LocalMapLink.cs); lo de la ruta y el dibujo son los de las salas
 // (MainMenuForm.MapaSala.cs, RoomMap.cs). Solo en Conducción libre: en Actividad y Horarios, no.
@@ -98,6 +98,7 @@ namespace SelectOR
                 SignalsOk = sig != null && sig.Length == 2 * geo.Heads.Count && geo.Heads.Count > 0,
                 SwitchPos = s => st != null && s.Order >= 0 && s.Order < st.Length ? st[s.Order] : -1,
                 HeadState = k => sig != null && 2 * k < sig.Length ? sig[2 * k] - 1 : -1,
+                HeadDraw = k => sig != null && 2 * k + 1 < sig.Length ? sig[2 * k + 1] - 1 : -1,
                 SwitchLock = s => bl != null && s.Order >= 0 && s.Order < bl.Length ? bl[s.Order] : '.',
                 LocksKnown = bl != null
             };

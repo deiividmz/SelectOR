@@ -1,4 +1,4 @@
-// SALA COMPARTIDA DE CGL (desde la 1.2.65; sustituye a «Servidores SelectOR»): una sola sala, en el servidor de
+﻿// SALA COMPARTIDA DE CGL (desde la 1.2.65; sustituye a «Servidores SelectOR»): una sola sala, en el servidor de
 // SelectOR, con la ruta CGL_V22N_RE y un despachador fijo (SelectOR Despachador: Open Rails sin 3D que no es ningún
 // jugador). En Conducción libre con esa ruta, CONDUCIR entra solo en la sala si está marcada la casilla «Conducir en la
 // sala compartida» (junto al botón; activada de serie, _prefs.SalaCgl):
@@ -56,7 +56,7 @@ namespace SelectOR
         // La casilla, a la izquierda de CONDUCIR (BuildBottomBar): solo en Conducción libre con la ruta de la sala.
         Panel BuildSalaCheck()
         {
-            _salaHost = new Panel { Dock = DockStyle.Right, Width = 290, BackColor = Theme.Surface, Visible = false };
+            _salaHost = new Panel { Dock = DockStyle.Right, Width = 326, BackColor = Theme.Surface, Visible = false };
             _chkSala = new ThemeCheck { Text = Tr("Conducir en la sala compartida"), ForeColor = Theme.Text, BackColor = Theme.Surface, Size = new Size(280, 28), Checked = true };
             var sub = new Label { Text = SalaSubText(), AutoSize = false, Size = new Size(260, 34),
                                   ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8.25f) };
@@ -78,6 +78,7 @@ namespace SelectOR
             _salaHost.HandleCreated += (s, e) => place();
             _salaHost.Controls.Add(_chkSala); _salaHost.Controls.Add(sub);
             BuildSalaWeatherButton();   // ⛅ el clima de la sala, para el administrador (MainMenuForm.ClimaSala.cs)
+            BuildSalaDispatchButton();  // 🖥 el puesto de mando de la sala, para todos (MainMenuForm.PuestoMando.cs)
             return _salaHost;
         }
 
@@ -194,12 +195,19 @@ namespace SelectOR
                 if (SalaSolo(Tr("Tu ruta CGL_V22N_RE no es la misma versión que la de la sala, y Open Rails no te dejaría entrar. Actualiza la ruta para conducir con los demás."))) LaunchSolo();
                 return;
             }
-            // dos con el mismo nombre: Open Rails echa al segundo. Los nombres de SelectOR son únicos: es una conexión
-            // tuya de antes que la sala aún no ha soltado
-            if (info.Trains.Any(t => t.player && string.Equals(t.name, me, StringComparison.Ordinal)))
+            // (1.2.75) si en la sala aún queda tu conexión de antes con tu nombre, ya no se avisa ni se espera: el servidor la
+            // cierra al llegar la nueva (antes había que esperar y volver a intentarlo)
+            // (1.2.75) tu tren de antes: si la sala lo guarda (Open Rails se cerró hace poco) y vas con el mismo recorrido y
+            // tren, se pregunta si seguir con él donde se quedó o empezar en tu vía. Sin respuesta, se empieza en tu vía
+            // (antes se recuperaba siempre y aparecías donde lo habías dejado, aunque eligieras otra vía)
+            if (info.SavedSecs >= 0 && SameFile(info.SavedPat, p.FilePath) && SameFile(info.SavedCon, c.FilePath))
             {
-                ThemedBox.Show(this, string.Format(Tr("En la sala ya hay un jugador «{0}»: será tu conexión anterior, que la sala aún no ha soltado. Espera un momento y vuelve a intentarlo."), me), title, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                int min = Math.Max(1, (int)Math.Round(Math.Max(0, 600 - info.SavedSecs) / 60.0));   // (el servidor dice lo que le queda de los 10 min que lo guarda)
+                bool seguir = ThemedBox.Show(this,
+                    string.Format(Tr("Tu tren de hace {0} min sigue en la sala, donde lo dejaste al salir.\n\n¿Quieres seguir con él ahí o empezar en la vía que has elegido?"), min),
+                    title, MessageBoxButtons.YesNo, MessageBoxIcon.Question, new[] { Tr("Seguir donde lo dejé"), Tr("Empezar en mi vía") }) == DialogResult.Yes;
+                SetBusy(Tr("Comprobando la sala compartida…"));
+                try { await SalaResume(me, seguir); } finally { SetIdle(); UpdateStatus(); }
             }
             // (desde la 1.2.72 no se mira si hay otro tren en la vía de salida: se entra igualmente)
 
@@ -256,6 +264,7 @@ namespace SelectOR
             public string Route, Tdb, Disp, OrVersion; public int Players;
             public int Season = -1, Weather = -1;   // el clima de la sala (−1: un servidor de antes, que no lo dice)
             public int Offset;                       // la hora de la sala: minutos de adelanto (+) o retraso (−) sobre la de España
+            public int SavedSecs = -1; public string SavedPat, SavedCon;   // (1.2.75) tu tren de antes, guardado en la sala: hace cuánto, recorrido y tren
             public List<(string name, int tx, int tz, double x, double z, bool player)> Trains = new();
             public Dictionary<string, (int node, int mu, int dir, double len)> Track = new(StringComparer.Ordinal);
         }
@@ -307,6 +316,12 @@ namespace SelectOR
                                 if (wx.Length >= 3 && int.TryParse(wx[2], out int wo) && wo is >= -720 and <= 720) info.Offset = wo;
                             }
                         }
+                        else if (f.StartsWith("SELECTOR SAVED ", StringComparison.Ordinal) && info != null)
+                        {
+                            // «SELECTOR SAVED segundos\trecorrido\ttren» (1.2.75): tu tren de antes sigue en la sala
+                            var sv = f.Substring(15).Split('\t');
+                            if (sv.Length >= 3 && int.TryParse(sv[0].Trim(), out int secs) && secs >= 0) { info.SavedSecs = secs; info.SavedPat = sv[1]; info.SavedCon = sv[2]; }
+                        }
                         else if (f.StartsWith("SELECTOR TRAINS ", StringComparison.Ordinal) && info != null)
                         {
                             ParseSalaTrains(info, f.Substring(16));
@@ -317,6 +332,47 @@ namespace SelectOR
                 return info;   // (sin los trenes: no se sabe si la vía está ocupada)
             }
             catch { return null; }
+        }
+
+        // ¿El mismo archivo? (el servidor da el nombre como lo manda Open Rails: con o sin carpeta y extensión)
+        static bool SameFile(string a, string b)
+        {
+            static string N(string x) { x = (x ?? "").Trim().Replace('/', '\\'); int i = x.LastIndexOf('\\'); if (i >= 0) x = x.Substring(i + 1); return System.IO.Path.GetFileNameWithoutExtension(x); }
+            string na = N(a), nb = N(b);
+            return na.Length > 0 && string.Equals(na, nb, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // «SELECTOR HELLO nombre 0» + «SELECTOR RESUME 1|0» (1.2.75, conexión corta): seguir con el tren de antes o no. El
+        // servidor contesta «SELECTOR RESUMEOK». false = no ha llegado (se entra igual: sin respuesta, se empieza en tu vía).
+        internal static async Task<bool> SalaResume(string me, bool resume, string host = null, int port = 0)
+        {
+            host ??= SalaHost; if (port <= 0) port = SalaPort;
+            try
+            {
+                using var tcp = new TcpClient();
+                var conn = tcp.ConnectAsync(host, port);
+                if (await Task.WhenAny(conn, Task.Delay(5000)) != conn || conn.IsFaulted) return false;
+                var st = tcp.GetStream();
+                async Task Send(string body) { var b = Encoding.Unicode.GetBytes(" " + body.Length + ": " + body); await st.WriteAsync(b, 0, b.Length); }
+                await Send($"SELECTOR HELLO {me} 0");
+                await Send("SELECTOR RESUME " + (resume ? "1" : "0"));
+                var sb = new StringBuilder(); var dec = Encoding.Unicode.GetDecoder();
+                var buf = new byte[8192]; var chars = new char[8192];
+                var until = DateTime.UtcNow.AddSeconds(4);
+                while (DateTime.UtcNow < until)
+                {
+                    var rd = st.ReadAsync(buf, 0, buf.Length);
+                    var left = until - DateTime.UtcNow;
+                    if (left <= TimeSpan.Zero || await Task.WhenAny(rd, Task.Delay(left)) != rd) break;
+                    int n = rd.Result; if (n <= 0) break;
+                    sb.Append(chars, 0, dec.GetChars(buf, 0, n, chars, 0));
+                    string f;
+                    while ((f = SwitchPilot.NextFrame(sb)) != null)
+                        if (f.StartsWith("SELECTOR RESUMEOK", StringComparison.Ordinal)) return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         // «nombre tx tz x z kmh p nodo mu sentido largo;…» (como SwitchPilot.OnTrains)

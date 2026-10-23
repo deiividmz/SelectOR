@@ -1,3 +1,10 @@
-1.2.74
-Weather and time in the shared room|In the CGL shared room you all drive with the same season, the same weather (clear, rain or snow, clouds and fog) and the same time, which can be ahead of or behind Spanish time. Changes reach you straight away even if you are already inside, and under «Drive in the shared room» you can see how the room is.
-More lit stations on CGL|With CYZYRails the Pere Comas canopy lights up too.
+1.2.75
+Control centre|A new control centre for the shared room, like ADIF's signal boxes: every station with its track diagram, platforms and numbered switches, occupied blocks in red and routes in green. Dispatchers take charge of their stations and receive the drivers' Tab requests.
+Signal-to-signal routes|Click a signal, «Set a route from here…» and pick the destination: the switches are thrown and locked, and the signal clears by itself, with its proper aspect, when the train arrives. If it crosses another route, it is queued and set automatically when its turn comes. The dispatcher can put a station under manual control and order the queue. The menus no longer have «Clear» or «Approach».
+Signals with their real lights|On the HUD big map and in the control centre, every signal shows its lights (green and yellow for the caution approach, flashing yellow, authorised passing…) and the number on its pre-warning display. They grow as you zoom in.
+Carry on with your train|If you leave the shared room or get disconnected, when you come back SelectOR offers to carry on with your train where you left it.
+Esc in the room|In the shared room, Esc opens a menu to quit or continue (you used to need Alt+F4).
+The big map follows your train|It centres on your train and follows it while you drive. If you drag it, it stays where you leave it, and «Follow my train» brings it back.
+CYZYRails improvements|LZB and ASFA on the locomotives that have them (like the 446) also work in CYZY. The cab panel no longer closes Open Rails. Station lights no longer jump as you move. More white light on CGL: canopies, street lamps and lit billboards.
+Leave a company|From «My account» you can leave the selected company whenever you want.
+Delete saved itineraries|The itinerary planner (Free driving and Scheduled services) has a button to delete the selected saved itinerary.

@@ -1,4 +1,4 @@
-// Conexión aparte con el servidor de la sala (SwitchPilot), mientras Open Rails está dentro de ella. Ya NO pide
+﻿// Conexión aparte con el servidor de la sala (SwitchPilot), mientras Open Rails está dentro de ella. Ya NO pide
 // desvíos: los desvíos según el itinerario de la hoja de ruta se quitaron en la 1.2.63 (copia en «Proyecto Menú OR\
 // SelectOR Desvíos por itinerario (aparcado)»). Sigue haciendo falta para:
 //  · el HUD: si Open Rails está dentro de la sala y si eres el despachador (WHO cada 3 s, «SELECTOR YOU»);
@@ -26,8 +26,31 @@ namespace SelectOR
             string name = (_txtMPUser?.Text ?? "").Trim();
             if (name.Length == 0) return;
             _pilot = new SwitchPilot(host, port, name, 1);
+            _roomSeenMe = DateTime.MinValue; _roomLostTold = false;
             RoomChatHook(_pilot);   // chat de la sala en el HUD (MainMenuForm.ChatSala.cs)
             RoomMapHook(_pilot);    // agujas, señales y trenes en el mapa grande (MainMenuForm.MapaSala.cs)
+        }
+
+        // (1.2.75) Open Rails ha perdido la conexión con la sala (su red, el servidor, un nombre repetido…): sigue en marcha, pero
+        // conduces solo y no se ve. Si tu tren estaba en la sala y deja de estar 15 s mientras sigues conduciendo, se avisa
+        // una vez en la barra de conducción, con qué hacer.
+        DateTime _roomSeenMe = DateTime.MinValue; bool _roomLostTold;
+        void RoomLostTick()
+        {
+            try
+            {
+                if (_pilot == null || !_pilot.Ready || !_pilot.MapOk) return;
+                string me = (_txtMPUser?.Text ?? "").Trim();
+                if (me.Length == 0) return;
+                bool there = false;
+                foreach (var t in _pilot.Trains) if (t.player && string.Equals(t.name, me, StringComparison.Ordinal)) { there = true; break; }
+                if (there) { _roomSeenMe = DateTime.UtcNow; _roomLostTold = false; return; }
+                if (_roomSeenMe == DateTime.MinValue || _roomLostTold || (DateTime.UtcNow - _roomSeenMe).TotalSeconds < 15) return;
+                _roomLostTold = true;
+                RoomLog("sala: tu tren ya no está en la sala (Open Rails ha perdido la conexión)");
+                try { _driveBar?.ShowMessage("⚠ " + Tr("Open Rails ha perdido la conexión con la sala: sigues conduciendo, pero solo. Para volver con los demás, sal de Open Rails y entra otra vez."), true, 20); } catch { }
+            }
+            catch { }
         }
 
         void PilotStop()
@@ -43,6 +66,7 @@ namespace SelectOR
             _pilot.EnsureStarted();
             if (_pilot.Ready) _pilot.Tick(Array.Empty<(int, int, int, int, double, double)>(), Array.Empty<(int, int, int)>());
             RoomMapTick();
+            RoomLostTick();
         }
     }
 }

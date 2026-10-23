@@ -1,4 +1,4 @@
-// Conducción libre → «Tu viaje» → chip «Itinerario»: un planificador sobre el plano de la ruta (el mismo detalle que el mapa
+﻿// Conducción libre → «Tu viaje» → chip «Itinerario»: un planificador sobre el plano de la ruta (el mismo detalle que el mapa
 // grande del HUD) para marcar el itinerario ANTES de conducir. Clic en la vía: salida, puntos de paso y llegada (el
 // camino se traza por las vías, respetando los desvíos, como en el mapa grande); «Seguir el recorrido» lo rellena con
 // el recorrido elegido; en la lista se marca en qué estaciones se para.
@@ -105,8 +105,18 @@ namespace SelectOR
                 Text = Tr("Haz clic en la vía para marcar la salida, los puntos de paso y la llegada: el camino va por las vías, como en el mapa grande del HUD. Para que vaya por otra vía, arrastra el trazado (o un punto) hasta ella. Al conducir desde Conducción libre, el itinerario sale ya en el HUD y en la hoja de ruta, y se sigue por esas mismas vías."),
                 AutoSize = true, MaximumSize = new Size(Theme.Px(330), 0), ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 6)
             };
-            var saved = new ThemeCombo { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 4) };
+            var saved = new ThemeCombo { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0) };
             StyleCombo(saved);
+            // (1.2.75) el guardado elegido en la lista se puede borrar
+            var bDelSaved = new RoundButton
+            {
+                Text = "🗑", Width = Theme.Px(38), Height = 30, Radius = 8, FontSize = 10f, Margin = new Padding(0),
+                BaseColor = Theme.Surface2, HoverColor = Color.FromArgb(150, 60, 60), TextColor = Theme.Text, Enabled = false
+            };
+            new ToolTip().SetToolTip(bDelSaved, Tr("Borrar el itinerario guardado elegido"));
+            var savedRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
+            savedRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); savedRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            savedRow.Controls.Add(saved, 0, 0); savedRow.Controls.Add(bDelSaved, 1, 0);
             var sum = new Label { AutoSize = true, MaximumSize = new Size(Theme.Px(330), 0), Font = Theme.Font(10f, FontStyle.Bold), ForeColor = Theme.Text, Margin = new Padding(0, 6, 0, 2) };
             var stops = new ListBox
             {
@@ -114,7 +124,7 @@ namespace SelectOR
                 DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = Theme.Px(30), IntegralHeight = false, Margin = new Padding(0, 4, 0, 0)
             };
             Native.UseDarkScrollBars(stops);
-            side.Controls.Add(help); side.Controls.Add(Cap(Tr("GUARDADOS"))); side.Controls.Add(saved);
+            side.Controls.Add(help); side.Controls.Add(Cap(Tr("GUARDADOS"))); side.Controls.Add(savedRow);
             // parar en todas / en ninguna
             var allRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 2, 0, 0) };
             RoundButton Small(string t) => new RoundButton { Text = t, Width = Theme.Px(120), Height = 30, Radius = 8, FontSize = 9f, Margin = new Padding(0, 0, 6, 0), BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text };
@@ -243,6 +253,7 @@ namespace SelectOR
                 int sel = selectId == null ? 0 : savedHere.FindIndex(s => s.Id == selectId) + 1;
                 saved.SelectedIndex = Math.Max(0, sel);
                 saved.EndUpdate();
+                bDelSaved.Enabled = saved.SelectedIndex > 0;
             }
             bool loading = false;
             void Load(SavedItinerary it)
@@ -257,8 +268,20 @@ namespace SelectOR
             }
             saved.SelectedIndexChanged += (s, e) =>
             {
+                bDelSaved.Enabled = saved.SelectedIndex > 0;
                 if (loading || saved.SelectedIndex <= 0) return;
                 Load(savedHere[saved.SelectedIndex - 1]);
+            };
+            bDelSaved.Click += (s, e) =>
+            {
+                if (saved.SelectedIndex <= 0 || saved.SelectedIndex - 1 >= savedHere.Count) return;
+                var it = savedHere[saved.SelectedIndex - 1];
+                if (ThemedBox.Show(f, string.Format(Tr("¿Borrar el itinerario guardado «{0}»?"), it.Name), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                DeleteSavedItinerary(it);
+                if (loadedId == it.Id) { loadedId = null; dirty = true; }   // lo dibujado se queda, pero ya sin guardar
+                if (preset?.Id == it.Id) preset = null;
+                loading = true; FillSaved(); loading = false;
+                msg.Text = string.Format(Tr("Itinerario borrado: {0}"), it.Name);
             };
 
             // ---------- acciones ----------

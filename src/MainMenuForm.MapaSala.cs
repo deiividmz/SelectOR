@@ -1,4 +1,4 @@
-// Mapa grande en una sala de Servidores SelectOR, como el mapa de Open Rails (Ctrl+9): agujas, señales y trenes
+﻿// Mapa grande en una sala de Servidores SelectOR, como el mapa de Open Rails (Ctrl+9): agujas, señales y trenes
 // (RoomMap.cs). Lo de la ruta se prepara una vez por ruta en segundo plano; lo que cambia llega por la conexión aparte
 // con la sala (SwitchPilot, servidor con «READY 4»). Un clic en una aguja la pide al despachador en tu nombre; en una
 // señal, su menú (solo si el despachador te ha nombrado ayudante: Open Rails no acepta cambios de señal de nadie más).
@@ -43,6 +43,8 @@ namespace SelectOR
             RoomLog($"── sala {_roomName ?? "(unirse a un servidor)"} · {_curRoute?.Name}");
             p.SwitchSet += (tx, tz, id, pos) => { try { BeginInvoke((Action)(() => RoomSwitchSet(tx, tz, id, pos))); } catch { } };
             p.MapError += e => { try { BeginInvoke((Action)(() => RoomMapError(e))); } catch { } };
+            RoomItinHook(p);   // (1.2.75) itinerarios (MainMenuForm.ItinSala.cs)
+            _hudPick = null;
         }
 
         // Cada segundo (PilotTick): preparar lo de la ruta, comprobar la última señal pedida y repintar el mapa grande.
@@ -125,6 +127,7 @@ namespace SelectOR
             var p = _pilot; var geo = _roomGeo;
             var st = p.States; var statesAt = p.StatesAt; var sig = p.SigStates;
             var bl = p.Blocked; if (bl != null && bl.Length != geo.Switches.Count) bl = null;   // (otra ruta u otra numeración: no se usa)
+            var itinNodes = new HashSet<int>();   // (1.2.75) agujas enclavadas en un itinerario
             var v = new RoomMapView
             {
                 Geo = geo,
@@ -135,10 +138,12 @@ namespace SelectOR
                     return st != null && s.Order < st.Length ? st[s.Order] : -1;
                 },
                 HeadState = k => sig != null && 2 * k < sig.Length ? sig[2 * k] - 1 : -1,
-                SwitchLock = s => bl != null && s.Order >= 0 && s.Order < bl.Length ? bl[s.Order] : '.',
+                HeadDraw = k => sig != null && 2 * k + 1 < sig.Length ? sig[2 * k + 1] - 1 : -1,
+                SwitchLock = s => itinNodes.Contains(s.Node) ? 'I' : bl != null && s.Order >= 0 && s.Order < bl.Length ? bl[s.Order] : '.',
                 LocksKnown = bl != null
             };
             int PosOf(int o) => _roomSwSet.TryGetValue(o, out var ch) && ch.at > statesAt ? ch.pos : st != null && o < st.Length ? st[o] : -1;
+            RoomItinView(v, PosOf, itinNodes);
             v.Paths = TrainPaths(geo, p.Trains, p.TrainTrack, PosOf, st, _roomSwVer, (_txtMPUser?.Text ?? "").Trim());
             foreach (var t in p.Trains)
                 if (!t.player && OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) v.AiTrains.Add((t.name, la, lo, t.kmh));
@@ -190,7 +195,16 @@ namespace SelectOR
         }
 
         // «Tú» en la leyenda de una sala: tu papel (null fuera de una sala).
-        string RoomMeStatus() => !RoomMapOn ? null : _pilot.IsDispatcher ? Tr("despachador") : _pilot.Helper ? Tr("ayudante") : Tr("jugador");
+        string RoomMeStatus() => !RoomMapOn ? null : (_pilot.IsDispatcher ? Tr("despachador") : _pilot.Helper ? Tr("ayudante") : Tr("jugador"))
+                                 + (_pilot.JefeZones.Count > 0 ? " · " + string.Format(Tr("Jefes de circulación: {0}"), string.Join(", ", _pilot.JefeZones.Select(z => z.Name).Distinct())) : "");
+
+        // Jefes de circulación (1.2.75): en sus estaciones, las agujas y las órdenes a las señales son suyas. El jefe de esa
+        // aguja o señal, si no soy yo (null: la puedo mover)
+        string RoomJefeOfNode(int node) => RoomMapOn ? NotMe(_pilot.JefeOfNode(node)) : null;
+        string RoomJefeOfSig(int obj) => RoomMapOn ? NotMe(_pilot.JefeOfSig(obj)) : null;
+        string NotMe(string n) => n != null && !string.Equals(n, (_txtMPUser?.Text ?? "").Trim(), StringComparison.OrdinalIgnoreCase) ? n : null;
+        string RoomJefeText(string jefe) => jefe != null ? string.Format(Tr("Ahí las agujas y las señales las mueve el jefe de circulación ({0}). Para pedir paso: Tab."), jefe)
+                                                         : Tr("Ahí las agujas y las señales las mueve un jefe de circulación. Para pedir paso: Tab.");
 
         // El camino por delante de cada tren, como el mapa de Open Rails (Ctrl+9, «Draw next path section»): hasta 5 km
         // por la vía según cómo están las agujas, del color del tren (tú, en verde; los de la IA, en gris). Se rehace solo
@@ -224,9 +238,11 @@ namespace SelectOR
         // Un clic en el mapa grande sobre una aguja o una señal. Devuelve el aviso que se enseña (o null).
         string RoomMapClick(object hit, Point screen)
         {
+            if (_hudPick != null || hit == RoomMapView.PickCancel || hit is RoomMapView.ItinPickOpt) return RoomPickClick(hit);   // (1.2.75) eligiendo el destino de un itinerario
             if (hit is List<RouteGraph.SwitchGeo> many) { SwitchChooser(many, screen); return null; }
             if (LocalMapOn) return LocalMapClick(hit, screen);
             if (!RoomMapOn) return null;
+            if (hit is RouteGraph.SwitchGeo sj && RoomJefeOfNode(sj.Node) is string oj) return RoomJefeText(oj);
             if (hit is RouteGraph.SwitchGeo s)
             {
                 // las de una travesía o un escape (comparten identificador): por su nodo, solo con el despachador fijo
@@ -241,7 +257,8 @@ namespace SelectOR
                 if (RoomMapDraw.IsLocked(v, s))
                 {
                     RoomLog($"clic en la aguja {s.Tx} {s.Tz} {s.Id}: enclavada ({lk}), no se pide");
-                    return lk == 'S' ? Tr("Aguja enclavada: la reserva una señal abierta. Se libera cuando la señal vuelva a parada o pase el tren.")
+                    return lk == 'I' ? Tr("Aguja enclavada en un itinerario. Se libera cuando pase el tren o se anule el itinerario.")
+                         : lk == 'S' ? Tr("Aguja enclavada: la reserva una señal abierta. Se libera cuando la señal vuelva a parada o pase el tren.")
                          : lk == 'O' ? Tr("Aguja enclavada: hay un tren encima.")
                          : Tr("Aguja enclavada: la tiene reservada un tren para su ruta.");
                 }
@@ -367,17 +384,21 @@ namespace SelectOR
                 if (pick == 1) _roomSigCheck = (g.Obj, DateTime.UtcNow, false);
                 try { _serviceHud?.MapNotice(Tr("Señal pedida al despachador…")); } catch { }
             });
-            var items = new List<(string, Color, Action)>
+            if (RoomJefeOfSig(g.Obj) is string og)   // de un jefe de circulación: solo lo de tu tren
             {
-                Item(Tr("Parada"), 1, RoomMapDraw.AspectColor(0)),
-                Item(Tr("Anuncio de parada"), 2, RoomMapDraw.AspectColor(3)),
-                Item(Tr("Vía libre"), 3, RoomMapDraw.AspectColor(6)),
-                Item(Tr("Rebase autorizado"), 4, RoomMapDraw.CallOnWhite),
-                (null, Color.Empty, null),
-                Item(Tr("Automática (como la pone Open Rails)"), 0, Color.Empty)
-            };
+                var mine = new List<(string, Color, Action)> { (string.Format(Tr("La mueve el jefe de circulación ({0})"), og), Theme.Subtle, null) };
+                if (RoomFixedDispatcher) { mine.Add((null, Color.Empty, null)); mine.Add(RoomPassItem()); mine.Add(RoomReleaseItem()); }
+                _serviceHud?.BigMapMenu(screen, g.Obj >= 0 ? string.Format(Tr("Señal {0} · ahora: {1}"), g.Obj, state) : string.Format(Tr("Señal · ahora: {0}"), state), mine);
+                return;
+            }
+            // (1.2.75) como en un puesto de mando: itinerarios en vez de «anuncio» y «vía libre» (la señal se abre sola con el aspecto
+            // que le toca); siguen «parada» (cerrarla), el rebase autorizado y quitar la parada
+            var items = RoomItinItems(g);
+            items.Add(Item(Tr("Cerrar la señal (parada)"), 1, RoomMapDraw.AspectColor(0)));
+            items.Add(Item(Tr("Rebase autorizado"), 4, RoomMapDraw.CallOnWhite));
+            items.Add(Item(Tr("Quitar la parada (automática)"), 0, Color.Empty));
             if (!LocalMapOn && RoomFixedDispatcher) { items.Add((null, Color.Empty, null)); items.Add(RoomPassItem()); items.Add(RoomReleaseItem()); }   // (y las de tu tren: Tab y Ctrl+Tab)
-            _serviceHud?.BigMapMenu(screen, string.Format(Tr("Señal · ahora: {0}"), state), items);
+            _serviceHud?.BigMapMenu(screen, g.Obj >= 0 ? string.Format(Tr("Señal {0} · ahora: {1}"), g.Obj, state) : string.Format(Tr("Señal · ahora: {0}"), state), items);
             RoomLog($"menú de la señal {g.Obj} abierto");
         }
 
@@ -421,6 +442,9 @@ namespace SelectOR
         void RoomMapError(string e)
         {
             RoomLog("el servidor dice: " + e);
+            // (1.2.75) con el motivo del despachador: «busy motivo»
+            if (e.StartsWith("busy ", StringComparison.Ordinal)) { try { _serviceHud?.MapNotice(Tr("No se puede mover la aguja: ") + e.Substring(5)); } catch { } return; }
+            if (e.StartsWith("jefe ", StringComparison.Ordinal)) { try { _serviceHud?.MapNotice(RoomJefeText(e.Substring(5).Trim())); } catch { } return; }
             string msg = e switch
             {
                 "busy" => Tr("Open Rails no deja cambiarla: hay un tren encima o en la ruta que tiene reservada."),
@@ -433,6 +457,7 @@ namespace SelectOR
                 "nobot" => Tr("Liberar la señal solo se puede con el despachador fijo de la sala."),
                 "nobotsw" => Tr("Esta aguja va unida a otra (un escape): se cambia con la otra."),
                 "notpath" => Tr("El despachador no la deja: no está en tu camino (la línea discontinua de tu tren)."),
+                "jefe" => RoomJefeText(null),
                 _ => Tr("No estás dentro de la sala.")
             };
             try { _serviceHud?.MapNotice(msg); } catch { }

@@ -43,6 +43,8 @@ namespace SelectOR.MapAgent
 
         public static void Install()
         {
+            Errores.Install();   // por qué se cierra Open Rails, aunque tenga su registro apagado (Errores.cs)
+            try { Tcs.Install(new Harmony("selector.mapagent.tcs")); } catch (Exception ex) { Log("scripts de seguridad: " + ex.Message); }   // ATO/LZB más nuevos que este Open Rails (Tcs.cs)
             var h = new Harmony("selector.mapagent");
             int n = 0;
             var upd = AccessTools.Method(typeof(MPManager), "Update");
@@ -60,16 +62,17 @@ namespace SelectOR.MapAgent
             int sun = Sol.Install(h);            // el sol de las rutas CGL a la hora de España (Sol.cs)
             int threads = Hilos.Install(h);      // .NET 6: que un corte de la sala no cierre Open Rails (Hilos.cs)
             int keys = Teclado.Install(h);       // escribir en el chat del HUD sin que Open Rails lo reciba (Teclado.cs)
+            int esc = Pausa.Install(h);          // Esc en multijugador: menú con «Salir» y «Continuar» (Pausa.cs)
             int events = SelectOR.Comun.Eventos.Install(h, Log);   // bocina, puertas, luces… de otras versiones de Open Rails (Eventos.cs)
             int clock = SelectOR.Comun.Hora.Install(h, Log);       // la hora de la sala, también a los que ya están dentro (Hora.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
-            if (sun == 0 || keys == 0) Later(h, sun == 0, keys == 0);
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(esc > 0 ? " + Esc" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            if (sun == 0 || keys == 0 || esc == 0) Later(h, sun == 0, keys == 0, esc == 0);
         }
 
         // En los Open Rails de .NET Framework el agente entra antes de que se cargue RunActivity.exe, que es donde están el
         // teclado (UserInput) y el sol (SunMoonPos): no se encontraban y no se ponían nunca (1.2.69). Se ponen en cuanto
         // Open Rails carga ese ensamblado.
-        static void Later(Harmony h, bool sun, bool keys)
+        static void Later(Harmony h, bool sun, bool keys, bool esc)
         {
             AssemblyLoadEventHandler onLoad = null;
             bool busy = false;
@@ -83,8 +86,9 @@ namespace SelectOR.MapAgent
                     bool Has(string type) => (a == null ? AccessTools.TypeByName(type) : a.GetType(type, false)) != null;
                     if (sun && Has("Orts.Viewer3D.Common.SunMoonPos")) { sun = false; if (Sol.Install(h) > 0) got += " + sol"; }
                     if (keys && Has("Orts.Viewer3D.UserInput")) { keys = false; if (Teclado.Install(h) > 0) got += " + teclado"; }
+                    if (esc && Has("Orts.Viewer3D.Popups.QuitWindow")) { esc = false; if (Pausa.Install(h) > 0) got += " + Esc"; }
                     if (got != "") Log("instalado al cargar el 3D:" + got);
-                    if (!sun && !keys) AppDomain.CurrentDomain.AssemblyLoad -= onLoad;
+                    if (!sun && !keys && !esc) AppDomain.CurrentDomain.AssemblyLoad -= onLoad;
                 }
                 catch (Exception ex) { Log("al cargar el 3D: " + ex.GetType().Name + " " + ex.Message); }
                 finally { busy = false; }

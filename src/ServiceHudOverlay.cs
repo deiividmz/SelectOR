@@ -1,4 +1,4 @@
-// HUD acompañante de servicio: ventanita pequeña, siempre encima, semitransparente y arrastrable,
+﻿// HUD acompañante de servicio: ventanita pequeña, siempre encima, semitransparente y arrastrable,
 // que aparece mientras conduces un servicio de empresa en Open Rails. NO roba el foco al simulador
 // (WS_EX_NOACTIVATE) y solo se ve si OR corre en ventana / ventana sin bordes (no en fullscreen
 // exclusivo). Todo se dibuja a mano (sin controles hijos) para que arrastrar/plegar sea fiable.
@@ -1337,6 +1337,12 @@ namespace SelectOR
         bool ItinEditable(Point p) => Book is RoadBook rb && rb.Editing && rb.Graph != null && rb.Points.Count > 0 && _inv != null && p.Y > HdrH
                                       && !_hitGrip.Contains(p) && !_hitKey.Contains(p) && !_legendBox.Contains(p) && !(_savedOpen && _savedPanel.Contains(p));
         bool _panMoved; Point _panDown;
+        // Seguir al tren (1.2.75): solo un arrastre claro (más de FreeDrag px desde donde empezó) deja la vista libre; uno
+        // corto, sin querer, vuelve a seguir al soltar. La rueda acerca o aleja sin dejar de seguir. Con la vista libre, un
+        // botón «Seguir mi tren» (o doble clic) vuelve.
+        const int FreeDrag = 60;
+        bool _panWasFollow; int _panMax;
+        Rectangle _hitFollow;
         RoadBook Book => _hud?.Book;
         // Leyenda de los demás usuarios de la ruta: su caja y cada fila (clic → centrar en ese usuario).
         Rectangle _legendBox; List<(Rectangle hit, LiveMarker m)> _legendHits = new();
@@ -1467,7 +1473,8 @@ namespace SelectOR
             else if (_savedOpen && _savedPanel.Contains(e.Location)) _savedDown = true;                                      // pestaña «Guardados»
             else if (e.Y < HdrH) { _winDrag = true; _moved = false; _downScreen = Cursor.Position; _formAtDown = Location; }   // cabecera → mueve la ventana
             else if (_legendBox.Contains(e.Location)) _legendDown = true;                                                // leyenda → clic en un nombre
-            else { _panning = true; _lastPan = e.Location; _panDown = e.Location; _panMoved = false; }                    // mapa → desplaza el contenido
+            else if (_free && _hitFollow.Contains(e.Location)) { _free = false; UpdateFollow(); Invalidate(); }          // «Seguir mi tren»
+            else { _panning = true; _lastPan = e.Location; _panDown = e.Location; _panMoved = false; _panWasFollow = !_free; _panMax = 0; }   // mapa → desplaza el contenido
             base.OnMouseDown(e);
         }
 
@@ -1508,6 +1515,7 @@ namespace SelectOR
             else if (_panning)
             {
                 if (!_panMoved && (Math.Abs(e.X - _panDown.X) > 4 || Math.Abs(e.Y - _panDown.Y) > 4)) _panMoved = true;
+                _panMax = Math.Max(_panMax, (int)Math.Sqrt((double)(e.X - _panDown.X) * (e.X - _panDown.X) + (double)(e.Y - _panDown.Y) * (e.Y - _panDown.Y)));
                 if (_panMoved) { PanBy(e.X - _lastPan.X, e.Y - _lastPan.Y); _lastPan = e.Location; }
             }
             else
@@ -1568,6 +1576,7 @@ namespace SelectOR
                 base.OnMouseUp(e); return;
             }
             if (wasWinDrag && moved) SavePlace();
+            if (wasPan && panMoved && _panWasFollow && _panMax < FreeDrag) { _free = false; UpdateFollow(); Invalidate(); }   // (arrastre corto: sigue al tren)
             _winDrag = false; _panning = false; _moved = false; _legendDown = false; _panMoved = false;
             if (wasWinDrag && !moved && _hitClose.Contains(e.Location)) { Close(); return; }
             if (wasWinDrag && !moved && HdrZone(e.Location) is int z && z >= 0) { HdrClick(z); return; }
@@ -1677,7 +1686,12 @@ namespace SelectOR
         void ZoomAt(Point m, double factor)
         {
             if (!_haveCenter) return;
-            _free = true;
+            if (!_free)
+            {
+                // siguiendo al tren: acercar o alejar sobre el tren, sin dejar de seguirlo
+                _pxPerM = Math.Max(0.02, Math.Min(60.0, _pxPerM * factor));
+                UpdateFollow(); Invalidate(); return;
+            }
             var area = MapArea();
             double cx = area.X + area.Width / 2.0, cy = area.Y + area.Height / 2.0;
             double mLat = 111320.0, mLon = 111320.0 * Math.Cos(_cLat * Math.PI / 180.0);
@@ -1740,7 +1754,7 @@ namespace SelectOR
                 ? (rb.Building ? I18n.T("Preparando el esquema de vías…")
                    : rb.Graph == null && rb.Problem != null ? rb.Problem
                    : I18n.T("Clic en la vía: añadir · arrastra el trazado o un punto a otra vía · clic derecho: quitar · Ctrl+Z: deshacer"))
-                : I18n.T("rueda: zoom · arrastra: mover · doble clic: centrar");
+                : I18n.T("rueda: zoom · arrastra: mirar en otro sitio · doble clic: volver al tren");
             TextRenderer.DrawText(g, hdr, Theme.Font(9.5f, FontStyle.Bold), new Rectangle(14, 0, bx - 20, HdrH),
                 rb != null && rb.Editing ? Color.FromArgb(240, 180, 70) : Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
@@ -1780,9 +1794,27 @@ namespace SelectOR
             string meSt = null; try { meSt = _hud?.RoomMeStatus?.Invoke(); } catch { }   // en una sala: tu papel
             _legendHits = LiveMapDraw.Legend(g, area, snap.Me.name, snap.Me.company, snap.Mates, out _legendBox, true, meSt);
             DrawSaved(g, area);
+            DrawFollow(g, area);
             DrawNotice(g, area);
             DrawMenu(g, area);
             DrawGrip(g);
+        }
+
+        // Con la vista libre: «Seguir mi tren», arriba en el centro del mapa.
+        void DrawFollow(Graphics g, Rectangle area)
+        {
+            if (!_free) { _hitFollow = Rectangle.Empty; return; }
+            string t = "⌖  " + I18n.T("Seguir mi tren");
+            using var f = Theme.Font(9f, FontStyle.Bold);
+            var sz = TextRenderer.MeasureText(g, t, f, Size.Empty, TextFormatFlags.NoPadding);
+            int w = sz.Width + 24, h = sz.Height + 10;
+            _hitFollow = new Rectangle(area.X + (area.Width - w) / 2, area.Y + 8, w, h);
+            bool hover = _hitFollow.Contains(PointToClient(Cursor.Position));
+            var amber = Color.FromArgb(240, 180, 70);
+            using (var b = new SolidBrush(Color.FromArgb(225, hover ? Blend(Theme.Surface2, amber, 0.25f) : Theme.Surface2)))
+            using (var p = Theme.Round(_hitFollow, h / 2)) g.FillPath(b, p);
+            using (var pen = new Pen(amber, 1.2f)) using (var p = Theme.Round(_hitFollow, h / 2)) g.DrawPath(pen, p);
+            TextRenderer.DrawText(g, t, f, _hitFollow, amber, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         // Pestaña «Guardados»: a la derecha del mapa, los itinerarios guardados de esta ruta.

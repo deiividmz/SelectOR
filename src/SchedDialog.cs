@@ -1,4 +1,4 @@
-// «Programar servicio» (Empresas → Servicios → Programados): a la izquierda el formulario en cinco pasos (ruta e
+﻿// «Programar servicio» (Empresas → Servicios → Programados): a la izquierda el formulario en cinco pasos (ruta e
 // itinerario, tren, salida, repetición y nota) y a la derecha el billete del servicio, que se rellena mientras eliges:
 // la ruta, la composición 2D del tren, la salida, cuántas salidas habrá y la prima.
 
@@ -25,6 +25,7 @@ namespace SelectOR
 
         public Func<Result, Task<string>> Submit;            // hace el alta; devuelve el error o null
         public Func<string, List<SavedItinerary>> ItinerariesOf;            // itinerarios guardados de una ruta (por su nombre)
+        public Func<string, bool> ItineraryDeleted;                         // (1.2.75) se ha borrado (por su Id): no se vuelve a enseñar
         public Func<string, SavedItinerary, SavedItinerary> PlanItinerary;  // abre el planificador (ruta, el elegido) → el que se usa
         public Func<string, Task<string>> TrainImage;        // archivo con el 2D de un tren de la flota
         public double Pct = 20, Max = 25000;
@@ -238,6 +239,7 @@ namespace SelectOR
             string route = _route.SelectedItem as string;
             _itins.Clear();
             try { if (ItinerariesOf != null && route != null) _itins.AddRange(ItinerariesOf(route) ?? new()); } catch { }
+            if (select != null && select.Id != null && ItineraryDeleted?.Invoke(select.Id) == true) select = null;
             if (select != null && _itins.All(x => x.Id != select.Id)) _itins.Insert(0, select);
             _itin.BeginUpdate();
             _itin.Items.Clear();

@@ -1,4 +1,4 @@
-// Pestaña "Empresas": empresas ferroviarias multi-maquinista sobre Supabase.
+﻿// Pestaña "Empresas": empresas ferroviarias multi-maquinista sobre Supabase.
 // Tres vistas conmutables: configuración del servidor, acceso (login/registro) y panel.
 // La economía vive en el servidor (funciones SQL); aquí solo se muestra y se llama por REST.
 
@@ -1866,10 +1866,42 @@ namespace SelectOR
             };
             cm.Items.Add(snd);
             cm.Items.Add(new ToolStripSeparator());
+            // (1.2.75) dejar la empresa elegida, si soy socio de ella
+            if (_empSel != null && _myRole != null)
+            {
+                var co = _empSel;
+                var leave = new ToolStripMenuItem(string.Format(Tr("🚪  Abandonar «{0}»…"), co.Name)) { ForeColor = Color.FromArgb(214, 120, 60) };
+                leave.Click += (s, e) => LeaveCompany(co);
+                cm.Items.Add(leave);
+            }
             var del = new ToolStripMenuItem(Tr("Eliminar mi cuenta…")) { ForeColor = Color.FromArgb(200, 60, 60) };
             del.Click += (s, e) => DeleteMyAccount();
             cm.Items.Add(del);
             cm.Show(anchor, new Point(0, anchor.Height));
+        }
+
+        // (1.2.75) Abandonar una empresa por voluntad propia (sql/abandonar-empresa.sql: leave_company). El servidor no
+        // deja si hay un servicio abierto en ella o si eres su único gerente, y suelta los turnos que tuvieras reservados.
+        async void LeaveCompany(EmpCompany co)
+        {
+            if (co == null || !Supa.IsLoggedIn) return;
+            string msg = string.Format(Tr("¿Seguro que quieres abandonar «{0}»?\n\nDejarás de ser socio: ya no podrás conducir sus servicios ni ver su banca. Lo que has hecho en ella se queda en la empresa. Para volver, tendrás que pedir el ingreso otra vez."), co.Name);
+            if (ThemedBox.Show(this, msg, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            var (_, err) = await Supa.RpcAsync("leave_company", new { p_company = co.Id });
+            if (err != null)
+            {
+                string m = err.IndexOf("leave_company", StringComparison.OrdinalIgnoreCase) >= 0 && err.IndexOf("function", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? Tr("El servidor todavía no permite abandonar empresas (falta actualizarlo).") : err;
+                ThemedBox.Show(this, Tr("No se ha podido abandonar la empresa: ") + m, "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            // Lo que el programa tuviera de esa empresa deja de valer (como al eliminarla).
+            if (_empOnDutyCompany?.Id == co.Id) { _empOnDutyCompany = null; _pendingServiceId = null; _svcOpenedUtc = null; }
+            if (_favCompanyId == co.Id) { _favCompanyId = null; if (_prefs != null && _prefs.FavoriteCompany == co.Id) { _prefs.FavoriteCompany = null; try { _prefs.Save(); } catch { } } }
+            _empSel = null; _myRole = null;
+            UpdateDutyUi();
+            ThemedBox.Show(this, string.Format(Tr("Has abandonado «{0}»."), co.Name), "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            LoadCompanies();
         }
 
         // Cómo te conoce la cuenta: tu nombre de acceso (o tu correo, en cuentas antiguas).

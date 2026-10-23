@@ -1,4 +1,4 @@
-// Escribir en el chat del HUD sin que Open Rails reaccione a las teclas (1.2.69).
+﻿// Escribir en el chat del HUD sin que Open Rails reaccione a las teclas (1.2.69).
 // La cajita del chat de SelectOR toma el teclado, pero a veces Windows no le deja quitárselo a Open Rails (que es la
 // ventana activa) y las letras le llegaban también al simulador (regulador, frenos, cámaras…). Mientras SelectOR
 // avisa de que se está escribiendo («TYPING segundos» por la conexión local, LocalLink.cs; caduca solo si deja de
@@ -53,6 +53,8 @@ namespace SelectOR.MapAgent
                 _empty = Activator.CreateInstance(_kb.FieldType);
                 _pressed = AccessTools.Method(_kb.FieldType, "GetPressedKeys", Type.EmptyTypes);
                 h.Patch(m, postfix: new HarmonyMethod(typeof(Teclado), nameof(After)));
+                int r = Raton.Install(h);   // y el ratón: los clics en las ventanas de SelectOR no le llegan (Raton.cs)
+                Agent.Log("ratón:" + ((r & 1) != 0 ? " clics de SelectOR fuera de Open Rails" : " (sin filtro)") + ((r & 2) != 0 ? " · mandos de la cabina protegidos" : ""));
                 return 1;
             }
             catch (Exception ex) { Agent.Log("teclado: " + ex.GetType().Name + " " + ex.Message); return 0; }

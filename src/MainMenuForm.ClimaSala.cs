@@ -61,7 +61,7 @@ namespace SelectOR
             bool admin = Supa.IsSuperadmin && Supa.IsLoggedIn;
             if (_salaWxBtn.Visible == admin) return;
             _salaWxBtn.Visible = admin;
-            _salaHost.Width = admin ? 326 : 290;
+            _salaHost.Width = admin ? 360 : 326;   // (con el 🖥 del puesto de mando)
         }
 
         async Task EditSalaWeather()

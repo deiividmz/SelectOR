@@ -1,4 +1,4 @@
-// Avisos al usuario (notificaciones.sql): el servidor guarda un aviso cada vez que pasa algo que te
+﻿// Avisos al usuario (notificaciones.sql): el servidor guarda un aviso cada vez que pasa algo que te
 // afecta (te aceptan o rechazan en una empresa, se resuelve una solicitud de compra, te cambian el
 // rol…) y aquí se enseñan como ventanas emergentes abajo a la derecha. Llegan al momento por
 // Supabase Realtime y, por si acaso, se consultan cada 90 s; mientras conduces se guardan y salen al
@@ -185,6 +185,9 @@ namespace SelectOR
                 case "member_removed":
                     icon = "🚪"; c = bad; title = Tr("Ya no perteneces a una empresa");
                     body = string.Format(Tr("{0} te ha quitado de {1}."), who, co); cid = null; break;
+                case "member_left":
+                    icon = "🚪"; c = info; title = Tr("Un socio ha dejado la empresa");
+                    body = string.Format(Tr("{0} ha abandonado {1}."), DataOr(r, "who", Tr("Un maquinista")), co); sub = 2; break;
                 case "company_deleted":
                     icon = "🗑"; c = bad; title = Tr("Empresa eliminada");
                     body = string.Format(Tr("La empresa {0} ha sido eliminada."), co); cid = null; break;

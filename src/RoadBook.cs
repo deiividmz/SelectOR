@@ -31,6 +31,7 @@ namespace SelectOR
             public readonly List<(double off, string name)> Platforms = new();  // andenes (nombre de estación)
             // Marcas de andén con su id del .tdb (para emparejar inicio y fin y saber a qué lado de la vía está)
             public readonly List<(double off, uint id, uint linked, bool start)> PlatformMarks = new();
+            public readonly List<(double off, uint id, string raw)> PlatformNames = new();   // (el nombre tal cual del andén, con su vía: puesto de mando)
             // Para el mapa del HUD: hitos kilométricos (valor del PK), cruces sin desvío, puntos de carga y apartaderos con nombre
             public readonly List<(double off, float value)> MilePosts = new();
             public readonly List<double> Diamonds = new(), Pickups = new();
@@ -310,6 +311,7 @@ namespace SelectOR
                             string name = cleanName?.Invoke(pl.Station.Trim()) ?? pl.Station.Trim();
                             if (!string.IsNullOrWhiteSpace(name)) e.Platforms.Add((off, name));
                             e.PlatformMarks.Add((off, pl.TrItemId, pl.LinkedPlatformItemId, !(pl.Flags1 ?? "").StartsWith("ffff", StringComparison.OrdinalIgnoreCase)));
+                            e.PlatformNames.Add((off, pl.TrItemId, (pl.ItemName ?? "").Trim()));
                         }
                     }
                 e.Limits.Sort((u, v) => u.off.CompareTo(v.off));
@@ -683,6 +685,29 @@ namespace SelectOR
 
         // Final de vía (topera): ahí el tren puede invertir la marcha, como en una estación término.
         bool DeadEnd(int nodeId) => nodeId >= 0 && _nodes.TryGetValue(nodeId, out var n) && n.In.Count + n.Out.Count == 1;
+
+        // ── Para el esquema del puesto de mando (Schematic.cs)
+        public bool IsDeadEnd(int node) => DeadEnd(node);
+        // Tronco y ramas de un nodo (tramos), según la geometría: el tronco es el que no forma el ángulo cerrado.
+        public bool NodeLegs(int node, out int[] trunk, out int[] branches)
+        {
+            trunk = branches = Array.Empty<int>();
+            if (node < 0 || !_nodes.TryGetValue(node, out var n)) return false;
+            trunk = n.In.ToArray(); branches = n.Out.ToArray(); return true;
+        }
+        // Ángulo (radianes, en la proyección local) con el que sale el tramo del nodo de su principio (A) o de su final.
+        public double LegAngle(int e, bool fromA) => AwayAngle(e, fromA);
+        // Desvío: su identificador en el mundo y sus ramas en el orden del .tdb (posición 0/1 de la foto de agujas).
+        public bool JunctionOf(int node, out int tx, out int tz, out int id, out int[] outEdges)
+        {
+            tx = tz = id = 0; outEdges = Array.Empty<int>();
+            if (!_junc.TryGetValue(node, out var j)) return false;
+            tx = j.Tx; tz = j.Tz; id = j.Id;
+            var vec = new Dictionary<int, int>();
+            for (int k = 0; k < Edges.Length; k++) vec[Edges[k].Vec] = k;
+            outEdges = j.Out.Select(v => vec.TryGetValue(v, out int e) ? e : -1).ToArray();
+            return true;
+        }
         const double ReversePenaltyM = 5000;   // solo se invierte si no hay otro camino razonable
 
         // Camino más corto por las vías desde (e0, off0) en el sentido dir0 hasta (eg, offg). null si no hay.

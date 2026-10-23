@@ -1,4 +1,4 @@
-// Itinerarios guardados (mapa grande → «Guardar» y pestaña «Guardados»): el itinerario marcado en el mapa, con sus
+﻿// Itinerarios guardados (mapa grande → «Guardar» y pestaña «Guardados»): el itinerario marcado en el mapa, con sus
 // puntos y sus paradas, se guarda en las preferencias (AppPrefs.SavedItineraries, por ruta) para cargarlo en otra
 // conducción sin marcarlo a mano. Al cargarlo, si el tren ya está en mitad del itinerario (de A a F y el tren en
 // C), la hoja de ruta se calcula desde donde está el tren (RoadBook.SkipReachedFrom).
@@ -67,11 +67,21 @@ namespace SelectOR
             return string.Format(Tr("Itinerario guardado: {0}"), it.Name);
         }
 
+        // (1.2.75) Borrar un guardado: fuera de la lista y de Conducción libre si estaba elegido para su ruta. Se apunta
+        // como borrado para que un diálogo abierto (Servicios programados) no lo vuelva a enseñar.
+        readonly HashSet<string> _deletedItins = new(StringComparer.Ordinal);
         void DeleteSavedItinerary(SavedItinerary it)
         {
             if (it == null || _prefs?.SavedItineraries == null) return;
             _prefs.SavedItineraries.RemoveAll(s => s.Id == it.Id);
+            if (it.Id != null)
+            {
+                _deletedItins.Add(it.Id);
+                if (_prefs.ExploreItinerary != null)
+                    foreach (var k in _prefs.ExploreItinerary.Where(kv => kv.Value == it.Id).Select(kv => kv.Key).ToList()) _prefs.ExploreItinerary.Remove(k);
+            }
             try { _prefs.Save(); } catch { }
+            try { if (!IsDisposed) BeginInvoke(new Action(UpdateItineraryChip)); } catch { }
         }
 
         // Carga un guardado como itinerario de la conducción en curso. Devuelve el mensaje para la cabecera del mapa.

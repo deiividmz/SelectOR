@@ -1,4 +1,4 @@
-// Mandos al conducir (Ajustes de SelectOR → Mandos; Joysticks.cs): mientras Open Rails está abierto, cada 25 ms se leen
+﻿// Mandos al conducir (Ajustes de SelectOR → Mandos; Joysticks.cs): mientras Open Rails está abierto, cada 25 ms se leen
 // los mandos y, si algo cambia, se le manda al agente del mapa dentro de Open Rails por la conexión local
 // (LocalMapLink: «CAB tipo valor» para las palancas, «CRUISE fracción máx» para la del control de crucero, «BTN orden
 // 1|0» para los botones; MapAgent\Controls.cs). En
@@ -90,6 +90,7 @@ namespace SelectOR
                 if (known && was == down) continue;
                 if (!known && !down) { _joyBtnSent[g.Key] = false; continue; }   // (al empezar, los sueltos no se mandan)
                 _joyBtnSent[g.Key] = down;
+                OrControl.Calm(OrControl.CalmFor(g.Key, !down));   // (como el pupitre: sin consultas a OR mientras cambia)
                 l.Send("BTN " + g.Key + " " + (down ? "1" : "0"));
             }
         }
