@@ -1,10 +1,7 @@
-1.2.75
-Control centre|A new control centre for the shared room, like ADIF's signal boxes: every station with its track diagram, platforms and numbered switches, occupied blocks in red and routes in green. Dispatchers take charge of their stations and receive the drivers' Tab requests.
-Signal-to-signal routes|Click a signal, «Set a route from here…» and pick the destination: the switches are thrown and locked, and the signal clears by itself, with its proper aspect, when the train arrives. If it crosses another route, it is queued and set automatically when its turn comes. The dispatcher can put a station under manual control and order the queue. The menus no longer have «Clear» or «Approach».
-Signals with their real lights|On the HUD big map and in the control centre, every signal shows its lights (green and yellow for the caution approach, flashing yellow, authorised passing…) and the number on its pre-warning display. They grow as you zoom in.
-Carry on with your train|If you leave the shared room or get disconnected, when you come back SelectOR offers to carry on with your train where you left it.
-Esc in the room|In the shared room, Esc opens a menu to quit or continue (you used to need Alt+F4).
-The big map follows your train|It centres on your train and follows it while you drive. If you drag it, it stays where you leave it, and «Follow my train» brings it back.
-CYZYRails improvements|LZB and ASFA on the locomotives that have them (like the 446) also work in CYZY. The cab panel no longer closes Open Rails. Station lights no longer jump as you move. More white light on CGL: canopies, street lamps and lit billboards.
-Leave a company|From «My account» you can leave the selected company whenever you want.
-Delete saved itineraries|The itinerary planner (Free driving and Scheduled services) has a button to delete the selected saved itinerary.
+1.2.76
+Control centre on a single screen|The whole route on one board you pan with the mouse and zoom with the wheel, following the real track layout (spread out in stations so it reads well): occupied blocks, routes, numbered switches, signals with their real look, platforms and trains. The list on the left takes you to each station or line section, and the dispatcher works from the same board.
+Room switches as on the map|In the shared room your Open Rails no longer sets switches by itself: the switches you see in 3D are always the same as on the big map and in the room, also when another player throws them.
+G key in the room|In the shared room, G and Shift+G throw the switch in the room, like a click on the big map (before, it only changed in your Open Rails and the others did not see it).
+Detached cars on the map|If someone uncouples and leaves cars on the track, they show on the big map and in the control centre («… detached cars», in grey) and occupy their track: signals and routes take them into account.
+Lit tunnels in CYZYRails|Tunnel lamps no longer go dark when you switch on the train lights.
+Finer ATO in CYZYRails|The ATO starts braking in time and follows its braking curve, without overshooting the stopping point.

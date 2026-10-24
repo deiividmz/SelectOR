@@ -19,7 +19,7 @@ namespace SelectOR
     public sealed partial class DispatchForm
     {
         Label _manualBtn;
-        (Schematic.Signal origin, List<SchematicCircuits.ItinOption> opts)? _pick;
+        (RoomMapGeo.Sig origin, List<SchematicCircuits.ItinOption> opts)? _pick;   // (1.2.76: la señal de la ruta, en el tablero o en un esquema)
         string _itinMsg; bool _itinMsgOk; DateTime _itinMsgUntil;
 
         // (constructor, tras BuildJefeBar) el botón del mando y las respuestas de la sala
@@ -78,7 +78,7 @@ namespace SelectOR
         {
             if (_manualBtn == null) return;
             var h = _sel;
-            bool mine = HeaderMine(h) && !Overview;
+            bool mine = HeaderMine(h) && (Board || !Overview);
             _manualBtn.Visible = mine;
             if (!mine) return;
             bool man = HeaderManual(h);
@@ -87,11 +87,11 @@ namespace SelectOR
         }
 
         // ── el menú de una señal tuya: itinerarios y órdenes
-        void SignalMenu(Schematic.Signal sg, Point p)
+        void SignalMenu(RoomMapGeo.Sig sg, Point p)
         {
             var m = MenuStyle.Apply(new ContextMenuStrip());
-            m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Señal {0}"), sg.Sig.Obj)) { Enabled = false });
-            var it = _pilot.ItinFrom(sg.Sig.Obj);
+            m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Señal {0}"), sg.Obj)) { Enabled = false });
+            var it = _pilot.ItinFrom(sg.Obj);
             if (it == null)
                 m.Items.Add(new ToolStripMenuItem(Tr("Establecer itinerario desde aquí…"), null, (o, e) => StartPick(sg)) { ForeColor = SchematicDraw.RouteColor });
             else if (it.State == "queue")
@@ -106,7 +106,7 @@ namespace SelectOR
             m.Items.Add(new ToolStripSeparator());
             void Item(string text, int pick, Color col)
             {
-                var mi = new ToolStripMenuItem(text, null, (o, e) => { _pilot.JefeSignal(sg.Sig.Obj, pick); _flash[sg.Sig.Obj] = DateTime.Now; _timer.Interval = 250; });
+                var mi = new ToolStripMenuItem(text, null, (o, e) => { _pilot.JefeSignal(sg.Obj, pick); _flash[sg.Obj] = DateTime.Now; _timer.Interval = 250; });
                 if (col != Color.Empty) mi.ForeColor = col;
                 m.Items.Add(mi);
             }
@@ -118,9 +118,9 @@ namespace SelectOR
 
         static string ItinName(SwitchPilot.Itin it) => it.Origin + " → " + (it.Dest >= 0 ? it.Dest.ToString() : Tr("topera"));
 
-        void StartPick(Schematic.Signal sg)
+        void StartPick(RoomMapGeo.Sig sg)
         {
-            if (_g == null || _sbe == null || !SchematicCircuits.SignalPlace(_sbe, sg.Sig, out int e, out double off, out int dir))
+            if (_g == null || _sbe == null || !SchematicCircuits.SignalPlace(_sbe, sg, out int e, out double off, out int dir))
             { ItinSay(Tr("No se sabe por dónde sigue la vía desde esa señal."), false); return; }
             var opts = SchematicCircuits.Options(_g, _sbe, e, off, dir);
             if (opts.Count == 0) { ItinSay(Tr("Desde esa señal no hay ningún destino a menos de 3 km."), false); return; }
@@ -136,20 +136,34 @@ namespace SelectOR
             var o = PickAt(pk, p);
             if (o != null)
             {
-                _pilot.ItinSet(pk.origin.Sig.Obj, o.Dest, o.Switches);
-                ItinSay(string.Format(Tr("Estableciendo el itinerario {0} → {1}…"), pk.origin.Sig.Obj, o.Dest >= 0 ? o.Dest.ToString() : Tr("topera")), true);
+                _pilot.ItinSet(pk.origin.Obj, o.Dest, o.Switches);
+                ItinSay(string.Format(Tr("Estableciendo el itinerario {0} → {1}…"), pk.origin.Obj, o.Dest >= 0 ? o.Dest.ToString() : Tr("topera")), true);
             }
             _canvas.Invalidate();
             return true;
         }
 
-        SchematicCircuits.ItinOption PickAt((Schematic.Signal origin, List<SchematicCircuits.ItinOption> opts) pk, Point p)
+        // (1.2.76) un punto de un tramo y un trozo de vía, en pantalla: en el tablero o en el esquema que se ve
+        bool ScreenOff(int e, double off, out PointF s)
+        {
+            if (Board) { s = Bp(_board.At(e, off)); return true; }
+            s = default;
+            if (_cur == null || !_cur.MapOff(e, off, out var q)) return false;
+            s = new PointF(_origin.X + q.X * _zoom, _origin.Y + q.Y * _zoom); return true;
+        }
+        PointF[] ScreenPiece(int e, double a, double b)
+        {
+            var pc = Board ? _board.Piece(e, a, b) : _cur?.Piece(e, a, b);
+            if (pc == null) return null;
+            return Board ? pc.Select(Bp).ToArray() : pc.Select(q => new PointF(_origin.X + q.X * _zoom, _origin.Y + q.Y * _zoom)).ToArray();
+        }
+
+        SchematicCircuits.ItinOption PickAt((RoomMapGeo.Sig origin, List<SchematicCircuits.ItinOption> opts) pk, Point p)
         {
             SchematicCircuits.ItinOption best = null; float bd = Theme.Px(16) * Theme.Px(16);
             foreach (var o in pk.opts)
             {
-                if (!_cur.MapOff(o.EndEdge, o.EndOff, out var q)) continue;
-                var s = new PointF(_origin.X + q.X * _zoom, _origin.Y + q.Y * _zoom);
+                if (!ScreenOff(o.EndEdge, o.EndOff, out var s)) continue;
                 float d = (s.X - p.X) * (s.X - p.X) + (s.Y - p.Y) * (s.Y - p.Y);
                 if (d < bd) { bd = d; best = o; }
             }
@@ -161,9 +175,8 @@ namespace SelectOR
         // (Paint_) los caminos posibles mientras se elige, y el mensaje de la sala
         void DrawPick(Graphics g, Rectangle area)
         {
-            if (_pick is { } pk && _cur != null)
+            if (_pick is { } pk && (Board || _cur != null))
             {
-                PointF P(PointF q) => new PointF(_origin.X + q.X * _zoom, _origin.Y + q.Y * _zoom);
                 var mouse = _canvas.PointToClient(Cursor.Position);
                 var hov = PickAt(pk, mouse);
                 foreach (var o in pk.opts.OrderBy(o => o == hov))
@@ -172,18 +185,18 @@ namespace SelectOR
                     using var pen = new Pen(h ? SchematicDraw.RouteColor : Color.FromArgb(200, 236, 238, 240), h ? 4f : 2.4f) { DashStyle = h ? DashStyle.Solid : DashStyle.Dash, LineJoin = LineJoin.Round };
                     foreach (var (e, a, b) in o.Pieces)
                     {
-                        var pc = _cur.Piece(e, a, b);
-                        if (pc != null && pc.Length >= 2) g.DrawLines(pen, pc.Select(P).ToArray());
+                        var pc = ScreenPiece(e, a, b);
+                        if (pc != null && pc.Length >= 2) g.DrawLines(pen, pc);
                     }
-                    if (!_cur.MapOff(o.EndEdge, o.EndOff, out var q)) continue;
-                    var s = P(q); float r = Theme.Px(h ? 10 : 8);
+                    if (!ScreenOff(o.EndEdge, o.EndOff, out var s)) continue;
+                    float r = Theme.Px(h ? 10 : 8);
                     using (var fb = new SolidBrush(Color.FromArgb(h ? 230 : 160, 20, 60, 30))) g.FillEllipse(fb, s.X - r, s.Y - r, 2 * r, 2 * r);
                     using (var rp = new Pen(h ? SchematicDraw.RouteColor : Color.White, 2f)) g.DrawEllipse(rp, s.X - r, s.Y - r, 2 * r, 2 * r);
                     string lab = o.Dest >= 0 ? o.Dest.ToString() : Tr("topera");
                     using var f = Theme.Font(8f, FontStyle.Bold);
                     TextRenderer.DrawText(g, lab, f, new Point((int)(s.X + r + 3), (int)(s.Y - r - 2)), h ? SchematicDraw.RouteColor : Color.White, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
                 }
-                Banner(g, area, string.Format(Tr("Itinerario desde la señal {0}: clic en el destino (un círculo) · Esc: cancelar"), pk.origin.Sig.Obj), Color.FromArgb(230, 20, 60, 30), Color.FromArgb(200, 240, 200));
+                Banner(g, area, string.Format(Tr("Itinerario desde la señal {0}: clic en el destino (un círculo) · Esc: cancelar"), pk.origin.Obj), Color.FromArgb(230, 20, 60, 30), Color.FromArgb(200, 240, 200));
                 return;
             }
             if (_itinMsg != null && DateTime.UtcNow < _itinMsgUntil)

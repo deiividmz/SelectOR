@@ -227,6 +227,19 @@ namespace SelectOR
     }
 
     // Lo que hay que dibujar ahora (lo prepara la ventana principal en cada repintado).
+    // (1.2.76) La parte suelta de un desacople en la sala: el despachador la manda como «SUELTO-dueño-número».
+    public static class RoomLoose
+    {
+        public static bool Is(string name) => name != null && name.StartsWith("SUELTO-", StringComparison.Ordinal);
+        public static string Owner(string name)
+        {
+            if (!Is(name)) return null;
+            string r = name.Substring(7); int k = r.LastIndexOf('-');
+            return k > 0 ? r.Substring(0, k) : r;
+        }
+        public static string Label(string name) => string.Format(I18n.T("Suelto de {0}"), Owner(name));
+    }
+
     public sealed class RoomMapView
     {
         public RoomMapGeo Geo;

@@ -1,4 +1,4 @@
-// Scripts de seguridad (TCS) más nuevos que el Open Rails que los carga (1.2.75).
+﻿// Scripts de seguridad (TCS) más nuevos que el Open Rails que los carga (1.2.75).
 // Los trenes españoles con ASFA + LZB + ATO (Common_TCS_Spain\Script1\ServerTCS.cs, 38 .eng, p. ej. el 446-140) usan dos
 // propiedades del sistema de seguridad que solo tienen los Open Rails nuevos (New Year 174/175, MG, Inestable):
 // SetSpeedMpS y SetSpeedAccelerationMpSS (la velocidad y la aceleración que el ATO le pide al control de crucero). En
@@ -30,12 +30,17 @@ namespace SelectOR.MapAgent
 
         // ── el ATO en los Open Rails que no lo tienen: como en New Year (CruiseControl.ASCSetSpeedMpS) sin
         // ASCSpeedTakesPriorityOverSpeedSelector: la velocidad del control de crucero es la menor entre la elegida y la del
-        // ATO. La aceleración del ATO (ASCAccelerationMpSS) solo se guarda: el control de crucero de estas versiones calcula
-        // de otra manera y no la usa (frena hacia la velocidad del ATO a su manera).
-        sealed class AtoState { public float? Speed; public float Acc; }
+        // ATO. (1.2.76) El control de crucero de estas versiones no usa la aceleración del ATO: solo frena cuando el tren ya va
+        // más deprisa que la velocidad marcada (y con más fuerza cuanto mayor es la diferencia), con un tope de deceleración
+        // (MaxDecelerationMpSS, 0,5 m/s² de serie). Siguiendo la curva de frenado del ATO, que baja sin parar, iba siempre
+        // tarde y se pasaba del punto de parada. Ahora, mientras el ATO frena: la velocidad marcada es la de la curva un poco
+        // más adelante en el tiempo (AtoLead s, menos cerca de la parada) y más baja si el tren va por encima de la curva; y
+        // el tope de deceleración, el que pide el ATO (se devuelve al suyo al acabar).
+        sealed class AtoState { public float? Speed; public float Acc; public float? OrigMaxDec; }
+        const float AtoLead = 2f;   // s de adelanto sobre la curva del ATO (a 20 km/h o más; menos por debajo)
         static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, AtoState> _ato = new System.Runtime.CompilerServices.ConditionalWeakTable<object, AtoState>();
         static readonly Dictionary<Type, PropertyInfo> _locoProp = new Dictionary<Type, PropertyInfo>();
-        static FieldInfo _ccField, _ccMode, _ccLoco; static PropertyInfo _ccSet;
+        static FieldInfo _ccField, _ccMode, _ccLoco, _ccMaxDec; static PropertyInfo _ccSet; static MemberInfo _locoSpeed;
 
         static object LocoOf(object tcs)
         {
@@ -74,9 +79,44 @@ namespace SelectOR.MapAgent
             try
             {
                 var loco = _ccLoco?.GetValue(__instance);
-                if (loco != null && _ato.TryGetValue(loco, out var a) && a.Speed.HasValue && a.Speed.Value < __result) __result = a.Speed.Value;
+                if (loco == null || !_ato.TryGetValue(loco, out var a)) return;
+                bool braking = a.Speed.HasValue && a.Speed.Value < __result && a.Acc < -0.05f;
+                if (a.Speed.HasValue && a.Speed.Value < __result) __result = a.Speed.Value;
+                // (1.2.76) frenando con la curva del ATO: adelanto, corrección y tope de deceleración
+                float v = Speed(loco);
+                if (braking && v >= 0)
+                {
+                    float near = Clamp((v - (a.Speed.Value - 1f)) / 1f, 0f, 1f);   // (solo cerca o por encima de la curva)
+                    float lead = AtoLead * Clamp(v / (20f / 3.6f), 0.3f, 1f);
+                    float set = a.Speed.Value + a.Acc * lead * near - Math.Max(0f, v - a.Speed.Value);
+                    __result = Math.Max(0f, Math.Min(__result, set));
+                    if (_ccMaxDec != null)
+                    {
+                        float cur = (float)_ccMaxDec.GetValue(__instance);
+                        if (!a.OrigMaxDec.HasValue) a.OrigMaxDec = cur;
+                        float want = Math.Max(a.OrigMaxDec.Value, -a.Acc + 0.15f);
+                        if (Math.Abs(cur - want) > 0.01f) _ccMaxDec.SetValue(__instance, want);
+                    }
+                }
+                else if (a.OrigMaxDec.HasValue && _ccMaxDec != null)
+                {
+                    _ccMaxDec.SetValue(__instance, a.OrigMaxDec.Value); a.OrigMaxDec = null;
+                }
             }
             catch { }
+        }
+
+        static float Clamp(float x, float lo, float hi) => x < lo ? lo : x > hi ? hi : x;
+
+        static float Speed(object loco)
+        {
+            try
+            {
+                if (_locoSpeed is PropertyInfo pi) return Math.Abs(Convert.ToSingle(pi.GetValue(loco, null)));
+                if (_locoSpeed is FieldInfo fi) return Math.Abs(Convert.ToSingle(fi.GetValue(loco)));
+            }
+            catch { }
+            return -1f;
         }
 
         static void InstallAto(Harmony h)
@@ -88,6 +128,8 @@ namespace SelectOR.MapAgent
                 if (cc == null || loco == null || AccessTools.Field(cc, "ASCSetSpeedMpS") != null) return;   // (ya lo tiene)
                 _ccField = AccessTools.Field(loco, "CruiseControl"); _ccMode = AccessTools.Field(cc, "SpeedRegMode");
                 _ccLoco = AccessTools.Field(cc, "Locomotive"); _ccSet = AccessTools.Property(cc, "SetSpeedMpS");
+                _ccMaxDec = AccessTools.Field(cc, "MaxDecelerationMpSS"); if (_ccMaxDec != null && _ccMaxDec.FieldType != typeof(float)) _ccMaxDec = null;
+                _locoSpeed = (MemberInfo)AccessTools.Property(loco, "AbsSpeedMpS") ?? AccessTools.Field(loco, "AbsSpeedMpS");
                 var d = AppDomain.CurrentDomain;
                 d.SetData("selector.ato.get", new Func<object, float?>(AtoGet));
                 d.SetData("selector.ato.set", new Action<object, float?>(AtoSet));
@@ -96,7 +138,8 @@ namespace SelectOR.MapAgent
                 if (_ccSet?.GetGetMethod(true) != null && _ccLoco != null && _ccSet.PropertyType == typeof(float))
                 {
                     h.Patch(_ccSet.GetGetMethod(true), postfix: new HarmonyMethod(typeof(Tcs), nameof(AfterSetSpeed)));
-                    Agent.Log("scripts de seguridad: ATO conectado al control de crucero (la velocidad del ATO limita la elegida, como en New Year)");
+                    Agent.Log("scripts de seguridad: ATO conectado al control de crucero (la velocidad del ATO limita la elegida, como en New Year; frenando, con adelanto sobre su curva"
+                              + (_ccMaxDec != null ? " y su deceleración" : "") + (_locoSpeed == null ? "; sin la velocidad del tren: sin adelanto" : "") + ")");
                 }
                 else Agent.Log("scripts de seguridad: este control de crucero no se deja limitar: el ATO no actúa");
             }

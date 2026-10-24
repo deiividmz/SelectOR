@@ -41,6 +41,9 @@ namespace SelectOR
         Point _dragFrom; PointF _dragOrigin; bool _dragging;
         string _hover;                                                                   // (plano) la dependencia bajo el ratón
         RectangleF _backBox;                                                             // «← Plano general»
+        // (1.2.76) el tablero: toda la ruta en una sola pantalla (RouteBoard.cs). Mientras se prepara, el plano de antes
+        RouteBoard _board; PointF _bOrigin; float _bZoom = 0.05f; bool _bFitted;
+        bool Board => _board != null;
 
         static string General => "🗺  " + I18n.T("Plano general");
         bool Overview => _curZone == null;
@@ -98,7 +101,12 @@ namespace SelectOR
             _canvas.Paint += (s, e) => Paint_(e.Graphics);
             _canvas.MouseWheel += (s, e) =>
             {
-                if (Overview)
+                if (Board)
+                {
+                    float k = e.Delta > 0 ? 1.18f : 1 / 1.18f, nz = Math.Max(0.004f, Math.Min(9f, _bZoom * k)); k = nz / _bZoom;
+                    _bOrigin = new PointF(e.X - (e.X - _bOrigin.X) * k, e.Y - (e.Y - _bOrigin.Y) * k); _bZoom = nz;
+                }
+                else if (Overview)
                 {
                     float k = e.Delta > 0 ? 1.15f : 1 / 1.15f, nz = Math.Max(0.004f, Math.Min(3f, _ovZoom * k)); k = nz / _ovZoom;
                     _ovOrigin = new PointF(e.X - (e.X - _ovOrigin.X) * k, e.Y - (e.Y - _ovOrigin.Y) * k); _ovZoom = nz;
@@ -110,7 +118,7 @@ namespace SelectOR
                 }
                 _canvas.Invalidate();
             };
-            _canvas.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { _dragFrom = e.Location; _dragOrigin = Overview ? _ovOrigin : _origin; _dragging = false; _canvas.Focus(); } };
+            _canvas.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { _dragFrom = e.Location; _dragOrigin = Board ? _bOrigin : Overview ? _ovOrigin : _origin; _dragging = false; _canvas.Focus(); } };
             _canvas.MouseMove += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left)
@@ -119,12 +127,19 @@ namespace SelectOR
                     if (_dragging)
                     {
                         var no = new PointF(_dragOrigin.X + e.X - _dragFrom.X, _dragOrigin.Y + e.Y - _dragFrom.Y);
-                        if (Overview) _ovOrigin = no; else _origin = no;
+                        if (Board) _bOrigin = no; else if (Overview) _ovOrigin = no; else _origin = no;
                         _canvas.Invalidate();
                     }
                     return;
                 }
-                if (Overview)
+                if (Board)
+                {
+                    bool own = Me != null && (RouteBoardDraw.SignalAt(_board, e.Location, Theme.Px(4)) is RouteBoard.Sg bs && MySig(bs.S.Obj)
+                                              || RouteBoardDraw.SwitchAt(_board, e.Location) is RouteBoard.Sw bw && MyNode(bw.Node));
+                    _canvas.Cursor = own || _pick != null || StationAt(e.Location) != null ? Cursors.Hand : Cursors.SizeAll;
+                    if (_pick != null) _canvas.Invalidate();
+                }
+                else if (Overview)
                 {
                     string h = ZoneAt(e.Location);
                     if (h != _hover) { _hover = h; _canvas.Invalidate(); }
@@ -141,6 +156,13 @@ namespace SelectOR
             {
                 if (e.Button != MouseButtons.Left || _dragging) { _dragging = false; return; }
                 if (NoticeClick(e.Location)) return;   // una notificación de Tab: a esa señal (DispatchForm.Avisos.cs)
+                if (Board)
+                {
+                    if (PickClick(e.Location)) return;     // eligiendo el destino de un itinerario
+                    if (JefeClick(e.Location)) return;     // con el mando: una aguja o una señal
+                    var st = StationAt(e.Location); if (st != null && _list.Items.Contains(st)) Select(st);
+                    return;
+                }
                 if (Overview) { var z = ZoneAt(e.Location); if (z != null) Select(z); return; }
                 if (_backBox.Contains(e.Location)) { PickCancel(); Select(General); return; }
                 if (PickClick(e.Location)) return;     // eligiendo el destino de un itinerario (DispatchForm.Itinerarios.cs)
@@ -149,15 +171,15 @@ namespace SelectOR
                 var x = SchematicDraw.ExitAt(_cur, _origin, _zoom, e.Location, g2);
                 if (x != null && _list.Items.Contains(x.Station)) Select(x.Station);
             };
-            _canvas.DoubleClick += (s, e) => { if (Overview) FitOverview(); else Fit(); };
+            _canvas.DoubleClick += (s, e) => { if (Board) FitBoard(); else if (Overview) FitOverview(); else Fit(); };
             new ToolTip().SetToolTip(_canvas, Tr("rueda: zoom · arrastrar: mover · doble clic: ajustar"));
-            _canvas.Resize += (s, e) => { if (Overview ? !_ovFitted : !_fitted) { if (Overview) FitOverview(); else Fit(); } };
+            _canvas.Resize += (s, e) => { if (Board) { if (!_bFitted) FitBoard(); } else if (Overview ? !_ovFitted : !_fitted) { if (Overview) FitOverview(); else Fit(); } };
 
             Controls.Add(_canvas); Controls.Add(side); Controls.Add(top);
 
             // (1.2.75) luces a destellos (amarillo a destellos, rebase autorizado…): repintar cada cuarto de segundo mientras haya
             _blink = new Timer { Interval = 250 };
-            _blink.Tick += (s, e) => { if (_blinking && !Overview) _canvas.Invalidate(); };
+            _blink.Tick += (s, e) => { if (_blinking && (Board || !Overview)) _canvas.Invalidate(); };
             _blink.Start();
             _timer = new Timer { Interval = 1000 };
             _timer.Tick += (s, e) => { UpdateStatus(); if (JefeBarStale()) UpdateJefe(); JefeKeepAlive(); RefreshHeaders(); _canvas.Invalidate(); };
@@ -215,12 +237,25 @@ namespace SelectOR
             _curZone = null; _cur = null; _sel = null; _heads = new();
             _title.Text = Tr("PUESTO DE MANDO") + "  ·  " + Tr("Plano general");
             UpdateJefe();
+            if (Board) { FitBoard(); return; }
             if (!_ovFitted) FitOverview(); else _canvas.Invalidate();
         }
 
         void ShowZone(string zone)
         {
             if (_g == null) return;
+            if (Board)
+            {
+                // (1.2.76) en el tablero: a esa estación o trayecto, sin cambiar de pantalla; la dependencia queda elegida para el jefe
+                _cur = null; _curZone = zone;
+                _title.Text = Tr("PUESTO DE MANDO") + "  ·  " + zone;
+                if (_unread.Remove(zone)) _list.Invalidate();
+                _sel = new SchematicHeader { Name = zone, Zones = new List<string> { zone } };
+                _heads = new List<SchematicHeader> { _sel };
+                RefreshHeaders(); UpdateJefe();
+                FocusZone(zone);
+                return;
+            }
             if (!_cache.TryGetValue(zone, out var s))
             {
                 var z = _zones?.FirstOrDefault(q => q.Name == zone) ?? new Schematic.Zone { Name = zone };
@@ -278,6 +313,146 @@ namespace SelectOR
         }
 
         PointF Ov(double x, double y) => new PointF((float)(_ovOrigin.X + x * _ovZoom), (float)(_ovOrigin.Y + y * _ovZoom));
+
+        // ── (1.2.76) el tablero
+        PointF Bp(PointF q) => new PointF(_bOrigin.X + q.X * _bZoom, _bOrigin.Y + q.Y * _bZoom);
+
+        void FitBoard()
+        {
+            if (_board == null || _canvas.Width < 50) { _canvas.Invalidate(); return; }
+            var b = _board.Bounds; float pad = Theme.Px(50);
+            _bZoom = Math.Min((_canvas.Width - 2 * pad) / Math.Max(1f, b.Width), (_canvas.Height - 2 * pad) / Math.Max(1f, b.Height));
+            _bOrigin = new PointF((_canvas.Width - b.Width * _bZoom) / 2 - b.Left * _bZoom, (_canvas.Height - b.Height * _bZoom) / 2 - b.Top * _bZoom);
+            _bFitted = true; _canvas.Invalidate();
+        }
+
+        // centrar en una zona: una estación (sus andenes y alrededor) o un trayecto (sus puntos)
+        void FocusZone(string zone)
+        {
+            if (_board == null) return;
+            RectangleF r = RectangleF.Empty;
+            var st = _board.Stations.FirstOrDefault(s => s.name == zone);
+            if (st.name != null) r = RectangleF.Inflate(st.box, 220, 160);
+            else if (_zones?.FirstOrDefault(z => z.Name == zone) is { Anchors.Count: > 0 } z)
+            {
+                var pts = z.Anchors.Select(a => _board.W(a.x, a.y)).ToList();
+                r = RectangleF.FromLTRB(pts.Min(q => q.X), pts.Min(q => q.Y), pts.Max(q => q.X), pts.Max(q => q.Y)); r.Inflate(150, 150);
+            }
+            if (r.IsEmpty) { FitBoard(); return; }
+            CenterOn(r);
+        }
+
+        void CenterOn(RectangleF r, float minZoom = 0f)
+        {
+            float pad = Theme.Px(40);
+            _bZoom = Math.Max(minZoom, Math.Min(4f, Math.Min((_canvas.Width - 2 * pad) / Math.Max(1f, r.Width), (_canvas.Height - 2 * pad) / Math.Max(1f, r.Height))));
+            _bOrigin = new PointF(_canvas.Width / 2f - (r.X + r.Width / 2) * _bZoom, _canvas.Height / 2f - (r.Y + r.Height / 2) * _bZoom);
+            _bFitted = true; _canvas.Invalidate();
+        }
+
+        // la estación bajo el ratón (su nombre en el tablero)
+        string StationAt(Point p)
+        {
+            if (_board == null) return null;
+            foreach (var (name, r) in RouteBoardDraw.StationLabels(_board)) if (r.Contains(p)) return name;
+            return null;
+        }
+
+        // (IndexSignals) el tablero, con el número de cada aguja en su estación (el de su esquema de siempre)
+        static RouteBoard MakeBoard(RouteGraph g, RoomMapGeo geo, List<Schematic.Zone> zones, Dictionary<string, Schematic> built)
+        {
+            var num = new Dictionary<int, (string, int)>();
+            foreach (var z in zones.Where(z => !z.Line))
+                if (built.TryGetValue(z.Name, out var s) && s != null)
+                    foreach (var w in s.Switches) { int n = SchematicDraw.SwitchNumber(s, w.Node); if (n > 0 && !num.ContainsKey(w.Node)) num[w.Node] = (z.Name, n); }
+            return RouteBoard.Build(g, geo, n => num.TryGetValue(n, out var v) ? v : null);
+        }
+
+        // lo que pasa en la sala ahora, en el tablero (los mismos datos que en un esquema, en metros de cada tramo)
+        SchematicLive LiveBoard()
+        {
+            var p = _pilot; var geo = _geo; var b = _board;
+            if (p == null || geo == null || b == null || !p.Ready) return null;
+            var st = p.States; var stAt = p.StatesAt; var sig = p.SigStates; var blocked = p.Blocked;
+            bool sigOk = sig != null && sig.Length == 2 * geo.Heads.Count && geo.Heads.Count > 0;
+            int Pos(int order)
+            {
+                lock (_swSet) if (_swSet.TryGetValue(order, out var o) && o.at > stAt) return o.pos;
+                return st != null && order >= 0 && order < st.Length ? st[order] : -1;
+            }
+            int Asp(RoomMapGeo.Sig sg)
+            {
+                if (!sigOk) return -1;
+                int best = -1;
+                foreach (int k in sg.Heads) { if (!geo.Heads[k].Normal) continue; int v = 2 * k < sig.Length ? sig[2 * k] - 1 : -1; if (v >= 0 && v < 8 && v > best) best = v; }
+                return best;
+            }
+            var itinLocked = new HashSet<int>();
+            var live = new SchematicLive
+            {
+                SwitchPos = Pos, Aspect = Asp,
+                Figure = sg => !sigOk ? null : RoomMapDraw.FigureOf(geo, sg, k => 2 * k < sig.Length ? sig[2 * k] - 1 : -1, k => 2 * k + 1 < sig.Length ? sig[2 * k + 1] - 1 : -1),
+                Locked = o => itinLocked.Contains(o) || blocked != null && o >= 0 && o < blocked.Length && blocked[o] is 'S' or 'T' or 'O'
+            };
+            int PosNode(int n) => geo.OrderOf.TryGetValue(n, out int o) ? Pos(o) : -1;
+            void Occ(int e, double off)
+            {
+                if (!live.Occupied.TryGetValue(e, out var l)) live.Occupied[e] = l = new();
+                if (l.Count > 0 && off >= l[^1].a - 12 && off <= l[^1].b + 12) l[^1] = (Math.Min(l[^1].a, off - 2), Math.Max(l[^1].b, off + 2));
+                else l.Add((off - 2, off + 2));
+            }
+            foreach (var t in p.Trains)
+            {
+                if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
+                var body = new List<PointF>();
+                void At(double a, double o)
+                {
+                    if (b.Locate(a, o, out int e, out double off)) { Occ(e, off); body.Add(b.At(e, off)); }
+                    else { var (x, y) = _g.Proj(a, o); body.Add(b.W(x, y)); }
+                }
+                try
+                {
+                    if (p.TrainTrack.TryGetValue(t.name, out var k))
+                    {
+                        var pts = geo.Graph.PathAhead(k.node, la, lo, k.dir, k.mu, 0, Math.Max(k.len, 5), PosNode, out _);
+                        if (pts != null)
+                            for (int i = 0; i < pts.Count; i++)
+                            {
+                                if (i > 0)
+                                {
+                                    var (a1, o1) = pts[i - 1]; var (a2, o2) = pts[i];
+                                    double dm = LiveMates.Haversine(a1, o1, a2, o2); int n = (int)Math.Min(40, dm / 8);
+                                    for (int j = 1; j < n; j++) { double f = (double)j / n; At(a1 + (a2 - a1) * f, o1 + (o2 - o1) * f); }
+                                }
+                                At(pts[i].lat, pts[i].lon);
+                            }
+                    }
+                }
+                catch { }
+                if (body.Count == 0) At(la, lo);
+                if (body.Count == 0) continue;
+                string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
+                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player));
+            }
+            // itinerarios de las señales abiertas (de estación, con alguna aguja, y los rebases), solo las que se ven
+            if (sigOk && _sbe != null && _bZoom >= 0.08f)
+            {
+                var view = new RectangleF((-_bOrigin.X) / _bZoom, (-_bOrigin.Y) / _bZoom, _canvas.Width / _bZoom, _canvas.Height / _bZoom); view.Inflate(400, 400);
+                foreach (var sg in b.Signals)
+                {
+                    if (!view.Contains(sg.At)) continue;
+                    int a = Asp(sg.S); if (a < 1) continue;
+                    if (!SchematicCircuits.SignalPlace(_sbe, sg.S, out int e0, out double o0, out int d0)) continue;
+                    bool callOn = RoomMapDraw.IsCallOn(a);
+                    var got = new List<(int e, double x0, double x1)>();
+                    if (!SchematicCircuits.Walk(_g, _sbe, e0, o0, d0, PosNode, (e, x0, x1) => got.Add((e, x0, x1))) && !callOn) continue;
+                    foreach (var (e, x0, x1) in got) { if (!live.Route.TryGetValue(e, out var rl)) live.Route[e] = rl = new(); rl.Add((x0, x1, callOn)); }
+                }
+            }
+            AddItins(live, PosNode, itinLocked);
+            AddFlashes(live);
+            return live;
+        }
 
         // (plano) la dependencia bajo el ratón: una estación (su nombre o su punto) o, si no, el tramo de vía más cercano
         string ZoneAt(Point p)
@@ -349,7 +524,7 @@ namespace SelectOR
                         var col = t.player ? SchematicDraw.Occ : SchematicDraw.AiCol;
                         using (var b = new SolidBrush(col)) g.FillEllipse(b, q.X - 4.5f, q.Y - 4.5f, 9, 9);
                         using (var op = new Pen(Color.FromArgb(200, 10, 12, 14), 1.2f)) g.DrawEllipse(op, q.X - 4.5f, q.Y - 4.5f, 9, 9);
-                        if (t.player) using (var tb = new SolidBrush(col)) g.DrawString(t.name, tf, tb, q.X + 6, q.Y - 14);
+                        if (t.player || RoomLoose.Is(t.name)) using (var tb = new SolidBrush(col)) g.DrawString(t.player ? t.name : RoomLoose.Label(t.name), tf, tb, q.X + 6, q.Y - 14);
                     }
             // estaciones: su punto y su nombre (sin montarse unos nombres con otros); la 🔔 si alguien pide paso allí
             _stLabels.Clear();
@@ -480,7 +655,7 @@ namespace SelectOR
                 if (body.Count == 0) At(la, lo);
                 if (body.Count == 0) continue;
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
-                live.Trains.Add((t.player ? t.name : Tr("IA"), sub, body.ToArray(), t.player));
+                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player));
             }
             // itinerarios: de cada señal abierta a la siguiente, por las agujas como están (los de plena vía, no)
             if (sigOk && _sbe != null)
@@ -509,6 +684,19 @@ namespace SelectOR
         void Paint_(Graphics g)
         {
             var area = _canvas.ClientRectangle;
+            if (Board)
+            {
+                var lv = LiveBoard();
+                RouteBoardDraw.Draw(g, _board, lv, _bOrigin, _bZoom, area);
+                _blinking = lv?.Blinking == true;
+                if (_pick == null && !(_itinMsg != null && DateTime.UtcNow < _itinMsgUntil))
+                    using (var hf = Theme.Font(8.6f)) using (var tb = new SolidBrush(Theme.Subtle))
+                        g.DrawString(Tr("rueda: zoom · arrastrar: mover · doble clic: toda la ruta · clic en una estación: acercar"), hf, tb, area.Left + Theme.Px(12), area.Top + Theme.Px(10));
+                DrawNotices(g, area);
+                DrawJefeBand(g, area);
+                DrawPick(g, area);
+                return;
+            }
             if (Overview) { DrawOverview(g, area); DrawNotices(g, area); return; }
             if (_cur == null)
             {

@@ -12,6 +12,9 @@
 //  · si aun así no caben en 24, las distancias de esos fundidos se acortan poco a poco hasta que caben (y se alargan
 //    cuando sobra sitio); lo que queda fuera se va apagando, no de golpe;
 //  · las luces que se mueven (los faros de los trenes) van siempre sueltas;
+//  · (1.2.76) y como mucho ocupan MaxMoving plazas (las que más alumbran): CYZYRails pone una luz de punto por cada luz
+//    encendida del tren (faros, pilotos, testeros: 10 a 100 cd cada una) y, con las luces del tren encendidas, se quedaban
+//    con las 24 plazas y las lámparas tenues de los túneles (100 lm) se apagaban. El haz de los faros no es de estas (va aparte);
 //  · (1.2.75) los carteles de varias caras (Facades): sus luces se funden igual, por celdas, pero solo con las de su misma cara. Antes, de lejos,
 //    las de las tres caras se juntaban en el centro del cartel, dentro, y alumbraban su interior en vez de las caras.
 // Solo con los gráficos mejorados de CYZYRails (si no, no dibuja luces de punto). En otro Open Rails no se pone nada.
@@ -93,6 +96,7 @@ namespace SelectOR.MapAgent
         public static bool Sliding = true;   // (pruebas: false = sin fundidos en el tiempo)
 
         const int Max = 24, Room = 21;        // plazas; las que se quieren usar (con margen para los fundidos)
+        const int MaxMoving = 6;               // (1.2.76) plazas como mucho para las luces de los trenes
         const float Reach = 30f, FadeTime = 0.3f;
         // niveles: sueltas, celdas de 8, 32 y 128 m. Se pasa al nivel lv entre Near[lv−1] y Far[lv−1] metros de la cámara
         // al centro de la celda de ese nivel (a escala 1)
@@ -106,7 +110,7 @@ namespace SelectOR.MapAgent
         static float _scale = 1f, _scaleTry = 1f;   // se acorta cuando no caben (0,1…1)
 
         struct Raw { public Vector3 P, C; public float I; public bool Down, Surf; public long K, G; }   // G: su cara de cartel (0: ninguna)
-        struct Cand { public long K; public Vector3 P, C; public float I, W, D; public bool Down, Surf; }
+        struct Cand { public long K; public Vector3 P, C; public float I, W, D; public bool Down, Surf, Mov; }
         struct Acc { public Vector3 P, C; public float I; public int N; public bool Down, Surf; }
 
         static Raw[] _raw = new Raw[256]; static int _rawCount;
@@ -320,7 +324,15 @@ namespace SelectOR.MapAgent
                 }
             _pool.Sort((x, y) => (y.W * y.I / (y.D * y.D + 400f)).CompareTo(x.W * x.I / (x.D * x.D + 400f)));
             _outCount = 0;
-            foreach (var c in _pool) { if (_outCount >= Max) { _shownNext.Remove(c.K); continue; } _out[_outCount++] = c; }
+            // (1.2.76) las de los trenes, como mucho MaxMoving plazas (salvo que sobre sitio)
+            int still = 0; foreach (var c in _pool) if (!c.Mov) still++;
+            int movRoom = Math.Max(MaxMoving, Max - still), mov = 0;
+            foreach (var c in _pool)
+            {
+                if (_outCount >= Max || (c.Mov && mov >= movRoom)) { _shownNext.Remove(c.K); continue; }
+                if (c.Mov) mov++;
+                _out[_outCount++] = c;
+            }
             _last.Clear(); for (int k = 0; k < _outCount; k++) _last[_out[k].K] = _out[k];
             var tmp = _shown; _shown = _shownNext; _shownNext = tmp;
             var ts = _seen; _seen = _seenNext; _seenNext = ts;
@@ -362,7 +374,7 @@ namespace SelectOR.MapAgent
             {
                 var l = _raw[i];
                 float d = Vector3.Distance(l.P, cam);
-                if (!_seen.Contains(l.K)) { if (seen(l.P, Reach)) _cand.Add(new Cand { K = l.K, P = l.P, C = l.C, I = l.I, W = 1f, D = d, Down = l.Down, Surf = l.Surf }); continue; }   // (se mueve: suelta)
+                if (!_seen.Contains(l.K)) { if (seen(l.P, Reach)) _cand.Add(new Cand { K = l.K, P = l.P, C = l.C, I = l.I, W = 1f, D = d, Down = l.Down, Surf = l.Surf, Mov = true }); continue; }   // (se mueve: suelta)
                 Levels(l, cam);
                 if (_lw[0] > 0.002f && seen(l.P, Reach)) _cand.Add(new Cand { K = l.K, P = l.P, C = l.C, I = l.I, W = _lw[0], D = d, Down = l.Down, Surf = l.Surf });
                 for (int lv = 1; lv < L; lv++)
@@ -380,6 +392,6 @@ namespace SelectOR.MapAgent
         }
 
         // cuántas plazas hacen falta (las que se ven algo)
-        static int Count() { int n = 0; foreach (var c in _cand) if (c.W > 0.05f) n++; return n; }
+        static int Count() { int n = 0, m = 0; foreach (var c in _cand) if (c.W > 0.05f) { if (c.Mov) m++; else n++; } return n + Math.Min(m, MaxMoving); }
     }
 }

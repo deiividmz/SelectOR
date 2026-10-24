@@ -146,7 +146,7 @@ namespace SelectOR
             RoomItinView(v, PosOf, itinNodes);
             v.Paths = TrainPaths(geo, p.Trains, p.TrainTrack, PosOf, st, _roomSwVer, (_txtMPUser?.Text ?? "").Trim());
             foreach (var t in p.Trains)
-                if (!t.player && OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) v.AiTrains.Add((t.name, la, lo, t.kmh));
+                if (!t.player && !RoomLoose.Is(t.name) && OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) v.AiTrains.Add((t.name, la, lo, t.kmh));
             return v;
         }
 
@@ -158,9 +158,10 @@ namespace SelectOR
             var l = new List<LiveMarker>();
             foreach (var t in _pilot.Trains)
             {
-                if (!t.player || string.Equals(t.name, me, StringComparison.Ordinal)) continue;
+                bool loose = RoomLoose.Is(t.name);   // (1.2.76) la parte suelta de un desacople: a escala, en gris
+                if ((!t.player && !loose) || string.Equals(t.name, me, StringComparison.Ordinal)) continue;
                 if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
-                var c = RoomColor(t.name);
+                var c = loose ? Color.FromArgb(150, 156, 164) : RoomColor(t.name);
                 // en la cabeza (Open Rails manda la cola) y con su rumbo: los primeros metros por la vía en el sentido de la marcha
                 bool hasHdg = false; double hdg = 0; double lenM = 0; List<(double lat, double lon)> body = null;
                 try
@@ -180,6 +181,14 @@ namespace SelectOR
                 catch { }
                 bool disp = t.name == _pilot.DispatcherName, helper = _pilot.Helpers.Contains(t.name);
                 string role = disp ? " · " + Tr("despachador") : helper ? " · " + Tr("ayudante") : "";
+                if (loose)
+                {
+                    string ln = RoomLoose.Label(t.name);
+                    l.Add(new LiveMarker { Id = "@mp:" + t.name, Name = ln, Short = ln, Train = "", Company = "", Room = true, HasHeading = hasHdg, Heading = hdg,
+                                           Role = Tr("Tren suelto"), Status = Tr("parado, sin maquinista"), Lat = la, Lon = lo, SpeedKmh = 0, Color = c,
+                                           LengthM = lenM, Body = body });
+                    continue;
+                }
                 l.Add(new LiveMarker { Id = "@mp:" + t.name, Name = t.name, Short = t.name, Train = "", Company = "", Room = true, HasHeading = hasHdg, Heading = hdg,
                                        Role = disp ? Tr("Despachador de la sala") : helper ? Tr("Ayudante del despachador") : Tr("Jugador de la sala"),
                                        Status = (t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado")) + role, Lat = la, Lon = lo, SpeedKmh = t.kmh, Color = c,

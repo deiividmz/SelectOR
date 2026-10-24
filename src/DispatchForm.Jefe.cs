@@ -232,6 +232,7 @@ namespace SelectOR
         // ── en tus estaciones: clic en una aguja o en una señal (true = era una aguja o una señal)
         bool JefeClick(Point p)
         {
+            if (Board) return JefeClickBoard(p);
             if (Me == null || _cur == null || _geo == null) return false;
             PointF Sc(PointF a) => new PointF(_origin.X + a.X * _zoom, _origin.Y + a.Y * _zoom);
             float R = Theme.Px(11);
@@ -240,29 +241,56 @@ namespace SelectOR
             // (1.2.75) donde se ve la señal (mástil, luces, número); si no, junto al pie del mástil como antes
             var sg = SchematicDraw.SignalAt(_cur, p, Theme.Px(4)) is Schematic.Signal hit && hit.Sig != null && hit.Sig.Obj >= 0 && MySig(hit.Sig.Obj) ? hit
                 : _cur.Signals.Where(q => q.Sig != null && q.Sig.Obj >= 0 && MySig(q.Sig.Obj)).Select(q => (q, d: D(Sc(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
-            if (sg != null) { SignalMenu(sg, p); return true; }
+            if (sg != null) { SignalMenu(sg.Sig, p); return true; }
             var sws = _cur.Switches.Where(q => MyNode(q.Node)).Select(q => (q, d: D(Sc(q.At), p))).Where(x => x.d < R * 1.4f).OrderBy(x => x.d).Select(x => x.q).ToList();
             if (sws.Count == 0) return false;
             var live = Live();
             int Pos(Schematic.Switch s) => live?.SwitchPos != null && s.Order >= 0 ? live.SwitchPos(s.Order) : -1;
-            if (sws.Count == 1) { Throw(sws[0], Pos(sws[0])); return true; }
+            if (sws.Count == 1) { Throw(sws[0].Node, sws[0].Order, Pos(sws[0])); return true; }
             var m = MenuStyle.Apply(new ContextMenuStrip());
             m.Items.Add(new ToolStripMenuItem(string.Format(Tr("{0} agujas aquí"), sws.Count)) { Enabled = false });
             foreach (var s in sws)
             {
                 var ss = s; int pos = Pos(s);
-                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Aguja {0}: {1} → cambiar"), s.Node, pos == 0 ? Tr("normal") : pos == 1 ? Tr("desviada") : Tr("sin dato")), null, (o, e) => Throw(ss, pos)));
+                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Aguja {0}: {1} → cambiar"), s.Node, pos == 0 ? Tr("normal") : pos == 1 ? Tr("desviada") : Tr("sin dato")), null, (o, e) => Throw(ss.Node, ss.Order, pos)));
             }
             m.Show(_canvas, p);
             return true;
         }
 
-        void Throw(Schematic.Switch s, int pos)
+        void Throw(int node, int order, int pos)
         {
             int to = pos == 1 ? 0 : 1;
-            _pilot.JefeThrowNode(s.Node, to);
-            if (s.Order >= 0) lock (_swSet) _swSet[s.Order] = (to, DateTime.UtcNow);   // a la vista ya (la sala lo confirma)
+            _pilot.JefeThrowNode(node, to);
+            if (order >= 0) lock (_swSet) _swSet[order] = (to, DateTime.UtcNow);   // a la vista ya (la sala lo confirma)
             _canvas.Invalidate();
+        }
+
+        // (1.2.76) lo mismo en el tablero: una señal tuya (su figura, su mástil o su número) o una aguja tuya
+        bool JefeClickBoard(Point p)
+        {
+            if (Me == null || _board == null) return false;
+            float R = Theme.Px(11);
+            static float D(PointF a, Point b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+            var sg = RouteBoardDraw.SignalAt(_board, p, Theme.Px(4)) is RouteBoard.Sg hit && hit.S.Obj >= 0 && MySig(hit.S.Obj) ? hit
+                : _board.Signals.Where(q => q.S.Obj >= 0 && MySig(q.S.Obj)).Select(q => (q, d: D(Bp(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
+            if (sg != null) { SignalMenu(sg.S, p); return true; }
+            var sws = _board.Switches.Where(q => MyNode(q.Node)).Select(q => (q, d: D(Bp(q.At), p))).Where(x => x.d < R * 1.4f).OrderBy(x => x.d).Select(x => x.q).ToList();
+            if (sws.Count == 0 && RouteBoardDraw.SwitchAt(_board, p) is RouteBoard.Sw bw && MyNode(bw.Node)) sws.Add(bw);
+            if (sws.Count == 0) return false;
+            var live = LiveBoard();
+            int Pos(RouteBoard.Sw s) => live?.SwitchPos != null && s.Order >= 0 ? live.SwitchPos(s.Order) : -1;
+            if (sws.Count == 1) { Throw(sws[0].Node, sws[0].Order, Pos(sws[0])); return true; }
+            var m = MenuStyle.Apply(new ContextMenuStrip());
+            m.Items.Add(new ToolStripMenuItem(string.Format(Tr("{0} agujas aquí"), sws.Count)) { Enabled = false });
+            foreach (var s in sws)
+            {
+                var ss = s; int pos = Pos(s);
+                string name = s.Number > 0 ? s.Number.ToString() : s.Node.ToString();
+                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Aguja {0}: {1} → cambiar"), name, pos == 0 ? Tr("normal") : pos == 1 ? Tr("desviada") : Tr("sin dato")), null, (o, e) => Throw(ss.Node, ss.Order, pos)));
+            }
+            m.Show(_canvas, p);
+            return true;
         }
 
         // (Paint_) con algún enclavamiento tuyo en la línea, una franja abajo que lo recuerda

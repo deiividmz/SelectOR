@@ -44,13 +44,20 @@ namespace SelectOR
                     if (s != null) foreach (int n in s.Switches.Select(w => w.Node).Concat(s.SlipNodes)) if (n > 0 && !nidx.ContainsKey(n)) nidx[n] = z.Name;
                     if (s != null) foreach (int e in s.DrawnEdges) if (!eidx.ContainsKey(e)) eidx[e] = z.Name;
                 }
-                return (idx, nidx, eidx, built);
+                RouteBoard board = null;   // (1.2.76) toda la ruta en una sola pantalla
+                try { board = MakeBoard(g, geo, zones, built); } catch { board = null; }
+                return (idx, nidx, eidx, built, board);
             }).ContinueWith(t =>
             {
                 if (IsDisposed || t.IsFaulted) return;
                 _sigZone = t.Result.idx; _nodeZone = t.Result.nidx; _edgeZone = t.Result.eidx;
-                UpdateJefe(); _canvas.Invalidate();
                 foreach (var kv in t.Result.built) if (!_cache.ContainsKey(kv.Key)) _cache[kv.Key] = kv.Value;
+                if (t.Result.board != null)
+                {
+                    _board = t.Result.board;
+                    if (_curZone != null) ShowZone(_curZone); else FitBoard();
+                }
+                UpdateJefe(); _canvas.Invalidate();
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
@@ -183,7 +190,13 @@ namespace SelectOR
                 _canvas.Invalidate();
                 return true;
             }
-            if (n.Zone != null)
+            if (Board && n.Sig >= 0 && _board.Signals.FirstOrDefault(q => q.S.Obj == n.Sig) is RouteBoard.Sg bs)
+            {
+                if (n.Zone != null) Select(n.Zone);
+                CenterOn(new RectangleF(bs.At.X - 120, bs.At.Y - 80, 240, 160), 1.6f);
+                _flash[n.Sig] = DateTime.Now; _timer.Interval = 250;
+            }
+            else if (n.Zone != null)
             {
                 Select(n.Zone);
                 var sg = _cur?.Signals.FirstOrDefault(q => q.Sig?.Obj == n.Sig);

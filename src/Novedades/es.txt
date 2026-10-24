@@ -1,10 +1,7 @@
-1.2.75
-Puesto de mando|Nuevo puesto de mando de la sala compartida, como los videográficos de ADIF: cada estación con su esquema de vías, andenes y agujas numeradas, los cantones ocupados en rojo y los itinerarios en verde. Los jefes de circulación toman el mando de sus estaciones y les llegan los avisos de Tab de los maquinistas.
-Itinerarios de señal a señal|Clic en una señal, «Establecer itinerario desde aquí…» y elige el destino: las agujas se ponen y quedan enclavadas, y la señal se abre sola, con su aspecto, cuando llega el tren. Si se cruza con otro itinerario, queda en cola y se establece solo en su turno. El jefe de circulación puede poner su estación en mando manual y ordenar la cola. Los menús ya no tienen «Vía libre» ni «Anuncio de parada».
-Señales con su figura real|En el mapa grande del HUD y en el puesto de mando, cada señal se ve con sus luces (el verde y amarillo del anuncio de precaución, el amarillo a destellos, el rebase autorizado…) y la cifra de su pantalla de preanuncio. Al acercar el mapa, crecen.
-Sigue con tu tren|Si sales de la sala compartida o se te corta, al volver SelectOR te ofrece seguir con tu tren donde lo dejaste.
-Esc en la sala|En la sala compartida, Esc abre un menú para salir o continuar (antes había que salir con Alt+F4).
-El mapa grande sigue a tu tren|Se centra en tu tren y lo sigue mientras conduces. Si lo arrastras, se queda donde lo dejas y con «Seguir mi tren» vuelve.
-Mejoras en CYZYRails|El LZB y el ASFA de las locomotoras que los traen (como la 446) también funcionan en CYZY. El pupitre ya no cierra Open Rails. Las luces de las estaciones ya no saltan al moverte. Más luz blanca en la CGL: marquesinas, farolas y carteles publicitarios iluminados.
-Abandonar una empresa|Desde «Mi cuenta» puedes dejar la empresa elegida cuando quieras.
-Borrar itinerarios guardados|En el planificador de itinerarios (Conducción libre y Servicios programados) hay un botón para borrar el itinerario guardado elegido.
+1.2.76
+Puesto de mando en una sola pantalla|Toda la ruta en un único tablero que se mueve con el ratón y se amplía con la rueda, con el trazado real de las vías (en las estaciones, más separadas para que se lean): cantones ocupados, itinerarios, agujas con su número, señales con su figura, andenes y trenes. La lista de la izquierda te lleva a cada estación o trayecto, y el jefe de circulación manda desde el mismo tablero.
+Agujas de la sala como en el mapa|En la sala compartida, tu Open Rails ya no coloca las agujas por su cuenta: las agujas que ves en el 3D son siempre las mismas que en el mapa grande y en la sala, también cuando otro jugador las cambia.
+Tecla G en la sala|En la sala compartida, G y Mayús+G cambian la aguja en la sala, como un clic en el mapa grande (antes solo cambiaba en tu Open Rails y los demás no la veían).
+Trenes segregados en el mapa|Si alguien desacopla y deja coches en la vía, se ven en el mapa grande y en el puesto de mando («Suelto de …», en gris) y ocupan su vía: las señales y los itinerarios los tienen en cuenta.
+Túneles con luz en CYZYRails|Las lámparas de los túneles ya no se apagan al encender las luces del tren.
+ATO más fino en CYZYRails|El ATO empieza a frenar a tiempo y sigue su curva de frenado, sin pasarse del punto de parada.

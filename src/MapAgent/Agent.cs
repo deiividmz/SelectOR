@@ -1,4 +1,4 @@
-// Agente del mapa (multijugador): una pieza mínima dentro del Open Rails de cada jugador de una sala (la carga SelectOR
+﻿// Agente del mapa (multijugador): una pieza mínima dentro del Open Rails de cada jugador de una sala (la carga SelectOR
 // al lanzar una partida en red), que solo trabaja en el DESPACHADOR, para que el mapa grande de SelectOR haga lo mismo
 // que su ventana Ctrl+9:
 //  · las órdenes de señal de su propio SelectOR: Open Rails solo acepta órdenes de señal de sus ayudantes, y las del
@@ -57,6 +57,7 @@ namespace SelectOR.MapAgent
             if (text != null) { h.Patch(text, prefix: new HarmonyMethod(typeof(Agent), nameof(BeforeText))); n++; }
             int local = LocalLink.Install(h);   // conducción libre: el mapa grande de SelectOR (LocalLink.cs)
             int spawn = Spawn.Install(h);       // sala compartida: el .pat solo para la salida (Spawn.cs)
+            int roomSw = AgujasSala.Install(h); // sala compartida: las agujas, solo las de la sala; la tecla G, a la sala (AgujasSala.cs)
             int remote = Remotos.Install(h);    // los trenes de los demás: vehículos que faltan y por qué no se ve uno (Remotos.cs)
             int release = Liberar.Install(h);   // Ctrl+Tab en multijugador: liberar la señal de tu tren (Liberar.cs)
             int sun = Sol.Install(h);            // el sol de las rutas CGL a la hora de España (Sol.cs)
@@ -65,7 +66,7 @@ namespace SelectOR.MapAgent
             int esc = Pausa.Install(h);          // Esc en multijugador: menú con «Salir» y «Continuar» (Pausa.cs)
             int events = SelectOR.Comun.Eventos.Install(h, Log);   // bocina, puertas, luces… de otras versiones de Open Rails (Eventos.cs)
             int clock = SelectOR.Comun.Hora.Install(h, Log);       // la hora de la sala, también a los que ya están dentro (Hora.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(esc > 0 ? " + Esc" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(roomSw > 0 ? " + agujas de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(esc > 0 ? " + Esc" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
             if (sun == 0 || keys == 0 || esc == 0) Later(h, sun == 0, keys == 0, esc == 0);
         }
 
