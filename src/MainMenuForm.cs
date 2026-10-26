@@ -2471,6 +2471,26 @@ namespace SelectOR
             _cboFolder.SelectedIndex = idx;
         }
 
+        // (1.2.80) la lista de vehículos con su largo (VehiculosCache.cs), en segundo plano y sin prisa (30 s después de cargar la
+        // carpeta, con prioridad baja): así el agente la tiene hecha al entrar en la sala y Open Rails no se para minutos
+        // buscando un sustituto para el vehículo que le falta (se le caía la conexión). Una vez por carpeta y sesión.
+        readonly HashSet<string> _vehPrewarmed = new(StringComparer.OrdinalIgnoreCase);
+        void PrewarmVehicles(string root)
+        {
+            if (string.IsNullOrEmpty(root) || !_vehPrewarmed.Add(root)) return;
+            var t = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    System.Threading.Thread.Sleep(30000);
+                    var r = SelectOR.Comun.VehiculosCache.Build(root);
+                    if (r != null) System.Diagnostics.Trace.WriteLine("vehículos para sustituir: " + r.Value.info);
+                }
+                catch { }
+            }) { IsBackground = true, Priority = System.Threading.ThreadPriority.Lowest, Name = "Vehículos para sustituir" };
+            t.Start();
+        }
+
         void OnFolderChanged()
         {
             if (_cboFolder.SelectedIndex < 0 || _cboFolder.SelectedIndex >= _folders.Count) return;
@@ -2483,6 +2503,7 @@ namespace SelectOR
             _consistsOverlay?.SetState(ListStatePanel.Mode.Loading, Tr("Cargando trenes…"));
             StartConsistsProgress();   // «Leyendo trenes: 4.500 de 12.000…» (la primera vez, sin índice)
             var folder = _curFolder;
+            PrewarmVehicles(folder.Path);   // (1.2.80) la lista de vehículos para sustituir los que falten en la sala
 
             Task.Run(() =>
             {

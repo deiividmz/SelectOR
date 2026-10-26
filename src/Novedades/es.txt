@@ -1,5 +1,2 @@
-﻿1.2.79
-Puertas de los trenes IA|En la sala compartida, los trenes IA abren las puertas del lado del andén al parar en cada estación y las cierran antes de salir.
-Trenes IA hasta la topera|En las estaciones en topera, como Estación Sur o Aeropuerto, los trenes IA se acercan hasta unos 15 m del final de la vía en lugar de quedarse en mitad del andén.
-Trenes IA sin atascos en las estaciones|Si la vía de un tren IA en una estación está ocupada, entra por otra vía libre de la misma estación y hace allí su parada, en vez de quedarse esperando en la entrada.
-Paradas comerciales solo en trenes de viajeros|La ficha del servicio ya no muestra paradas comerciales ni la apertura de puertas en los trenes de mercancías o sin viajeros.
+﻿1.2.80
+Entrar en la sala sin cortes|Al entrar en la sala compartida con trenes de otros jugadores o trenes IA que llevan vehículos que no tienes, Open Rails ya no se queda varios minutos buscando un sustituto (y perdiendo la conexión): SelectOR le deja preparada la lista de tus vehículos y el sustituto sale al momento.

@@ -13,9 +13,9 @@
     <AssemblyTitle>SelectOR</AssemblyTitle>
     <Company>David MZP</Company>
     <Copyright>© 2026 David MZP. Licencia GNU GPL v3.</Copyright>
-    <Version>1.2.79</Version>
-    <AssemblyVersion>1.2.79.0</AssemblyVersion>
-    <FileVersion>1.2.79.0</FileVersion>
+    <Version>1.2.80</Version>
+    <AssemblyVersion>1.2.80.0</AssemblyVersion>
+    <FileVersion>1.2.80.0</FileVersion>
 
     <!-- Carpeta de una instalación de Open Rails (la que contiene OpenRails.exe). Por defecto,
          «OR Desplegado» junto a esta carpeta; se cambia al compilar con
@@ -112,6 +112,10 @@
   <ItemGroup>
     <Compile Remove="MapAgent\**" />
     <None Remove="MapAgent\**" />
+  </ItemGroup>
+  <!-- (1.2.80) salvo la lista de vehículos para sustituir los que faltan: la comparten SelectOR (la prepara) y el agente -->
+  <ItemGroup>
+    <Compile Include="MapAgent\VehiculosCache.cs" Link="VehiculosCache.cs" />
   </ItemGroup>
   <!-- …pero se compila antes y va DENTRO de SelectOR.dll (con Harmony): SelectOR lo deja junto a Open Rails al entrar en
        multijugador (MapAgentFiles.cs). Así llega con la actualización de siempre, que solo instala sus propios archivos. -->
