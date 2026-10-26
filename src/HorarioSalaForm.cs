@@ -3,7 +3,7 @@
 // lo lee al arrancar y cada minuto (SelectOR Despachador/HorarioSala.cs): los cambios entran sin reiniciar; los trenes
 // que ya circulan terminan su viaje y las salidas nuevas siguen el horario nuevo.
 //  · arriba, los ajustes: trenes IA activados o no, cuántos como mucho a la vez y la densidad por franja horaria;
-//  · la tabla de servicios (añadir, editar, quitar; doble clic = editar);
+//  · los servicios en tarjetas (HorarioSalaForm.Cards.cs; añadir, editar, quitar; doble clic = editar);
 //  · «Probar camino»: si hay vía entre las dos estaciones y cuántos km (aproximado: por la red de la ruta, sin mirar por
 //    qué lado se puede pasar cada aguja; el despachador busca el camino de verdad al crear el tren).
 
@@ -37,7 +37,7 @@ namespace SelectOR
 
         readonly Func<Task<RouteGraph>> _graph;
         readonly string _routeDir, _route;
-        readonly StyledTable _table;
+        readonly ServiceCards _cards;   // (1.2.78) tarjetas en vez de tabla
         readonly ThemeCheck _enabled;
         readonly ComboBox _max;
         readonly ComboBox[] _density = new ComboBox[5];
@@ -46,6 +46,7 @@ namespace SelectOR
         List<string> _stations, _consists;
         RouteGraph _g;
         public Func<string, object, Task<(string json, string err)>> Rpc = Supa.RpcAsync;   // (las pruebas la cambian)
+        public Func<string, Task<string>> RetireAi;   // (1.2.78) retirar ya los trenes IA (null = todos; o un servicio): null si fue bien
 
         public HorarioSalaForm(string routeDir, Func<Task<RouteGraph>> graph, string route = "CGL_V22N_RE",
                                Func<Task<RouteMapData>> mapData = null, Func<List<(string name, double lat, double lon, double kmh)>> aiTrains = null)
@@ -82,12 +83,10 @@ namespace SelectOR
             saveSet.Click += async (s, e) => await SaveSettings();
             top.Controls.Add(saveSet);
 
-            _table = new StyledTable { Dock = DockStyle.Fill };
-            _table.SetColumns(new StyledTable.Col(Tr("Servicio"), 80), new StyledTable.Col(Tr("Tipo"), 90), new StyledTable.Col(Tr("Recorrido"), 220, true),
-                              new StyledTable.Col(Tr("Salidas"), 150), new StyledTable.Col(Tr("Composición"), 160), new StyledTable.Col(Tr("Paradas"), 120), new StyledTable.Col(Tr("Activo"), 60));
-            _table.DoubleClick += async (s, e) => await Edit(_table.SelectedRow);
+            _cards = new ServiceCards { Dock = DockStyle.Fill, ColorOf = ColorOf, KindName = KindName };
+            _cards.Open += async s => await Edit(s);
             var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(Theme.Px(16), Theme.Px(10), Theme.Px(16), Theme.Px(6)), BackColor = Theme.Bg };
-            body.Controls.Add(_table);
+            body.Controls.Add(_cards);
             BuildMap(body);   // (1.2.77) el mapa de la ruta con el recorrido de cada servicio (HorarioSalaForm.Mapa.cs)
 
             var foot = new DialogKit.Footer();
@@ -95,14 +94,16 @@ namespace SelectOR
             var edit = DialogKit.Secondary(Tr("Editar"), 110);
             var del = DialogKit.Danger(Tr("Quitar"), 110);
             var test = DialogKit.Secondary(Tr("Probar camino"), 140);
+            var retire = DialogKit.Danger(Tr("Retirar trenes IA…"), 170);   // (1.2.78)
+            retire.Click += (s, e) => RetireMenu(retire);
             var close = DialogKit.Secondary(Tr("Cerrar"), 110);
-            add.Click += async (s, e) => await Edit(-1);
-            edit.Click += async (s, e) => await Edit(_table.SelectedRow);
-            del.Click += async (s, e) => await Delete(_table.SelectedRow);
-            test.Click += async (s, e) => await TestPath(_table.SelectedRow);
+            add.Click += async (s, e) => await Edit(null);
+            edit.Click += async (s, e) => { if (_cards.Selected == null) Pick(); else await Edit(_cards.Selected); };
+            del.Click += async (s, e) => await Delete(_cards.Selected);
+            test.Click += async (s, e) => await TestPath(_cards.Selected);
             close.Click += (s, e) => Close();
-            foot.AddRight(close, test, del, edit, add);
-            _status = new Label { AutoSize = false, Width = Theme.Px(320), ForeColor = Theme.Subtle, BackColor = foot.BackColor, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Px(16), 0, 0, 0) };
+            foot.AddRight(close, test, del, edit, add, retire);
+            _status = new Label { AutoSize = false, Width = Theme.Px(240), ForeColor = Theme.Subtle, BackColor = foot.BackColor, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Px(16), 0, 0, 0) };
             foot.AddLeft(_status);
 
             Controls.Add(body); Controls.Add(top); Controls.Add(head); Controls.Add(foot);
@@ -167,18 +168,11 @@ namespace SelectOR
 
         void Fill()
         {
-            _table.BeginReload("horario");
-            for (int i = 0; i < _services.Count; i++)
-            {
-                var s = _services[i];
-                string when = s.Every > 0 ? string.Format(Tr("{0}–{1} cada {2} min"), s.First, s.Last, s.Every) : s.First;
-                string stops = s.Stops == "todas" ? Tr("todas") : s.Stops == "ninguna" ? Tr("ninguna") : s.Stops;
-                _table.AddRow(new[] { s.Name, KindName(s.Kind), s.Origin + " → " + s.Destination, when, s.Consist, stops, s.Active ? Tr("Sí") : Tr("No") },
-                              new Color?[] { ColorOf(i), null, null, null, null, null, s.Active ? (Color?)null : Theme.Subtle });   // (el nombre, del color de su recorrido en el mapa)
-            }
-            _table.EndReload();
-            if (_services.Count == 0) _table.SetEmpty(Tr("Aún no hay servicios: «Añadir servicio»."));
+            _cards.EmptyText = Tr("Aún no hay servicios: «Añadir servicio».");
+            _cards.SetItems(_services);
         }
+
+        void Pick() => ThemedBox.Show(this, Tr("Elige un servicio de la lista."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         // ── ajustes
         async Task SaveSettings()
@@ -188,6 +182,35 @@ namespace SelectOR
             if (IsDisposed) return;
             if (err != null) { ThemedBox.Show(this, err, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             _status.Text = Tr("Ajustes guardados: la sala los aplica en un minuto.");
+        }
+
+        // ── (1.2.78) retirar ya los trenes IA de la sala: todos o los del servicio elegido
+        void RetireMenu(Control at)
+        {
+            if (RetireAi == null) return;
+            var m = MenuStyle.Apply(new ContextMenuStrip());
+            int live = _ai.Count;
+            m.Items.Add(new ToolStripMenuItem(live > 0 ? string.Format(Tr("Todos los trenes IA ({0} circulando)"), live) : Tr("Todos los trenes IA"), null, async (o, e) => await Retire(null)));
+            var s = _cards.Selected;
+            if (s != null)
+            {
+                int mine = _ai.Count(t => ServiceIndexOf(t.name) == _services.IndexOf(s));
+                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Solo los de «{0}» ({1} circulando)"), s.Name, mine), null, async (o, e) => await Retire(s.Name)));
+            }
+            else m.Items.Add(new ToolStripMenuItem(Tr("(elige un servicio para retirar solo los suyos)")) { Enabled = false });
+            m.Show(at, new Point(0, -m.PreferredSize.Height));
+        }
+
+        async Task Retire(string service)
+        {
+            string what = service == null ? Tr("todos los trenes IA de la sala") : string.Format(Tr("los trenes IA de «{0}»"), service);
+            if (ThemedBox.Show(this, string.Format(Tr("¿Retirar ya {0}? Desaparecen al momento, también los que están circulando.\n\nLas salidas siguientes del horario siguen: para que no salgan más, desactiva el servicio o los trenes IA."), what),
+                               Tr("Retirar trenes IA"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            _status.Text = Tr("Retirando…");
+            string err = await RetireAi(service);
+            if (IsDisposed) return;
+            if (err != null) { _status.Text = ""; ThemedBox.Show(this, err, Tr("Retirar trenes IA"), MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            _status.Text = Tr("Retirados: desaparecen de la sala en unos segundos.");
         }
 
         // ── listas de la ruta (estaciones y apartaderos con nombre; composiciones de TRAINS\CONSISTS)
@@ -215,20 +238,25 @@ namespace SelectOR
 
         static readonly Regex Hm = new Regex(@"^([01]\d|2[0-3]):[0-5]\d$");
 
-        async Task Edit(int idx)
+        // (1.2.78) por el servicio mismo (null = nuevo), no por su posición en la lista
+        async Task Edit(Service sv)
         {
-            if (idx >= _services.Count) return;
+            bool isNew = sv == null;
             await EnsureLists();
-            var s = idx >= 0 ? _services[idx] : new Service();
-            var stations = _stations.Count > 0 ? _stations : new List<string> { s.Origin, s.Destination }.Where(x => x != "").Distinct().ToList();
+            var s = sv ?? new Service();
+            var stations = new List<string>(_stations);
+            // (1.2.78) su origen y su destino aunque ya no salgan en la ruta (antes se enseñaba la primera estación de la lista)
+            foreach (var st in new[] { s.Destination, s.Origin })
+                if (st != "" && !stations.Any(x => string.Equals(x, st, StringComparison.CurrentCultureIgnoreCase))) stations.Insert(0, st);
             var cons = _consists.Count > 0 ? new List<string>(_consists) : new List<string>();
             if (s.Consist != "" && !cons.Contains(s.Consist)) cons.Insert(0, s.Consist);
             var stopList = s.Stops == "todas" || s.Stops == "ninguna" ? new List<string>() : s.Stops.Split(',').Select(x => x.Trim()).Where(x => x != "").ToList();
-            using var dlg = new FormDialog(idx >= 0 ? Tr("Editar servicio") : Tr("Nuevo servicio"), Tr("Guardar"), 560, "🚆", Tr("Trenes IA de la sala compartida de CGL"));
+            using var dlg = new FormDialog(!isNew ? Tr("Editar servicio") : Tr("Nuevo servicio"), Tr("Guardar"), 560, "🚆", Tr("Trenes IA de la sala compartida de CGL"));
             dlg.AddText("name", Tr("Nombre (p. ej. C1)"), s.Name);
             dlg.AddCombo("kind", Tr("Tipo"), Kinds.Select(KindName), Math.Max(0, Array.IndexOf(Kinds, s.Kind)));
-            dlg.AddCombo("origin", Tr("Origen"), stations, Math.Max(0, stations.IndexOf(s.Origin)));
-            dlg.AddCombo("dest", Tr("Destino"), stations, Math.Max(0, stations.IndexOf(s.Destination)));
+            int StIdx(string n) => Math.Max(0, stations.FindIndex(x => string.Equals(x, n, StringComparison.CurrentCultureIgnoreCase)));
+            dlg.AddCombo("origin", Tr("Origen"), stations, StIdx(s.Origin));
+            dlg.AddCombo("dest", Tr("Destino"), stations, StIdx(s.Destination));
             dlg.AddCombo("con", Tr("Composición"), cons, Math.Max(0, cons.IndexOf(s.Consist)));
             dlg.AddText("first", Tr("Primera salida (HH:MM, hora de la sala)"), s.First);
             dlg.AddText("every", Tr("Cada cuántos minutos (0 = una sola salida)"), s.Every.ToString(CultureInfo.InvariantCulture));
@@ -263,7 +291,7 @@ namespace SelectOR
                 if (spec == null) return string.Format(Tr("No se puede leer la composición «{0}» en tu Open Rails."), cons[ci]);
                 var (json, err) = await Rpc("room_ai_service_save", new
                 {
-                    p_id = idx >= 0 ? (long?)s.Id : null, p_name = name, p_kind = Kinds[Math.Max(0, d.Index("kind"))], p_origin = stations[oi], p_destination = stations[di],
+                    p_id = !isNew ? (long?)s.Id : null, p_name = name, p_kind = Kinds[Math.Max(0, d.Index("kind"))], p_origin = stations[oi], p_destination = stations[di],
                     p_consist = cons[ci], p_first_time = first, p_every_min = ev, p_last_time = last, p_stops = stops, p_active = d.Index("active") == 0, p_route = _route,
                     p_consist_spec = spec
                 });
@@ -273,10 +301,9 @@ namespace SelectOR
             if (dlg.ShowDialog(this) == DialogResult.OK) await Reload();
         }
 
-        async Task Delete(int idx)
+        async Task Delete(Service s)
         {
-            if (idx < 0 || idx >= _services.Count) { ThemedBox.Show(this, Tr("Elige un servicio de la lista."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-            var s = _services[idx];
+            if (s == null) { Pick(); return; }
             if (ThemedBox.Show(this, string.Format(Tr("¿Quitar el servicio {0} ({1} → {2})?"), s.Name, s.Origin, s.Destination), Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             var (_, err) = await Rpc("room_ai_service_delete", new { p_id = s.Id });
             if (IsDisposed) return;
@@ -284,11 +311,10 @@ namespace SelectOR
             await Reload();
         }
 
-        async Task TestPath(int idx)
+        async Task TestPath(Service s)
         {
-            if (idx < 0 || idx >= _services.Count) { ThemedBox.Show(this, Tr("Elige un servicio de la lista."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (s == null) { Pick(); return; }
             await EnsureLists();
-            var s = _services[idx];
             double km = _g == null ? -1 : PathKm(_g, s.Origin, s.Destination);
             string msg = _g == null ? Tr("No se ha podido leer la ruta.")
                        : km < 0 ? string.Format(Tr("No hay vía entre {0} y {1}."), s.Origin, s.Destination)

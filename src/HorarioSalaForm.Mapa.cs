@@ -38,9 +38,9 @@ namespace SelectOR
             _map.EmptyText = Tr("Cargando el mapa de la ruta…");
             _map.Overlay = DrawOverlay;
             body.Controls.Add(gap); body.Controls.Add(_map);
-            gap.SendToBack(); _map.SendToBack();   // (el mapa a la derecha del todo; la tabla ocupa el resto)
+            gap.SendToBack(); _map.SendToBack();   // (el mapa a la derecha del todo; las tarjetas ocupan el resto)
             body.Resize += (s, e) => _map.Width = Math.Max(Theme.Px(380), (int)(body.ClientSize.Width * 0.45));
-            _table.SelectedIndexChanged += (s, e) => FocusSelected();
+            _cards.SelectedChanged += FocusSelected;
             if (_aiTrains != null)
             {
                 _aiTimer = new Timer { Interval = 2000 };
@@ -89,7 +89,7 @@ namespace SelectOR
         void FocusSelected()
         {
             if (_map?.Data == null) return;
-            int i = _table.SelectedRow;
+            int i = _cards.SelectedIndex;
             var p = i >= 0 && i < _services.Count ? PathOf(_services[i]) : null;
             if (p != null && p.Count > 1) _map.FitLL(p);
             else if (i < 0) _map.FitAll();
@@ -116,12 +116,16 @@ namespace SelectOR
         int ServiceIndexOf(string aiName)
         {
             string svc = RoomAi.Label(aiName);
-            return _services.FindIndex(s => string.Equals(s.Name.Replace('_', ' '), svc, StringComparison.CurrentCultureIgnoreCase));
+            // (1.2.78) el despachador les pone detrás su hora de salida («C4: Sur-Orobón 09:30»): sin ella
+            var m = System.Text.RegularExpressions.Regex.Match(svc, @"^(.*\S)\s+\d{1,2}:\d{2}$");
+            string bare = m.Success ? m.Groups[1].Value : svc;
+            int i = _services.FindIndex(s => string.Equals(s.Name.Replace('_', ' '), bare, StringComparison.CurrentCultureIgnoreCase));
+            return i >= 0 ? i : _services.FindIndex(s => string.Equals(s.Name.Replace('_', ' '), svc, StringComparison.CurrentCultureIgnoreCase));
         }
 
         void DrawOverlay(Graphics g, Func<double, double, PointF> scr)
         {
-            int sel = _table.SelectedRow;
+            int sel = _cards.SelectedIndex;
             var order = Enumerable.Range(0, _services.Count).Where(i => i != sel).ToList();
             if (sel >= 0 && sel < _services.Count) order.Add(sel);   // (el elegido, encima)
             using var font = Theme.Font(8.25f, FontStyle.Bold);

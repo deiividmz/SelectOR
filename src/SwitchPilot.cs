@@ -85,6 +85,7 @@ namespace SelectOR
         public string JefeOfZone(string zone) => JefeZones.FirstOrDefault(z => z.Zone == zone)?.Name;
         public string JefeMe { get; private set; }                   // yo, como jefe (tras JEFEOK)
         public event Action JefeChanged;
+        public event Action<string> AiRetired;                       // (1.2.78) «*» o el servicio (con %xx): la sala ha pasado la orden de retirar trenes IA
         public event Action<string> JefeError;                       // ticket · busy estación nombre · offline · notake
         // Servidor con «READY 5»: el despachador también pide señales desde el mapa (con el agente del mapa en su Open Rails)
         // y nombra ayudantes desde él; quién es quién en la sala.
@@ -268,6 +269,7 @@ namespace SelectOR
             if (t[0] == "CHATERR" && t.Length > 1) { try { ChatError?.Invoke(t[1]); } catch { } return; }
             if (t[0] == "HELPER" && t.Length > 1) { Helper = t[1] == "1"; return; }
             if (t[0] == "JEFEOK" && t.Length > 1) { JefeMe = t[1]; try { JefeChanged?.Invoke(); } catch { } return; }
+            if (t[0] == "AIRETIRED" && t.Length > 1) { try { AiRetired?.Invoke(t[1]); } catch { } return; }
             if (t[0] == "JEFEERR" && t.Length > 1) { try { JefeError?.Invoke(string.Join(" ", t.Skip(1))); } catch { } return; }
             if (t[0] == "ROLES" && t.Length > 2)
             {
@@ -364,6 +366,8 @@ namespace SelectOR
         // el jefe: agujas y señales aunque no esté conduciendo (el servidor lo deja solo a él)
         public void JefeThrowNode(int node, int pos) { if (Ready) Send($"THROWNODE {node} {pos}"); }
         public void JefeSignal(int obj, int pick) { if (Ready) Send($"SIGNAL {obj} {pick}"); }
+        // (1.2.78) el administrador quita ya los trenes IA de la sala: todos (service null) o los de un servicio
+        public void AiRetire(string ticket, string service) { if (Ready) Send("JEFE AIRETIRE " + ticket + " " + (string.IsNullOrEmpty(service) ? "*" : Uri.EscapeDataString(service))); }
         public void JefeManual(string zone, bool on) { if (Ready) Send($"JEFE MANUAL {Uri.EscapeDataString(zone)} {(on ? 1 : 0)}"); }
         // (1.2.75) itinerarios: de la señal origen a la destino (−1: topera) con esas agujas (nodo del .tdb, posición); anular
         public void ItinSet(int origin, int dest, IEnumerable<(int node, int pos)> switches)

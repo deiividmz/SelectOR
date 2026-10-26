@@ -10,7 +10,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
-using Orts.Formats.Msts;
+using System.Linq;
 
 namespace SelectOR
 {
@@ -25,9 +25,14 @@ namespace SelectOR
             {
                 string con = Path.Combine(baseDir, "TRAINS", "CONSISTS", consist.EndsWith(".con", StringComparison.OrdinalIgnoreCase) ? consist : consist + ".con");
                 if (!File.Exists(con)) return null;
-                var cf = new ConsistFile(con);
-                var sb = new StringBuilder("v=" + cf.Train.TrainCfg.MaxVelocity.A.ToString("0.##", Inv));
-                foreach (var wg in cf.Train.TrainCfg.WagonList)
+                // (con el lector propio, ConsistDoc: el ConsistFile de Open Rails cambia de una versión a otra y en la del
+                // jugador fallaba con «Method not found»)
+                var cf = ConsistDoc.Load(con);
+                if (cf == null) return null;
+                string mv = (cf.MaxVelocity ?? "").Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+                double vmax = double.TryParse(mv, NumberStyles.Float, Inv, out double vv) ? vv : 0;
+                var sb = new StringBuilder("v=" + vmax.ToString("0.##", Inv));
+                foreach (var wg in cf.Cars)
                 {
                     string f = Path.Combine(baseDir, "TRAINS", "TRAINSET", wg.Folder, wg.Name + (wg.IsEngine ? ".eng" : ".wag"));
                     var (len, mass) = Measure(f);
