@@ -148,7 +148,9 @@ namespace SelectOR
                 if (d.Valid)
                 {
                     body.Controls.Add(new Receipt(d) { Width = W, Margin = new Padding(0, 0, 0, 10) });
-                    if (d.Stops != null) body.Controls.Add(new StopsCard(d.Stops) { Width = W, Margin = new Padding(0, 0, 0, 10) });
+                    // (solo trenes de viajeros, con plazas o con viajeros: uno de mercancías, o sin viajeros configurados, no tiene
+                    // paradas comerciales ni tiene que abrir puertas)
+                    if (d.Stops != null && (d.Capacity > 0 || d.Pax > 0)) body.Controls.Add(new StopsCard(d.Stops) { Width = W, Margin = new Padding(0, 0, 0, 10) });
                     if (!d.History)
                         body.Controls.Add(new Label
                         {

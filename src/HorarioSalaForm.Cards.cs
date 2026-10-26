@@ -94,13 +94,27 @@ namespace SelectOR
                 return (int)(span / s.Every) + 1;
             }
 
+            static string HintText(string h)
+            {
+                bool o = false, d = false; int v = 0;
+                foreach (var part in h.Split(';'))
+                {
+                    if (part.StartsWith("o=")) o = true; else if (part.StartsWith("d=")) d = true;
+                    else if (part.StartsWith("v=")) v = part.Substring(2).Split(',', StringSplitOptions.RemoveEmptyEntries).Length;
+                }
+                var l = new List<string>();
+                if (o) l.Add(Tr("vía de salida")); if (d) l.Add(Tr("vía de llegada"));
+                if (v > 0) l.Add(v == 1 ? Tr("1 vía de paso") : string.Format(Tr("{0} vías de paso"), v));
+                return string.Join(" · ", l) + "  " + Tr("(marcado en el mapa)");
+            }
+
             int TextWidth(int w) => w - Theme.Px(6) - 2 * Pad;   // (tras la franja de color)
 
             int CardHeight(Service s, int w)
             {
                 int tw = TextWidth(w) - Theme.Px(4);
                 int stopsH = TextRenderer.MeasureText(Tr("Paradas") + ": " + StopsText(s), FText, new Size(tw, 2000), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
-                return Pad + Theme.Px(26) + Theme.Px(6) + Theme.Px(20) + Theme.Px(20) + Theme.Px(4) + stopsH + Pad;
+                return Pad + Theme.Px(26) + Theme.Px(6) + Theme.Px(20) + Theme.Px(20) + (string.IsNullOrEmpty(s.Hint) ? 0 : Theme.Px(20)) + Theme.Px(4) + stopsH + Pad;
             }
 
             protected override void OnPaint(PaintEventArgs e)
@@ -163,7 +177,9 @@ namespace SelectOR
                 TextRenderer.DrawText(g, s.Origin + "  →  " + s.Destination, FText, new Rectangle(x, y, avail, Theme.Px(20)), dim, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                 y += Theme.Px(20);
                 Line(g, Tr("Composición"), s.Consist, x, y, tw);
-                y += Theme.Px(20) + Theme.Px(4);
+                y += Theme.Px(20);
+                if (!string.IsNullOrEmpty(s.Hint)) { Line(g, Tr("Recorrido"), HintText(s.Hint), x, y, tw); y += Theme.Px(20); }   // (1.2.79)
+                y += Theme.Px(4);
                 var lab = Tr("Paradas") + ": ";
                 TextRenderer.DrawText(g, lab + StopsText(s), FText, new Rectangle(x, y, tw - Theme.Px(4), r.Bottom - y), dim, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
             }

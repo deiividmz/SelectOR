@@ -26,6 +26,7 @@ namespace SelectOR
         {
             public long Id; public string Name = "", Kind = "cercanias", Origin = "", Destination = "", Consist = "", First = "07:00", Last = "23:00", Stops = "todas";
             public int Every = 30; public bool Active = true;
+            public string Hint = "";   // (1.2.79) el recorrido marcado en el mapa: «o=nodo;d=nodo;v=nodo,nodo» (HorarioRecorridoForm)
         }
 
         public static readonly string[] Kinds = { "cercanias", "media", "larga", "mercancias" };   // (media: sql/horario-media.sql)
@@ -95,6 +96,8 @@ namespace SelectOR
             var del = DialogKit.Danger(Tr("Quitar"), 110);
             var test = DialogKit.Secondary(Tr("Probar camino"), 140);
             var retire = DialogKit.Danger(Tr("Retirar trenes IA…"), 170);   // (1.2.78)
+            var routeBtn = DialogKit.Secondary(Tr("Recorrido…"), 120);       // (1.2.79) vías de salida, de llegada y de paso, en el mapa
+            routeBtn.Click += async (s, e) => await EditRoute(_cards.Selected);
             retire.Click += (s, e) => RetireMenu(retire);
             var close = DialogKit.Secondary(Tr("Cerrar"), 110);
             add.Click += async (s, e) => await Edit(null);
@@ -102,8 +105,8 @@ namespace SelectOR
             del.Click += async (s, e) => await Delete(_cards.Selected);
             test.Click += async (s, e) => await TestPath(_cards.Selected);
             close.Click += (s, e) => Close();
-            foot.AddRight(close, test, del, edit, add, retire);
-            _status = new Label { AutoSize = false, Width = Theme.Px(240), ForeColor = Theme.Subtle, BackColor = foot.BackColor, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Px(16), 0, 0, 0) };
+            foot.AddRight(close, test, routeBtn, del, edit, add, retire);
+            _status = new Label { AutoSize = false, Width = Theme.Px(160), ForeColor = Theme.Subtle, BackColor = foot.BackColor, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Px(16), 0, 0, 0) };
             foot.AddLeft(_status);
 
             Controls.Add(body); Controls.Add(top); Controls.Add(head); Controls.Add(foot);
@@ -150,7 +153,8 @@ namespace SelectOR
                                 Id = x.TryGetProperty("id", out var id) && id.TryGetInt64(out long l) ? l : 0, Name = S("name"), Kind = S("kind"), Origin = S("origin"), Destination = S("destination"),
                                 Consist = S("consist"), First = S("first_time"), Last = S("last_time"), Stops = S("stops"),
                                 Every = x.TryGetProperty("every_min", out var ev) && ev.TryGetInt32(out int e) ? e : 0,
-                                Active = !x.TryGetProperty("active", out var ac) || ac.ValueKind != JsonValueKind.False
+                                Active = !x.TryGetProperty("active", out var ac) || ac.ValueKind != JsonValueKind.False,
+                                Hint = S("route_hint") ?? ""
                             });
                         }
                 }
@@ -182,6 +186,26 @@ namespace SelectOR
             if (IsDisposed) return;
             if (err != null) { ThemedBox.Show(this, err, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             _status.Text = Tr("Ajustes guardados: la sala los aplica en un minuto.");
+        }
+
+        // ── (1.2.79) el recorrido en el mapa: vía de salida, de llegada y por dónde pasar
+        async Task EditRoute(Service s)
+        {
+            if (s == null) { Pick(); return; }
+            await EnsureLists();
+            if (_g == null || _map?.Data == null) { ThemedBox.Show(this, Tr("El mapa de la ruta aún no está listo."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            using var f = new HorarioRecorridoForm(s.Name, s.Origin, s.Destination, s.Hint, _g, _map.Data);
+            if (f.ShowDialog(this) != DialogResult.OK) return;
+            var (_, err) = await Rpc("room_ai_service_route", new { p_id = s.Id, p_route_hint = f.Hint });
+            if (IsDisposed) return;
+            if (err != null)
+            {
+                ThemedBox.Show(this, err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? Tr("El servidor aún no guarda el recorrido de los servicios (falta horario-recorrido.sql).") : err,
+                               Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            _status.Text = Tr("Recorrido guardado: la sala lo aplica en un minuto.");
+            await Reload();
         }
 
         // ── (1.2.78) retirar ya los trenes IA de la sala: todos o los del servicio elegido

@@ -1,10 +1,5 @@
-﻿1.2.77
-Why a signal does not clear|In the shared room, the big HUD map and the control centre explain why a signal is still red or a route is still queued: track occupied, switch reserved, another player's train ahead… It shows next to the signal and, for your train's signal, at the bottom of the map.
-Room chat in the control centre|The control centre has the room chat on the right, the same as in the HUD and in Open Rails. The dispatcher can write from there even when not driving, and while in charge of a station their messages carry the «Dispatcher» tag, also in the HUD chat.
-Destination board editor|With the ✏️ button next to the train selector you create your own destinations: you type the text and SelectOR draws it on the train's board (LED dots or plate), with a preview. You can edit or delete them whenever you like.
-Choose your clouds|In Settings → Weather you pick the cloud texture: the default one or the ones SelectOR publishes.
-Signals in colour in CYZYRails|Signals show their colour, green, red or yellow, also up close and at night, without the white haze that covered them.
-Station lighting|The Via Estrecha route is lit in CYZYRails (stations, canopies, buildings and street lamps), and on CGL station lights no longer fall over the tracks; tunnels are dimmer.
-ASFA, LZB and ATO in Timetable with CYZYRails|The train's safety systems also work in Timetable and activities, not only in Free driving and multiplayer.
-Other players' trains when recoupling|In the shared room, when another player couples back the cars they had left, their train no longer disappears from your screen.
-Smooth curves in the control centre|Control centre tracks are drawn with smooth curves, without spikes or steps. The room bar icons are also in colour now.
+﻿1.2.79
+AI train doors|In the shared room, AI trains open their doors on the platform side when they stop at each station and close them before leaving.
+AI trains up to the buffer stop|At terminus stations, such as Estación Sur or Aeropuerto, AI trains now pull up to about 15 m from the end of the track instead of stopping in the middle of the platform.
+No more AI jams at stations|If an AI train's track at a station is occupied, it takes another free track of the same station and makes its stop there, instead of waiting at the entrance.
+Commercial stops only for passenger trains|The service sheet no longer shows commercial stops or door opening for freight trains or trains without passengers.

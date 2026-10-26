@@ -109,6 +109,7 @@ namespace SelectOR.MapAgent
         static void AfterUpdate()
         {
             if (_errors > 20) return;
+            try { PuertasIA.Apply(); } catch { }   // (1.2.79) las puertas de los trenes IA (PuertasIA.cs)
             try
             {
                 if (!MPManager.IsMultiPlayer() || !MPManager.IsServer()) return;
@@ -159,6 +160,7 @@ namespace SelectOR.MapAgent
             try
             {
                 if (___sender != "SelectOR" || ___msgx == null || !___msgx.StartsWith("@selector:", StringComparison.Ordinal)) return true;
+                if (PuertasIA.Take(___msgx)) return false;   // (1.2.79) las puertas de los trenes IA (PuertasIA.cs)
                 if (___msgx.StartsWith("@selector:blocked", StringComparison.Ordinal) && !_blockedOn)
                 {
                     _blockedLast = null; _blockedNext = 0; _blockedOn = true;
