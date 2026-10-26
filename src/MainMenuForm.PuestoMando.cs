@@ -15,21 +15,21 @@ namespace SelectOR
 
         void BuildSalaDispatchButton()
         {
-            _salaDispBtn = new Label { Text = "🖥", AutoSize = false, Size = new Size(30, 30), TextAlign = ContentAlignment.MiddleCenter,
+            // (1.2.77) el icono en color, como los demás de SelectOR (EmojiIcon)
+            _salaDispBtn = new EmojiIcon { Text = "🖥", Size = new Size(30, 30),
                                        ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(12.5f), Cursor = Cursors.Hand };
-            _salaDispBtn.MouseEnter += (s, e) => _salaDispBtn.ForeColor = Theme.AccentHi;
-            _salaDispBtn.MouseLeave += (s, e) => _salaDispBtn.ForeColor = Theme.Subtle;
             _salaDispBtn.Click += (s, e) => OpenDispatch();
             new ToolTip().SetToolTip(_salaDispBtn, Tr("Puesto de mando de la sala"));
             Action place = () =>
             {
-                int right = _salaWxBtn != null && _salaWxBtn.Visible ? _salaWxBtn.Left - 4 : _salaHost.ClientSize.Width - 4;
+                int right = _salaAiBtn != null && _salaAiBtn.Visible ? _salaAiBtn.Left - 4 : _salaWxBtn != null && _salaWxBtn.Visible ? _salaWxBtn.Left - 4 : _salaHost.ClientSize.Width - 4;
                 _salaDispBtn.Location = new Point(right - _salaDispBtn.Width, Math.Max(0, (_salaHost.ClientSize.Height - _salaDispBtn.Height) / 2));
             };
             _salaHost.Resize += (s, e) => place();
             _salaHost.HandleCreated += (s, e) => place();
             _salaDispBtn.VisibleChanged += (s, e) => place();
             if (_salaWxBtn != null) { _salaWxBtn.VisibleChanged += (s, e) => place(); _salaWxBtn.LocationChanged += (s, e) => place(); }
+            if (_salaAiBtn != null) { _salaAiBtn.VisibleChanged += (s, e) => place(); _salaAiBtn.LocationChanged += (s, e) => place(); }
             _salaHost.Controls.Add(_salaDispBtn);
             _salaDispBtn.BringToFront();
         }

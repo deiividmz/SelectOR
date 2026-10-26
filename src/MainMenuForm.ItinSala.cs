@@ -28,6 +28,7 @@ namespace SelectOR
         void RoomItinHook(SwitchPilot p)
         {
             p.ItinsChanged += () => { try { _serviceHud?.BigMapInvalidate(); } catch { } };
+            p.WhyChanged += () => { try { _serviceHud?.BigMapInvalidate(); } catch { } };   // (1.2.77)
             p.ItinReply += (who, ok, o, text) =>
             {
                 string me = (_txtMPUser?.Text ?? "").Trim();
@@ -72,6 +73,7 @@ namespace SelectOR
             else if (it.State == "queue")
             {
                 l.Add((string.Format(Tr("Itinerario {0}: en cola ({1}.º)"), it.Origin + " → " + (it.Dest >= 0 ? it.Dest.ToString() : Tr("topera")), it.Queue), Theme.Subtle, null));
+                if (!string.IsNullOrEmpty(it.Why)) l.Add((string.Format(Tr("Espera porque {0}"), SwitchPilot.Lang(it.Why)), RoomMapDraw.WhyColor, null));   // (1.2.77)
                 l.Add((Tr("Quitarlo de la cola"), Color.FromArgb(255, 183, 77), () => { _pilot.ItinDel(it.Origin); RoomLog($"quitar de la cola el itinerario desde la señal {it.Origin}"); }));
             }
             else l.Add((string.Format(Tr("Anular itinerario {0}"), it.Origin + " → " + (it.Dest >= 0 ? it.Dest.ToString() : Tr("topera"))), Color.FromArgb(255, 183, 77), () =>

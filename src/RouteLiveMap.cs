@@ -419,6 +419,28 @@ namespace SelectOR
 
         public void FitAll() { _follow = null; Fit(); Invalidate(); }
 
+        // (1.2.77) capa propia encima de la vía (Horario de la sala: el recorrido de cada servicio); recibe lat/lon → pantalla.
+        public Action<Graphics, Func<double, double, PointF>> Overlay;
+        // (1.2.77) encuadrar unos puntos (lat/lon), con margen; sin puntos, toda la ruta.
+        public void FitLL(IEnumerable<(double lat, double lon)> pts)
+        {
+            if (_d == null) return;
+            if (!_fitted) Fit();
+            if (!_fitted) return;
+            double x0 = double.MaxValue, y0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue; int n = 0;
+            foreach (var (la, lo) in pts ?? Array.Empty<(double, double)>())
+            {
+                var (x, y) = _d.Proj(la, lo); n++;
+                x0 = Math.Min(x0, x); x1 = Math.Max(x1, x); y0 = Math.Min(y0, y); y1 = Math.Max(y1, y);
+            }
+            if (n == 0) { FitAll(); return; }
+            double w = Math.Max(300, x1 - x0), h = Math.Max(300, y1 - y0);
+            _follow = null;
+            _s = Math.Max(_fitS * 0.6, Math.Min(4.0, Math.Min((Width - 90) / w, (Height - 90) / h)));
+            _cx = (x0 + x1) / 2; _cy = (y0 + y1) / 2;
+            Invalidate();
+        }
+
         PointF Scr(double x, double y) => new PointF((float)((x - _cx) * _s + Width / 2.0), (float)((y - _cy) * _s + Height / 2.0));
         PointF ScrLL(double lat, double lon) { var (x, y) = _d.Proj(lat, lon); return Scr(x, y); }
 
@@ -641,6 +663,7 @@ namespace SelectOR
             }
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            if (Overlay != null) { try { Overlay(g, (la, lo) => ScrLL(la, lo)); } catch { } }
             // Las locomotoras, a escala según el zoom (como en el mapa grande del HUD): crecen al acercarse y menguan al
             // alejarse (raíz cuadrada de los px por metro), entre 7 y 30 px de ancho; el nombre dentro solo si cabe.
             float locoW = LocoW();

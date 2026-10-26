@@ -86,6 +86,9 @@ namespace SelectOR
             ClientSize = new Size(ClientSize.Width, ClientSize.Height + h);
         }
 
+        // (1.2.77) Un control cualquiera (p. ej. una vista previa), de alto fijo.
+        public void AddControl(Control c, int height) => AddRow(c, height);
+
         // Texto de ayuda (se puede cambiar después: deja sitio para dos líneas como mínimo).
         public Label AddInfo(string text, Color? color = null)
         {

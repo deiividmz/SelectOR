@@ -10,6 +10,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace SelectOR
@@ -371,6 +372,81 @@ namespace SelectOR
             }
             finally { bmp.UnlockBits(data); }
             return bmp;
+        }
+
+        // (1.2.77, TeleEditor) Guarda un .ace sin comprimir («SIMISA@@@@@@@@@@»), con datos por canales como lo lee Open
+        // Rails (Orts.Formats.Msts.AceFile): rojo, verde y azul de 8 bits y, según alphaBits, alfa de 8 bits (8) o máscara de
+        // 1 bit (1). Con mipmaps si la textura es cuadrada y potencia de 2 (como las de los trenes); si no, sin ellos.
+        public static void Save(Bitmap bmp, string fileName, int alphaBits)
+        {
+            int w = bmp.Width, h = bmp.Height;
+            bool mips = w == h && w > 0 && (w & (w - 1)) == 0;
+            var levels = new List<int[]>();
+            var px = new int[w * h];
+            var d = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try { Marshal.Copy(d.Scan0, px, 0, px.Length); } finally { bmp.UnlockBits(d); }
+            levels.Add(px);
+            if (mips)
+                for (int s = w; s > 1; s /= 2)
+                {
+                    var src = levels[^1]; int ns = s / 2; var dst = new int[ns * ns];
+                    for (int y = 0; y < ns; y++)
+                        for (int x = 0; x < ns; x++)
+                        {
+                            int a = 0, r = 0, g = 0, b = 0;
+                            foreach (int c in new[] { src[(2 * y) * s + 2 * x], src[(2 * y) * s + 2 * x + 1], src[(2 * y + 1) * s + 2 * x], src[(2 * y + 1) * s + 2 * x + 1] })
+                            { a += (c >> 24) & 255; r += (c >> 16) & 255; g += (c >> 8) & 255; b += c & 255; }
+                            dst[y * ns + x] = ((a / 4) << 24) | ((r / 4) << 16) | ((g / 4) << 8) | (b / 4);
+                        }
+                    levels.Add(dst);
+                }
+            var ch = new List<(int size, int type)> { (8, 3), (8, 4), (8, 5) };
+            if (alphaBits >= 8) ch.Add((8, 6)); else if (alphaBits == 1) ch.Add((1, 2));
+            using var ms = new MemoryStream();
+            using (var wr = new BinaryWriter(ms, System.Text.Encoding.ASCII, true))
+            {
+                wr.Write(System.Text.Encoding.ASCII.GetBytes("SIMISA@@@@@@@@@@"));
+                wr.Write(new byte[] { 1, 0, 0, 0 });
+                wr.Write(mips ? OPT_MIPMAPS : 0);
+                wr.Write(w); wr.Write(h);
+                wr.Write(alphaBits >= 8 ? 0x11 : alphaBits == 1 ? 0x10 : 0x0E);   // (informativo con datos por canales)
+                wr.Write(ch.Count);
+                var name = new byte[128]; System.Text.Encoding.ASCII.GetBytes("SelectOR").CopyTo(name, 0); wr.Write(name);
+                foreach (var (size, type) in ch) { wr.Write((ulong)size); wr.Write((ulong)type); }
+                // tablas de desplazamiento de cada fila de cada nivel (Open Rails no las usa; se rellenan bien igualmente)
+                int lineBytes(int lw) => ch.Sum(c => c.size == 1 ? (lw + 7) / 8 : lw);
+                long headerEnd = ms.Position + Enumerable.Range(0, levels.Count).Sum(l => 4 * (h >> l));
+                long pos = 0;
+                for (int l = 0; l < levels.Count; l++)
+                {
+                    int lw = w >> l, lh = h >> l;
+                    for (int y = 0; y < lh; y++) { wr.Write((int)(headerEnd - 16 + pos)); pos += lineBytes(lw); }
+                }
+                for (int l = 0; l < levels.Count; l++)
+                {
+                    int lw = w >> l, lh = h >> l; var lv = levels[l];
+                    for (int y = 0; y < lh; y++)
+                        foreach (var (size, type) in ch)
+                        {
+                            if (size == 1)
+                            {
+                                var bits = new byte[(lw + 7) / 8];
+                                for (int x = 0; x < lw; x++) if (((lv[y * lw + x] >> 24) & 255) >= 128) bits[x / 8] |= (byte)(0x80 >> (x % 8));
+                                wr.Write(bits);
+                            }
+                            else
+                            {
+                                int shift = type == 3 ? 16 : type == 4 ? 8 : type == 5 ? 0 : 24;
+                                var line = new byte[lw];
+                                for (int x = 0; x < lw; x++) line[x] = (byte)((lv[y * lw + x] >> shift) & 255);
+                                wr.Write(line);
+                            }
+                        }
+                }
+            }
+            string tmp = fileName + ".tmp";
+            File.WriteAllBytes(tmp, ms.ToArray());
+            File.Move(tmp, fileName, true);
         }
     }
 }

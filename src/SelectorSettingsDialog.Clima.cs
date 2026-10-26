@@ -37,7 +37,7 @@ namespace SelectOR
             _chkClima.Size = new Size(TextRenderer.MeasureText(_chkClima.Text, _chkClima.Font).Width + Theme.Px(40), Theme.Px(28));
             _chkClima.CheckedChanged += async (s, e) =>
             {
-                _prefs.ClimaEnabled = _chkClima.Checked; Save(); _climaGroups.Enabled2 = _chkClima.Checked; _climaGroups.Invalidate();
+                _prefs.ClimaEnabled = _chkClima.Checked; Save(); _climaGroups.Enabled2 = _chkClima.Checked; _climaGroups.Invalidate(); ClimaCloudRefresh();
                 if (_chkClima.Checked) await ClimaSync();
             };
             _lblClimaVer = new Label { AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8.5f), Anchor = AnchorStyles.Top | AnchorStyles.Right };
@@ -61,7 +61,7 @@ namespace SelectOR
                 if (!_prefs.ClimaGroups.Remove(id)) _prefs.ClimaGroups.Add(id);
                 Save(); ClimaRefresh();
             };
-            _climaGroups.Picked += id => { _climaPreview.ShowGroup(id, ClimaShown()); };
+            _climaGroups.Picked += id => { _climaPreview.ShowGroup(id, ClimaShownEffective()); };
 
             // administrador: un botón que abre su ventana (las imágenes del clima y publicar; ClimaAdminDialog)
             _climaAdminStrip = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Visible = Supa.IsSuperadmin, Padding = new Padding(0, Theme.Px(14), 0, 0) };
@@ -82,12 +82,13 @@ namespace SelectOR
             }
             Btn("Añadir imágenes…").Click += (s, e) => ClimaAddFiles(false);
             Btn("Añadir una carpeta…").Click += (s, e) => ClimaAddFiles(true);
+            Btn("Añadir nubes…").Click += (s, e) => ClimaAddClouds();   // (1.2.77) texturas de nubes a elegir
             Btn("Quitar").Click += (s, e) => ClimaRemoveSelected();
             _btnClimaPublish = Btn("Publicar", true);
             _btnClimaPublish.Click += async (s, e) => await ClimaPublish();
             _lblClimaAdmin = new Label { Dock = DockStyle.Bottom, Height = Theme.Px(40), ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8.75f), Padding = new Padding(0, Theme.Px(6), 0, 0) };
             _climaAdminBox.Controls.Add(_climaAdminList); _climaAdminBox.Controls.Add(_lblClimaAdmin); _climaAdminBox.Controls.Add(abtns);
-            left.Controls.Add(_climaAdminStrip); left.Controls.Add(_climaGroups);
+            left.Controls.Add(_climaAdminStrip); left.Controls.Add(BuildClimaCloudPicker()); left.Controls.Add(_climaGroups);   // (1.2.77) nubes a elegir, debajo de los grupos
 
             _climaPreview = new ClimaPreview { Dock = DockStyle.Fill, Margin = new Padding(Theme.Px(12), 0, 0, 0) };
             cols.Controls.Add(left, 0, 0); cols.Controls.Add(_climaPreview, 1, 0);
@@ -95,6 +96,7 @@ namespace SelectOR
             page.Controls.Add(cols); page.Controls.Add(_lblClimaStatus); page.Controls.Add(info); page.Controls.Add(top);
             _climaPub = ClimaFiles.LoadCached();
             _climaDraft = _climaPub?.files.ToList() ?? new List<ClimaFiles.Item>();
+            _climaDraftClouds = _climaPub?.clouds?.ToList() ?? new List<ClimaFiles.Cloud>();
             ClimaRefresh();
             page.VisibleChanged += async (s, e) => { if (page.Visible) await ClimaLoad(); };
             return page;
@@ -115,7 +117,7 @@ namespace SelectOR
             if (err == null && text != null)
             {
                 var m = ClimaFiles.Parse(text, sig);
-                if (m != null) { _climaPub = m; if (!ClimaDirty()) _climaDraft = m.files.ToList(); }
+                if (m != null) { bool d0 = ClimaDirty(); _climaPub = m; if (!d0) { _climaDraft = m.files.ToList(); _climaDraftClouds = m.clouds?.ToList() ?? new List<ClimaFiles.Cloud>(); } }
             }
             _lblClimaStatus.Text = err != null && err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? I18n.T("El servidor aún no tiene el clima.") : "";
             ClimaRefresh();
@@ -128,11 +130,11 @@ namespace SelectOR
             try
             {
                 _lblClimaStatus.ForeColor = Theme.AccentHi; _lblClimaStatus.Text = I18n.T("Comprobando el clima…");
-                var (m, err) = await ClimaFiles.SyncAsync((d, t) => { try { BeginInvoke((Action)(() => { if (t > 0 && d < t) _lblClimaStatus.Text = string.Format(I18n.T("Descargando el clima: {0} de {1}…"), d + 1, t); })); } catch { } });
+                var (m, err) = await ClimaFiles.SyncAsync((d, t) => { try { BeginInvoke((Action)(() => { if (t > 0 && d < t) _lblClimaStatus.Text = string.Format(I18n.T("Descargando el clima: {0} de {1}…"), d + 1, t); })); } catch { } }, _prefs.ClimaClouds);
                 if (IsDisposed) return;
                 bool wasDirty = ClimaDirty();
                 if (m != null) _climaPub = m;
-                if (!wasDirty) _climaDraft = _climaPub?.files.ToList() ?? new List<ClimaFiles.Item>();
+                if (!wasDirty) { _climaDraft = _climaPub?.files.ToList() ?? new List<ClimaFiles.Item>(); _climaDraftClouds = _climaPub?.clouds?.ToList() ?? new List<ClimaFiles.Cloud>(); }
                 _lblClimaStatus.ForeColor = err != null ? Color.FromArgb(229, 115, 115) : Theme.AccentHi;
                 _lblClimaStatus.Text = err != null ? (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 ? I18n.T("El servidor aún no tiene el clima.") : err)
                                      : _climaPub == null ? I18n.T("Todavía no hay clima publicado.") : I18n.T("Clima al día.");
@@ -145,7 +147,7 @@ namespace SelectOR
         {
             var a = (_climaPub?.files ?? new List<ClimaFiles.Item>()).Select(f => f.name + ":" + f.sha).OrderBy(x => x);
             var b = _climaDraft.Select(f => f.name + ":" + f.sha).OrderBy(x => x);
-            return !a.SequenceEqual(b);
+            return !a.SequenceEqual(b) || ClimaCloudsDirty();
         }
 
         void ClimaRefresh()
@@ -161,7 +163,8 @@ namespace SelectOR
                 return new ClimaGroupList.Row { Id = g.id, Label = I18n.T(g.label), Count = fs.Count, Changed = fs.Count(f => !ClimaFiles.SameAsOriginal(f)), Bytes = fs.Sum(f => f.size), On = _prefs.ClimaGroups?.Contains(g.id) == true };
             }).ToList();
             _climaGroups.Invalidate();
-            _climaPreview.ShowGroup(_climaPreview.Group ?? _climaGroups.Rows.FirstOrDefault(r => r.Count > 0)?.Id ?? "clouds", shown);
+            _climaPreview.ShowGroup(_climaPreview.Group ?? _climaGroups.Rows.FirstOrDefault(r => r.Count > 0)?.Id ?? "clouds", ClimaShownEffective());
+            ClimaCloudRefresh();
             _climaAdminStrip.Visible = Supa.IsSuperadmin;
             if (Supa.IsSuperadmin)
             {
@@ -172,10 +175,15 @@ namespace SelectOR
                                    .Concat((_climaPub?.files ?? new List<ClimaFiles.Item>()).Where(f => !names.Contains(f.name)).Select(f => new ClimaAdminList.Row
                                        { Name = f.name, Group = I18n.T(ClimaFiles.Groups.First(g => g.id == ClimaFiles.GroupOf(f.name)).label), Bytes = f.size, State = 2 }))
                                    .ToList();
+                // (1.2.77) las texturas de nubes a elegir
+                var pubC = new HashSet<string>((_climaPub?.clouds ?? new List<ClimaFiles.Cloud>()).Select(c => c.sha));
+                var draftC = new HashSet<string>(_climaDraftClouds.Select(c => c.sha));
+                _climaAdminList.Rows.AddRange(_climaDraftClouds.Select(c => new ClimaAdminList.Row { Name = "☁ " + c.label, Group = I18n.T("Nubes a elegir"), Bytes = c.size, State = pubC.Contains(c.sha) ? 0 : 1, CloudSha = c.sha }));
+                _climaAdminList.Rows.AddRange((_climaPub?.clouds ?? new List<ClimaFiles.Cloud>()).Where(c => !draftC.Contains(c.sha)).Select(c => new ClimaAdminList.Row { Name = "☁ " + c.label, Group = I18n.T("Nubes a elegir"), Bytes = c.size, State = 2, CloudSha = c.sha }));
                 _climaAdminList.Invalidate();
                 bool dirty = ClimaDirty();
                 _btnClimaPublish.Enabled = dirty && !_climaBusy;
-                _lblClimaAdminSum.Text = string.Format(I18n.T("{0} imagen(es) en el clima"), _climaDraft.Count) + (dirty ? " · " + I18n.T("hay cambios sin publicar") : "");
+                _lblClimaAdminSum.Text = string.Format(I18n.T("{0} imagen(es) en el clima"), _climaDraft.Count) + (_climaDraftClouds.Count > 0 ? " · " + string.Format(I18n.T("{0} nubes a elegir"), _climaDraftClouds.Count) : "") + (dirty ? " · " + I18n.T("hay cambios sin publicar") : "");
                 _lblClimaAdmin.Text = !Updater.HasSigningKey ? I18n.T("Este equipo no tiene la clave de firma: aquí no se puede publicar el clima.")
                                     : dirty ? I18n.T("Hay cambios sin publicar.") : I18n.T("Todo publicado.");
             }
@@ -234,6 +242,12 @@ namespace SelectOR
         {
             var r = _climaAdminList.Selected;
             if (r == null) { _lblClimaAdmin.Text = I18n.T("Elige una imagen de la lista."); return; }
+            if (r.CloudSha != null)
+            {
+                if (r.State == 2) _climaDraftClouds.Add(_climaPub.clouds.First(c => c.sha == r.CloudSha));   // (quitada: vuelve)
+                else _climaDraftClouds.RemoveAll(c => c.sha == r.CloudSha);
+                ClimaRefresh(); return;
+            }
             if (r.State == 2) { var f = _climaPub.files.First(x => x.name == r.Name); _climaDraft.Add(f); }   // (quitada: vuelve)
             else _climaDraft.RemoveAll(f => f.name == r.Name);
             ClimaRefresh();
@@ -248,10 +262,11 @@ namespace SelectOR
             _lblClimaAdmin.Text = I18n.T("Publicando…");
             try
             {
-                var (ver, err) = await ClimaFiles.PublishAsync(_climaDraft);
+                var (ver, err) = await ClimaFiles.PublishAsync(_climaDraft, _climaDraftClouds);
                 if (err != null) { _lblClimaAdmin.Text = err; return; }
                 _climaPub = ClimaFiles.LoadCached();
                 _climaDraft = _climaPub?.files.ToList() ?? _climaDraft;
+                _climaDraftClouds = _climaPub?.clouds?.ToList() ?? new List<ClimaFiles.Cloud>();
                 _lblClimaStatus.ForeColor = Theme.AccentHi; _lblClimaStatus.Text = string.Format(I18n.T("Clima n.º {0} publicado."), ver);
             }
             finally { _climaBusy = false; ClimaRefresh(); }
@@ -428,7 +443,7 @@ namespace SelectOR
         // ---------------------------------------------------------------- lista del administrador
         sealed class ClimaAdminList : Control
         {
-            public sealed class Row { public string Name, Group; public long Bytes; public int State; public bool Same; }   // 0 publicada · 1 nueva · 2 se quita
+            public sealed class Row { public string Name, Group; public long Bytes; public int State; public bool Same; public string CloudSha; }   // 0 publicada · 1 nueva · 2 se quita · CloudSha: una textura de nubes a elegir
             public List<Row> Rows = new();
             int _sel = -1, _top;
             public Row Selected => _sel >= 0 && _sel < Rows.Count ? Rows[_sel] : null;

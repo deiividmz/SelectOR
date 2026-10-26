@@ -1,7 +1,10 @@
-1.2.76
-Puesto de mando en una sola pantalla|Toda la ruta en un único tablero que se mueve con el ratón y se amplía con la rueda, con el trazado real de las vías (en las estaciones, más separadas para que se lean): cantones ocupados, itinerarios, agujas con su número, señales con su figura, andenes y trenes. La lista de la izquierda te lleva a cada estación o trayecto, y el jefe de circulación manda desde el mismo tablero.
-Agujas de la sala como en el mapa|En la sala compartida, tu Open Rails ya no coloca las agujas por su cuenta: las agujas que ves en el 3D son siempre las mismas que en el mapa grande y en la sala, también cuando otro jugador las cambia.
-Tecla G en la sala|En la sala compartida, G y Mayús+G cambian la aguja en la sala, como un clic en el mapa grande (antes solo cambiaba en tu Open Rails y los demás no la veían).
-Trenes segregados en el mapa|Si alguien desacopla y deja coches en la vía, se ven en el mapa grande y en el puesto de mando («Suelto de …», en gris) y ocupan su vía: las señales y los itinerarios los tienen en cuenta.
-Túneles con luz en CYZYRails|Las lámparas de los túneles ya no se apagan al encender las luces del tren.
-ATO más fino en CYZYRails|El ATO empieza a frenar a tiempo y sigue su curva de frenado, sin pasarse del punto de parada.
+﻿1.2.77
+Por qué no se abre una señal|En la sala compartida, el mapa grande del HUD y el puesto de mando explican por qué una señal sigue en rojo o un itinerario sigue en cola: vía ocupada, aguja reservada, tren de otro jugador delante… Sale junto a la señal y, la de tu tren, abajo en el mapa.
+Chat de la sala en el puesto de mando|El puesto de mando tiene a la derecha el chat de la sala, el mismo que el del HUD y el de Open Rails. El jefe de circulación puede escribir desde ahí aunque no esté conduciendo, y mientras lleva alguna estación sus mensajes salen con la etiqueta «Jefe de circulación», también en el chat del HUD.
+Editor de teleindicadores|Con el botón ✏️ junto al selector del tren creas tus propios destinos: escribes el texto y SelectOR lo dibuja sobre el teleindicador del tren (de puntos LED o de placa), con vista previa. Puedes modificarlos o eliminarlos cuando quieras.
+Nubes a elegir|En Ajustes → Clima eliges la textura de las nubes entre la de serie y las que publica SelectOR.
+Señales con su color en CYZYRails|Las señales se ven de su color, verde, rojo o amarillo, también de cerca y de noche, sin el velo blanco que las tapaba.
+Luces en las estaciones|La ruta Via Estrecha tiene iluminación en CYZYRails (estaciones, marquesinas, edificios y farolas), y en CGL las luces de las estaciones ya no caen encima de las vías; los túneles, más tenues.
+ASFA, LZB y ATO en Horarios con CYZYRails|Los sistemas de seguridad del tren funcionan también en Horarios y actividades, no solo en Conducción libre y multijugador.
+Trenes de los demás al reacoplar|En la sala compartida, cuando otro jugador vuelve a enganchar los coches que había dejado, su tren ya no desaparece de tu pantalla.
+Curvas suaves en el puesto de mando|Las vías del puesto de mando se dibujan con curvas suaves, sin picos ni escalones. Además, los iconos de la barra de la sala salen en color.

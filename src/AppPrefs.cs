@@ -143,6 +143,8 @@ namespace SelectOR
         // mientras se conduce. De serie, desactivado; los grupos elegidos (nubes, lluvia, nieve, luces, cielo nocturno).
         public bool ClimaEnabled { get; set; } = false;
         public List<string> ClimaGroups { get; set; } = new List<string> { "clouds", "rain", "snow", "lights", "night" };
+        // (1.2.77) la textura de nubes elegida (huella de una de las «nubes» del clima publicado); null = la de serie del clima
+        public string ClimaClouds { get; set; } = null;
 
         static string Dir => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Open Rails");

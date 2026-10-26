@@ -145,6 +145,12 @@ namespace SelectOR
             int PosOf(int o) => _roomSwSet.TryGetValue(o, out var ch) && ch.at > statesAt ? ch.pos : st != null && o < st.Length ? st[o] : -1;
             RoomItinView(v, PosOf, itinNodes);
             v.Paths = TrainPaths(geo, p.Trains, p.TrainTrack, PosOf, st, _roomSwVer, (_txtMPUser?.Text ?? "").Trim());
+            // (1.2.77) por qué no se abre cada señal (Motivos.cs del despachador) y, la de tu tren, abajo en el mapa
+            var why = p.SigWhy;
+            v.SignalWhy = obj => why.TryGetValue(obj, out var w) ? SwitchPilot.Lang(w.text) : null;
+            string meW = (_txtMPUser?.Text ?? "").Trim();
+            foreach (var kv in why)
+                if (meW.Length > 0 && string.Equals(kv.Value.train, meW, StringComparison.OrdinalIgnoreCase)) { v.Banner = string.Format(Tr("Señal {0} en parada: {1}"), kv.Key, SwitchPilot.Lang(kv.Value.text)); break; }
             foreach (var t in p.Trains)
                 if (!t.player && !RoomLoose.Is(t.name) && OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) v.AiTrains.Add((t.name, la, lo, t.kmh));
             return v;
@@ -396,6 +402,7 @@ namespace SelectOR
             if (RoomJefeOfSig(g.Obj) is string og)   // de un jefe de circulación: solo lo de tu tren
             {
                 var mine = new List<(string, Color, Action)> { (string.Format(Tr("La mueve el jefe de circulación ({0})"), og), Theme.Subtle, null) };
+                if (RoomWhyItem(g) is var wj && wj.Item1 != null) mine.Insert(0, wj);
                 if (RoomFixedDispatcher) { mine.Add((null, Color.Empty, null)); mine.Add(RoomPassItem()); mine.Add(RoomReleaseItem()); }
                 _serviceHud?.BigMapMenu(screen, g.Obj >= 0 ? string.Format(Tr("Señal {0} · ahora: {1}"), g.Obj, state) : string.Format(Tr("Señal · ahora: {0}"), state), mine);
                 return;
@@ -403,12 +410,20 @@ namespace SelectOR
             // (1.2.75) como en un puesto de mando: itinerarios en vez de «anuncio» y «vía libre» (la señal se abre sola con el aspecto
             // que le toca); siguen «parada» (cerrarla), el rebase autorizado y quitar la parada
             var items = RoomItinItems(g);
+            if (RoomWhyItem(g) is var wi && wi.Item1 != null) items.Insert(0, wi);   // (1.2.77) por qué está en parada
             items.Add(Item(Tr("Cerrar la señal (parada)"), 1, RoomMapDraw.AspectColor(0)));
             items.Add(Item(Tr("Rebase autorizado"), 4, RoomMapDraw.CallOnWhite));
             items.Add(Item(Tr("Quitar la parada (automática)"), 0, Color.Empty));
             if (!LocalMapOn && RoomFixedDispatcher) { items.Add((null, Color.Empty, null)); items.Add(RoomPassItem()); items.Add(RoomReleaseItem()); }   // (y las de tu tren: Tab y Ctrl+Tab)
             _serviceHud?.BigMapMenu(screen, g.Obj >= 0 ? string.Format(Tr("Señal {0} · ahora: {1}"), g.Obj, state) : string.Format(Tr("Señal · ahora: {0}"), state), items);
             RoomLog($"menú de la señal {g.Obj} abierto");
+        }
+
+        // (1.2.77) la línea «En parada: …» del menú de una señal (Item1 null: sin motivo)
+        (string, Color, Action) RoomWhyItem(RoomMapGeo.Sig g)
+        {
+            if (LocalMapOn || _pilot == null || g.Obj < 0 || !_pilot.SigWhy.TryGetValue(g.Obj, out var w)) return (null, Color.Empty, null);
+            return (string.Format(Tr("En parada para «{0}»: {1}"), w.train, SwitchPilot.Lang(w.text)), RoomMapDraw.WhyColor, null);
         }
 
         // ¿La sala la lleva el despachador fijo de SelectOR, con el servidor que sabe pedir paso, liberar y cambiar un desvío

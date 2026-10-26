@@ -101,7 +101,7 @@ namespace SelectOR
         // Ficheros que se copian a la carpeta del tren (todos los de la subcarpeta del destino).
         static List<string> FilesOf(string destSub)
         {
-            try { return Directory.GetFiles(destSub).Where(x => !string.Equals(Path.GetFileName(x), "desktop.ini", StringComparison.OrdinalIgnoreCase)).ToList(); }
+            try { return Directory.GetFiles(destSub).Where(x => !string.Equals(Path.GetFileName(x), "desktop.ini", StringComparison.OrdinalIgnoreCase) && !string.Equals(Path.GetFileName(x), TeleEditor.Marker, StringComparison.OrdinalIgnoreCase)).ToList(); }   // (la marca de SelectOR no va al tren)
             catch { return new List<string>(); }
         }
 
@@ -239,6 +239,8 @@ namespace SelectOR
         // ---- Cartel LED para la lista: se recorta lo encendido y se estira a lo ancho (en el modelo el
         //      panel es mucho más ancho que la textura), sobre un fondo casi negro. ----
         static readonly Dictionary<string, Bitmap> _thumbs = new(StringComparer.OrdinalIgnoreCase);
+        // (1.2.77) tras crear, modificar o eliminar un destino (TeleEditor): las miniaturas, otra vez
+        public static void ForgetThumbs() { foreach (var b in _thumbs.Values) b?.Dispose(); _thumbs.Clear(); }
 
         public static Bitmap LedThumb(string file, int height)
         {
@@ -265,6 +267,26 @@ namespace SelectOR
             }
             catch { res = null; }
             _thumbs[key] = res;
+            return res;
+        }
+
+        // (1.2.77) vista grande y legible del editor: los LED, estirados como en el tren
+        //  (la textura va aplastada en horizontal); las placas claras, tal cual.
+        public static Bitmap Readable(Bitmap src, int height)
+        {
+            if (src == null) return null;
+            if (!TeleEditor.IsLed(src)) return new Bitmap(src);
+            var bb = LitBounds(src);
+            if (bb.Width <= 0 || bb.Height <= 0) return new Bitmap(src);
+            int pad = Math.Max(6, height / 10), inner = Math.Max(8, height - 2 * pad);
+            int w = Math.Max(16, (int)Math.Round(bb.Width * 5.0 * inner / bb.Height));
+            w = Math.Min(w, height * 12);
+            var res = new Bitmap(w + 2 * pad, height, PixelFormat.Format32bppArgb);
+            using var g = Graphics.FromImage(res);
+            g.Clear(Color.FromArgb(8, 8, 8));
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+            g.DrawImage(src, new Rectangle(pad, pad, w, inner), bb, GraphicsUnit.Pixel);
             return res;
         }
 

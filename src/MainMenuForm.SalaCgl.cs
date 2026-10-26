@@ -78,6 +78,7 @@ namespace SelectOR
             _salaHost.HandleCreated += (s, e) => place();
             _salaHost.Controls.Add(_chkSala); _salaHost.Controls.Add(sub);
             BuildSalaWeatherButton();   // ⛅ el clima de la sala, para el administrador (MainMenuForm.ClimaSala.cs)
+            BuildSalaAiButton();        // 🚆 el horario de los trenes IA, para el administrador (MainMenuForm.HorarioSala.cs)
             BuildSalaDispatchButton();  // 🖥 el puesto de mando de la sala, para todos (MainMenuForm.PuestoMando.cs)
             return _salaHost;
         }

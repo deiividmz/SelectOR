@@ -23,7 +23,8 @@ namespace SelectOR
         public Func<RoomMapGeo.Sig, int> Aspect;                  // aspecto (0…7; −1: no se sabe)
         public Func<RoomMapGeo.Sig, RoomMapDraw.Figure> Figure;   // (1.2.75) su figura del RCF (luces y pantalla de preanuncio); null: no se sabe
         public bool Blinking;                                     // (lo pone el dibujo) hay alguna luz a destellos: repintar a menudo
-        public readonly List<(string name, string sub, PointF[] body, bool player)> Trains = new();
+        public Func<int, string> SignalWhy;                       // (1.2.77) por qué está en parada una señal que espera un tren (null: sin motivo)
+        public readonly List<(string name, string sub, PointF[] body, bool player, bool ai)> Trains = new();   // ai: (1.2.77) del horario de la sala
         public readonly HashSet<int> Flash = new();               // señales en las que alguien acaba de pedir paso (Tab): parpadean
         public readonly Dictionary<int, List<(double a, double b)>> Occupied = new();          // por tramo: metros con un tren
         public readonly Dictionary<int, List<(double a, double b, bool callOn)>> Route = new(); // por tramo: itinerarios establecidos
@@ -267,7 +268,7 @@ namespace SelectOR
                     foreach (var tr in live.Trains)
                     {
                         if (tr.body == null || tr.body.Length < 1) continue;
-                        var col = tr.player ? Occ : AiCol;
+                        var col = tr.player ? Occ : tr.ai ? RoomAi.Color : AiCol;
                         var pts = tr.body.Select(P).ToArray();
                         var mid = pts[pts.Length / 2];
                         // y una línea fina encima de su vía, para ver dónde está dentro del cantón

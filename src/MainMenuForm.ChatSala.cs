@@ -5,6 +5,7 @@
 // No se guarda: el servidor recuerda las últimas 40 líneas mientras quede alguien en la sala.
 
 using System;
+using System.Linq;
 
 namespace SelectOR
 {
@@ -57,6 +58,8 @@ namespace SelectOR
             if (kind == 'm')
             {
                 m.User = from; m.Body = text;
+                // (1.2.77) el jefe de circulación con alguna dependencia ahora, con su etiqueta
+                if (_pilot != null && _pilot.JefeZones.Any(z => z.Name == from)) m.User = from + "  · " + Tr("Jefe de circulación");
                 // (el chat agrupa por UserId: cada jugador el suyo; los míos, como míos)
                 m.UserId = string.Equals(from, me, StringComparison.Ordinal) ? Supa.UserId ?? "" : "@mp:" + from;
             }

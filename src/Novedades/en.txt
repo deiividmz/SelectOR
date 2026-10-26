@@ -1,7 +1,10 @@
-1.2.76
-Control centre on a single screen|The whole route on one board you pan with the mouse and zoom with the wheel, following the real track layout (spread out in stations so it reads well): occupied blocks, routes, numbered switches, signals with their real look, platforms and trains. The list on the left takes you to each station or line section, and the dispatcher works from the same board.
-Room switches as on the map|In the shared room your Open Rails no longer sets switches by itself: the switches you see in 3D are always the same as on the big map and in the room, also when another player throws them.
-G key in the room|In the shared room, G and Shift+G throw the switch in the room, like a click on the big map (before, it only changed in your Open Rails and the others did not see it).
-Detached cars on the map|If someone uncouples and leaves cars on the track, they show on the big map and in the control centre («… detached cars», in grey) and occupy their track: signals and routes take them into account.
-Lit tunnels in CYZYRails|Tunnel lamps no longer go dark when you switch on the train lights.
-Finer ATO in CYZYRails|The ATO starts braking in time and follows its braking curve, without overshooting the stopping point.
+﻿1.2.77
+Why a signal does not clear|In the shared room, the big HUD map and the control centre explain why a signal is still red or a route is still queued: track occupied, switch reserved, another player's train ahead… It shows next to the signal and, for your train's signal, at the bottom of the map.
+Room chat in the control centre|The control centre has the room chat on the right, the same as in the HUD and in Open Rails. The dispatcher can write from there even when not driving, and while in charge of a station their messages carry the «Dispatcher» tag, also in the HUD chat.
+Destination board editor|With the ✏️ button next to the train selector you create your own destinations: you type the text and SelectOR draws it on the train's board (LED dots or plate), with a preview. You can edit or delete them whenever you like.
+Choose your clouds|In Settings → Weather you pick the cloud texture: the default one or the ones SelectOR publishes.
+Signals in colour in CYZYRails|Signals show their colour, green, red or yellow, also up close and at night, without the white haze that covered them.
+Station lighting|The Via Estrecha route is lit in CYZYRails (stations, canopies, buildings and street lamps), and on CGL station lights no longer fall over the tracks; tunnels are dimmer.
+ASFA, LZB and ATO in Timetable with CYZYRails|The train's safety systems also work in Timetable and activities, not only in Free driving and multiplayer.
+Other players' trains when recoupling|In the shared room, when another player couples back the cars they had left, their train no longer disappears from your screen.
+Smooth curves in the control centre|Control centre tracks are drawn with smooth curves, without spikes or steps. The room bar icons are also in colour now.

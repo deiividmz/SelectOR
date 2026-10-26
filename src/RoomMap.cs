@@ -240,6 +240,21 @@ namespace SelectOR
         public static string Label(string name) => string.Format(I18n.T("Suelto de {0}"), Owner(name));
     }
 
+    // (1.2.77) los trenes IA del horario de la sala: «IA-nombre-número» en la lista del despachador (los espacios, «_»);
+    // en el mapa y en el puesto, con su nombre de servicio («C1 07:20») y su color
+    public static class RoomAi
+    {
+        public static readonly Color Color = Color.FromArgb(179, 136, 255);
+        public static bool Is(string name) => name != null && name.StartsWith("IA-", StringComparison.Ordinal);
+        public static string Label(string name)
+        {
+            if (!Is(name)) return name;
+            string r = name.Substring(3); int k = r.LastIndexOf('-');
+            if (k > 0 && int.TryParse(r.Substring(k + 1), out _)) r = r.Substring(0, k);
+            return r.Replace('_', ' ');
+        }
+    }
+
     public sealed class RoomMapView
     {
         public RoomMapGeo Geo;
@@ -258,10 +273,24 @@ namespace SelectOR
         public static readonly object PickCancel = new object();   // (clic fuera mientras se elige)
         // El camino por delante de cada tren (como Ctrl+9), del color del tren; X donde lo corta una aguja en contra.
         public List<(Color col, List<(double lat, double lon)> pts, (double lat, double lon)? against)> Paths = new();
+        // (1.2.77) por qué no se abre una señal en parada que espera un tren (null: sin motivo); y el de la señal de tu tren
+        public Func<int, string> SignalWhy;
+        public string Banner;
     }
 
     public static class RoomMapDraw
     {
+        // (1.2.77) la marca de «tiene un motivo para estar en parada» (el texto, en su menú y, el de tu tren, abajo en el mapa)
+        public static readonly Color WhyColor = Color.FromArgb(255, 183, 77);
+        public static void WhyBadge(Graphics g, float x, float y, float sc)
+        {
+            float r = 5.5f * Math.Max(0.9f, Math.Min(1.6f, sc));
+            using (var b = new SolidBrush(WhyColor)) g.FillEllipse(b, x - r, y - r, 2 * r, 2 * r);
+            using (var o = new Pen(Color.FromArgb(230, 20, 22, 24), 1.2f)) g.DrawEllipse(o, x - r, y - r, 2 * r, 2 * r);
+            using var f = new Font("Segoe UI", r * 1.25f, FontStyle.Bold, GraphicsUnit.Pixel);
+            var sz = g.MeasureString("!", f);
+            using (var tb = new SolidBrush(Color.FromArgb(25, 25, 25))) g.DrawString("!", f, tb, x - sz.Width / 2, y - sz.Height / 2);
+        }
         public const double MaxMPerPx = 6;   // más lejos, sin agujas ni señales (no cabrían)
 
         public static readonly Color ItinGreen = Color.FromArgb(120, 200, 80);   // (1.2.75) itinerarios (como el puesto de mando)
@@ -544,6 +573,7 @@ namespace SelectOR
                             float px = fb.Right + 2 * sc, fs = 7f * Math.Min(2.2f, sc);
                             DrawPap(g, fig, px, fb.Bottom - fs * 1.6f, fs);
                             if (s.Obj >= 0 && mPerPx <= SignalIdMPerPx) SignalId(g, s.Obj, px, fb.Top - 1, 6.8f * Math.Min(1.8f, sc));
+                            if (s.Obj >= 0 && v.SignalWhy?.Invoke(s.Obj) != null) WhyBadge(g, fb.Left - 6 * sc, fb.Top + 2 * sc, sc);   // (1.2.77)
                             continue;
                         }
                         if (callOn)
@@ -555,6 +585,7 @@ namespace SelectOR
                         using (var o = new Pen(Color.FromArgb(220, 15, 17, 19), 1.4f)) g.DrawEllipse(o, m.X - r, m.Y - r, 2 * r, 2 * r);
                         // su número (el de Open Rails: el de los avisos y el registro), de cerca
                         if (s.Obj >= 0 && mPerPx <= SignalIdMPerPx) SignalId(g, s.Obj, m.X + r + 2, m.Y - r - 1, 6.8f * Math.Min(1.8f, sc));
+                        if (s.Obj >= 0 && v.SignalWhy?.Invoke(s.Obj) != null) WhyBadge(g, m.X - r - 5 * sc, m.Y - r, sc);   // (1.2.77)
                     }
             }
             // (1.2.75) eligiendo el destino de un itinerario: los caminos posibles y un círculo en cada destino
@@ -584,10 +615,11 @@ namespace SelectOR
                 {
                     var p = pj(t.lat, t.lon); if (!view.Contains(p)) continue;
                     float r = 5f;
-                    using (var b = new SolidBrush(Color.FromArgb(170, 176, 181))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
+                    bool svc = RoomAi.Is(t.name);   // (1.2.77) del horario de la sala: su nombre de servicio, en violeta
+                    using (var b = new SolidBrush(svc ? RoomAi.Color : Color.FromArgb(170, 176, 181))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
                     using (var o = new Pen(Color.FromArgb(40, 44, 48), 1.4f)) g.DrawEllipse(o, p.X - r, p.Y - r, 2 * r, 2 * r);
-                    string lab = I18n.T("IA") + (t.kmh >= 1 ? $" · {t.kmh:0} km/h" : "");
-                    System.Windows.Forms.TextRenderer.DrawText(g, lab, f, new Point((int)(p.X + 7), (int)(p.Y - 7)), Color.FromArgb(200, 205, 210), System.Windows.Forms.TextFormatFlags.NoPadding);
+                    string lab = (svc ? RoomAi.Label(t.name) : I18n.T("IA")) + (t.kmh >= 1 ? $" · {t.kmh:0} km/h" : "");
+                    System.Windows.Forms.TextRenderer.DrawText(g, lab, f, new Point((int)(p.X + 7), (int)(p.Y - 7)), svc ? RoomAi.Color : Color.FromArgb(200, 205, 210), System.Windows.Forms.TextFormatFlags.NoPadding);
                 }
             g.Clip = clip;
         }

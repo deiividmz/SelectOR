@@ -33,6 +33,8 @@ namespace SelectOR
         readonly Dictionary<int, (int pos, DateTime at)> _swSet = new();
         readonly ListBox _list;
         readonly Canvas _canvas;
+        readonly ToolTip _whyTip = new ToolTip { InitialDelay = 0, ReshowDelay = 0 };   // (1.2.77) por qué está en parada una señal (al pasar el ratón)
+        string _whyShown;
         readonly Label _status, _title;
         readonly Timer _timer, _blink;
         bool _blinking;
@@ -138,6 +140,14 @@ namespace SelectOR
                                               || RouteBoardDraw.SwitchAt(_board, e.Location) is RouteBoard.Sw bw && MyNode(bw.Node));
                     _canvas.Cursor = own || _pick != null || StationAt(e.Location) != null ? Cursors.Hand : Cursors.SizeAll;
                     if (_pick != null) _canvas.Invalidate();
+                    // (1.2.77) por qué está en parada la señal que hay bajo el ratón
+                    string wt = RouteBoardDraw.SignalAt(_board, e.Location, Theme.Px(4)) is RouteBoard.Sg ws && _pilot != null && _pilot.SigWhy.TryGetValue(ws.S.Obj, out var ww)
+                                ? string.Format(Tr("Señal {0} en parada para «{1}»: {2}"), ws.S.Obj, ww.train, SwitchPilot.Lang(ww.text)) : null;
+                    if (wt != _whyShown)
+                    {
+                        _whyShown = wt;
+                        if (wt == null) _whyTip.Hide(_canvas); else _whyTip.Show(wt, _canvas, e.X + 16, e.Y + 18, 8000);
+                    }
                 }
                 else if (Overview)
                 {
@@ -175,7 +185,7 @@ namespace SelectOR
             new ToolTip().SetToolTip(_canvas, Tr("rueda: zoom · arrastrar: mover · doble clic: ajustar"));
             _canvas.Resize += (s, e) => { if (Board) { if (!_bFitted) FitBoard(); } else if (Overview ? !_ovFitted : !_fitted) { if (Overview) FitOverview(); else Fit(); } };
 
-            Controls.Add(_canvas); Controls.Add(side); Controls.Add(top);
+            Controls.Add(_canvas); Controls.Add(BuildChat()); Controls.Add(side); Controls.Add(top);   // (1.2.77) el chat de la sala a la derecha (DispatchForm.Chat.cs)
 
             // (1.2.75) luces a destellos (amarillo a destellos, rebase autorizado…): repintar cada cuarto de segundo mientras haya
             _blink = new Timer { Interval = 250 };
@@ -221,6 +231,7 @@ namespace SelectOR
                     if (_geo != null && _geo.ById.TryGetValue((tx, tz, id), out var sw)) lock (_swSet) _swSet[sw.Order] = (pos, DateTime.UtcNow);
                 };
                 _pilot.TabAsked += OnTab;   // avisos de Tab (DispatchForm.Avisos.cs)
+                PrepareChat();              // (1.2.77) chat de la sala (DispatchForm.Chat.cs)
                 _pilot.EnsureStarted();
                 _ = PrepareJefe();
                 PrepareItins();
@@ -391,6 +402,7 @@ namespace SelectOR
             var live = new SchematicLive
             {
                 SwitchPos = Pos, Aspect = Asp,
+                SignalWhy = obj => _pilot != null && _pilot.SigWhy.TryGetValue(obj, out var w) ? string.Format(Tr("En parada para «{0}»: {1}"), w.train, SwitchPilot.Lang(w.text)) : null,   // (1.2.77)
                 Figure = sg => !sigOk ? null : RoomMapDraw.FigureOf(geo, sg, k => 2 * k < sig.Length ? sig[2 * k] - 1 : -1, k => 2 * k + 1 < sig.Length ? sig[2 * k + 1] - 1 : -1),
                 Locked = o => itinLocked.Contains(o) || blocked != null && o >= 0 && o < blocked.Length && blocked[o] is 'S' or 'T' or 'O'
             };
@@ -432,7 +444,7 @@ namespace SelectOR
                 if (body.Count == 0) At(la, lo);
                 if (body.Count == 0) continue;
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
-                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player));
+                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
             }
             // itinerarios de las señales abiertas (de estación, con alguna aguja, y los rebases), solo las que se ven
             if (sigOk && _sbe != null && _bZoom >= 0.08f)
@@ -521,10 +533,10 @@ namespace SelectOR
                     {
                         if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
                         var (x, y) = _g.Proj(la, lo); var q = Ov(x, y);
-                        var col = t.player ? SchematicDraw.Occ : SchematicDraw.AiCol;
+                        var col = t.player ? SchematicDraw.Occ : RoomAi.Is(t.name) ? RoomAi.Color : SchematicDraw.AiCol;
                         using (var b = new SolidBrush(col)) g.FillEllipse(b, q.X - 4.5f, q.Y - 4.5f, 9, 9);
                         using (var op = new Pen(Color.FromArgb(200, 10, 12, 14), 1.2f)) g.DrawEllipse(op, q.X - 4.5f, q.Y - 4.5f, 9, 9);
-                        if (t.player || RoomLoose.Is(t.name)) using (var tb = new SolidBrush(col)) g.DrawString(t.player ? t.name : RoomLoose.Label(t.name), tf, tb, q.X + 6, q.Y - 14);
+                        if (t.player || RoomLoose.Is(t.name) || RoomAi.Is(t.name)) using (var tb = new SolidBrush(col)) g.DrawString(t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Label(t.name), tf, tb, q.X + 6, q.Y - 14);
                     }
             // estaciones: su punto y su nombre (sin montarse unos nombres con otros); la 🔔 si alguien pide paso allí
             _stLabels.Clear();
@@ -613,6 +625,7 @@ namespace SelectOR
             var live = new SchematicLive
             {
                 SwitchPos = Pos, Aspect = Asp,
+                SignalWhy = obj => _pilot != null && _pilot.SigWhy.TryGetValue(obj, out var w) ? string.Format(Tr("En parada para «{0}»: {1}"), w.train, SwitchPilot.Lang(w.text)) : null,   // (1.2.77)
                 Figure = sg => !sigOk ? null : RoomMapDraw.FigureOf(geo, sg, k => 2 * k < sig.Length ? sig[2 * k] - 1 : -1, k => 2 * k + 1 < sig.Length ? sig[2 * k + 1] - 1 : -1),
                 Locked = o => itinLocked.Contains(o) || blocked != null && o >= 0 && o < blocked.Length && blocked[o] is 'S' or 'T' or 'O'
             };
@@ -655,7 +668,7 @@ namespace SelectOR
                 if (body.Count == 0) At(la, lo);
                 if (body.Count == 0) continue;
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
-                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player));
+                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
             }
             // itinerarios: de cada señal abierta a la siguiente, por las agujas como están (los de plena vía, no)
             if (sigOk && _sbe != null)
@@ -736,6 +749,7 @@ namespace SelectOR
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (keyData == Keys.Escape && _chatInput != null && _chatInput.Focused) { _canvas.Focus(); return true; }   // (1.2.77) Esc en el chat: solo sale del chat
             if (keyData == Keys.Escape) { if (PickCancel()) return true; if (!Overview) { Select(General); return true; } Close(); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
         }

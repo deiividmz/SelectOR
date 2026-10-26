@@ -78,8 +78,8 @@ namespace SelectOR
         // (MainMenuForm) ¿puedo ser jefe? · un vale · la lista y apuntar o quitar (administrador)
         public Func<Task<(bool allowed, bool admin)>> ChiefMe;
         public Func<Task<(string ticket, string err)>> IssueTicket;
-        public Func<Task<(List<string> names, string err)>> ChiefsList;
-        public Func<string, bool, Task<string>> ChiefSet;
+        public Func<Task<(List<(string id, string name)> chiefs, string err)>> ChiefsList;
+        public Func<string, bool, Task<(string name, string err)>> ChiefSet;   // por ID de usuario (1.2.77): el nombre puede cambiar
 
         void OnJefeChanged()
         {
@@ -182,19 +182,19 @@ namespace SelectOR
         async void JefesMenu()
         {
             if (ChiefsList == null) return;
-            var (names, err) = await ChiefsList();
+            var (chiefs, err) = await ChiefsList();
             var m = MenuStyle.Apply(new ContextMenuStrip());
             if (err != null) m.Items.Add(new ToolStripMenuItem(err) { Enabled = false });
             else
             {
-                m.Items.Add(new ToolStripMenuItem(names.Count == 0 ? Tr("Ningún jefe de circulación apuntado") : Tr("Jefes de circulación (clic para quitar):")) { Enabled = false });
-                foreach (var n in names)
+                m.Items.Add(new ToolStripMenuItem(chiefs.Count == 0 ? Tr("Ningún jefe de circulación apuntado") : Tr("Jefes de circulación (clic para quitar):")) { Enabled = false });
+                foreach (var c in chiefs)
                 {
-                    string nn = n;
-                    m.Items.Add(new ToolStripMenuItem("   " + nn, null, async (s, e) =>
+                    string id = c.id, nn = string.IsNullOrEmpty(c.name) ? "?" : c.name;
+                    m.Items.Add(new ToolStripMenuItem($"   {nn}   ·   ID {ShortId(id)}", null, async (s, e) =>
                     {
                         if (ThemedBox.Show(this, string.Format(Tr("¿Quitar a {0} de jefe de circulación?"), nn), Tr("Jefes de circulación"), MessageBoxButtons.YesNo) != DialogResult.Yes) return;
-                        string r = await ChiefSet(nn, false);
+                        var (_, r) = await ChiefSet(id, false);
                         if (r != null) ThemedBox.Show(this, r, Tr("Jefes de circulación"));
                     }));
                 }
@@ -202,10 +202,12 @@ namespace SelectOR
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(new ToolStripMenuItem(Tr("Apuntar a un maquinista…"), null, async (s, e) =>
             {
-                using var d = new TextPromptDialog(Tr("Jefe de circulación"), Tr("Nombre del maquinista:"), "", "", Tr("Apuntar"), "🚦");
+                using var d = new TextPromptDialog(Tr("Jefe de circulación"), Tr("ID de usuario del maquinista (lo copia con «ID ⧉» en su barra de Empresas; también está en Usuarios):"), "", "", Tr("Apuntar"), "🚦");
                 if (d.ShowDialog(this) != DialogResult.OK || d.Value.Trim().Length == 0) return;
-                string r = await ChiefSet(d.Value.Trim(), true);
-                ThemedBox.Show(this, r ?? string.Format(Tr("{0} ya puede tomar el mando desde el puesto de mando."), d.Value.Trim()), Tr("Jefes de circulación"));
+                string key = d.Value.Trim();
+                if (!LooksLikeId(key)) { ThemedBox.Show(this, Tr("Eso no es un ID de usuario: pega el ID (entero o sus primeros 8 caracteres), no el nombre."), Tr("Jefes de circulación")); return; }
+                var (name, r) = await ChiefSet(key, true);
+                ThemedBox.Show(this, r ?? string.Format(Tr("{0} ya puede tomar el mando desde el puesto de mando."), name ?? key), Tr("Jefes de circulación"));
             }));
             // los que tienen estaciones ahora: quitarles todas
             var now = _pilot?.JefeZones.Select(z => z.Name).Distinct().Where(n => n != Me).ToList() ?? new List<string>();
@@ -233,6 +235,11 @@ namespace SelectOR
         bool JefeClick(Point p)
         {
             if (Board) return JefeClickBoard(p);
+            return JefeClickZone(p);
+        }
+
+        bool JefeClickZone(Point p)
+        {
             if (Me == null || _cur == null || _geo == null) return false;
             PointF Sc(PointF a) => new PointF(_origin.X + a.X * _zoom, _origin.Y + a.Y * _zoom);
             float R = Theme.Px(11);
@@ -336,20 +343,39 @@ namespace SelectOR
             catch { return (null, Tr("No se ha podido tomar el mando.")); }
         }
 
-        public static async Task<(List<string>, string)> SupaChiefs()
+        public static async Task<(List<(string, string)>, string)> SupaChiefs()
         {
             var (json, err) = await Supa.RpcAsync("dispatch_chiefs_list", new { });
             if (err != null) return (null, err);
-            var l = new List<string>();
-            try { using var d = JsonDocument.Parse(json); foreach (var e in d.RootElement.EnumerateArray()) if (e.TryGetProperty("username", out var u) && u.ValueKind == JsonValueKind.String) l.Add(u.GetString()); }
+            var l = new List<(string, string)>();
+            try
+            {
+                using var d = JsonDocument.Parse(json);
+                foreach (var e in d.RootElement.EnumerateArray())
+                    if (e.TryGetProperty("user_id", out var i) && i.ValueKind == JsonValueKind.String)
+                        l.Add((i.GetString(), e.TryGetProperty("username", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null));
+            }
             catch { }
             return (l, null);
         }
 
-        public static async Task<string> SupaChiefSet(string name, bool on)
+        // Apuntar o quitar por ID de usuario (el UUID entero o sus primeros 8 caracteres o más).
+        public static async Task<(string, string)> SupaChiefSet(string id, bool on)
         {
-            var (_, err) = await Supa.RpcAsync("dispatch_chief_set", new { p_username = name, p_on = on });
-            return err;
+            var (json, err) = await Supa.RpcAsync("dispatch_chief_set_id", new { p_user = id, p_on = on });
+            if (err != null) return (null, err.Contains("PGRST202") ? Tr("Falta ejecutar sql/jefe-circulacion-id.sql en el servidor.") : err);
+            try { using var d = JsonDocument.Parse(json); return (d.RootElement.TryGetProperty("username", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null, null); }
+            catch { return (null, null); }
+        }
+
+        static string ShortId(string id) => string.IsNullOrEmpty(id) ? "?" : id.Length > 8 ? id.Substring(0, 8) : id;
+
+        // ¿Parece un ID de usuario? (UUID entero, o al menos 8 caracteres hexadecimales del principio)
+        internal static bool LooksLikeId(string s)
+        {
+            s = (s ?? "").Trim().ToLowerInvariant();
+            if (Guid.TryParse(s, out _)) return true;
+            return s.Length >= 8 && s.Length <= 35 && s.All(ch => (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || ch == '-');
         }
     }
 }

@@ -1971,7 +1971,7 @@ namespace SelectOR
 
         void DrawNotice(Graphics g, Rectangle area)
         {
-            if (string.IsNullOrEmpty(_notice) || DateTime.UtcNow >= _noticeUntil) return;
+            if (string.IsNullOrEmpty(_notice) || DateTime.UtcNow >= _noticeUntil) { DrawBanner(g, area); return; }
             using var f = Theme.Font(9.5f, FontStyle.Bold);
             var sz = TextRenderer.MeasureText(_notice, f, new Size(area.Width - 80, 200), TextFormatFlags.WordBreak);
             var r = new Rectangle(area.X + (area.Width - sz.Width - 28) / 2, area.Bottom - sz.Height - 34, sz.Width + 28, sz.Height + 14);
@@ -1981,6 +1981,23 @@ namespace SelectOR
                 using (var pen = new Pen(HudMapRender.ItineraryCol, 1.3f)) g.DrawPath(pen, path);
             }
             TextRenderer.DrawText(g, _notice, f, r, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+        }
+
+        // (1.2.77) por qué no se abre la señal de tu tren (RoomMapView.Banner): fija, abajo, mientras dure
+        void DrawBanner(Graphics g, Rectangle area)
+        {
+            string t = null; try { t = _hud?.RoomMapNow()?.Banner; } catch { }
+            if (string.IsNullOrEmpty(t)) return;
+            using var f = Theme.Font(9.25f, FontStyle.Bold);
+            var sz = TextRenderer.MeasureText(t, f, new Size(area.Width - 120, 200), TextFormatFlags.WordBreak);
+            var r = new Rectangle(area.X + (area.Width - sz.Width - 40) / 2, area.Bottom - sz.Height - 30, sz.Width + 40, sz.Height + 12);
+            using (var path = Theme.Round(r, 9))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(235, 40, 30, 14))) g.FillPath(b, path);
+                using (var pen = new Pen(RoomMapDraw.WhyColor, 1.3f)) g.DrawPath(pen, path);
+            }
+            RoomMapDraw.WhyBadge(g, r.X + 14, r.Y + r.Height / 2f, 1.1f);
+            TextRenderer.DrawText(g, t, f, new Rectangle(r.X + 26, r.Y, r.Width - 30, r.Height), Color.FromArgb(255, 224, 178), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         }
 
         // Leyenda del detalle del .tdb (arriba a la izquierda): plegada, solo su título.

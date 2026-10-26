@@ -41,10 +41,9 @@ namespace SelectOR
         // (BuildSalaCheck) el botón ⛅, a la derecha de la casilla; solo para el administrador
         void BuildSalaWeatherButton()
         {
-            _salaWxBtn = new Label { Text = "⛅", AutoSize = false, Size = new Size(30, 30), TextAlign = ContentAlignment.MiddleCenter,
+            // (1.2.77) el icono en color, como los demás de SelectOR (EmojiIcon)
+            _salaWxBtn = new EmojiIcon { Text = "⛅", Size = new Size(30, 30),
                                      ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(13f), Cursor = Cursors.Hand, Visible = false };
-            _salaWxBtn.MouseEnter += (s, e) => _salaWxBtn.ForeColor = Theme.AccentHi;
-            _salaWxBtn.MouseLeave += (s, e) => _salaWxBtn.ForeColor = Theme.Subtle;
             _salaWxBtn.Click += async (s, e) => await EditSalaWeather();
             new ToolTip().SetToolTip(_salaWxBtn, Tr("Clima de la sala (administrador)"));
             Action place = () => _salaWxBtn.Location = new Point(_salaHost.ClientSize.Width - _salaWxBtn.Width - 4, Math.Max(0, (_salaHost.ClientSize.Height - _salaWxBtn.Height) / 2));
@@ -61,7 +60,8 @@ namespace SelectOR
             bool admin = Supa.IsSuperadmin && Supa.IsLoggedIn;
             if (_salaWxBtn.Visible == admin) return;
             _salaWxBtn.Visible = admin;
-            _salaHost.Width = admin ? 360 : 326;   // (con el 🖥 del puesto de mando)
+            if (_salaAiBtn != null) _salaAiBtn.Visible = admin;   // (1.2.77) 🚆 el horario de los trenes IA
+            _salaHost.Width = admin ? 394 : 326;   // (con el 🖥 del puesto de mando)
         }
 
         async Task EditSalaWeather()

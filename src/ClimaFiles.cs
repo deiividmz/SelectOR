@@ -8,6 +8,10 @@
 // desde SelectOR sin publicar versión (sql/clima.sql). El manifiesto (nombre, huella y tamaño de cada una) va FIRMADO con
 // la clave de las actualizaciones (Updater.SignData; solo está en su PC): cada SelectOR comprueba la firma, la huella y
 // que sea una imagen de verdad con un nombre de la lista antes de usarla.
+// (1.2.77) Texturas de nubes a elegir: además de su Clouds01.png, el clima puede traer varias «nubes» (Manifest.clouds:
+// nombre, huella y tamaño), y cada usuario elige la que más le guste (AppPrefs.ClimaClouds). Van en una lista aparte del
+// manifiesto: los SelectOR anteriores no la conocen, la ignoran y siguen con la de siempre. Cada textura se descarga solo
+// cuando se ve o se elige (pesan varios MB).
 
 using System;
 using System.Collections.Generic;
@@ -69,8 +73,12 @@ namespace SelectOR
             public int ver { get; set; }
             public string date { get; set; }
             public List<Item> files { get; set; } = new();
+            public List<Cloud> clouds { get; set; }   // (1.2.77) texturas de nubes a elegir (null o vacía: ninguna)
         }
-        static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
+        public sealed class Cloud { public string label { get; set; } public string sha { get; set; } public long size { get; set; } }
+        public const string CloudsFile = "Clouds01.png";
+        public static Item AsItem(Cloud c) => new Item { name = CloudsFile, sha = c.sha, size = c.size };
+        static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
         public static string Serialize(Manifest m) => JsonSerializer.Serialize(m, JsonOpts);
 
@@ -90,6 +98,17 @@ namespace SelectOR
                     if (f.sha == null || f.sha.Length != 64 || !f.sha.All(Uri.IsHexDigit)) return null;
                     f.sha = f.sha.ToLowerInvariant();
                     if (f.size <= 0 || f.size > MaxBytes) return null;
+                }
+                if (m.clouds != null)
+                {
+                    var cs = new HashSet<string>();
+                    foreach (var c in m.clouds)
+                    {
+                        if (string.IsNullOrWhiteSpace(c.label) || c.label.Length > 40) return null;
+                        if (c.sha == null || c.sha.Length != 64 || !c.sha.All(Uri.IsHexDigit)) return null;
+                        c.sha = c.sha.ToLowerInvariant(); c.label = c.label.Trim();
+                        if (c.size <= 0 || c.size > MaxBytes || !cs.Add(c.sha)) return null;
+                    }
                 }
                 return m;
             }
@@ -151,7 +170,7 @@ namespace SelectOR
         }
 
         // Descarga el clima publicado (manifiesto firmado e imágenes que falten) y lo deja en la caché. progress(hechas, total).
-        public static async Task<(Manifest m, string err)> SyncAsync(Action<int, int> progress = null)
+        public static async Task<(Manifest m, string err)> SyncAsync(Action<int, int> progress = null, string clouds = null)
         {
             var (text, sig, _, err) = await FetchAsync();
             if (err != null) return (LoadCached(), err);
@@ -160,38 +179,66 @@ namespace SelectOR
             if (m == null) return (LoadCached(), I18n.T("El clima del servidor no tiene una firma válida: no se usa."));
             Directory.CreateDirectory(CacheDir);
             int done = 0;
-            foreach (var f in m.files)
+            // (1.2.77) y la textura de nubes elegida, si la hay
+            var want = m.files.ToList();
+            var pick = clouds == null ? null : m.clouds?.FirstOrDefault(c => c.sha == clouds);
+            if (pick != null) want.Add(AsItem(pick));
+            foreach (var f in want)
             {
-                progress?.Invoke(done, m.files.Count);
+                progress?.Invoke(done, want.Count);
                 if (!IsCached(f))
                 {
-                    try
-                    {
-                        using var req = new HttpRequestMessage(HttpMethod.Get, ObjectUrl(f));
-                        using var resp = await Supa.HttpBig().SendAsync(req);
-                        if (!resp.IsSuccessStatusCode) return (LoadCached(), string.Format(I18n.T("No se ha podido descargar {0}."), f.name));
-                        var data = await resp.Content.ReadAsByteArrayAsync();
-                        if (data.LongLength != f.size || Sha(data) != f.sha || !IsImage(data, Ext(f.name)))
-                            return (LoadCached(), string.Format(I18n.T("{0} no coincide con el clima publicado: no se usa."), f.name));
-                        string tmp = CachedFile(f) + ".part";
-                        await File.WriteAllBytesAsync(tmp, data);
-                        File.Move(tmp, CachedFile(f), true);
-                    }
-                    catch (Exception ex) { return (LoadCached(), ex.Message); }
+                    var derr = await DownloadAsync(f);
+                    if (derr != null) return (LoadCached(), derr);
                 }
                 done++;
             }
-            progress?.Invoke(done, m.files.Count);
+            progress?.Invoke(done, want.Count);
             File.WriteAllText(Path.Combine(CacheDir, "manifiesto.json"), text, new UTF8Encoding(false));
             File.WriteAllText(Path.Combine(CacheDir, "manifiesto.sig"), sig);
             // fuera las imágenes que ya no están en el clima
             var keep = new HashSet<string>(m.files.Select(f => Path.GetFileName(CachedFile(f))), StringComparer.OrdinalIgnoreCase);
+            foreach (var c in m.clouds ?? new List<Cloud>()) keep.Add(Path.GetFileName(CachedFile(AsItem(c))));
             foreach (var p in Directory.GetFiles(CacheDir))
             {
                 string n = Path.GetFileName(p), e = Path.GetExtension(n).ToLowerInvariant();
                 if ((e == ".png" || e == ".bmp" || e == ".part") && !keep.Contains(n)) try { File.Delete(p); } catch { }
             }
             return (m, null);
+        }
+
+        // Una imagen del clima publicado a la caché (comprobada: tamaño, huella y que sea una imagen). null = bien.
+        public static async Task<string> DownloadAsync(Item f)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, ObjectUrl(f));
+                using var resp = await Supa.HttpBig().SendAsync(req);
+                if (!resp.IsSuccessStatusCode) return string.Format(I18n.T("No se ha podido descargar {0}."), f.name);
+                var data = await resp.Content.ReadAsByteArrayAsync();
+                if (data.LongLength != f.size || Sha(data) != f.sha || !IsImage(data, Ext(f.name)))
+                    return string.Format(I18n.T("{0} no coincide con el clima publicado: no se usa."), f.name);
+                Directory.CreateDirectory(CacheDir);
+                string tmp = CachedFile(f) + ".part";
+                await File.WriteAllBytesAsync(tmp, data);
+                File.Move(tmp, CachedFile(f), true);
+                return null;
+            }
+            catch (Exception ex) { return ex.Message; }
+        }
+
+        // (1.2.77) Las imágenes que se ponen de verdad: las del clima, con la textura de nubes elegida en vez de su
+        // Clouds01.png (si está descargada; si no, la de serie).
+        public static List<Item> Effective(Manifest m, string clouds)
+        {
+            var list = m.files.ToList();
+            var pick = clouds == null ? null : m.clouds?.FirstOrDefault(c => c.sha == clouds);
+            if (pick != null && IsCached(AsItem(pick)))
+            {
+                list.RemoveAll(f => string.Equals(f.name, CloudsFile, StringComparison.OrdinalIgnoreCase));
+                list.Add(AsItem(pick));
+            }
+            return list;
         }
 
         // ---------------------------------------------------------------- respaldo de las imágenes de Open Rails
@@ -219,15 +266,16 @@ namespace SelectOR
                 if (m == null) { Remove(); return "sin clima descargado"; }
                 if (!Directory.Exists(ContentDir)) return "sin carpeta Content";
                 var groups = new HashSet<string>(p.ClimaGroups ?? new List<string>());
+                var files = Effective(m, p.ClimaClouds);   // (1.2.77) con la textura de nubes elegida
                 var st = LoadState();
                 // primero se devuelven las de los grupos que ya no se quieren (o que el clima ya no trae)
                 foreach (var name in st.Keys.ToList())
                 {
-                    var f = m.files.FirstOrDefault(x => x.name == name);
+                    var f = files.FirstOrDefault(x => x.name == name);
                     if (f == null || !groups.Contains(GroupOf(name)) || f.sha != st[name].ours) RestoreOne(st, name);
                 }
                 int n = 0;
-                foreach (var f in m.files)
+                foreach (var f in files)
                 {
                     if (!groups.Contains(GroupOf(f.name))) continue;
                     string src = CachedPath(f), dst = Path.Combine(ContentDir, f.name);
@@ -310,14 +358,15 @@ namespace SelectOR
         }
 
         // Publica el clima (firmado con la clave de este equipo). Devuelve la versión publicada o el error.
-        public static async Task<(int ver, string err)> PublishAsync(List<Item> files)
+        public static async Task<(int ver, string err)> PublishAsync(List<Item> files, List<Cloud> clouds = null)
         {
             if (!Supa.IsSuperadmin) return (0, I18n.T("Solo el administrador."));
             if (!Updater.HasSigningKey) return (0, I18n.T("Este equipo no tiene la clave de firma de SelectOR: el clima solo se puede publicar desde el PC con la clave."));
             var (_, _, pubVer, ferr) = await FetchAsync();
             if (ferr != null && ferr.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0) return (0, I18n.T("El servidor aún no tiene el clima (falta clima.sql)."));
             var m = new Manifest { ver = Math.Max(pubVer, LoadCached()?.ver ?? 0) + 1, date = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                                   files = files.Select(f => new Item { name = f.name, sha = f.sha, size = f.size }).OrderBy(f => f.name, StringComparer.Ordinal).ToList() };
+                                   files = files.Select(f => new Item { name = f.name, sha = f.sha, size = f.size }).OrderBy(f => f.name, StringComparer.Ordinal).ToList(),
+                                   clouds = clouds == null || clouds.Count == 0 ? null : clouds.Select(c => new Cloud { label = c.label.Trim(), sha = c.sha, size = c.size }).ToList() };
             string text = Serialize(m);
             string sig = Updater.SignData(Encoding.UTF8.GetBytes(text));
             if (sig == null) return (0, I18n.T("No se ha podido firmar el clima con la clave de este equipo."));

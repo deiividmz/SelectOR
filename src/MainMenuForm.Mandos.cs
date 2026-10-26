@@ -29,7 +29,7 @@ namespace SelectOR
         {
             if (_prefs?.ClimaEnabled != true) return;
             await System.Threading.Tasks.Task.Delay(15000);
-            try { await ClimaFiles.SyncAsync(); } catch { }
+            try { await ClimaFiles.SyncAsync(null, _prefs?.ClimaClouds); } catch { }
         }
 
         void ShowSelectorSettings()

@@ -8,6 +8,8 @@
 //  · si no, en la cabeza del poste: arriba y, si tiene brazo, al final del brazo (en cada brazo si son varios).
 // Lúmenes por la altura de la luz y color por las pistas de los nombres (naranja o sodio: 2000 K; fluorescente, LED o
 // blanco: 4500 K; si no, 3000 K). Lo que no sale claro se deja fuera (mejor sin luz que una luz en mitad de un tejado).
+// (1.2.77) Y fuera la luz que, colocada en la ruta, cae encima de una vía (a menos de 1,5 m de su eje en la mayoría de
+// sus copias): los fluorescentes de las marquesinas que cuelgan sobre la vía daban un charco de luz en mitad de la vía.
 
 using System;
 using System.Collections.Generic;
@@ -23,7 +25,7 @@ namespace SelectOR
 {
     public static class LampScanner
     {
-        public const string Version = "1";   // (cambia cuando cambia la forma de medir: las cachés se rehacen)
+        public const string Version = "2";   // 2 (1.2.77): fuera las luces que caen encima de una vía   // (cambia cuando cambia la forma de medir: las cachés se rehacen)
         // nombre de la forma: da luz (y no es otra cosa con esas letras)
         static readonly Regex LampName = new Regex(@"farol|lamp|l[aá]mpara|luminari|alumbrado|foco|proyector|reflector|light|licht|leuchte|laterne|lantern|kandelaber|lampa|lampy|svetl|swiatl|flood|piezaluz",
                                                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -39,7 +41,10 @@ namespace SelectOR
         public sealed class Result { public string Text = ""; public int Shapes, Lamps, Placed, Skipped; public List<string> Notes = new List<string>(); }
 
         // Las formas que dan luz de la ruta y cuántas veces están colocadas (solo objetos estáticos).
-        public static Dictionary<string, (string file, int n)> LampShapes(string routeDir)
+        public static Dictionary<string, (string file, int n)> LampShapes(string routeDir) => LampShapes(routeDir, null);
+
+        // (con places: dónde está cada copia: x y z del mundo en metros y su giro)
+        static Dictionary<string, (string file, int n)> LampShapes(string routeDir, Dictionary<string, List<(double x, double z, Quaternion q)>> places)
         {
             var res = new Dictionary<string, (string, int)>(StringComparer.OrdinalIgnoreCase);
             string world = Path.Combine(routeDir, "WORLD");
@@ -54,6 +59,12 @@ namespace SelectOR
                     string name = Path.GetFileName(o.FileName.Replace('/', '\\'));
                     if (!LampName.IsMatch(name) || NotLamp.IsMatch(name)) continue;
                     res[name] = res.TryGetValue(name, out var c) ? (c.Item1, c.Item2 + 1) : (o.FileName, 1);
+                    if (places != null && o.Position != null && TileOf(w, out int tx, out int tz))
+                    {
+                        if (!places.TryGetValue(name, out var l)) places[name] = l = new List<(double, double, Quaternion)>();
+                        var q = o.QDirection == null ? Quaternion.Identity : new Quaternion(o.QDirection.A, o.QDirection.B, o.QDirection.C, o.QDirection.D);
+                        l.Add((tx * 2048.0 + o.Position.X, tz * 2048.0 + o.Position.Z, q));
+                    }
                 }
             }
             return res;
@@ -64,7 +75,10 @@ namespace SelectOR
             var r = new Result();
             var sb = new StringBuilder();
             string basePath = Path.GetDirectoryName(Path.GetDirectoryName(routeDir.TrimEnd('\\')));
-            foreach (var kv in LampShapes(routeDir).OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            var places = new Dictionary<string, List<(double x, double z, Quaternion q)>>(StringComparer.OrdinalIgnoreCase);
+            Tracks tracks = null;
+            try { tracks = Tracks.Load(routeDir); } catch { }
+            foreach (var kv in LampShapes(routeDir, places).OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
             {
                 string key = kv.Key.ToLowerInvariant();
                 if (skip != null && skip.Contains(key)) continue;
@@ -74,12 +88,84 @@ namespace SelectOR
                 List<string> lines;
                 try { lines = Measure(path, key, out string why); if (lines.Count == 0) { r.Skipped++; r.Notes.Add($"{kv.Key}: {why}"); continue; } }
                 catch (Exception ex) { r.Skipped++; r.Notes.Add($"{kv.Key}: {ex.GetType().Name}"); continue; }
+                if (tracks != null && places.TryGetValue(kv.Key, out var pl) && pl.Count > 0)
+                {
+                    int before = lines.Count;
+                    lines = lines.Where(l => !OverTrack(l, pl, tracks)).ToList();
+                    if (lines.Count < before) r.Notes.Add($"{kv.Key}: {before - lines.Count} de {before} luces fuera (encima de una vía)");
+                    if (lines.Count == 0) { r.Skipped++; continue; }
+                }
                 sb.AppendLine($"# {kv.Key} ({kv.Value.n} en la ruta)");
                 foreach (var l in lines) sb.AppendLine(l);
                 r.Shapes++; r.Lamps += lines.Count; r.Placed += kv.Value.n;
             }
             r.Text = sb.ToString();
             return r;
+        }
+
+        static bool TileOf(string w, out int tx, out int tz)
+        {
+            tx = tz = 0; var m = Regex.Match(Path.GetFileName(w), @"^w([+-]\d+)([+-]\d+)\.w$", RegexOptions.IgnoreCase);
+            return m.Success && int.TryParse(m.Groups[1].Value, out tx) && int.TryParse(m.Groups[2].Value, out tz);
+        }
+
+        // Los ejes de las vías (tramos rectos entre los puntos de cada nodo del TDB), en una rejilla de 50 m
+        sealed class Tracks
+        {
+            const double G = 50;
+            readonly Dictionary<(int, int), List<(double ax, double az, double bx, double bz)>> _grid = new Dictionary<(int, int), List<(double, double, double, double)>>();
+            public static Tracks Load(string routeDir)
+            {
+                var tdbPath = Directory.GetFiles(routeDir, "*.tdb").FirstOrDefault();
+                if (tdbPath == null) return null;
+                var t = new Tracks();
+                foreach (var n in new TrackDatabaseFile(tdbPath).TrackDB.TrackNodes)
+                {
+                    var vs = n?.TrVectorNode?.TrVectorSections; if (vs == null) continue;
+                    for (int i = 0; i + 1 < vs.Length; i++)
+                    {
+                        double ax = vs[i].TileX * 2048.0 + vs[i].X, az = vs[i].TileZ * 2048.0 + vs[i].Z, bx = vs[i + 1].TileX * 2048.0 + vs[i + 1].X, bz = vs[i + 1].TileZ * 2048.0 + vs[i + 1].Z;
+                        for (int gx = (int)Math.Floor(Math.Min(ax, bx) / G); gx <= (int)Math.Floor(Math.Max(ax, bx) / G); gx++)
+                            for (int gz = (int)Math.Floor(Math.Min(az, bz) / G); gz <= (int)Math.Floor(Math.Max(az, bz) / G); gz++)
+                            {
+                                if (!t._grid.TryGetValue((gx, gz), out var l)) t._grid[(gx, gz)] = l = new List<(double, double, double, double)>();
+                                l.Add((ax, az, bx, bz));
+                            }
+                    }
+                }
+                return t;
+            }
+            public double Near(double x, double z)
+            {
+                double best = 1e9; int cx = (int)Math.Floor(x / G), cz = (int)Math.Floor(z / G);
+                for (int gx = cx - 1; gx <= cx + 1; gx++)
+                    for (int gz = cz - 1; gz <= cz + 1; gz++)
+                        if (_grid.TryGetValue((gx, gz), out var l))
+                            foreach (var s in l)
+                            {
+                                double dx = s.bx - s.ax, dz = s.bz - s.az, L = dx * dx + dz * dz;
+                                double f = L == 0 ? 0 : Math.Max(0, Math.Min(1, ((x - s.ax) * dx + (z - s.az) * dz) / L));
+                                double ex = x - (s.ax + f * dx), ez = z - (s.az + f * dz);
+                                best = Math.Min(best, Math.Sqrt(ex * ex + ez * ez));
+                            }
+                return best;
+            }
+        }
+
+        // ¿Esta luz (una línea de CyzyLamps.txt) cae encima de una vía en la mayoría de sus copias?
+        static bool OverTrack(string line, List<(double x, double z, Quaternion q)> places, Tracks t)
+        {
+            var f = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (f.Length < 4 || !float.TryParse(f[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float lx)
+                || !float.TryParse(f[3], NumberStyles.Float, CultureInfo.InvariantCulture, out float lz)) return false;
+            int over = 0;
+            foreach (var p in places)
+            {
+                // como Open Rails: en XNA la z va al revés (posición (x, y, −z), giro (A, B, −C, D))
+                var v = Vector3.Transform(new Vector3(lx, 0, -lz), new Quaternion(p.q.X, p.q.Y, -p.q.Z, p.q.W));
+                if (t.Near(p.x + v.X, p.z - v.Z) < 1.5) over++;
+            }
+            return over * 2 > places.Count;
         }
 
         sealed class Part { public string Name; public List<Vector3> V = new List<Vector3>(); }

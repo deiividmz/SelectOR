@@ -14,7 +14,7 @@ using System.Text.RegularExpressions;
 
 namespace SelectOR
 {
-    public sealed class RouteBoard
+    public sealed partial class RouteBoard
     {
         public RouteGraph G; public RoomMapGeo Geo;
         public List<(int e, double a, double b)> Circuits = new();
@@ -166,7 +166,38 @@ namespace SelectOR
                 }
                 _woff[e] = offs.ToArray(); _wx[e] = new float[offs.Count]; _wy[e] = new float[offs.Count];
                 for (int i = 0; i < offs.Count; i++) { var (x, y) = G.PointAt(e, offs[i]); var (wx, wy) = Warp(x, y); _wx[e][i] = (float)wx; _wy[e][i] = (float)wy; }
+                SmoothEdge(e);
             }
+        }
+
+        // (1.2.77) curvas suaves: sin picos en los vértices del .tdb ni escalones donde empieza el ensanche de una
+        // estación. Suavizado gaussiano a lo largo del tramo (varias pasadas de 1-2-1, unos 20 m), con los extremos
+        // quietos: los primeros 10 m junto a cada aguja o unión no se mueven y luego entra poco a poco (las ramas de
+        // las agujas y el tramo de al lado siguen encajando). Las señales y los andenes van sobre esta misma vía (At).
+        const int SmoothPasses = 16; const double SmoothKeep = 10, SmoothRamp = 30;
+        void SmoothEdge(int e)
+        {
+            var x = _wx[e]; var y = _wy[e]; var o = _woff[e]; int n = x.Length;
+            if (n < 5) return;
+            double len = o[n - 1];
+            var w = new float[n];
+            for (int i = 0; i < n; i++) { double d = Math.Min(o[i] - o[0], len - o[i]); w[i] = (float)Math.Max(0, Math.Min(1, (d - SmoothKeep) / SmoothRamp)); }
+            if (w.All(v => v == 0)) return;
+            var ox = (float[])x.Clone(); var oy = (float[])y.Clone();
+            var tx = new float[n]; var ty = new float[n];
+            for (int p = 0; p < SmoothPasses; p++)
+            {
+                tx[0] = x[0]; ty[0] = y[0]; tx[n - 1] = x[n - 1]; ty[n - 1] = y[n - 1];
+                for (int i = 1; i < n - 1; i++)
+                {
+                    // (con la distancia real a cada vecino: los puntos no están repartidos del todo igual)
+                    double da = Math.Max(0.01, o[i] - o[i - 1]), db = Math.Max(0.01, o[i + 1] - o[i]), ka = db / (da + db), kb = da / (da + db);
+                    tx[i] = (float)(0.5 * x[i] + 0.5 * (ka * x[i - 1] + kb * x[i + 1]));
+                    ty[i] = (float)(0.5 * y[i] + 0.5 * (ka * y[i - 1] + kb * y[i + 1]));
+                }
+                (x, tx) = (tx, x); (y, ty) = (ty, y);
+            }
+            for (int i = 0; i < n; i++) { _wx[e][i] = ox[i] + (x[i] - ox[i]) * w[i]; _wy[e][i] = oy[i] + (y[i] - oy[i]) * w[i]; }
         }
 
         // el punto (deformado) de un tramo en un metro
@@ -188,6 +219,13 @@ namespace SelectOR
             var b = new RouteBoard { G = g, Geo = geo };
             b.Sbe = SchematicCircuits.SignalsByEdge(g, geo);
             b.MakeFields(); b.WarpEdges();
+            Finish(b, g, geo, numberOf);
+            return b;
+        }
+
+        // (Build) con la geometría de cada tramo ya hecha: cantones, agujas, señales, andenes y estaciones
+        static void Finish(RouteBoard b, RouteGraph g, RoomMapGeo geo, Func<int, (string st, int n)?> numberOf)
+        {
             float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
             for (int e = 0; e < g.Edges.Length; e++) if (b._wx[e] != null) for (int i = 0; i < b._wx[e].Length; i++) { x0 = Math.Min(x0, b._wx[e][i]); x1 = Math.Max(x1, b._wx[e][i]); y0 = Math.Min(y0, b._wy[e][i]); y1 = Math.Max(y1, b._wy[e][i]); }
             b.Bounds = RectangleF.FromLTRB(x0, y0, x1, y1);
@@ -270,7 +308,6 @@ namespace SelectOR
                 var box = RectangleF.FromLTRB(pts.Min(q => q.X), pts.Min(q => q.Y), pts.Max(q => q.X), pts.Max(q => q.Y));
                 b.Stations.Add((grp.Key, new PointF(box.X + box.Width / 2, box.Y + box.Height / 2), box));
             }
-            return b;
         }
 
         // el lado del tramo e en el metro off sin otra vía cerca (+1 a la derecha del sentido A→B, −1 a la izquierda)
@@ -517,6 +554,7 @@ namespace SelectOR
                     m.TransformPoints(corners); m.Dispose();
                     g.Restore(st);
                     sigBoxes.Add((sg, Bounds(corners)));
+                    if (live?.SignalWhy?.Invoke(sg.S.Obj) != null) { var bx = Bounds(corners); RoomMapDraw.WhyBadge(g, bx.Left - 2, bx.Top - 2, Math.Max(0.9f, Math.Min(1.5f, zoom))); }   // (1.2.77)
                 }
             }
 
@@ -549,7 +587,7 @@ namespace SelectOR
                     foreach (var tr in live.Trains)
                     {
                         if (tr.body == null || tr.body.Length < 1) continue;
-                        var col = tr.player ? SchematicDraw.Occ : SchematicDraw.AiCol;
+                        var col = tr.player ? SchematicDraw.Occ : tr.ai ? RoomAi.Color : SchematicDraw.AiCol;
                         var pts = tr.body.Select(P).ToArray();
                         if (!InView(pts)) continue;
                         if (pts.Length >= 2)

@@ -300,7 +300,7 @@ namespace SelectOR
                     string Near((double x, double y) p) => st.OrderBy(t => (t.x - p.x) * (t.x - p.x) + (t.y - p.y) * (t.y - p.y)).First().name;
                     var first = byU.First(t => t.u >= lo - 1).p; var last = byU.Last(t => t.u <= hi + 1).p;
                     string a = Near(first), b = Near(last);
-                    string name = a == b ? "Junto a " + a : "Línea " + string.Join(" – ", new[] { a, b }.OrderBy(x => x, StringComparer.CurrentCulture));
+                    string name = a == b ? "Junto a " + a : "Línea " + string.Join(" – ", new[] { a, b }.OrderBy(x => x, StringComparer.CurrentCulture));   // (sin traducir: el nombre es el identificador de la dependencia en la sala, igual para todos)
                     string nm = name; int n = 2; while (!used.Add(nm)) nm = name + " (" + n++ + ")";
                     zones.Add(new Zone { Name = nm, Anchors = chunk, Line = true });
                 }

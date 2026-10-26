@@ -3415,6 +3415,10 @@ namespace SelectOR
                 if (_roomPending != null) psi.Environment["SELECTOR_SPAWN_ONLY"] = "1";
                 // Conducción libre: el mismo agente, para que el mapa grande haga lo de Ctrl+9 (MainMenuForm.MapaLocal.cs)
                 LocalMapPrepare(psi, args);
+                // (1.2.77) Actividades y Horarios: el agente también. En CYZYRails (y Testing/Estable) es quien completa los
+                // scripts de seguridad (ASFA, LZB, ATO: Tcs.cs) para que compilen; sin él, en modo Timetable no había ninguno.
+                // Y las luces de CYZY (Luces.cs) y el sol de CGL (Sol.cs). Sin sala ni enlace, el resto no hace nada.
+                if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase)) MapAgentFiles.Apply(psi);
                 // Gráficos: ReShade junto a Open Rails mientras se conduce (ReShadeFiles.cs; se quita al volver)
                 { string why = ReShadeFiles.Install(_prefs); if (why != null) RoomLog("gráficos: sin ReShade: " + why); }
                 // Clima: las imágenes de clima de SelectOR en Content mientras se conduce (ClimaFiles.cs; se quitan al volver)

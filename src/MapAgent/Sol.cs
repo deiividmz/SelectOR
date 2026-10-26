@@ -32,6 +32,7 @@ namespace SelectOR.MapAgent
                 h.Patch(m, prefix: new HarmonyMethod(typeof(Sol), nameof(Before)));
                 Cyzy(h);
                 Luces.Install(h);   // CYZYRails: luces lejanas agrupadas y con fundido (Luces.cs)
+                SenalesCyzy.Install(h);   // CYZYRails: las luces de las señales con su color, no blancas (SenalesCyzy.cs)
                 return 1;
             }
             catch (Exception ex) { Agent.Log("sol: " + ex.GetType().Name + " " + ex.Message); return 0; }

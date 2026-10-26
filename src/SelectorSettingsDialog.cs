@@ -60,6 +60,14 @@ namespace SelectOR
             _tabClima.Location = new Point(_tabGfx.Right + Theme.Px(8), Theme.Px(12));
             _tabJoy.Click += (s, e) => ShowPage("mandos"); _tabGfx.Click += (s, e) => ShowPage("graficos"); _tabClima.Click += (s, e) => ShowPage("clima");
             tabs.Controls.Add(_tabJoy); tabs.Controls.Add(_tabGfx); tabs.Controls.Add(_tabClima);
+            // (1.2.77) Sala: los tiempos del multijugador, solo el administrador (SelectorSettingsDialog.Sala.cs)
+            if (Supa.IsSuperadmin)
+            {
+                _tabSala = DialogKit.Fit(DialogKit.Secondary(I18n.T("Sala")), 130); _tabSala.Height = Theme.Px(36);
+                _tabSala.Location = new Point(_tabClima.Right + Theme.Px(8), Theme.Px(12));
+                _tabSala.Click += (s, e) => ShowPage("sala");
+                tabs.Controls.Add(_tabSala);
+            }
 
             var body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(20), Theme.Px(12), Theme.Px(20), Theme.Px(8)) };
 
@@ -115,6 +123,7 @@ namespace SelectOR
             footer.AddLeft(_lblStatus);
 
             _pageJoy = body; _pageGfx = BuildGfxPage(); _pageClima = BuildClimaPage();
+            if (_tabSala != null) { _pageSala = BuildSalaPage(); Controls.Add(_pageSala); }
             Controls.Add(_pageClima); Controls.Add(_pageGfx); Controls.Add(body); Controls.Add(footer); Controls.Add(tabs); Controls.Add(header); Controls.Add(stripe);
             ShowPage(page ?? "mandos");
 
@@ -128,8 +137,10 @@ namespace SelectOR
 
         public void ShowPage(string page)
         {
-            bool gfx = page == "graficos", clima = page == "clima", joy = !gfx && !clima;
+            bool sala = page == "sala" && _pageSala != null, gfx = page == "graficos", clima = page == "clima", joy = !gfx && !clima && !sala;
             _pageGfx.Visible = gfx; _pageClima.Visible = clima; _pageJoy.Visible = joy;
+            if (_pageSala != null) _pageSala.Visible = sala;
+            if (_tabSala != null) { _tabSala.BaseColor = sala ? Theme.Accent : Theme.Surface2; _tabSala.HoverColor = sala ? Theme.AccentHi : Theme.SurfaceHi; _tabSala.TextColor = sala ? Color.White : Theme.Text; _tabSala.Invalidate(); }
             if (_reset != null) _reset.Visible = joy;
             foreach (var (b, on) in new[] { (_tabJoy, joy), (_tabGfx, gfx), (_tabClima, clima) })
             { b.BaseColor = on ? Theme.Accent : Theme.Surface2; b.HoverColor = on ? Theme.AccentHi : Theme.SurfaceHi; b.TextColor = on ? Color.White : Theme.Text; b.Invalidate(); }

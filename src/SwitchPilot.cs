@@ -67,10 +67,15 @@ namespace SelectOR
         // jefes de circulación (1.2.75): quién manda en cada estación, y en cada señal y aguja
         public sealed class JefeZone { public string Zone, Name; public int[] Sigs, Nodes; public bool Manual; }   // Manual: mando manual (1.2.75)
         // (1.2.75) itinerarios de la sala: de qué señal a cuál, de quién, en qué estado y qué agujas tiene enclavadas
-        public sealed class Itin { public int Origin, Dest; public string Owner, Role, State, Train; public int Left, Queue; public (int node, int pos)[] Switches = Array.Empty<(int, int)>(); }   // State: set · in · cancel · queue (Queue: lugar)
+        public sealed class Itin { public int Origin, Dest; public string Owner, Role, State, Train, Why; public int Left, Queue; public (int node, int pos)[] Switches = Array.Empty<(int, int)>(); }   // State: set · in · cancel · queue (Queue: lugar)
         public IReadOnlyList<Itin> Itins { get; private set; } = Array.Empty<Itin>();
         public DateTime ItinsAt { get; private set; }
         public event Action ItinsChanged;
+        // (1.2.77) por qué no se abre cada señal en parada que espera un tren (Motivos.cs del despachador): señal → (tren, «es · en»)
+        public IReadOnlyDictionary<int, (string train, string text)> SigWhy { get; private set; } = new Dictionary<int, (string, string)>();
+        public event Action WhyChanged;
+        // la parte en el idioma de SelectOR de un texto «es · en»
+        public static string Lang(string t) { if (string.IsNullOrEmpty(t)) return t; int k = t.IndexOf(" · ", StringComparison.Ordinal); return k < 0 ? t : I18n.English ? t.Substring(k + 3) : t.Substring(0, k); }
         public event Action<string, bool, int, string> ItinReply;   // quién, bien o no, señal de origen, texto (es · en)
         public Itin ItinFrom(int sig) => Itins.FirstOrDefault(i => i.Origin == sig);
         public IReadOnlyList<JefeZone> JefeZones { get; private set; } = Array.Empty<JefeZone>();
@@ -199,6 +204,7 @@ namespace SelectOR
                             Owner = e.GetProperty("n").GetString(), Role = e.GetProperty("r").GetString(), State = e.GetProperty("st").GetString(),
                             Left = e.GetProperty("t").GetInt32(), Train = e.TryGetProperty("tr", out var tr) ? tr.GetString() : null,
                             Queue = e.TryGetProperty("q", out var q) ? q.GetInt32() : 0,
+                            Why = e.TryGetProperty("y", out var y) ? y.GetString() : null,
                             Switches = e.GetProperty("w").EnumerateArray().Select(x => (x[0].GetInt32(), x[1].GetInt32())).ToArray()
                         });
                 Itins = l; ItinsAt = DateTime.UtcNow;
@@ -220,6 +226,20 @@ namespace SelectOR
             }
             if (body.StartsWith("SELECTOR JEFES ", StringComparison.Ordinal)) { OnJefes(body.Substring(15)); return; }
             if (body.StartsWith("SELECTOR ITINS ", StringComparison.Ordinal)) { OnItins(body.Substring(15)); return; }
+            if (body.StartsWith("SELECTOR WHY ", StringComparison.Ordinal))
+            {
+                try
+                {
+                    var d = new Dictionary<int, (string, string)>();
+                    using (var doc = System.Text.Json.JsonDocument.Parse(body.Substring(13)))
+                        foreach (var e in doc.RootElement.EnumerateArray())
+                            d[e.GetProperty("s").GetInt32()] = (e.TryGetProperty("tr", out var tr) ? tr.GetString() : "", e.GetProperty("t").GetString());
+                    SigWhy = d;
+                    try { WhyChanged?.Invoke(); } catch { }
+                }
+                catch { }
+                return;
+            }
             if (body.StartsWith("SELECTOR ITIN ", StringComparison.Ordinal))
             {
                 var f = body.Substring(14).Split(' ', 4);

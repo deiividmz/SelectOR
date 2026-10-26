@@ -44,6 +44,7 @@ namespace SelectOR
         void PrepareItins()
         {
             _pilot.ItinsChanged += () => { try { if (!IsDisposed) BeginInvoke(new Action(() => _canvas.Invalidate())); } catch { } };
+            _pilot.WhyChanged += () => { try { if (!IsDisposed) BeginInvoke(new Action(() => _canvas.Invalidate())); } catch { } };   // (1.2.77)
             // lo que la sala no deja (agujas y señales del puesto)
             _pilot.MapError += e =>
             {
@@ -91,6 +92,8 @@ namespace SelectOR
         {
             var m = MenuStyle.Apply(new ContextMenuStrip());
             m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Señal {0}"), sg.Obj)) { Enabled = false });
+            if (_pilot.SigWhy.TryGetValue(sg.Obj, out var why))   // (1.2.77) por qué está en parada
+                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("En parada para «{0}»: {1}"), why.train, SwitchPilot.Lang(why.text))) { ForeColor = RoomMapDraw.WhyColor });
             var it = _pilot.ItinFrom(sg.Obj);
             if (it == null)
                 m.Items.Add(new ToolStripMenuItem(Tr("Establecer itinerario desde aquí…"), null, (o, e) => StartPick(sg)) { ForeColor = SchematicDraw.RouteColor });
@@ -98,6 +101,7 @@ namespace SelectOR
             {
                 // (en cola: el primero, o quitarlo)
                 m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Itinerario {0}: en cola ({1}.º)"), ItinName(it), it.Queue)) { Enabled = false });
+                if (!string.IsNullOrEmpty(it.Why)) m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Espera porque {0}"), SwitchPilot.Lang(it.Why))) { ForeColor = RoomMapDraw.WhyColor });   // (1.2.77)
                 if (it.Queue > 1) m.Items.Add(new ToolStripMenuItem(Tr("Pasarlo el primero de la cola"), null, (o, e) => _pilot.ItinFirst(it.Origin)) { ForeColor = SchematicDraw.QueueColor });
                 m.Items.Add(new ToolStripMenuItem(Tr("Quitarlo de la cola"), null, (o, e) => _pilot.ItinDel(it.Origin)) { ForeColor = Color.FromArgb(255, 183, 77) });
             }

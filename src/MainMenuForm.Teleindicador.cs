@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -21,6 +22,8 @@ namespace SelectOR
             public bool Active;       // el tren tiene destinos (el selector está en uso)
             public Control Row;       // fila propia (Horarios): se enseña solo si hay destinos
             public Action Rerender;   // vuelve a pintar la vista 3D de esa pestaña
+            public TrainItem Train;   // (1.2.77) el tren de ahora (para el editor de teleindicadores)
+            public Control Edit;      // (1.2.77) ✎ teleindicadores del tren
         }
 
         TeleUi _teleExplore, _teleTT;
@@ -38,13 +41,19 @@ namespace SelectOR
             sel.Chosen += () => OnTeleChosen(ui);
             var host = new Panel { Dock = DockStyle.Left, Width = sel.Width + 14, BackColor = hdr.BackColor, Visible = false };   // mismo fondo que la tarjeta
             host.Controls.Add(cap); host.Controls.Add(sel);
+            // (1.2.77) ✎: hacer, modificar o eliminar destinos a partir de los del tren (TeleEditorForm.cs)
+            var edit = new EmojiIcon { Text = "✏️", Size = new Size(Theme.Px(28), Theme.Px(28)), BackColor = hdr.BackColor, ForeColor = Theme.Subtle, Font = Theme.Font(11f) };
+            new ToolTip().SetToolTip(edit, Tr("Teleindicadores del tren: hacer destinos nuevos con el texto que quieras"));
+            edit.Click += (s, e) => OpenTeleEditor(ui);
+            host.Controls.Add(edit); ui.Edit = edit;
             int x0 = ownRow ? 0 : Theme.Px(26);   // aire entre el título y el teleindicador
             void Place()
             {
                 int capW = ownRow ? Math.Max(cap.Width, Theme.Px(104)) : cap.Width;   // en Horarios, columna fija como las demás filas
                 cap.Location = new Point(x0, Math.Max(0, (host.Height - cap.Height) / 2));
                 sel.Location = new Point(x0 + capW + Theme.Px(8), Math.Max(0, (host.Height - sel.Height) / 2));
-                host.Width = sel.Right + 2;
+                edit.Location = new Point(sel.Right + Theme.Px(4), Math.Max(0, (host.Height - edit.Height) / 2));
+                host.Width = edit.Right + 2;
             }
             host.Resize += (s, e) => Place();
             sel.Resize += (s, e) => Place();
@@ -62,7 +71,7 @@ namespace SelectOR
             ui.Loading = true;
             try
             {
-                ui.ConPath = c?.FilePath;
+                ui.ConPath = c?.FilePath; ui.Train = c;
                 ui.Folders = c != null && _curFolder != null ? Teleindicadores.FoldersOf(_curFolder.Path, c.FilePath) : new List<string>();
                 var dests = ui.Folders.Count > 0 ? Teleindicadores.Destinations(ui.Folders) : new List<(string name, string sample)>();
                 if (dests.Count == 0) { ui.Sel.SetItems(Array.Empty<TeleOption>(), -1); ShowTele(ui, false); return; }
@@ -80,6 +89,25 @@ namespace SelectOR
             finally { ui.Loading = false; }
             // la barra inferior se escribió con los destinos del tren anterior (Horarios la actualiza antes): otra vez
             try { UpdateStatus(); } catch { }
+        }
+
+        // (1.2.77) la ventana de los teleindicadores del tren; al volver, la lista otra vez (y el nuevo, elegido)
+        void OpenTeleEditor(TeleUi ui)
+        {
+            if (ui == null || ui.Folders.Count == 0) return;
+            using var dlg = new TeleEditorForm(ui.Folders, ui.Train?.Name ?? Tr("Tren"));
+            dlg.ShowDialog(this);
+            if (!dlg.Changed) return;
+            Teleindicadores.ForgetThumbs();
+            if (!string.IsNullOrEmpty(ui.ConPath))
+            {
+                if (dlg.Created != null) _prefs.TeleDest[ui.ConPath] = dlg.Created;
+                else if (_prefs.TeleDest.TryGetValue(ui.ConPath, out var cur) && !string.IsNullOrEmpty(cur) && !Teleindicadores.Destinations(ui.Folders).Any(d => string.Equals(d.name, cur, StringComparison.OrdinalIgnoreCase)))
+                    _prefs.TeleDest[ui.ConPath] = "";   // (el elegido ya no existe: el original)
+                try { _prefs.Save(); } catch { }
+            }
+            TeleRefresh(ui, ui.Train);
+            try { ui.Rerender?.Invoke(); } catch { }
         }
 
         static void ShowTele(TeleUi ui, bool on)
