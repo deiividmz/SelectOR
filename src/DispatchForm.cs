@@ -45,7 +45,11 @@ namespace SelectOR
         RectangleF _backBox;                                                             // «← Plano general»
         // (1.2.76) el tablero: toda la ruta en una sola pantalla (RouteBoard.cs). Mientras se prepara, el plano de antes
         RouteBoard _board; PointF _bOrigin; float _bZoom = 0.05f; bool _bFitted;
-        bool Board => _board != null;
+        // (1.2.81) en una dependencia, su esquema recto (estilo ADIF, Schematic) o el trazado real (el tablero); el plano general,
+        // siempre el tablero. Se recuerda mientras SelectOR está abierto.
+        static bool _schema = true;
+        readonly HashSet<string> _noSchema = new();   // dependencias sin esquema recto (no se pudo hacer): su trazado real
+        bool Board => _board != null && (_curZone == null || !_schema || _noSchema.Contains(_curZone));
 
         static string General => "🗺  " + I18n.T("Plano general");
         bool Overview => _curZone == null;
@@ -255,6 +259,18 @@ namespace SelectOR
         void ShowZone(string zone)
         {
             if (_g == null) return;
+            // (1.2.81) con «esquema»: el de la dependencia, si se puede hacer; si no, su trazado real
+            if (_schema && _board != null && !_noSchema.Contains(zone))
+            {
+                if (!_cache.TryGetValue(zone, out var s0))
+                {
+                    var z0 = _zones?.FirstOrDefault(q => q.Name == zone) ?? new Schematic.Zone { Name = zone };
+                    try { s0 = Schematic.Build(_g, _geo, z0); } catch { s0 = null; }
+                    _cache[zone] = s0;
+                }
+                if (s0 == null || s0.Tracks.Count == 0) _noSchema.Add(zone);
+            }
+            _curZone = zone;   // (Board depende de la dependencia elegida)
             if (Board)
             {
                 // (1.2.76) en el tablero: a esa estación o trayecto, sin cambiar de pantalla; la dependencia queda elegida para el jefe
@@ -372,11 +388,18 @@ namespace SelectOR
         // (IndexSignals) el tablero, con el número de cada aguja en su estación (el de su esquema de siempre)
         static RouteBoard MakeBoard(RouteGraph g, RoomMapGeo geo, List<Schematic.Zone> zones, Dictionary<string, Schematic> built)
         {
-            var num = new Dictionary<int, (string, int)>();
-            foreach (var z in zones.Where(z => !z.Line))
+            var num = new Dictionary<int, (string, int)>(); var lab = new Dictionary<int, string>();
+            foreach (var z in zones.Where(z => !z.Line).Concat(zones.Where(z => z.Line)))   // (1.2.81: primero las estaciones; las de los tramos de línea, con el de su tramo)
                 if (built.TryGetValue(z.Name, out var s) && s != null)
-                    foreach (var w in s.Switches) { int n = SchematicDraw.SwitchNumber(s, w.Node); if (n > 0 && !num.ContainsKey(w.Node)) num[w.Node] = (z.Name, n); }
-            return RouteBoard.Build(g, geo, n => num.TryGetValue(n, out var v) ? v : null);
+                    foreach (int nd in s.Switches.Select(w => w.Node).Concat(s.SlipNodes))   // (y las de las tijeras, con su nombre T1a…)   // (1.2.81: y las de las travesías)
+                    {
+                        int n = SchematicDraw.SwitchNumber(s, nd); string lb = SchematicDraw.SwitchLabel(s, nd);
+                        if ((n > 0 || lb.StartsWith("T")) && !num.ContainsKey(nd)) { num[nd] = (z.Name, Math.Max(n, 1)); lab[nd] = lb; }   // (las de tijera: T1a…)
+                    }
+            var b = RouteBoard.Build(g, geo, n => num.TryGetValue(n, out var v) ? v : null);
+            foreach (var w in b.Switches) if (lab.TryGetValue(w.Node, out var l)) w.Label = l;
+            foreach (var t in b.Scissors) { var l0 = t.S.Select(w => w.Label).FirstOrDefault(x => x != null && x.StartsWith("T")); if (l0 != null) t.Name = l0.TrimEnd('a', 'b', 'c', 'd'); }   // (1.2.81)
+            return b;
         }
 
         // lo que pasa en la sala ahora, en el tablero (los mismos datos que en un esquema, en metros de cada tramo)
@@ -453,6 +476,7 @@ namespace SelectOR
                 foreach (var sg in b.Signals)
                 {
                     if (!view.Contains(sg.At)) continue;
+                    if (HasItin(sg.S.Obj)) continue;   // (1.2.81) la de un itinerario: se dibuja el itinerario (AddItins), no dos caminos
                     int a = Asp(sg.S); if (a < 1) continue;
                     if (!SchematicCircuits.SignalPlace(_sbe, sg.S, out int e0, out double o0, out int d0)) continue;
                     bool callOn = RoomMapDraw.IsCallOn(a);
@@ -675,6 +699,7 @@ namespace SelectOR
                 foreach (var sg in s.Signals)
                 {
                     if (sg.Sig == null || sg.Sig.Edge < 0) continue;
+                    if (HasItin(sg.Sig.Obj)) continue;   // (1.2.81) la de un itinerario: se dibuja el itinerario (AddItins), no dos caminos
                     int a = Asp(sg.Sig); if (a < 1) continue;
                     if (!_sbe.TryGetValue(sg.Sig.Edge, out var l)) continue;
                     int dir = 0; foreach (var q in l) if (q.obj == sg.Sig.Obj) { dir = q.dir; break; }

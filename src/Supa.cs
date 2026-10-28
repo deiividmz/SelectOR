@@ -33,6 +33,7 @@ namespace SelectOR
         // nada que lo identifique. Esto solo decide qué ve la interfaz: los permisos de verdad los
         // vuelve a comprobar el servidor en cada operación.
         public static bool IsSuperadmin { get; private set; }
+        public static bool IsAiEditor { get; private set; }   // (1.2.81) gestor del horario de la sala (o el administrador)
         static string _superadminCheckedFor;   // usuario para el que ya se consultó
 
         static HttpClient _http;
@@ -67,7 +68,7 @@ namespace SelectOR
         {
             AccessToken = null; RefreshToken = null; _accessExpiresUtc = DateTime.MinValue;
             UserId = null; Email = null; Username = null;
-            IsSuperadmin = false; _superadminCheckedFor = null;
+            IsSuperadmin = false; IsAiEditor = false; _superadminCheckedFor = null;
         }
 
         public static void SetUsername(string u) { if (!string.IsNullOrWhiteSpace(u)) Username = u; }
@@ -166,7 +167,17 @@ namespace SelectOR
                 if (resp.IsSuccessStatusCode) { su = txt.Trim() == "true"; forUser = UserId; }
             }
             catch { }
-            IsSuperadmin = su; _superadminCheckedFor = forUser;
+            // (1.2.81) gestor del horario de la sala (sql/horario-gestores-vueltas.sql): puede cambiar los trenes IA
+            bool ed = su;
+            if (!su && forUser != null)
+                try
+                {
+                    var r2 = await Send(Req(HttpMethod.Post, "/rest/v1/rpc/is_ai_editor", "{}", useUserToken: true));
+                    var t2 = await r2.Content.ReadAsStringAsync();
+                    ed = r2.IsSuccessStatusCode && t2.Trim() == "true";
+                }
+                catch { }
+            IsSuperadmin = su; IsAiEditor = ed; _superadminCheckedFor = forUser;
         }
 
         /// <summary>Devuelve null si OK, o el mensaje de error.</summary>

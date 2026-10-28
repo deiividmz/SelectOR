@@ -21,7 +21,7 @@ namespace SelectOR
     public sealed class Schematic
     {
         public const float Row = 26f;   // (1.2.75, estilo ADIF: filas más separadas, que se lean bien)
-        const double Scale = 0.9, Gap = 8, VMax = 650;
+        const double Scale = 0.9, Gap = 8, VMax = 650, VPar = 140;
 
         public sealed class Track
         {
@@ -32,16 +32,33 @@ namespace SelectOR
             internal (double off, double u)[] Map;   // (vía en fila) del punto del tramo a la posición a lo largo
             internal double LenPx;
         }
-        public sealed class Switch { public int Node, Order = -1; public PointF At; public PointF[][] Legs = new PointF[2][]; public bool Hidden; }
+        public sealed class Switch { public int Node, Order = -1; public PointF At; public PointF[][] Legs = new PointF[2][]; public bool Hidden; public int Straight = -1; public int[] LegEdge = { -1, -1 }; public bool[] LegFromA = new bool[2]; public double[] LegLen = new double[2]; }   // LegEdge…: (1.2.81) el tramo de cada rama, para pintarla con el itinerario   // Straight: (1.2.81) la rama directa (0/1, como THROWNODE)
         public sealed class Signal { public RoomMapGeo.Sig Sig; public PointF At; public int Face; public int RowIdx; public int Stack; }   // Stack: varias en el mismo sitio, una encima de otra
-        public sealed class Platform { public RectangleF Bar; public string Label; }
+        public sealed class Platform { public RectangleF Bar; public string Label; public bool Above; }   // Above: (1.2.81) la barra encima de la vía
         public sealed class Exit { public PointF At; public bool Right; public string Station; public int Edge = -1, Side; }   // Edge/Side: el tramo y su extremo por donde sale
 
         public string Station;
         public readonly List<Track> Tracks = new();
         public readonly List<Switch> Switches = new();
         public readonly List<PointF> Slips = new(), Crossings = new();
+        public readonly List<(PointF At, PointF Dir, int Edge)> Bridges = new();   // (1.2.81) pasos superiores: un enlace que cruza una vía sin cruce a nivel (Dir: hacia dónde va el de arriba)
         public readonly List<int> SlipNodes = new();   // las agujas de las travesías (no se dibujan sueltas)
+        // (1.2.81) cada travesía: su punto y sus agujas (de izquierda a derecha), con su número en la foto de agujas, para
+        // cambiarlas desde el esquema como en el mapa grande del HUD
+        public sealed class SlipGroup { public PointF At; public int[] Nodes; public int[] Orders; }
+        public readonly List<SlipGroup> SlipGroups = new();
+        // (1.2.81, petición) cada escape en tijera, como un símbolo: sus cuatro agujas (arriba izquierda, arriba derecha, abajo
+        // izquierda, abajo derecha), las dos paralelas (arriba, abajo) y las dos diagonales (la que baja hacia la derecha, la que
+        // sube), con las agujas de cada una; sus tramos no se dibujan sueltos (HiddenEdges)
+        public sealed class ScissorGroup
+        {
+            public int[] Nodes = new int[4], Orders = new int[4], Straight = new int[4];
+            public int ParTop, ParBot, DiagDown, DiagUp;
+            public PointF[] At = new PointF[4];
+            public PointF Center => new PointF((At.Min(p => p.X) + At.Max(p => p.X)) / 2, (At.Min(p => p.Y) + At.Max(p => p.Y)) / 2);
+        }
+        public readonly List<ScissorGroup> ScissorGroups = new();
+        public readonly HashSet<int> HiddenEdges = new();
         public readonly List<int> Missing = new();     // (auditoría) tramos dentro de la zona que no se dibujan (los de dentro de una travesía)
         public readonly List<PointF> Buffers = new();
         public readonly List<Signal> Signals = new();
@@ -206,13 +223,13 @@ namespace SelectOR
 
         // ── zonas: las estaciones y los tramos de línea que no cubre ninguna (1.2.75, por la auditoría: entre estaciones
         // lejanas quedaban kilómetros de línea, con sus señales, fuera de todos los esquemas)
-        public sealed class Zone { public string Name; public List<(double x, double y)> Anchors; public bool Line; }
-        List<(double x, double y)> _anchors; bool _line;
+        public sealed class Zone { public string Name; public List<(double x, double y)> Anchors; public bool Line; public HashSet<int> Skip; }   // Skip: (1.2.81) tramos que ya dibuja entera una estación
+        List<(double x, double y)> _anchors; bool _line; HashSet<int> _skip;
 
         // (panel por línea) girado o no: flip = 1 como sale, −1 media vuelta
         public static Schematic Build(RouteGraph g, RoomMapGeo geo, Zone z, int flip)
         {
-            var s = new Schematic { _g = g, Station = z.Name, _anchors = z.Line ? z.Anchors : null, _line = z.Line, _flip = flip };
+            var s = new Schematic { _g = g, Station = z.Name, _anchors = z.Line ? z.Anchors : null, _line = z.Line, _flip = flip, _skip = z.Line ? z.Skip : null };
             return s.Make(geo) ? s : null;
         }
         public int Flip => (int)_flip;
@@ -220,7 +237,7 @@ namespace SelectOR
         public static Schematic Build(RouteGraph g, RoomMapGeo geo, Zone z)
         {
             if (!z.Line) return Build(g, geo, z.Name);
-            var s = new Schematic { _g = g, Station = z.Name, _anchors = z.Anchors, _line = true };
+            var s = new Schematic { _g = g, Station = z.Name, _anchors = z.Anchors, _line = true, _skip = z.Skip };
             return s.Make(geo) ? s : null;
         }
 
@@ -252,13 +269,14 @@ namespace SelectOR
             var built = st.Select(t => { try { return Build(g, null, t.name); } catch { return null; } }).Where(x => x != null).ToList();
             // puntos de vía (cada 40 m) que no salen en ninguna estación
             var unc = new List<(double x, double y)>();
+            var uncAt = new Dictionary<(double x, double y), (int e, double off)>();   // (1.2.81) de qué vía es cada punto
             for (int e = 0; e < g.Edges.Length; e++)
             {
                 var E = g.Edges[e];
                 for (double off = 0; off <= E.Len; off += 40)
                 {
                     var (x, y) = g.PointAt(e, off);
-                    if (!built.Any(b => b.Covers(e, off))) unc.Add((x, y));
+                    if (!built.Any(b => b.Covers(e, off))) { unc.Add((x, y)); uncAt[(x, y)] = (e, off); }
                 }
             }
             // grupos de puntos juntos (a menos de 90 m)
@@ -282,27 +300,57 @@ namespace SelectOR
                 nc++;
             }
             var used = new HashSet<string>(zones.Select(z => z.Name));
+            // (1.2.81) lo que una estación ya dibuja entero no se repite en un tramo de línea (en «Junto a Aranda (2)» salían otra
+            // vez, sueltos y desordenados, los finales de las vías muertas de Aranda)
+            var whole = new HashSet<int>();
+            for (int e = 0; e < g.Edges.Length; e++)
+                if ((g.Edges[e].A >= 0 && g.IsDeadEnd(g.Edges[e].A) || g.Edges[e].B >= 0 && g.IsDeadEnd(g.Edges[e].B))   // (solo vías muertas: si no, una aguja del tramo se quedaba sin una de sus vías)
+                    && built.Any(b => b.Drawn(e) && b._offRange.TryGetValue(e, out var r) && r.a <= 1 && r.b >= g.Edges[e].Len - 1 && !b.Missing.Contains(e))) whole.Add(e);
             for (int c = 0; c < nc; c++)
             {
                 var pts = Enumerable.Range(0, unc.Count).Where(i => comp[i] == c).Select(i => unc[i]).ToList();
                 if (pts.Count < 4) continue;   // menos de ~150 m
-                // en trozos de hasta 3 km a lo largo de su eje
-                double cx = pts.Average(p => p.x), cy = pts.Average(p => p.y), sxx = 0, syy = 0, sxy = 0;
-                foreach (var (x, y) in pts) { sxx += (x - cx) * (x - cx); syy += (y - cy) * (y - cy); sxy += (x - cx) * (y - cy); }
-                double a0 = 0.5 * Math.Atan2(2 * sxy, sxx - syy), ux = Math.Cos(a0), uy = Math.Sin(a0);
-                var byU = pts.Select(p => (u: (p.x - cx) * ux + (p.y - cy) * uy, p)).OrderBy(t => t.u).ToList();
-                double umin = byU[0].u, umax = byU[^1].u; int parts = Math.Max(1, (int)Math.Ceiling((umax - umin) / 3000));
-                for (int k = 0; k < parts; k++)
+                // en trozos de hasta 3 km a lo largo de su eje; (1.2.81) y, si un trozo se curva mucho (más de 500 m a un lado de su
+                // eje) y por eso se queda sin dibujar parte de su vía, en dos, cada uno con su eje (las señales 4018 y 4039, junto a
+                // Castañeda, no salían en ningún esquema)
+                List<((double x, double y) p, double u)> ByAxis(List<(double x, double y)> ps, out double spread)
                 {
-                    double lo = umin + (umax - umin) * k / parts, hi = umin + (umax - umin) * (k + 1) / parts;
-                    var chunk = byU.Where(t => t.u >= lo - 1 && t.u <= hi + 1).Select(t => t.p).ToList();
-                    if (chunk.Count < 4) continue;
+                    double cx = ps.Average(p => p.x), cy = ps.Average(p => p.y), sxx = 0, syy = 0, sxy = 0;
+                    foreach (var (x, y) in ps) { sxx += (x - cx) * (x - cx); syy += (y - cy) * (y - cy); sxy += (x - cx) * (y - cy); }
+                    double a0 = 0.5 * Math.Atan2(2 * sxy, sxx - syy), ux = Math.Cos(a0), uy = Math.Sin(a0);
+                    spread = ps.Max(p => Math.Abs(-(p.x - cx) * uy + (p.y - cy) * ux));
+                    return ps.Select(p => (p, u: (p.x - cx) * ux + (p.y - cy) * uy)).OrderBy(t => t.u).ToList();
+                }
+                var chunks = new List<List<(double x, double y)>>();
+                void Add(List<(double x, double y)> ps, int depth)
+                {
+                    if (ps.Count < 4) return;
+                    var bu = ByAxis(ps, out double spread);
+                    double umin = bu[0].u, umax = bu[^1].u;
+                    int parts = Math.Max(1, (int)Math.Ceiling((umax - umin) / 3000));
+                    if (parts == 1 && spread > 500 && ps.Count >= 8 && depth < 4)
+                    {
+                        // solo si, dibujado entero, deja sin dibujar parte de su vía (si no, se queda como estaba)
+                        var trial = new Schematic { _g = g, Station = "?", _anchors = bu.Select(t => t.p).ToList(), _line = true, _skip = whole };
+                        int miss = trial.Make(null) ? ps.Count(p => uncAt.TryGetValue(p, out var eo) && !trial.Covers(eo.e, eo.off)) : ps.Count;
+                        if (miss > Math.Max(2, ps.Count / 20)) parts = 2;
+                    }
+                    if (parts == 1) { chunks.Add(bu.Select(t => t.p).ToList()); return; }
+                    for (int k = 0; k < parts; k++)
+                    {
+                        double lo = umin + (umax - umin) * k / parts, hi = umin + (umax - umin) * (k + 1) / parts;
+                        Add(bu.Where(t => t.u >= lo - 1 && t.u <= hi + 1).Select(t => t.p).ToList(), depth + 1);
+                    }
+                }
+                Add(pts, 0);
+                foreach (var chunk in chunks)
+                {
                     string Near((double x, double y) p) => st.OrderBy(t => (t.x - p.x) * (t.x - p.x) + (t.y - p.y) * (t.y - p.y)).First().name;
-                    var first = byU.First(t => t.u >= lo - 1).p; var last = byU.Last(t => t.u <= hi + 1).p;
+                    var first = chunk[0]; var last = chunk[^1];
                     string a = Near(first), b = Near(last);
                     string name = a == b ? "Junto a " + a : "Línea " + string.Join(" – ", new[] { a, b }.OrderBy(x => x, StringComparer.CurrentCulture));   // (sin traducir: el nombre es el identificador de la dependencia en la sala, igual para todos)
                     string nm = name; int n = 2; while (!used.Add(nm)) nm = name + " (" + n++ + ")";
-                    zones.Add(new Zone { Name = nm, Anchors = chunk, Line = true });
+                    zones.Add(new Zone { Name = nm, Anchors = chunk, Line = true, Skip = whole });
                 }
             }
             return zones;
@@ -400,8 +448,21 @@ namespace SelectOR
                         if (ou < pu0 && ou > loU - 1) loU = Math.Max(loU, Math.Min(pu0 - 60, (pu0 + ou) / 2));
                     }
             bool NearPt(double x, double y) { double u = U(x, y), v = V(x, y); return u >= loU && u <= hiU && Math.Abs(v) <= vNear; }
-            bool NearQ(int e, (double x, double y, double off) q) => NearPt(q.x, q.y);
-            bool NearNode(int n, double x, double y) => NearPt(x, y);
+            // (1.2.81, nudos) y, más allá de esa franja (hasta VPar), las vías que van paralelas a la estación (menos de 10°):
+            // en el Museo, el haz de vías de la línea pasa paralelo a los andenes a 60 m y, fuera de la franja, se rehacía a
+            // ciegas (por los papeles de las agujas) y salía torcido y cruzado
+            double vPar = _line ? vNear : Math.Max(vNear, VPar);
+            bool ParPt(int e, double off)
+            {
+                if (vPar <= vNear) return false;
+                var E = g.Edges[e]; var (x, y) = g.PointAt(e, off); double u = U(x, y), v = V(x, y);
+                if (u < loU || u > hiU || Math.Abs(v) > vPar) return false;
+                var (x1, y1) = g.PointAt(e, Math.Max(0, off - 6)); var (x2, y2) = g.PointAt(e, Math.Min(E.Len, off + 6));
+                double du = U(x2, y2) - U(x1, y1), dv = V(x2, y2) - V(x1, y1);
+                return Math.Abs(du) > 1 && Math.Abs(dv) < Math.Abs(du) * 0.176;   // (tan 10°)
+            }
+            bool NearQ(int e, (double x, double y, double off) q) => NearPt(q.x, q.y) || ParPt(e, q.off);
+            bool NearNode(int n, double x, double y) => NearPt(x, y) || g.EdgesAt(n).Any(e => ParPt(e, g.Edges[e].A == n ? 0 : g.Edges[e].Len));
             (double x, double y) NodeXY(int n)
             {
                 foreach (int e in g.EdgesAt(n)) { var E = g.Edges[e]; return E.A == n ? (E.X[0], E.Y[0]) : (E.X[^1], E.Y[^1]); }
@@ -584,6 +645,7 @@ namespace SelectOR
             for (int e = 0; e < g.Edges.Length; e++)
             {
                 var E = g.Edges[e];
+                if (_skip != null && _skip.Contains(e)) continue;
                 bool hasA = E.A >= 0 && ns.ContainsKey(E.A), hasB = E.B >= 0 && ns.ContainsKey(E.B);
                 var D = Dense(e);
                 int firstNear = D.FindIndex(q => NearQ(e, q)), lastNear = D.FindLastIndex(q => NearQ(e, q));
@@ -629,6 +691,13 @@ namespace SelectOR
                     }
                 }
                 if (Q.Count < 2) continue;
+                // (1.2.81) un tramo corto (menos de 25 m) que sale de una aguja que sí entra: casi entero, acabado en salida (si no,
+                // la aguja salía sin una de sus vías: la 374 en «Línea Lanuza – Parque Grande»)
+                if (E.Len < 25 && firstNear < 0 && (hasA && ns[E.A].d <= ns[E.A].lim || hasB && ns[E.B].d <= ns[E.B].lim) && !Q.All(q => q.d <= q.lim))
+                {
+                    double far = Q.Max(q => q.d);
+                    for (int i = 0; i < Q.Count; i++) Q[i] = (Q[i].u, Q[i].v, Q[i].d, Math.Max(Q[i].lim, far - 0.5), Q[i].off);
+                }
                 bool fA = E.A >= 0 && foreign.Contains(E.A), fB = E.B >= 0 && foreign.Contains(E.B);
                 if (fA && fB) continue;   // (entre dos agujas de otra estación: es suyo)
                 double cut = Math.Min(25, E.Len * 0.5);   // (un tramo corto entre una aguja nuestra y una de otra estación: queda un trozo con su flecha)
@@ -698,6 +767,9 @@ namespace SelectOR
             }
             foreach (var l in byKey.Values.Where(l => l.Count >= 2))
             {
+                // (1.2.81) un escape en tijera (sus cuatro agujas en una sola pieza de la ruta) no es una travesía: cuatro agujas y
+                // la X de sus diagonales (en Aranda, Estación Sur e Ingeniero Pizias salían como un rombo y no se podían mover)
+                if (l.All(n => sciss.Straight.ContainsKey(n))) continue;
                 var uvs = l.Select(NodeUV).ToList();
                 double mu = uvs.Average(p => p.u), mv = uvs.Average(p => p.v);
                 if (uvs.Any(p => Math.Abs(p.u - mu) > 40 || Math.Abs(p.v - mv) > 15)) continue;
@@ -723,6 +795,21 @@ namespace SelectOR
             // filas: tramos largos y rectos, por su posición lateral
             // recto: en buena parte de su largo (al menos 45 m y la mitad) a menos de 3,5 m de su posición lateral
             // mediana (una vía de estación que al final se curva hacia la cabecera sigue siendo una vía en fila)
+            // (1.2.81) ¿cruza este tramo, en la realidad, otro de los dibujados (sin aguja en común)?
+            bool CrossesReal(int e)
+            {
+                var E = g.Edges[e];
+                foreach (int f in T.Keys)
+                {
+                    if (f == e) continue;
+                    var F = g.Edges[f];
+                    if (F.A >= 0 && (F.A == E.A || F.A == E.B) || F.B >= 0 && (F.B == E.A || F.B == E.B)) continue;
+                    for (int i = 1; i < E.X.Length; i++)
+                        for (int k = 1; k < F.X.Length; k++)
+                            if (Cut(new PointF(E.X[i - 1], E.Y[i - 1]), new PointF(E.X[i], E.Y[i]), new PointF(F.X[k - 1], F.Y[k - 1]), new PointF(F.X[k], F.Y[k]), out _)) return true;
+                }
+                return false;
+            }
             bool Flat(int e)
             {
                 if (g.Edges[e].Platforms.Any(pl => Mine(pl.name)) && T[e].P.Max(p => p.u) - T[e].P.Min(p => p.u) > 30) return true;   // (las del andén, siempre)
@@ -741,6 +828,12 @@ namespace SelectOR
                 bool divB = E.B >= 0 && (divergeOf.TryGetValue(E.B, out int dB) && dB == e || group.ContainsKey(E.B));
                 bool link = jA && jB && ext < 200 && (dvEnds >= 2.5 || sciss.Diagonals.Contains(e)) && (divA || divB);
                 if (link) return false;
+                // (1.2.81, nudos) un tramo entre dos agujas que cambia mucho de lado (más de 10 m, con una pendiente de más de 1 a 4
+                // respecto al eje) y que en la realidad cruza otra vía es un paso de un lado al otro de la estación, aunque sea la
+                // vía directa de sus agujas: en fila, la línea de Lanuza en el Museo arrastraba al fondo la vía a la que sube y
+                // todo se cruzaba
+                if (jA && jB && ext < 250 && dvEnds >= 10 && dvEnds >= 0.25 * ext && !E.Platforms.Any(pl => Mine(pl.name))
+                    && !sciss.Diagonals.Contains(e) && !sciss.Parallels.Contains(e) && CrossesReal(e)) return false;
                 return ext > 8 || !(jA && jB);
             }
             double Med(IEnumerable<double> xs) { var l = xs.OrderBy(x => x).ToList(); return l[l.Count / 2]; }
@@ -770,7 +863,19 @@ namespace SelectOR
             foreach (int n in nodes)
             {
                 if (group.ContainsKey(n)) continue;
-                if (trunkOf.TryGetValue(n, out int tk) && straightOf.TryGetValue(n, out int sk)) { Join(tk, sk); continue; }
+                if (trunkOf.TryGetValue(n, out int tk) && straightOf.TryGetValue(n, out int sk))
+                {
+                    // (1.2.81) en una aguja de tijera, la paralela sigue en la fila del tronco que lleva a un andén de la estación (por
+                    // su otra punta), no en la del que se va a otro sitio: en Ingeniero Pizias la vía del andén 2 se iba con el tramo
+                    // de la playa y dejaba la playa entre las dos vías de los andenes
+                    if (sciss.Straight.ContainsKey(n) && g.Edges[sk].A >= 0 && g.Edges[sk].B >= 0)
+                    {
+                        int m = g.Edges[sk].A == n ? g.Edges[sk].B : g.Edges[sk].A;
+                        bool Plat(int e) => g.Edges[e].Platforms.Any(pl => Mine(pl.name));
+                        if (sciss.Straight.ContainsKey(m) && trunkOf.TryGetValue(m, out int tm) && Plat(tm) && !Plat(tk)) continue;
+                    }
+                    Join(tk, sk); continue;
+                }
                 var at = g.EdgesAt(n).Where(flatSet.Contains).ToList();
                 if (at.Count == 2 && g.EdgesAt(n).Count() == 2) Join(at[0], at[1]);
             }
@@ -789,6 +894,33 @@ namespace SelectOR
             // está a menos de 2,4 m) o en una nueva, siempre entre las que tiene a un lado y al otro.
             var chains = chainOf.Values.Distinct().ToList();
             var cpts = chains.Select(ch => ch.SelectMany(e => T[e].P.Select(p => (p.u, p.v))).OrderBy(p => p.u).ToList()).ToList();
+            // (1.2.81, nudos) solo los puntos con su posición real (dentro de la franja): fuera, la v es la enderezada (la de
+            // donde salió la vía) y en un nudo no dice nada de qué vía va a qué lado
+            bool Real(int e, double off) { var (x, y) = g.PointAt(e, off); return NearQ(e, (x, y, off)); }
+            var cptsR = chains.Select(ch => ch.SelectMany(e => T[e].P.Where(p => Real(e, p.off)).Select(p => (p.u, p.v))).OrderBy(p => p.u).ToList()).ToList();
+            // (1.2.81, nudos) una vía «débil»: casi sin posición real y que en la realidad va muy oblicua al eje de la estación
+            // (más de 35°: una línea que cruza la estación en ángulo); su lado enderezado no dice nada
+            var weakC = new Dictionary<int, bool>();
+            bool Weak(int c)
+            {
+                if (weakC.TryGetValue(c, out bool w)) return w;
+                w = false;
+                if (cpts[c].Count > 0 && cptsR[c].Count < 0.2 * cpts[c].Count)
+                {
+                    double du = 0, dv = 0;
+                    foreach (int e in chains[c]) { var E = g.Edges[e]; du += Math.Abs(U(E.X[^1], E.Y[^1]) - U(E.X[0], E.Y[0])); dv += Math.Abs(V(E.X[^1], E.Y[^1]) - V(E.X[0], E.Y[0])); }
+                    w = dv > 0.7 * du;
+                }
+                weakC[c] = w; return w;
+            }
+            double? VAtR(int c, double u)
+            {
+                var l = cptsR[c]; if (l.Count == 0 || u < l[0].u || u > l[^1].u) return null;
+                int k = l.FindIndex(p => p.u >= u); if (k <= 0) return l[Math.Max(0, k)].v;
+                var (ua, va) = l[k - 1]; var (ub, vb) = l[k];
+                if (ub - ua > 30) return null;
+                return ub - ua < 1e-6 ? va : va + (vb - va) * (u - ua) / (ub - ua);
+            }
             var cv = chains.Select(CMed).ToList();
             double? VAt(int c, double u)
             {
@@ -823,23 +955,31 @@ namespace SelectOR
                 {
                     if (group.ContainsKey(n) || !straightOf.TryGetValue(n, out int st) || !divergeOf.TryGetValue(n, out int dv)) continue;
                     if (!T.ContainsKey(st) || !T.ContainsKey(dv) || T[st].P.Count < 2) continue;
-                    int S = ChainOfEdge(st); if (S < 0) continue;
+                    int S = ChainOfEdge(st);
+                    // (1.2.81) la recta es un enlace corto (no va en fila): manda la vía del tronco, que sigue en la misma dirección
+                    // (si no, la desviada no tenía lado y salía al contrario: Aranda 829, Ingeniero Pizias 1370)
+                    if (S < 0 && trunkOf.TryGetValue(n, out int tkn)) S = ChainOfEdge(tkn);
+                    if (S < 0) continue;
                     int D = ChainOfEdge(dv);
                     if (D < 0)
                     {
                         // la desviada es un enlace: la vía a la que llega (hasta tres enlaces seguidos: en un escape en tijera,
                         // la desviada lleva a otra aguja y de ahí a otro enlace)
-                        var seenE = new HashSet<int> { dv, st }; var qn = new Queue<(int node, int depth)>();
-                        int m0 = g.Edges[dv].A == n ? g.Edges[dv].B : g.Edges[dv].A; if (m0 >= 0) qn.Enqueue((m0, 0));
+                        var seenE = new HashSet<int> { dv, st }; var qn = new Queue<(int node, int depth, int via)>();
+                        int m0 = g.Edges[dv].A == n ? g.Edges[dv].B : g.Edges[dv].A; if (m0 >= 0) qn.Enqueue((m0, 0, dv));
                         while (D < 0 && qn.Count > 0)
                         {
-                            var (m, dep) = qn.Dequeue();
+                            var (m, dep, via) = qn.Dequeue();
+                            // (1.2.81) primero la vía que sigue al enlace en esa aguja (si llega por el tronco, la recta; si por una
+                            // rama, el tronco): cogiendo la primera que salía, en Ingeniero Pizias la 1370 tomaba la desviada de la 154
+                            int cont = trunkOf.TryGetValue(m, out int tm) ? (via == tm ? (straightOf.TryGetValue(m, out int sm) ? sm : -1) : tm) : -1;
+                            if (cont >= 0 && !seenE.Contains(cont) && T.ContainsKey(cont)) { int cc = ChainOfEdge(cont); if (cc >= 0 && cc != S) { D = cc; break; } }
                             foreach (int f in g.EdgesAt(m))
                             {
                                 if (!seenE.Add(f) || !T.ContainsKey(f)) continue;
                                 int c = ChainOfEdge(f);
                                 if (c >= 0 && c != S) { D = c; break; }
-                                if (c < 0 && dep < 2) { int o2 = g.Edges[f].A == m ? g.Edges[f].B : g.Edges[f].A; if (o2 >= 0) qn.Enqueue((o2, dep + 1)); }
+                                if (c < 0 && dep < 2) { int o2 = g.Edges[f].A == m ? g.Edges[f].B : g.Edges[f].A; if (o2 >= 0) qn.Enqueue((o2, dep + 1, f)); }
                             }
                         }
                     }
@@ -851,9 +991,26 @@ namespace SelectOR
                     if (Math.Abs(cross) < 0.25) continue;   // (no se sabe)
                     double su = SchemU(st, n, 25) - SchemU(st, n, 0); if (Math.Abs(su) < 0.5) continue;
                     bool dvMore = (cross > 0) == (su > 0);   // la desviada, con más v que la recta
+                    // (1.2.81) si donde coinciden a lo largo las dos vías están claramente (más de 5 m) al revés de lo que dice el
+                    // giro de la aguja (el enlace sale hacia un lado y la vía a la que llega queda al otro: una S, o una vía que
+                    // tuerce), no se fuerza nada: mandaba el giro y la vía salía en el lado contrario (Ingeniero Pizias, Santa Ana)
+                    const double X3T = 5;   // (m; probado 3, 5, 8 y 12 con la auditoría: 5 es lo que menos fallos deja)
+                    if (COverl(S, D))
+                    {
+                        double lo3 = Math.Max(cpts[S][0].u, cpts[D][0].u), hi3 = Math.Min(cpts[S][^1].u, cpts[D][^1].u);
+                        int more3 = 0, less3 = 0;
+                        for (double u3 = lo3; u3 <= hi3; u3 += 8)
+                        {
+                            var vs3 = VAtR(S, u3); var vd3 = VAtR(D, u3);
+                            if (vs3 == null || vd3 == null || Math.Abs(vd3.Value - vs3.Value) < X3T) continue;
+                            if (vd3 > vs3) more3++; else less3++;
+                        }
+                        if (more3 + less3 >= 3 && Math.Max(more3, less3) >= 0.8 * (more3 + less3) && (more3 > less3) != dvMore) { if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dq && dq.Length > 0 && Station.Contains(dq)) Console.WriteLine($"  lado sin forzar (X3T): aguja {n} cadena {S}/{D} más {more3} menos {less3} dvMore {dvMore}"); continue; }
+                    }
                     int r = dvMore ? -1 : 1;                 // rel(S, D)
                     if (forced.TryGetValue((S, D), out int old) && old != r) { forced[(S, D)] = 0; forced[(D, S)] = 0; continue; }   // (contradicción: nada)
                     forced[(S, D)] = r; forced[(D, S)] = -r;
+                    if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dbg0 && dbg0.Length > 0 && Station.Contains(dbg0)) Console.WriteLine($"  lado: aguja {n} recta {st} (cadena {S}) desviada {dv} (cadena {D}) cruz {cross:F2} su {su:F1} → rel {r}");
                 }
             }
             // las que van después de cada una por los lados de las agujas, encadenadas
@@ -868,6 +1025,58 @@ namespace SelectOR
                     after[a0] = seen;
                 }
             }
+            // −1: la cadena a va a la derecha de b (menos v), +1 a la izquierda, 0 no se sabe; con la geometría real: desde cada
+            // punto de a (cada 10 m), la vía b más cercana (a menos de 25 m), a qué lado queda yendo hacia donde crece u
+            // ¿salen de agujas cercanas (a menos de 120 m por la vía)? (si no, pueden cruzarse lejos, por un paso superior)
+            bool Kin(int a, int b)
+            {
+                var na = new HashSet<int>(chains[a].SelectMany(e => new[] { g.Edges[e].A, g.Edges[e].B }).Where(n => n >= 0));
+                var nb = new HashSet<int>(chains[b].SelectMany(e => new[] { g.Edges[e].A, g.Edges[e].B }).Where(n => n >= 0));
+                var dist = new Dictionary<int, double>(); var pq2 = new PriorityQueue<int, double>();
+                foreach (int n in na) { dist[n] = 0; pq2.Enqueue(n, 0); }
+                while (pq2.TryDequeue(out int n, out double d))
+                {
+                    if (d > dist[n] + 1e-6) continue;
+                    if (nb.Contains(n)) return true;
+                    foreach (int e in g.EdgesAt(n))
+                    {
+                        if (chains[a].Contains(e) || chains[b].Contains(e)) continue;
+                        var E = g.Edges[e]; int m = E.A == n ? E.B : E.A; if (m < 0) continue;
+                        double nd = d + E.Len; if (nd > 120) continue;
+                        if (!dist.TryGetValue(m, out double om) || nd < om) { dist[m] = nd; pq2.Enqueue(m, nd); }
+                    }
+                }
+                return false;
+            }
+            int LocalSide(int a, int b, double lo, double hi)
+            {
+                if (!Kin(a, b)) return 0;
+                int left = 0, right = 0;
+                var bp = new List<(double x, double y)>();
+                foreach (int e in chains[b]) { var E = g.Edges[e]; for (double o = 0; o <= E.Len; o += 4) bp.Add(g.PointAt(e, o)); }
+                foreach (int e in chains[a])
+                {
+                    var E = g.Edges[e];
+                    for (double o = 3; o <= E.Len - 3; o += 10)
+                    {
+                        if (!PathUV(e, o - 3, out double u1, out _) || !PathUV(e, o + 3, out double u2, out _) || Math.Abs(u2 - u1) < 1) continue;
+                        if ((u1 + u2) / 2 < lo || (u1 + u2) / 2 > hi) continue;
+                        { var (rx, ry) = g.PointAt(e, o); double ru = U(rx, ry); if (ru < loU - 120 || ru > hiU + 120) continue; }   // (cerca de la estación)
+                        var (x1, y1) = g.PointAt(e, o - 3); var (x2, y2) = g.PointAt(e, o + 3); var (px, py) = g.PointAt(e, o);
+                        double dx = x2 - x1, dy = y2 - y1; if (u2 < u1) { dx = -dx; dy = -dy; }
+                        double bd = 25 * 25; (double x, double y) q = default; bool f = false;
+                        foreach (var c in bp) { double d = (c.x - px) * (c.x - px) + (c.y - py) * (c.y - py); if (d < bd) { bd = d; q = c; f = true; } }
+                        if (!f || bd < 1) continue;
+                        double dl0 = Math.Sqrt(dx * dx + dy * dy), dot = (dx * (q.x - px) + dy * (q.y - py)) / Math.Max(1e-6, dl0);
+                        if (Math.Abs(dot) > 0.5 * Math.Sqrt(bd)) continue;   // (enfrente, no por delante o por detrás)
+                        double cr = dx * (q.y - py) - dy * (q.x - px);   // > 0: b a la izquierda (más v)
+                        if (cr > 0) left++; else right++;   // (con media vuelta, u y v cambian a la vez: el signo ya sale bien)
+                    }
+                }
+                if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dl && dl.Length > 0 && Station.Contains(dl)) Console.WriteLine($"  lado local {a} [{string.Join(",", chains[a])}] / {b} [{string.Join(",", chains[b])}]: izq {left} dcha {right}");
+                if (left + right < 1 || Math.Max(left, right) < 0.75 * (left + right)) return 0;   // (salen de agujas cercanas: basta un punto; una que se separa deprisa solo tiene uno enfrente)
+                return left > right ? -1 : 1;
+            }
             int Rel(int a, int b)
             {
                 if (a == b) return 0;
@@ -880,12 +1089,38 @@ namespace SelectOR
                 if (COverl(a, b))
                 {
                     double lo = Math.Max(cpts[a][0].u, cpts[b][0].u), hi = Math.Min(cpts[a][^1].u, cpts[b][^1].u);
+                    // (1.2.81, nudos) si una de las dos vías apenas tiene posición real (una línea que cruza la estación en ángulo),
+                    // solo con las posiciones reales: su lado enderezado no dice nada
+                    // (1.2.81) primero con las posiciones reales (dentro de la franja); si no hay, el lado de verdad mirado de cerca,
+                    // punto a punto (fuera de la franja el lado enderezado puede engañar: en Aranda la 469 sale en curva por fuera de
+                    // todo y se metía entre la 470 y la 472); y si tampoco, el enderezado (no en las vías «débiles»)
+                    bool weak = Weak(a) || Weak(b);
                     int less = 0, more = 0;
                     for (double u = lo; u <= hi; u += 8)
                     {
-                        var va = VAt(a, u); var vb = VAt(b, u);
+                        var va = VAtR(a, u); var vb = VAtR(b, u);
                         if (va == null || vb == null || Math.Abs(va.Value - vb.Value) < 0.8) continue;
                         if (va < vb) less++; else more++;
+                    }
+                    if (less + more < 3)
+                    {
+                        int ls = LocalSide(a, b, lo, hi);
+                        if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dl2 && dl2.Length > 0 && Station.Contains(dl2))
+                        {
+                            int l2 = 0, m2 = 0; for (double u = lo; u <= hi; u += 8) { var va = VAt(a, u); var vb = VAt(b, u); if (va == null || vb == null || Math.Abs(va.Value - vb.Value) < 0.8) continue; if (va < vb) l2++; else m2++; }
+                            Console.WriteLine($"  REL {a}[{string.Join(",", chains[a])}] / {b}[{string.Join(",", chains[b])}]: local {ls} · enderezado {l2}/{m2}");
+                        }
+                        if (ls != 0) { less = ls < 0 ? 1 : 0; more = ls > 0 ? 1 : 0; }
+                        else if (!weak)
+                        {
+                            less = more = 0;
+                            for (double u = lo; u <= hi; u += 8)
+                            {
+                                var va = VAt(a, u); var vb = VAt(b, u);
+                                if (va == null || vb == null || Math.Abs(va.Value - vb.Value) < 0.8) continue;
+                                if (va < vb) less++; else more++;
+                            }
+                        }
                     }
                     if (less + more > 0 && Math.Max(less, more) >= 0.7 * (less + more)) r = less > more ? -1 : 1;
                 }
@@ -922,8 +1157,91 @@ namespace SelectOR
                         if (Math.Abs(lvl[j].v - cv[c]) < bd && !lvl[j].cs.Any(m => COverl(m, c))) { bd = Math.Abs(lvl[j].v - cv[c]); join = j; }
                 if (join >= 0) { lvl[join].cs.Add(c); lvl[join] = (lvl[join].cs.Average(i => cv[i]), lvl[join].cs); continue; }
                 int p = lvl.Count(l => l.v < cv[c]);
+                // (1.2.81, nudos) una vía casi sin posición real, junto a la vía de la que sale (la de su aguja), en vez de por su
+                // lado enderezado (en Parque Grande, la salida 771 acababa entre los andenes y cortaba todo)
+                if (Weak(c))
+                {
+                    int bestP = -1;
+                    for (int i = 0; i < lvl.Count && bestP < 0; i++)
+                        foreach (int m in lvl[i].cs)
+                            if (forced.TryGetValue((c, m), out int fr) && fr != 0) { bestP = fr < 0 ? i : i + 1; break; }
+                    if (bestP >= 0) p = bestP;
+                }
                 if (lo <= hi) p = Math.Max(lo, Math.Min(hi, p));
                 lvl.Insert(p, (cv[c], new List<int> { c }));
+            }
+            // (1.2.81) reparación: una vía que incumple el orden con otra (colocada antes de saber lo de las siguientes: en Aranda
+            // la 469 iba junto a la 470 y luego resultó ir detrás de la 473), a una fila nueva donde cumpla con todas, si la hay
+            for (int pass = 0; pass < 3; pass++)
+            {
+                bool moved = false;
+                foreach (int c in Enumerable.Range(0, chains.Count))
+                {
+                    int cur = lvl.FindIndex(l => l.cs.Contains(c)); if (cur < 0) continue;
+                    bool bad = false; int lo = 0, hi = lvl.Count - 1;
+                    for (int i = 0; i < lvl.Count; i++)
+                        foreach (int m in lvl[i].cs)
+                        {
+                            if (m == c) continue;
+                            int r = Rel(m, c);
+                            if (r < 0) { if (i >= cur) bad = true; lo = Math.Max(lo, i + 1); }
+                            else if (r > 0) { if (i <= cur) bad = true; hi = Math.Min(hi, i); }
+                        }
+                    if (!bad || lo > hi + 1) continue;
+                    // a una fila nueva en la posición lo (entre las de antes y las de después), quitándola de la suya
+                    lvl[cur].cs.Remove(c);
+                    int at = lo;
+                    if (lvl[cur].cs.Count == 0) { lvl.RemoveAt(cur); if (cur < at) at--; }
+                    lvl.Insert(Math.Max(0, Math.Min(lvl.Count, at)), (cv[c], new List<int> { c }));
+                    moved = true;
+                    if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dr && dr.Length > 0 && Station.Contains(dr)) Console.WriteLine($"  reparada cadena {c} [{string.Join(",", chains[c])}] → nivel {at}");
+                }
+                if (!moved) break;
+            }
+            // (1.2.81, petición) las dos vías de un escape en tijera, en filas vecinas (en la realidad van juntas): si había otras
+            // filas en medio, la de una pasa a una fila nueva junto a la otra, siempre que no cambie el orden con las vías que
+            // coinciden con ella a lo largo. Si no, el símbolo quedaba lejos de las dos y las vías llegaban con muchas vueltas
+            {
+                int LevelOfC(int c) { for (int i = 0; i < lvl.Count; i++) if (lvl[i].cs.Contains(c)) return i; return -1; }
+                bool Fits(int c, int at)   // ¿cumple con todas en una fila nueva en la posición «at»? (las de antes, < at)
+                {
+                    for (int i = 0; i < lvl.Count; i++)
+                        foreach (int m in lvl[i].cs)
+                        {
+                            if (m == c) continue;
+                            int r = Rel(m, c);
+                            if (r < 0 && i >= at || r > 0 && i < at) return false;
+                        }
+                    return true;
+                }
+                var pairs = new List<(int a, int b)>();
+                foreach (int d in sciss.Diagonals)
+                {
+                    var E = g.Edges[d]; if (E.A < 0 || E.B < 0) continue;
+                    if (!sciss.Straight.TryGetValue(E.A, out int pa) || !sciss.Straight.TryGetValue(E.B, out int pb)) continue;
+                    if (!chainOf.TryGetValue(pa, out var ca) || !chainOf.TryGetValue(pb, out var cb) || ca == cb) continue;
+                    pairs.Add((chains.IndexOf(ca), chains.IndexOf(cb)));
+                }
+                foreach (var (a, b) in pairs.Distinct())
+                {
+                    int la = LevelOfC(a), lb = LevelOfC(b);
+                    if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dt && dt.Length > 0 && Station.Contains(dt)) Console.WriteLine($"  tijera: cadenas {a} [{string.Join(",", chains[a])}] (nivel {la}) y {b} [{string.Join(",", chains[b])}] (nivel {lb})");
+                    if (la < 0 || lb < 0 || Math.Abs(la - lb) <= 1) continue;
+                    // probar a llevar cada una junto a la otra (la de arriba debajo de la de abajo, o al revés)
+                    foreach (var (mv, to) in new[] { (b, la), (a, lb) })
+                    {
+                        int from = LevelOfC(mv), other = LevelOfC(to == la ? a : b);
+                        int at = from > other ? other + 1 : other;   // (justo después de la otra si iba detrás; justo antes si iba delante)
+                        lvl[from].cs.Remove(mv); bool emptied = lvl[from].cs.Count == 0;
+                        var saved = lvl[from];
+                        if (emptied) { lvl.RemoveAt(from); if (from < at) at--; }
+                        if (Fits(mv, at)) { lvl.Insert(at, (cv[mv], new List<int> { mv })); break; }
+                        if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dt2 && dt2.Length > 0 && Station.Contains(dt2))
+                            for (int i = 0; i < lvl.Count; i++) foreach (int m in lvl[i].cs) { int r = Rel(m, mv); if (r < 0 && i >= at || r > 0 && i < at) Console.WriteLine($"    no cabe {mv} en {at}: choca con {m} [{string.Join(",", chains[m])}] nivel {i} rel {r}"); }
+                        // no cabe: como estaba
+                        if (emptied) lvl.Insert(from, saved); saved.cs.Add(mv);
+                    }
+                }
             }
             // (1.2.75) vía de paso recta: dos vías seguidas que se continúan por un enlace que no es la desviada de ninguna de
             // sus dos agujas (el camino directo: la línea que entra en la estación) y que no coinciden a lo largo, en la misma
@@ -981,6 +1299,14 @@ namespace SelectOR
                 if (k - 1 >= 0 && Math.Abs(lv[k - 1] - v) < Math.Abs(lv[best] - v)) best = k - 1;
                 return best;
             }
+            // (depuración: SELECTOR_ESQ_DEBUG=<dependencia>) papeles de las agujas, cadenas y filas
+            if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dbg && dbg.Length > 0 && Station.Contains(dbg))
+            {
+                foreach (int n in nodes.Where(trunkOf.ContainsKey))
+                    Console.WriteLine($"  aguja {n}: tronco {trunkOf[n]} (fila {(rowOf.TryGetValue(trunkOf[n], out int r1) ? r1 : -1)}) recta {straightOf[n]} (fila {(rowOf.TryGetValue(straightOf[n], out int r2) ? r2 : -1)}) desviada {divergeOf[n]} (fila {(rowOf.TryGetValue(divergeOf[n], out int r3) ? r3 : -1)})");
+                foreach (var ch in chains) Console.WriteLine($"  cadena {chains.IndexOf(ch)} [{string.Join(",", ch)}] v {CMed(ch):F1} fila {(rowOf.TryGetValue(ch[0], out int rr) ? rr : -1)}");
+                foreach (var kv in forced.Where(k => k.Value != 0 && k.Key.Item1 < k.Key.Item2)) Console.WriteLine($"  forzado: cadena {kv.Key.Item1} {(kv.Value < 0 ? "antes que" : "después de")} cadena {kv.Key.Item2}");
+            }
             // fila de cada aguja / travesía / unión
             var nrow = new Dictionary<int, int>();
             foreach (int n0 in nodes)
@@ -992,9 +1318,16 @@ namespace SelectOR
                     int best = -1; double bd = 1e9;
                     foreach (int e in T.Keys) if (!internalEdge.Contains(e) && rowOf.TryGetValue(e, out int r) && (Rep(g.Edges[e].A) == n || Rep(g.Edges[e].B) == n))
                         { double d = Math.Abs(lv[r] - ga.v); if (d < bd) { bd = d; best = r; } }
+                    // (1.2.81) una vía en fila que pasa a través de la travesía (le llegan dos tramos de la misma fila): en esa fila
+                    // (en Ingeniero Pizias la travesía de la línea general quedaba 5 filas más abajo y la línea bajaba y subía)
+                    var thru = T.Keys.Where(e => !internalEdge.Contains(e) && rowOf.ContainsKey(e) && (Rep(g.Edges[e].A) == n || Rep(g.Edges[e].B) == n))
+                        .GroupBy(e => rowOf[e]).Where(q => q.Count() >= 2).Select(q => q.Key).ToList();
+                    if (thru.Count == 1) { nrow[n] = thru[0]; continue; }
                     nrow[n] = best >= 0 && bd < 6 ? best : VRow(ga.v);
                     continue;
                 }
+                // (1.2.81) una aguja de tijera, en la fila de su paralela (su tronco puede irse lejos: Ingeniero Pizias 1427)
+                if (sciss.Straight.TryGetValue(n, out int spar) && rowOf.TryGetValue(spar, out int rsp)) { nrow[n] = rsp; continue; }
                 if (trunkOf.TryGetValue(n, out int t) && rowOf.TryGetValue(t, out int rt)) { nrow[n] = rt; continue; }
                 if (straightOf.TryGetValue(n, out int st) && rowOf.TryGetValue(st, out int rs)) { nrow[n] = rs; continue; }
                 // aguja de una escalera (ni el tronco ni la recta son vías en fila): en la fila de la vía a la que da paso
@@ -1003,6 +1336,56 @@ namespace SelectOR
                 if (!nrow.ContainsKey(n)) nrow[n] = VRow(NodeUV(n).v);
             }
 
+            // (1.2.81, petición) una tijera con sus dos vías en filas lejanas: las agujas de una de sus vías, en la fila vecina
+            // de la otra (esa vía da un quiebro a 45° antes y después de la tijera), si las filas de en medio están libres a esa
+            // altura. Así la X queda pequeña y entre sus dos vías, en vez de un recuadro alto
+            {
+                var tdone = new HashSet<int>();
+                int Oth(int e, int n) => g.Edges[e].A == n ? g.Edges[e].B : g.Edges[e].A;
+                foreach (int n0 in sciss.Straight.Keys)
+                {
+                    if (tdone.Contains(n0) || !nrow.ContainsKey(n0)) continue;
+                    int n1 = Oth(sciss.Straight[n0], n0); if (n1 < 0 || !sciss.Straight.ContainsKey(n1)) continue;
+                    // la otra pareja: las del otro lado de las diagonales de n0 y n1
+                    int m0 = g.EdgesAt(n0).Where(sciss.Diagonals.Contains).Select(e => Oth(e, n0)).FirstOrDefault(-1);
+                    if (m0 < 0 || !sciss.Straight.ContainsKey(m0)) continue;
+                    int m1 = Oth(sciss.Straight[m0], m0); if (m1 < 0) continue;
+                    var four = new[] { n0, n1, m0, m1 }; foreach (int q in four) tdone.Add(q);
+                    if (four.Any(q => !nrow.ContainsKey(q))) continue;
+                    // (1.2.81) las dos agujas de cada lado, a la misma altura a lo largo (en la realidad están casi enfrentadas, a 0-10
+                    // m; el esquema lo exageraba hasta más de 100 px y la tijera salía torcida, con una aguja dentro de su símbolo)
+                    if (ns.ContainsKey(n0) && ns.ContainsKey(n1) && ns.ContainsKey(m0) && ns.ContainsKey(m1))
+                    {
+                        int tL = ns[n0].u <= ns[n1].u ? n0 : n1, tR = tL == n0 ? n1 : n0, bL = ns[m0].u <= ns[m1].u ? m0 : m1, bR = bL == m0 ? m1 : m0;
+                        double uL = Math.Min(ns[tL].u, ns[bL].u), uR = Math.Max(ns[tR].u, ns[bR].u);
+                        if (uR - uL > 2)
+                        {
+                            void SetU(int q, double u) { var o = ns[q]; ns[q] = (u, o.v, o.d, o.s, o.lim); }
+                            SetU(tL, uL); SetU(bL, uL); SetU(tR, uR); SetU(bR, uR);
+                        }
+                    }
+                    int ra = nrow[n0], rb = nrow[m0];
+                    if (nrow[n1] != ra || nrow[m1] != rb || Math.Abs(ra - rb) <= 1) continue;
+                    // lo que ocupa a lo largo, con sitio para los quiebros
+                    double ua = four.Min(q => NodeUV(q).u), ub = four.Max(q => NodeUV(q).u), pad = 12 + 3 * Math.Abs(ra - rb);
+                    bool RowFree(int r) => !rowOf.Any(kv => kv.Value == r && T.ContainsKey(kv.Key) && !sciss.Parallels.Contains(kv.Key) && !sciss.Diagonals.Contains(kv.Key)
+                                                            && T[kv.Key].P.Min(p => p.u) < ub + pad && T[kv.Key].P.Max(p => p.u) > ua - pad);
+                    int lo = Math.Min(ra, rb), hi = Math.Max(ra, rb);
+                    var low = ra < rb ? new[] { m0, m1 } : new[] { n0, n1 }; var up = ra < rb ? new[] { n0, n1 } : new[] { m0, m1 };
+                    // la de abajo, a la fila vecina de la de arriba; o la de arriba, a la vecina de la de abajo; o, si en medio hay
+                    // alguna fila ocupada, lo más cerca que se pueda por cada lado
+                    var freeRows = Enumerable.Range(lo + 1, hi - lo - 1).Select(r => (r, f: RowFree(r))).ToList();
+                    int upTo = lo; foreach (var (r, f) in freeRows) { if (!f) break; upTo = r; }                     // hasta dónde puede bajar la de arriba
+                    int downTo = hi; foreach (var (r, f) in freeRows.AsEnumerable().Reverse()) { if (!f) break; downTo = r; }   // hasta dónde puede subir la de abajo
+                    if (downTo == lo + 1) foreach (int q in low) nrow[q] = lo + 1;
+                    else if (upTo == hi - 1) foreach (int q in up) nrow[q] = hi - 1;
+                    else
+                    {
+                        if (downTo < hi) foreach (int q in low) nrow[q] = downTo;
+                        if (upTo > lo) foreach (int q in up) nrow[q] = upTo;
+                    }
+                }
+            }
             // extremos de cada tramo: (u, fila, tipo, nodo)  tipo: j aguja/unión · g travesía · e topera · x salida
             var xrow = new Dictionary<(int, int), int>();
             (double u, int r, char k, int n) End(int e, int side)
@@ -1035,7 +1418,10 @@ namespace SelectOR
                     {
                         var en = End(e, side); if (en.k != 'x') continue;
                         var p = side == 0 ? T[e].P[0] : T[e].P[^1];
-                        if ((p.u > (_u0 + _u1) / 2) == right) ex.Add((p.v, en.r, e, side));
+                        // (1.2.81) a qué lado sale: hacia donde sigue la vía desde ese extremo (no por dónde cae en la zona: el
+                        // principio de un trozo cortado a la derecha del centro salía como salida de la derecha y se montaba en otra vía)
+                        bool toRight = side == 0 ? T[e].P[0].u > T[e].P[^1].u : T[e].P[^1].u > T[e].P[0].u;
+                        if (toRight == right) ex.Add((p.v, en.r, e, side));
                     }
                 int prev = int.MinValue;
                 // (1.2.75) por la fila de su vía (y a igualdad, por su posición): por la posición sola, si no coincidía con el orden
@@ -1056,15 +1442,37 @@ namespace SelectOR
                 foreach (double u in ev.Skip(1)) { double du = u - _knots[^1].u; if (du < 3) continue; _knots.Add((u, _knots[^1].x + Gx(du))); }
             }
 
+            // (1.2.81) una vía en fila que sale de una aguja o travesía en diagonal, si de ahí mismo sale un enlace que sube (o baja)
+            // más lejos hacia el mismo lado: la vía espera un trecho por la fila de la aguja y le deja la diagonal (si no, las dos
+            // diagonales iban una encima de otra o el enlace cortaba la vía: Estación Sur, la 801 y la 1)
+            double ShiftAt(int e, int side)
+            {
+                if (!rowOf.TryGetValue(e, out int r)) return 0;
+                var en = End(e, side); if (en.k != 'j' && en.k != 'g' || en.r == r) return 0;
+                var ot = End(e, 1 - side); int dir = Math.Sign(r - en.r), ux = Math.Sign(ot.u - en.u);
+                foreach (int l in T.Keys)
+                {
+                    if (l == e || rowOf.ContainsKey(l) || internalEdge.Contains(l)) continue;
+                    for (int sd = 0; sd < 2; sd++)
+                    {
+                        var le = End(l, sd); if (le.n != en.n) continue;
+                        var lo2 = End(l, 1 - sd);
+                        if (Math.Sign(lo2.r - en.r) == dir && Math.Abs(lo2.r - en.r) > Math.Abs(r - en.r) && Math.Sign(lo2.u - en.u) == ux) return 2 * Row;
+                    }
+                }
+                return 0;
+            }
             // estirar donde una diagonal a 45° no cabe
             var cons = new List<(double lo, double hi, double need)>();
             foreach (int e in T.Keys)
             {
                 if (internalEdge.Contains(e)) continue;
+                if (sciss.Diagonals.Contains(e)) continue;   // (1.2.81: las diagonales de una tijera van en su símbolo: sin hueco a 45°)
                 var a = End(e, 0); var b = End(e, 1);
                 double need = rowOf.TryGetValue(e, out int r)
                     ? (Math.Abs(a.r - r) + Math.Abs(b.r - r)) * Row + (a.r != r || b.r != r ? Gap : 0)
                     : Math.Abs(a.r - b.r) * Row + Gap;
+                need += ShiftAt(e, 0) + ShiftAt(e, 1);
                 if (need > 0) cons.Add((Math.Min(a.u, b.u), Math.Max(a.u, b.u), need));
             }
             foreach (var (lo, hi, need) in cons.OrderBy(c => c.lo))
@@ -1094,14 +1502,62 @@ namespace SelectOR
                 return a1 <= a0 || !occ.TryGetValue(rr, out var l) || !l.Any(q => q.a < a1 && a0 < q.b);
             }
             // (1.2.75, nudos) lo ya dibujado, para elegir el trazado de cada enlace que corte menos vías
-            var segs = new List<(PointF a, PointF b)>();
-            void AddSegs(PointF[] pts) { for (int i = 1; i < pts.Length; i++) segs.Add((pts[i - 1], pts[i])); }
-            int CutCount(List<PointF> pts)
+            var segs = new List<(PointF a, PointF b, int e)>();
+            void AddSegs(PointF[] pts, int e) { for (int i = 1; i < pts.Length; i++) segs.Add((pts[i - 1], pts[i], e)); }
+            // (1.2.81, nudos) cortar una vía que en la realidad también se cruza (paso superior) apenas cuenta
+            var realX = new Dictionary<(int, int), bool>();
+            bool RealPair(int a, int b)
             {
-                var s0 = pts[0]; var s1 = pts[^1]; int n = 0;
+                if (realX.TryGetValue((a, b), out bool r)) return r;
+                var EA = g.Edges[a]; var EB = g.Edges[b]; r = false;
+                bool shared = EA.A >= 0 && (EA.A == EB.A || EA.A == EB.B) || EA.B >= 0 && (EA.B == EB.A || EA.B == EB.B);
+                // (sin contar lo que se toca junto a los extremos: dentro de una travesía las vías se juntan sin cruzarse)
+                bool NearEnd(PointF q) { foreach (var E in new[] { EA, EB }) if (Math.Abs(q.X - E.X[0]) + Math.Abs(q.Y - E.Y[0]) < 4 || Math.Abs(q.X - E.X[^1]) + Math.Abs(q.Y - E.Y[^1]) < 4) return true; return false; }
+                for (int i = 1; i < EA.X.Length && !r && !shared; i++)
+                    for (int k = 1; k < EB.X.Length && !r; k++)
+                        r = Cut(new PointF(EA.X[i - 1], EA.Y[i - 1]), new PointF(EA.X[i], EA.Y[i]), new PointF(EB.X[k - 1], EB.Y[k - 1]), new PointF(EB.X[k], EB.Y[k]), out var cq) && !NearEnd(cq);
+                realX[(a, b)] = r; realX[(b, a)] = r; return r;
+            }
+            // los cruces reales del tramo e con las vías en fila ya dibujadas: su punto en el esquema, de A a B
+            List<PointF> RealThrough(int e)
+            {
+                var E = g.Edges[e]; var cuts = new List<(double off, PointF p)>();
+                foreach (var tf in Tracks)
+                {
+                    if (!tf.Flat || !RealPair(e, tf.Edge)) continue;
+                    var F = g.Edges[tf.Edge];
+                    for (int i = 1; i < E.X.Length; i++)
+                        for (int k = 1; k < F.X.Length; k++)
+                        {
+                            double r1 = E.X[i] - E.X[i - 1], r2 = E.Y[i] - E.Y[i - 1], s1 = F.X[k] - F.X[k - 1], s2 = F.Y[k] - F.Y[k - 1], den = r1 * s2 - r2 * s1;
+                            if (Math.Abs(den) < 1e-9) continue;
+                            double cx = F.X[k - 1] - E.X[i - 1], cy = F.Y[k - 1] - E.Y[i - 1];
+                            double t = (cx * s2 - cy * s1) / den, w = (cx * r2 - cy * r1) / den;
+                            if (t < 0 || t > 1 || w < 0 || w > 1) continue;
+                            double offE = E.Cum[i - 1] + t * (E.Cum[i] - E.Cum[i - 1]), offF = F.Cum[k - 1] + w * (F.Cum[k] - F.Cum[k - 1]);
+                            if (!MapOff(tf.Edge, offF, out var p)) continue;
+                            // lejos de las agujas de esa vía (a menos de 24 px parecía que el enlace se unía a ella)
+                            const float Clear = 44;
+                            var tp = tf.Pts; float L = 0; for (int q = 1; q < tp.Length; q++) L += Dist(tp[q - 1], tp[q]);
+                            if (L > 3 * Clear)
+                            {
+                                if (Dist(p, tp[0]) < Clear) p = AlongPts(tp, Clear);
+                                else if (Dist(p, tp[^1]) < Clear) p = AlongPts(tp, L - Clear);
+                            }
+                            cuts.Add((offE, p));
+                        }
+                }
+                return cuts.OrderBy(c => c.off).Select(c => c.p).ToList();
+            }
+            double CutCount(List<PointF> pts, int e)
+            {
+                var s0 = pts[0]; var s1 = pts[^1]; double n = 0;
                 for (int i = 1; i < pts.Count; i++)
-                    foreach (var (c, d) in segs)
-                        if (Cut(pts[i - 1], pts[i], c, d, out var x) && Dist(x, s0) > 1.5f && Dist(x, s1) > 1.5f) n++;
+                    foreach (var (c, d, f) in segs)
+                    {
+                        if (Cut(pts[i - 1], pts[i], c, d, out var x) && Dist(x, s0) > 1.5f && Dist(x, s1) > 1.5f) n += RealPair(e, f) ? 0.15 : 1;
+                        else if (Collinear(pts[i - 1], pts[i], c, d) > 4) n += 3;   // (1.2.81) una encima de otra (Estación Sur: dos diagonales desde la misma travesía)
+                    }
                 return n;
             }
             foreach (int e in T.Keys.OrderBy(k => rowOf.ContainsKey(k) ? 0 : 1))
@@ -1113,10 +1569,12 @@ namespace SelectOR
                 if (rowOf.TryGetValue(e, out int r))
                 {
                     tr.Flat = true; tr.RowIdx = r;
-                    var pts = new List<PointF> { new PointF(xa, Y(a.r)), new PointF(xa + sgn * Math.Abs(a.r - r) * Row, Y(r)), new PointF(xb - sgn * Math.Abs(b.r - r) * Row, Y(r)), new PointF(xb, Y(b.r)) };
+                    float sA = (float)ShiftAt(e, 0), sB = (float)ShiftAt(e, 1);
+                    if (Math.Abs(xb - xa) < Math.Abs(a.r - r) * Row + Math.Abs(b.r - r) * Row + sA + sB) sA = sB = 0;   // (si no cabe, como siempre)
+                    var pts = new List<PointF> { new PointF(xa, Y(a.r)), new PointF(xa + sgn * sA, Y(a.r)), new PointF(xa + sgn * (sA + Math.Abs(a.r - r) * Row), Y(r)), new PointF(xb - sgn * (sB + Math.Abs(b.r - r) * Row), Y(r)), new PointF(xb - sgn * sB, Y(b.r)), new PointF(xb, Y(b.r)) };
                     tr.Pts = Dedup(pts);
                     tr.Map = T[e].P.Select(p => (p.off, p.u)).ToArray();
-                    Occupy(tr.Pts); AddSegs(tr.Pts);
+                    Occupy(tr.Pts); AddSegs(tr.Pts, e);
                 }
                 else
                 {
@@ -1143,10 +1601,46 @@ namespace SelectOR
                         if (okB) cand.Add((diagB, prefB));
                         if (okM) cand.Add((mid, 2));
                         cand.Add((direct, 6));
-                        pts = cand.Select(c => (c.p, sc: c.score + 10 * CutCount(c.p))).OrderBy(c => c.sc).First().p;
+                        pts = cand.Select(c => (c.p, sc: c.score + 10 * CutCount(c.p, e))).OrderBy(c => c.sc).First().p;
+                    }
+                    // (1.2.81, nudos) un enlace que en la realidad cruza vías en fila (un paso superior): pasa por cada una en el
+                    // punto real del cruce (si no, en el Museo la línea de Lanuza cortaba en el dibujo vías que no cruza)
+                    var through = RealThrough(e);
+                    if (through.Count > 0)
+                    {
+                        int sy = Math.Sign(Y(b.r) - Y(a.r)), sx = Math.Sign(xb - xa);
+                        var path = new List<PointF> { new PointF(xa, Y(a.r)) };
+                        // llega y sale a 45° (por su fila hasta ahí)
+                        float k0 = through[0].X - sx * Math.Abs(through[0].Y - Y(a.r)), k1 = through[^1].X + sx * Math.Abs(Y(b.r) - through[^1].Y);
+                        if ((k0 - xa) * sx > 1) path.Add(new PointF(k0, Y(a.r)));
+                        path.AddRange(through);
+                        if ((xb - k1) * sx > 1) path.Add(new PointF(k1, Y(b.r)));
+                        path.Add(new PointF(xb, Y(b.r)));
+                        // siempre hacia delante: si un cruce queda un poco por detrás del anterior (por la holgura), a su altura
+                        bool mono = true;
+                        for (int i = 1; i < path.Count; i++)
+                        {
+                            if (sy != 0 && Math.Sign(path[i].Y - path[i - 1].Y) == -sy) mono = false;
+                            if (sx != 0 && (path[i].X - path[i - 1].X) * sx < 0)
+                            {
+                                if (Math.Abs(path[i].X - path[i - 1].X) > 30 || i == path.Count - 1) mono = false;
+                                else path[i] = new PointF(path[i - 1].X, path[i].Y);
+                            }
+                        }
+                        if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dq && dq.Length > 0 && Station.Contains(dq)) Console.WriteLine($"  enlace {e} por cruces reales: {string.Join(" ", path.Select(q => $"({q.X:F0},{q.Y:F0})"))} mono {mono}");
+                        if (mono)
+                        {
+                            pts = path;
+                            int i0 = path.Count - through.Count - 1 - ((xb - k1) * sx > 1 ? 1 : 0);
+                            for (int i = i0; i < i0 + through.Count; i++)
+                            {
+                                float dx2 = path[i + 1].X - path[i - 1].X, dy2 = path[i + 1].Y - path[i - 1].Y, dl = (float)Math.Sqrt(dx2 * dx2 + dy2 * dy2);
+                                if (dl > 0.1f) Bridges.Add((path[i], new PointF(dx2 / dl, dy2 / dl), e));
+                            }
+                        }
                     }
                     tr.Pts = Dedup(pts);
-                    Occupy(tr.Pts); AddSegs(tr.Pts);
+                    Occupy(tr.Pts); AddSegs(tr.Pts, e);
                 }
                 tr.LenPx = Length(tr.Pts);
                 tr.EndNode[0] = a.n; tr.EndNode[1] = b.n; tr.EndKind[0] = a.k; tr.EndKind[1] = b.k;
@@ -1155,7 +1649,13 @@ namespace SelectOR
                 if (a.k == 'e') Buffers.Add(tr.Pts[0]);
                 if (b.k == 'e') Buffers.Add(tr.Pts[^1]);
             }
-            foreach (var kv in groupAt) Slips.Add(new PointF(X(kv.Value.u), Y(nrow[kv.Key])));
+            foreach (var kv in groupAt)
+            {
+                var sat = new PointF(X(kv.Value.u), Y(nrow[kv.Key]));
+                Slips.Add(sat);
+                var gn = group.Where(q => q.Value == kv.Key).Select(q => q.Key).OrderBy(n => NodeUV(n).u).ThenBy(n => NodeUV(n).v).ToArray();
+                SlipGroups.Add(new SlipGroup { At = sat, Nodes = gn, Orders = gn.Select(n => geo != null && geo.OrderOf.TryGetValue(n, out int o) ? o : -1).ToArray() });
+            }
             SlipNodes.AddRange(group.Keys);
 
             // agujas (no las de las travesías): su punto y el principio de cada rama, para pintar la puesta
@@ -1170,13 +1670,74 @@ namespace SelectOR
                 var (nu, _) = NodeUV(n);
                 var sw = new Switch { Node = n, At = new PointF(X(nu), Y(rn)), Hidden = g.SwitchHidden(n), Order = geo != null && geo.OrderOf.TryGetValue(n, out int o) ? o : -1 };
                 for (int k = 0; k < 2; k++)
+                {
                     if (outs[k] >= 0 && _byEdge.TryGetValue(outs[k], out var tk)) sw.Legs[k] = Stub(tk, g.Edges[outs[k]].A == n, 12);
+                    if (outs[k] >= 0) { sw.LegEdge[k] = outs[k]; sw.LegFromA[k] = g.Edges[outs[k]].A == n; sw.LegLen[k] = g.Edges[outs[k]].Len; }
+                    if (outs[k] >= 0 && straightOf.TryGetValue(n, out int stE) && stE == outs[k]) sw.Straight = k;   // (1.2.81) la directa de verdad (StraightLeg)
+                }
                 Switches.Add(sw);
             }
+            // (1.2.81) los escapes en tijera: sus cuatro agujas, unidas por sus paralelas y diagonales
+            {
+                var scs = Switches.Where(w => sciss.Straight.ContainsKey(w.Node)).ToDictionary(w => w.Node);
+                var done = new HashSet<int>();
+                foreach (var w0 in scs.Values)
+                {
+                    if (done.Contains(w0.Node)) continue;
+                    var comp = new List<int>(); var q = new Queue<int>(); q.Enqueue(w0.Node); done.Add(w0.Node);
+                    while (q.Count > 0)
+                    {
+                        int n = q.Dequeue(); comp.Add(n);
+                        foreach (int e in g.EdgesAt(n))
+                        {
+                            if (!sciss.Diagonals.Contains(e) && !sciss.Parallels.Contains(e)) continue;
+                            int m = g.Edges[e].A == n ? g.Edges[e].B : g.Edges[e].A;
+                            if (m >= 0 && scs.ContainsKey(m) && done.Add(m)) q.Enqueue(m);
+                        }
+                    }
+                    if (comp.Count != 4) continue;
+                    var ws = comp.Select(n => scs[n]).ToList();
+                    float my = ws.Average(w => w.At.Y);
+                    var top = ws.Where(w => w.At.Y < my - 0.5f).OrderBy(w => w.At.X).ToList(); var bot = ws.Where(w => w.At.Y > my + 0.5f).OrderBy(w => w.At.X).ToList();
+                    if (top.Count != 2 || bot.Count != 2) continue;
+                    var order = new[] { top[0], top[1], bot[0], bot[1] };
+                    var grp = new ScissorGroup();
+                    for (int i = 0; i < 4; i++) { grp.Nodes[i] = order[i].Node; grp.Orders[i] = order[i].Order; grp.Straight[i] = order[i].Straight; grp.At[i] = order[i].At; }
+                    int EdgeBetween(int a, int b) { foreach (int e in g.EdgesAt(a)) { var E = g.Edges[e]; if (E.A == a && E.B == b || E.B == a && E.A == b) return e; } return -1; }
+                    grp.ParTop = EdgeBetween(grp.Nodes[0], grp.Nodes[1]); grp.ParBot = EdgeBetween(grp.Nodes[2], grp.Nodes[3]);
+                    grp.DiagDown = EdgeBetween(grp.Nodes[0], grp.Nodes[3]); grp.DiagUp = EdgeBetween(grp.Nodes[2], grp.Nodes[1]);
+                    if (grp.ParTop < 0 || grp.ParBot < 0 || grp.DiagDown < 0 || grp.DiagUp < 0) continue;
+                    ScissorGroups.Add(grp);
+                    foreach (int e in new[] { grp.ParTop, grp.ParBot, grp.DiagDown, grp.DiagUp }) HiddenEdges.Add(e);
+                }
+            }
             // cruces sin agujas: la X donde se cortan dos vías
+            // (1.2.81) cada cruce, una vez, donde se cortan en el dibujo las dos vías que se cruzan (las dos traen su marca; cada
+            // una en su sitio, en Industrias CAF salían dos X separadas y una sobre un tramo sin cruce)
+            var dmk = new List<(int e, double off, double x, double y)>();
             foreach (int e in T.Keys)
-                foreach (double off in sciss.Parallels.Contains(e) ? Enumerable.Empty<double>() : g.Edges[e].Diamonds)
-                    if (_byEdge.ContainsKey(e) && MapOff(e, off, out var cp) && !Crossings.Any(c => Dist(c, cp) < 6)) Crossings.Add(cp);
+                if (_byEdge.ContainsKey(e) && !sciss.Parallels.Contains(e))
+                    foreach (double off in g.Edges[e].Diamonds) { var (dx0, dy0) = g.PointAt(e, off); dmk.Add((e, off, dx0, dy0)); }
+            var usedD = new HashSet<int>();
+            for (int i = 0; i < dmk.Count; i++)
+            {
+                if (usedD.Contains(i)) continue;
+                var a = dmk[i]; PointF? at = null;
+                for (int j = 0; j < dmk.Count && at == null; j++)
+                {
+                    var b = dmk[j];
+                    if (j == i || usedD.Contains(j) || b.e == a.e || Math.Abs(a.x - b.x) + Math.Abs(a.y - b.y) > 4) continue;
+                    var A = _byEdge[a.e].Pts; var B = _byEdge[b.e].Pts; PointF? best = null; float bd = float.MaxValue;
+                    MapOff(a.e, a.off, out var ref0);
+                    for (int u = 1; u < A.Length; u++)
+                        for (int w = 1; w < B.Length; w++)
+                            if (Cut(A[u - 1], A[u], B[w - 1], B[w], out var x) && Dist(x, ref0) < bd) { bd = Dist(x, ref0); best = x; }
+                    if (best != null) { at = best; usedD.Add(j); }
+                }
+                usedD.Add(i);
+                if (at == null && MapOff(a.e, a.off, out var cp0)) at = cp0;
+                if (at is PointF cp && !Crossings.Any(c => Dist(c, cp) < 6)) Crossings.Add(cp);
+            }
             // (tijeras) el cruce, donde se cortan sus dos diagonales en el dibujo
             var dTr = Tracks.Where(t => sciss.Diagonals.Contains(t.Edge)).ToList();
             for (int i = 0; i < dTr.Count; i++)
@@ -1212,7 +1773,17 @@ namespace SelectOR
                     string raw = E.PlatformNames.FirstOrDefault(pn => pn.id == m.id).raw ?? "";
                     var mm = Regex.Match(raw, @"(\d+)\s*$");
                     string pst = E.Platforms.Where(pl => Mine(pl.name)).OrderBy(pl => Math.Abs(pl.off - (m.off + other.off) / 2)).Select(pl => pl.name).FirstOrDefault();
-                    Platforms.Add(new Platform { Bar = new RectangleF(x0, p0.Y, x1 - x0, 3f), Label = pst != null && mm.Success ? mm.Groups[1].Value : null });
+                    // (1.2.81) del lado en que está de verdad, como en el trazado real: el de la vía vecina más lejana (el andén ocupa
+                    // ese hueco; en un andén central, la vía de al lado está más separada que en una entrevía normal). Siempre debajo,
+                    // el andén de la vía 3 de Dos Hermanos (por fuera) y los centrales (Aranda, Carlos Abadias…) salían al revés
+                    double midOff = (m.off + other.off) / 2;
+                    int rs = RouteBoard.PlatformSide(g, tr.Edge, midOff);
+                    var (pxr, pyr) = g.PointAt(tr.Edge, midOff);
+                    var (ax1, ay1) = g.PointAt(tr.Edge, Math.Max(0, midOff - 2)); var (ax2, ay2) = g.PointAt(tr.Edge, Math.Min(E.Len, midOff + 2));
+                    double tdx = ax2 - ax1, tdy = ay2 - ay1, tl = Math.Sqrt(tdx * tdx + tdy * tdy);
+                    bool above = false;
+                    if (tl > 1e-6) { tdx /= tl; tdy /= tl; above = V(pxr - tdy * rs * 3, pyr + tdx * rs * 3) < V(pxr, pyr); }
+                    Platforms.Add(new Platform { Bar = new RectangleF(x0, p0.Y, x1 - x0, 3f), Label = pst != null && mm.Success ? mm.Groups[1].Value : null, Above = above });
                 }
             }
             // señales: las del mapa de la sala que caen en una vía del esquema
@@ -1250,7 +1821,7 @@ namespace SelectOR
                 {
                     if (!xrow.ContainsKey((e, side)) || !_byEdge.TryGetValue(e, out var tr)) continue;
                     var p = side == 0 ? tr.Pts[0] : tr.Pts[^1];
-                    bool right = (side == 0 ? T[e].P[0].u : T[e].P[^1].u) > (_u0 + _u1) / 2;
+                    bool right = side == 0 ? T[e].P[0].u > T[e].P[^1].u : T[e].P[^1].u > T[e].P[0].u;   // (1.2.81) hacia donde sale la vía
                     string nm = NextStation(e, side);
                     nm ??= "";   // (1.2.75: sin estación a la que se llegue, también con su flecha: si no, la vía acababa de golpe y parecía un fallo)
                     if (!Exits.Any(x => x.Station == nm && Math.Abs(x.At.Y - p.Y) < 1 && x.Right == right)) Exits.Add(new Exit { At = p, Right = right, Station = nm, Edge = e, Side = side });
@@ -1294,8 +1865,9 @@ namespace SelectOR
                 double span = m[i + 1].off - m[i].off, t = span > 0 ? Math.Max(0, Math.Min(1, (off - m[i].off) / span)) : 0;
                 double u = m[i].u + (m[i + 1].u - m[i].u) * t;
                 float x = X(u);
-                float lo = Math.Min(tr.Pts[Math.Min(1, tr.Pts.Length - 1)].X, tr.Pts[Math.Max(0, tr.Pts.Length - 2)].X), hi = Math.Max(tr.Pts[Math.Min(1, tr.Pts.Length - 1)].X, tr.Pts[Math.Max(0, tr.Pts.Length - 2)].X);
-                if (hi - lo < 1) { lo = Math.Min(tr.Pts[0].X, tr.Pts[^1].X); hi = Math.Max(tr.Pts[0].X, tr.Pts[^1].X); }
+                // (1.2.81) entre los puntos que están en su fila (con el trecho por la fila de la aguja, el segundo punto ya no lo está)
+                var onRow = tr.Pts.Where(q => Math.Abs(q.Y - tr.RowIdx * Row) < 0.1f).Select(q => q.X).ToList();
+                float lo = onRow.Count >= 2 ? onRow.Min() : Math.Min(tr.Pts[0].X, tr.Pts[^1].X), hi = onRow.Count >= 2 ? onRow.Max() : Math.Max(tr.Pts[0].X, tr.Pts[^1].X);
                 p = new PointF(Math.Max(lo, Math.Min(hi, x)), tr.RowIdx * Row);
                 return true;
             }
@@ -1400,6 +1972,27 @@ namespace SelectOR
         }
         static float Dist(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
         // ¿Se cortan los segmentos ab y cd (en un punto de dentro de los dos)?
+        // lo que dos segmentos van uno encima del otro (paralelos, a menos de 1,5 px), en px; 0 si no
+        static float Collinear(PointF a, PointF b, PointF c, PointF d)
+        {
+            float dx = b.X - a.X, dy = b.Y - a.Y, L = (float)Math.Sqrt(dx * dx + dy * dy); if (L < 0.5f) return 0;
+            dx /= L; dy /= L;
+            float ex = d.X - c.X, ey = d.Y - c.Y, M = (float)Math.Sqrt(ex * ex + ey * ey); if (M < 0.5f) return 0;
+            if (Math.Abs(dx * ey - dy * ex) / M > 0.02f) return 0;                       // no paralelos
+            if (Math.Abs((c.X - a.X) * dy - (c.Y - a.Y) * dx) > 1.5f) return 0;          // no en la misma recta
+            float t0 = (c.X - a.X) * dx + (c.Y - a.Y) * dy, t1 = (d.X - a.X) * dx + (d.Y - a.Y) * dy;
+            return Math.Max(0, Math.Min(L, Math.Max(t0, t1)) - Math.Max(0, Math.Min(t0, t1)));
+        }
+        static PointF AlongPts(PointF[] p, float d)
+        {
+            for (int i = 1; i < p.Length; i++)
+            {
+                float s = Dist(p[i - 1], p[i]);
+                if (d <= s || i == p.Length - 1) { float t = s > 0 ? Math.Min(1, d / s) : 0; return new PointF(p[i - 1].X + (p[i].X - p[i - 1].X) * t, p[i - 1].Y + (p[i].Y - p[i - 1].Y) * t); }
+                d -= s;
+            }
+            return p[^1];
+        }
         static bool Cut(PointF a, PointF b, PointF c, PointF d, out PointF x)
         {
             x = default;

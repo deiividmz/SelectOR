@@ -1,2 +1,8 @@
-﻿1.2.80
-Joining the room without drops|When you join the shared room with other players' or AI trains using vehicles you do not have, Open Rails no longer spends several minutes looking for a substitute (and losing the connection): SelectOR prepares the list of your vehicles beforehand and the substitute is found at once.
+﻿1.2.81
+A clearer dispatcher's desk|Each control area is shown as a straight ADIF-style diagram, with a button to switch to the real track layout. Signals and switch numbers no longer overlap, each train carries an arrow showing its direction and routes are shown along all their tracks.
+Coloured switches|On the dispatcher's desk, the set leg of each switch is marked white when it is set to the straight track and yellow when set to the diverging track, and the other leg is cut; if it carries a route or a train, it takes their colour.
+Scissors crossovers|X-shaped switches have their own symbol on the dispatcher's desk and on the HUD big map. With one click (on the big map, on the white dot in the middle) you choose the straight tracks, one diagonal, the other or both, and its four switches move together.
+Several paths to the same destination|When setting a route, if there is more than one path to the same signal, the menu lets you choose which one.
+Trains you do not have|In the shared room, another player's train that you do not have is shown with a similar consist of yours, and Open Rails no longer closes when loading some substitute vehicles.
+CYZYRails|Signals are back to their stock colours, Madrid Metro Line 9 has lights in its stations and tunnels, street lamps no longer leave floating dots in fog and a crash with the lights of some coaches is fixed.
+Consist editor|Renaming a consist no longer renames its .con file, so timetables and activities can still find it.

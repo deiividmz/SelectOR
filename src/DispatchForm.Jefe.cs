@@ -249,20 +249,61 @@ namespace SelectOR
             var sg = SchematicDraw.SignalAt(_cur, p, Theme.Px(4)) is Schematic.Signal hit && hit.Sig != null && hit.Sig.Obj >= 0 && MySig(hit.Sig.Obj) ? hit
                 : _cur.Signals.Where(q => q.Sig != null && q.Sig.Obj >= 0 && MySig(q.Sig.Obj)).Select(q => (q, d: D(Sc(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
             if (sg != null) { SignalMenu(sg.Sig, p); return true; }
-            var sws = _cur.Switches.Where(q => MyNode(q.Node)).Select(q => (q, d: D(Sc(q.At), p))).Where(x => x.d < R * 1.4f).OrderBy(x => x.d).Select(x => x.q).ToList();
+            // (1.2.81) también las de una travesía (en su rombo): la lista de todas, como en el mapa grande del HUD; y con el número
+            // que se ve en el esquema (antes salía el nodo del .tdb)
+            var sws = SchematicDraw.SwitchesAt(_cur, _origin, _zoom, p, R * 1.4f).Where(q => MyNode(q.node)).ToList();
             if (sws.Count == 0) return false;
             var live = Live();
-            int Pos(Schematic.Switch s) => live?.SwitchPos != null && s.Order >= 0 ? live.SwitchPos(s.Order) : -1;
-            if (sws.Count == 1) { Throw(sws[0].Node, sws[0].Order, Pos(sws[0])); return true; }
+            int Pos(int order) => live?.SwitchPos != null && order >= 0 ? live.SwitchPos(order) : -1;
+            if (sws.Count == 1) { Throw(sws[0].node, sws[0].order, Pos(sws[0].order)); return true; }
             var m = MenuStyle.Apply(new ContextMenuStrip());
+            // (1.2.81) una tijera: sus tres posiciones de una vez (en la realidad sus agujas van por parejas: una diagonal se
+            // usa con sus dos agujas a desviada, y la otra pareja a directa); y debajo, cada aguja suelta
+            var tg = _cur.ScissorGroups.FirstOrDefault(q => sws.Count == 4 && q.Nodes.All(n => sws.Any(w => w.node == n)));
+            // (1.2.81, petición) en una tijera solo sus cuatro combinaciones (cubren todos sus movimientos): sin agujas una a una
+            if (tg != null && tg.Straight.All(k => k >= 0))
+            {
+                ScissorItems(m, tg.Nodes, tg.Orders, tg.Straight, tg.Nodes.Select(n => SchematicDraw.SwitchLabel(_cur, n)).ToArray(),
+                             SchematicDraw.SwitchLabel(_cur, tg.Nodes[0]).TrimEnd('a'), true, Pos, o => live?.Locked != null && o >= 0 && live.Locked(o));
+                m.Show(_canvas, p);
+                return true;
+            }
             m.Items.Add(new ToolStripMenuItem(string.Format(Tr("{0} agujas aquí"), sws.Count)) { Enabled = false });
             foreach (var s in sws)
             {
-                var ss = s; int pos = Pos(s);
-                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Aguja {0}: {1} → cambiar"), s.Node, pos == 0 ? Tr("normal") : pos == 1 ? Tr("desviada") : Tr("sin dato")), null, (o, e) => Throw(ss.Node, ss.Order, pos)));
+                var ss = s; int pos = Pos(s.order);
+                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Aguja {0}: {1} → cambiar"), s.label, pos == 0 ? Tr("normal") : pos == 1 ? Tr("desviada") : Tr("sin dato")), null, (o, e) => Throw(ss.node, ss.order, pos)));
             }
             m.Show(_canvas, p);
             return true;
+        }
+
+        // (1.2.81) el menú de una tijera (esquema y trazado real): sus cuatro combinaciones (cada una pone las cuatro agujas): las dos
+        // paralelas, cada diagonal (las otras dos a directa) y las dos diagonales (una u otra: se cruzan). Nodos: a0, a1 (una
+        // paralela), b0, b1 (la otra); diagonales a0-b1 y b0-a1
+        void ScissorItems(ContextMenuStrip m, int[] nodes, int[] orders, int[] straight, string[] labels, string name, bool glyphs,
+                                             Func<int, int> Pos, Func<int, bool> Locked)
+        {
+            m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Tijera {0}"), name)) { Enabled = false });
+            int[] Dir(params int[] dv) => Enumerable.Range(0, 4).Select(i => dv.Contains(i) ? 1 - straight[i] : straight[i]).ToArray();
+            var opts = new[]
+            {
+                ((glyphs ? "═  " : "") + Tr("Vía directa (las dos paralelas)"), Dir()),
+                ((glyphs ? "╲  " : "") + string.Format(Tr("Diagonal {0} → {1}"), labels[0], labels[3]), Dir(0, 3)),
+                ((glyphs ? "╱  " : "") + string.Format(Tr("Diagonal {0} → {1}"), labels[2], labels[1]), Dir(2, 1)),
+                ((glyphs ? "✕  " : "") + Tr("Las dos diagonales (una u otra: se cruzan)"), Dir(0, 1, 2, 3)),
+            };
+            foreach (var (text, to) in opts)
+            {
+                var tt = to; bool now = Enumerable.Range(0, 4).All(i => Pos(orders[i]) == tt[i]);
+                m.Items.Add(new ToolStripMenuItem(text, null, (o, e) =>
+                {
+                    // con alguna de las que hay que mover enclavada, ninguna (si no, la tijera quedaba a medias)
+                    var need = Enumerable.Range(0, 4).Where(i => Pos(orders[i]) != tt[i]).ToList();
+                    if (need.Any(i => Locked(orders[i]))) { ThemedBox.Show(this, Tr("Alguna aguja de la tijera está enclavada: no se cambia ninguna."), Tr("Jefe de circulación")); return; }
+                    foreach (int i in need) Throw(nodes[i], orders[i], 1 - tt[i]);   // (Throw cambia a la contraria de la que se le da)
+                }) { Checked = now });
+            }
         }
 
         void Throw(int node, int order, int pos)
@@ -282,7 +323,20 @@ namespace SelectOR
             var sg = RouteBoardDraw.SignalAt(_board, p, Theme.Px(4)) is RouteBoard.Sg hit && hit.S.Obj >= 0 && MySig(hit.S.Obj) ? hit
                 : _board.Signals.Where(q => q.S.Obj >= 0 && MySig(q.S.Obj)).Select(q => (q, d: D(Bp(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
             if (sg != null) { SignalMenu(sg.S, p); return true; }
-            var sws = _board.Switches.Where(q => MyNode(q.Node)).Select(q => (q, d: D(Bp(q.At), p))).Where(x => x.d < R * 1.4f).OrderBy(x => x.d).Select(x => x.q).ToList();
+            // (1.2.81) una tijera: el mismo menú que en el esquema (sus cuatro combinaciones)
+            // (salvo que se pulse encima de una aguja suelta que hay al lado: su número o la tijera pueden quedar pegados)
+            bool onLoose = _board.Switches.Any(q => !_board.ScissorNodes.Contains(q.Node) && D(Bp(q.At), p) < Theme.Px(7));
+            if (!onLoose && RouteBoardDraw.ScissorAt(_board, p) is RouteBoard.Tij tj && tj.S.All(w => MyNode(w.Node)) && tj.StraightK.All(k => k >= 0))
+            {
+                var lvb = LiveBoard();
+                int PosB(int order) => lvb?.SwitchPos != null && order >= 0 ? lvb.SwitchPos(order) : -1;
+                var mt = MenuStyle.Apply(new ContextMenuStrip());
+                ScissorItems(mt, tj.S.Select(w => w.Node).ToArray(), tj.S.Select(w => w.Order).ToArray(), tj.StraightK,
+                             tj.S.Select(w => w.Label ?? w.Node.ToString()).ToArray(), tj.Name ?? "", false, PosB, o => lvb?.Locked != null && o >= 0 && lvb.Locked(o));
+                mt.Show(_canvas, p);
+                return true;
+            }
+            var sws = _board.Switches.Where(q => MyNode(q.Node) && !_board.ScissorNodes.Contains(q.Node)).Select(q => (q, d: D(Bp(q.At), p))).Where(x => x.d < R * 1.4f).OrderBy(x => x.d).Select(x => x.q).ToList();
             if (sws.Count == 0 && RouteBoardDraw.SwitchAt(_board, p) is RouteBoard.Sw bw && MyNode(bw.Node)) sws.Add(bw);
             if (sws.Count == 0) return false;
             var live = LiveBoard();
@@ -293,7 +347,7 @@ namespace SelectOR
             foreach (var s in sws)
             {
                 var ss = s; int pos = Pos(s);
-                string name = s.Number > 0 ? s.Number.ToString() : s.Node.ToString();
+                string name = s.Label ?? (s.Number > 0 ? s.Number.ToString() : s.Node.ToString());
                 m.Items.Add(new ToolStripMenuItem(string.Format(Tr("Aguja {0}: {1} → cambiar"), name, pos == 0 ? Tr("normal") : pos == 1 ? Tr("desviada") : Tr("sin dato")), null, (o, e) => Throw(ss.Node, ss.Order, pos)));
             }
             m.Show(_canvas, p);

@@ -59,6 +59,7 @@ namespace SelectOR
             public int Node, Order, Tx, Tz, Id; public bool Hidden;
             public double Lat, Lon;
             public readonly List<(double lat, double lon)>[] Branch = new List<(double lat, double lon)>[2];
+            public int Straight = -1;   // (1.2.81) la rama directa (0/1: la que sigue al tronco); −1 si no se sabe
         }
 
         public List<SwitchGeo> SwitchGeometry(double branchM = 30)
@@ -85,6 +86,32 @@ namespace SelectOR
                     sg.Branch[k] = pts;
                     if (!hasPos) { (sg.Lat, sg.Lon) = pts[0]; hasPos = true; }
                 }
+                // (1.2.81) la directa: la rama que más sigue la dirección del tronco (el tramo de su pin de entrada)
+                try
+                {
+                    if (kv.Value.In != null && kv.Value.In.Length > 0 && vecToEdge.TryGetValue(kv.Value.In[0], out int ti))
+                    {
+                        var T = Edges[ti]; bool tA = T.A == kv.Key;
+                        if (tA || T.B == kv.Key)
+                        {
+                            double d0 = Math.Min(15, T.Len);
+                            var (sx, sy) = PointAt(ti, tA ? 0 : T.Len); var (tx, ty) = PointAt(ti, tA ? d0 : T.Len - d0);
+                            double ux = sx - tx, uy = sy - ty, un = Math.Sqrt(ux * ux + uy * uy);   // del tronco hacia la aguja (y sigue)
+                            double best = -2; int bk = -1;
+                            for (int k = 0; k < 2 && un > 0.1; k++)
+                            {
+                                if (!vecToEdge.TryGetValue(kv.Value.Out[k], out int ei)) continue;
+                                var E = Edges[ei]; bool fromA = E.A == kv.Key; double dl = Math.Min(15, E.Len);
+                                var (bx, by) = PointAt(ei, fromA ? dl : E.Len - dl);
+                                double vx = bx - sx, vy = by - sy, vn = Math.Sqrt(vx * vx + vy * vy); if (vn < 0.1) continue;
+                                double c = (ux * vx + uy * vy) / (un * vn);
+                                if (c > best) { best = c; bk = k; }
+                            }
+                            sg.Straight = bk;
+                        }
+                    }
+                }
+                catch { }
                 if (hasPos && sg.Branch[0] != null && sg.Branch[1] != null) list.Add(sg);
             }
             return list;

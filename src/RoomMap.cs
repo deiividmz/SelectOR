@@ -44,6 +44,11 @@ namespace SelectOR
         public RouteGraph Graph;                           // (para el camino por delante de cada tren)
         public readonly Dictionary<int, int> OrderOf = new();   // nodo del desvío → su posición en la foto de agujas
         public string SignalNote;                          // por qué no (para el registro)
+        // (1.2.81, petición) los escapes en tijera, como en el puesto de mando: un símbolo con sus dos paralelas y su X. S: las
+        // cuatro agujas (a0, a1 en una paralela; b0, b1 en la otra; las diagonales, a0-b1 y b0-a1); StraightK: su rama paralela
+        public sealed class Scissor { public RouteGraph.SwitchGeo[] S = new RouteGraph.SwitchGeo[4]; public int[] StraightK = new int[4]; public int[] Edges = { -1, -1, -1, -1 }; }   // Edges: paralela a0-a1, paralela b0-b1, diagonal a0-b1, diagonal b0-a1
+        public readonly List<Scissor> ScissorList = new();
+        public readonly HashSet<int> ScissorNodes = new();
 
         public static RoomMapGeo Build(RouteGraph g, string routeDir)
         {
@@ -53,8 +58,45 @@ namespace SelectOR
             geo.Graph = g;
             for (int i = 0; i < g.JunctionOrder.Length; i++) geo.OrderOf[g.JunctionOrder[i]] = i;
             foreach (var s in geo.Switches.OrderBy(s => s.Node)) if (!s.Hidden) geo.ById.TryAdd((s.Tx, s.Tz, s.Id), s);
+            try { BuildScissors(geo, g); } catch { geo.ScissorList.Clear(); geo.ScissorNodes.Clear(); }
             try { BuildSignals(geo, g, routeDir); } catch (Exception ex) { geo.SignalNote = ex.Message; geo.Heads.Clear(); geo.Signals.Clear(); }
             return geo;
+        }
+
+        static void BuildScissors(RoomMapGeo geo, RouteGraph g)
+        {
+            var sc = Schematic.Scissors(g);
+            var byNode = geo.Switches.GroupBy(s => s.Node).ToDictionary(q => q.Key, q => q.First());
+            var done = new HashSet<int>();
+            int Other(int e, int n) => g.Edges[e].A == n ? g.Edges[e].B : g.Edges[e].A;
+            foreach (int n0 in sc.Straight.Keys)
+            {
+                if (done.Contains(n0)) continue;
+                var comp = new List<int>(); var q = new Queue<int>(); q.Enqueue(n0); done.Add(n0);
+                while (q.Count > 0)
+                {
+                    int n = q.Dequeue(); comp.Add(n);
+                    foreach (int e in g.EdgesAt(n))
+                        if ((sc.Diagonals.Contains(e) || sc.Parallels.Contains(e)) && Other(e, n) is int m && m >= 0 && sc.Straight.ContainsKey(m) && done.Add(m)) q.Enqueue(m);
+                }
+                if (comp.Count != 4 || comp.Any(n => !byNode.ContainsKey(n))) continue;
+                // a0-a1 por una paralela, b0-b1 por la otra, con a0-b1 en diagonal
+                int a0 = comp[0], a1 = Other(sc.Straight[a0], a0);
+                var rest = comp.Where(n => n != a0 && n != a1).ToList(); if (rest.Count != 2) continue;
+                int b1 = g.EdgesAt(a0).Where(sc.Diagonals.Contains).Select(e => Other(e, a0)).FirstOrDefault(m => rest.Contains(m), -1);
+                if (b1 < 0) continue; int b0 = rest.First(m => m != b1);
+                var t = new Scissor();
+                int[] ns = { a0, a1, b0, b1 };
+                for (int i = 0; i < 4; i++)
+                {
+                    t.S[i] = byNode[ns[i]];
+                    t.StraightK[i] = g.JunctionOf(ns[i], out _, out _, out _, out var outs) ? Array.IndexOf(outs, sc.Straight[ns[i]]) : -1;
+                    geo.ScissorNodes.Add(ns[i]);
+                }
+                int EdgeBetween(int a, int b) { foreach (int e in g.EdgesAt(a)) { var E = g.Edges[e]; if (E.A == a && E.B == b || E.B == a && E.A == b) return e; } return -1; }
+                t.Edges = new[] { EdgeBetween(a0, a1), EdgeBetween(b0, b1), EdgeBetween(a0, b1), EdgeBetween(b0, a1) };
+                geo.ScissorList.Add(t);
+            }
         }
 
         static void BuildSignals(RoomMapGeo geo, RouteGraph g, string routeDir)
@@ -516,6 +558,7 @@ namespace SelectOR
                 // agujas: la rama puesta, marcada; la otra, tenue
                 foreach (var s in v.Geo.Switches)
                 {
+                    if (v.Geo.ScissorNodes.Contains(s.Node)) continue;   // (1.2.81: van en el símbolo de su tijera)
                     var c = pj(s.Lat, s.Lon);
                     if (!view.Contains(c)) continue;
                     int pos = v.SwitchPos?.Invoke(s) ?? -1;   // (también los de una travesía: la foto de agujas los trae todos)
@@ -536,6 +579,8 @@ namespace SelectOR
                     using (var o = new Pen(Color.FromArgb(200, 20, 22, 24), 1.2f)) g.DrawEllipse(o, c.X - r, c.Y - r, 2 * r, 2 * r);
                     if (locked) Padlock(g, c.X - 14, c.Y - 14);   // (a la izquierda: los nombres de estación van a la derecha)
                 }
+                // (1.2.81, petición) los escapes en tijera: un símbolo, como en el puesto de mando
+                foreach (var t in v.Geo.ScissorList) DrawScissor(g, v, t, pj, view);
                 // señales
                 if (v.SignalsOk)
                     foreach (var s in v.Geo.Signals)
@@ -636,6 +681,84 @@ namespace SelectOR
             { g.FillRectangle(b, body); g.DrawRectangle(o, body.X, body.Y, body.Width, body.Height); }
         }
 
+        // (1.2.81) el símbolo de una tijera en pantalla: centro, eje (a lo largo de sus paralelas), largo y ancho. Del tamaño de la
+        // tijera si se ve grande; si no, como mínimo 28 × 18 px
+        public static (PointF c, PointF ax, float w, float h) ScissorShape(RoomMapGeo.Scissor t, Func<double, double, PointF> pj)
+        {
+            var p = t.S.Select(s => pj(s.Lat, s.Lon)).ToArray();
+            var c = new PointF(p.Average(q => q.X), p.Average(q => q.Y));
+            float dx = (p[1].X - p[0].X) + (p[3].X - p[2].X), dy = (p[1].Y - p[0].Y) + (p[3].Y - p[2].Y), l = (float)Math.Sqrt(dx * dx + dy * dy);
+            var ax = l < 0.01f ? new PointF(1, 0) : new PointF(dx / l, dy / l);
+            if (ax.X < 0) ax = new PointF(-ax.X, -ax.Y);   // (de izquierda a derecha)
+            float len = p.Max(q => (q.X - c.X) * ax.X + (q.Y - c.Y) * ax.Y) - p.Min(q => (q.X - c.X) * ax.X + (q.Y - c.Y) * ax.Y);
+            float wid = p.Max(q => -(q.X - c.X) * ax.Y + (q.Y - c.Y) * ax.X) - p.Min(q => -(q.X - c.X) * ax.Y + (q.Y - c.Y) * ax.X);
+            return (c, ax, Math.Max(28, Math.Min(90, len)), Math.Max(18, Math.Min(60, wid + 8)));
+        }
+
+        // (1.2.81) el centro de una tijera en pantalla: donde se cruzan sus dos diagonales (por su trazado); si no, el medio de sus agujas
+        public static PointF ScissorCenter(RoomMapGeo.Scissor t, Func<double, double, PointF> pj, RouteGraph gr)
+        {
+            var p = t.S.Select(s => pj(s.Lat, s.Lon)).ToArray();
+            var mid = new PointF(p.Average(q => q.X), p.Average(q => q.Y));
+            if (gr == null || t.Edges[2] < 0 || t.Edges[3] < 0) return mid;
+            PointF[] Line(int e)
+            {
+                var E = gr.Edges[e];
+                return Enumerable.Range(0, E.X.Length).Select(k => { var (la, lo) = gr.Unproj(E.X[k], E.Y[k]); return pj(la, lo); }).ToArray();
+            }
+            var a = Line(t.Edges[2]); var b = Line(t.Edges[3]);
+            for (int i = 1; i < a.Length; i++)
+                for (int j = 1; j < b.Length; j++)
+                {
+                    PointF p1 = a[i - 1], p2 = a[i], q1 = b[j - 1], q2 = b[j];
+                    float d = (p2.X - p1.X) * (q2.Y - q1.Y) - (p2.Y - p1.Y) * (q2.X - q1.X);
+                    if (Math.Abs(d) < 1e-6f) continue;
+                    float u = ((q1.X - p1.X) * (q2.Y - q1.Y) - (q1.Y - p1.Y) * (q2.X - q1.X)) / d;
+                    float w = ((q1.X - p1.X) * (p2.Y - p1.Y) - (q1.Y - p1.Y) * (p2.X - p1.X)) / d;
+                    if (u >= 0 && u <= 1 && w >= 0 && w <= 1) return new PointF(p1.X + (p2.X - p1.X) * u, p1.Y + (p2.Y - p1.Y) * u);
+                }
+            return mid;
+        }
+
+        // (1.2.81, petición) una tijera con el estilo de las agujas del mapa grande: sus cuatro vías sobre su trazado, la que está
+        // puesta en blanco (enclavada, en azul con su borde oscuro y el candado) y las demás tenues; una bolita en su centro
+        static void DrawScissor(Graphics g, RoomMapView v, RoomMapGeo.Scissor t, Func<double, double, PointF> pj, RectangleF view)
+        {
+            var sp = t.S.Select(s => pj(s.Lat, s.Lon)).ToArray();
+            if (!sp.Any(p => RectangleF.Inflate(view, 40, 40).Contains(p))) return;
+            int[] pos = t.S.Select(s => v.SwitchPos?.Invoke(s) ?? -1).ToArray();
+            bool known = pos.All(x => x >= 0);
+            bool Par(int i, int j) => known && pos[i] == t.StraightK[i] && pos[j] == t.StraightK[j];
+            bool Dia(int i, int j) => known && t.StraightK[i] >= 0 && t.StraightK[j] >= 0 && pos[i] == 1 - t.StraightK[i] && pos[j] == 1 - t.StraightK[j];
+            bool locked = t.S.Any(s => IsLocked(v, s));
+            var gr = v.Geo.Graph;
+            PointF[] Line(int e)
+            {
+                if (gr == null || e < 0) return Array.Empty<PointF>();
+                var E = gr.Edges[e];
+                return Enumerable.Range(0, E.X.Length).Select(k => { var (la, lo) = gr.Unproj(E.X[k], E.Y[k]); return pj(la, lo); }).ToArray();
+            }
+            var vias = new[] { (t.Edges[0], Par(0, 1)), (t.Edges[1], Par(2, 3)), (t.Edges[2], Dia(0, 3)), (t.Edges[3], Dia(2, 1)) };
+            foreach (bool lit in new[] { false, true })   // (lo tenue debajo)
+                foreach (var (e, set) in vias)
+                {
+                    if (set != lit) continue;
+                    var pts = Line(e); if (pts.Length < 2) continue;
+                    if (set && locked) using (var halo = new Pen(Color.FromArgb(220, 15, 17, 19), 6.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round }) g.DrawLines(halo, pts);
+                    using var pen = new Pen(set ? (locked ? SwLocked : SwOn) : SwOff, set ? 3.2f : 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+                    g.DrawLines(pen, pts);
+                }
+            // (1.2.81, petición) la tijera se acciona desde el centro: una sola bolita, donde se cruzan sus diagonales (ahí se pulsa
+            // para elegir su posición), en vez de una en cada aguja
+            {
+                var c = ScissorCenter(t, pj, gr); float r = 4.5f;
+                var dot = locked ? SwLocked : !known ? SwUnknown : SwOn;
+                using (var b = new SolidBrush(dot)) g.FillEllipse(b, c.X - r, c.Y - r, 2 * r, 2 * r);
+                using (var o = new Pen(Color.FromArgb(200, 20, 22, 24), 1.2f)) g.DrawEllipse(o, c.X - r, c.Y - r, 2 * r, 2 * r);
+            }
+            if (locked) Padlock(g, sp.Min(q => q.X) - 14, sp.Min(q => q.Y) - 14);
+        }
+
         // Lo que hay bajo el ratón: una aguja o una señal (null si nada). Si caen varias agujas bajo el ratón (los cuatro
         // desvíos de una travesía están a 2 o 3 m), la lista de todas, de izquierda a derecha en la pantalla, para elegir.
         public static object Hit(RoomMapView v, Func<double, double, PointF> pj, double mPerPx, Point at)
@@ -668,9 +791,20 @@ namespace SelectOR
                     if (d < 1 && d * 100 < bd) { bd = d * 100; best = s; }
                 }
             }
+            // (1.2.81) en el símbolo de una tijera: sus cuatro agujas, para elegir (salvo que se pulse encima de una aguja suelta
+            // que hay al lado: el símbolo, de lejos, la tapa)
+            bool onLoose = v.Geo.Switches.Any(s => !v.Geo.ScissorNodes.Contains(s.Node) && pj(s.Lat, s.Lon) is PointF c0 && (c0.X - at.X) * (c0.X - at.X) + (c0.Y - at.Y) * (c0.Y - at.Y) < 6 * 6);
+            if (!(best is RoomMapGeo.Sig) && !onLoose)
+                foreach (var t in v.Geo.ScissorList)
+                {
+                    var (cen, ax, w, h) = ScissorShape(t, pj);
+                    float lx = (at.X - cen.X) * ax.X + (at.Y - cen.Y) * ax.Y, ly = -(at.X - cen.X) * ax.Y + (at.Y - cen.Y) * ax.X;
+                    if (Math.Abs(lx) <= w / 2 + 5 && Math.Abs(ly) <= h / 2 + 5) return t.S.OrderBy(s => pj(s.Lat, s.Lon).X).ToList();
+                }
             var under = new List<(RouteGraph.SwitchGeo s, float x)>();
             foreach (var s in v.Geo.Switches)
             {
+                if (v.Geo.ScissorNodes.Contains(s.Node)) continue;   // (1.2.81: van en su símbolo)
                 var c = pj(s.Lat, s.Lon); double d = (c.X - at.X) * (c.X - at.X) + (c.Y - at.Y) * (c.Y - at.Y);
                 if (d < 10 * 10) under.Add((s, c.X));
                 if (d < bd) { bd = d; best = s; }

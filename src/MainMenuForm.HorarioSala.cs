@@ -21,7 +21,7 @@ namespace SelectOR
             _salaAiBtn = new EmojiIcon { Text = "🚆", Size = new Size(30, 30),
                                      ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(12.5f), Cursor = Cursors.Hand, Visible = false };
             _salaAiBtn.Click += (s, e) => OpenHorarioSala();
-            new ToolTip().SetToolTip(_salaAiBtn, Tr("Horario de la sala: trenes IA (administrador)"));
+            new ToolTip().SetToolTip(_salaAiBtn, Tr("Horario de la sala: trenes IA (administrador y gestores del horario)"));
             Action place = () =>
             {
                 int right = _salaWxBtn != null && _salaWxBtn.Visible ? _salaWxBtn.Left - 4 : _salaHost.ClientSize.Width - 4;
@@ -37,11 +37,12 @@ namespace SelectOR
 
         void OpenHorarioSala()
         {
-            if (!Supa.IsSuperadmin) { ThemedBox.Show(this, Tr("Solo el administrador."), Tr("Horario de la sala"), MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (!Supa.IsSuperadmin && !Supa.IsAiEditor) { ThemedBox.Show(this, Tr("Solo el administrador y los gestores del horario."), Tr("Horario de la sala"), MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             if (_horario != null && !_horario.IsDisposed) { _horario.WindowState = FormWindowState.Normal; _horario.Activate(); return; }
             if (!SalaRouteHere) return;
             string dir = _curRoute.Path;
-            _horario = new HorarioSalaForm(dir, () => RouteGraphFor(dir), "CGL_V22N_RE", () => HorarioMapData(dir), HorarioAiTrains) { RetireAi = HorarioRetire };
+            bool admin = Supa.IsSuperadmin;   // (1.2.81) un gestor: solo los servicios
+            _horario = new HorarioSalaForm(dir, () => RouteGraphFor(dir), "CGL_V22N_RE", () => HorarioMapData(dir), HorarioAiTrains, admin) { RetireAi = admin ? HorarioRetire : null };
             // (1.2.78) los trenes IA en su mapa aunque no estés conduciendo en la sala: una conexión aparte, solo para mirar
             try
             {

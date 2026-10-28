@@ -32,7 +32,10 @@ namespace SelectOR.MapAgent
                 h.Patch(m, prefix: new HarmonyMethod(typeof(Sol), nameof(Before)));
                 Cyzy(h);
                 Luces.Install(h);   // CYZYRails: luces lejanas agrupadas y con fundido (Luces.cs)
-                SenalesCyzy.Install(h);   // CYZYRails: las luces de las señales con su color, no blancas (SenalesCyzy.cs)
+                LucesCoche.Install(h);   // (1.2.81) luces de un coche sin forma 3D: sin cerrar Open Rails (LucesCoche.cs)
+                // CYZYRails: las luces de las señales con su color, no blancas (SenalesCyzy.cs). (1.2.81, petición) de serie,
+                // las señales como las dibuja CYZY; solo con SELECTOR_SENALES_CYZY=1
+                if (Environment.GetEnvironmentVariable("SELECTOR_SENALES_CYZY") == "1") SenalesCyzy.Install(h);
                 return 1;
             }
             catch (Exception ex) { Agent.Log("sol: " + ex.GetType().Name + " " + ex.Message); return 0; }

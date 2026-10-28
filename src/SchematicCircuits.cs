@@ -94,8 +94,11 @@ namespace SelectOR
                 else foreach (int f in g.EdgesAt(n)) if (f != ce) { Next(f, sw); break; }
             }
             try { Go(e, off, dir, 0, new(), new(), 0); } catch { }
-            // (cada destino, una vez: el camino más corto)
-            return res.GroupBy(o => o.Dest >= 0 ? "s" + o.Dest : "b" + o.EndEdge).Select(gr => gr.OrderBy(o => o.Len).First()).OrderBy(o => o.Len).ToList();
+            // (1.2.81) cada destino con sus caminos distintos (por otras agujas, p. ej. por una travesía), como mucho 3; el más
+            // corto, el primero
+            return res.GroupBy(o => o.Dest >= 0 ? "s" + o.Dest : "b" + o.EndEdge)
+                      .SelectMany(gr => gr.OrderBy(o => o.Len).GroupBy(o => string.Join(",", o.Switches.Select(w => w.Item1 + ":" + w.Item2))).Select(x => x.First()).Take(3))
+                      .OrderBy(o => o.Len).ToList();
         }
 
         // un trozo de vía (tramo, de a b metros) en latitud y longitud, para el mapa grande

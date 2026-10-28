@@ -1,2 +1,8 @@
-﻿1.2.80
-Entrar en la sala sin cortes|Al entrar en la sala compartida con trenes de otros jugadores o trenes IA que llevan vehículos que no tienes, Open Rails ya no se queda varios minutos buscando un sustituto (y perdiendo la conexión): SelectOR le deja preparada la lista de tus vehículos y el sustituto sale al momento.
+﻿1.2.81
+Puesto de mando más claro|Cada dependencia se ve como un esquema recto al estilo de ADIF, con un botón para pasar a la vista del trazado real. Las señales y los números de las agujas ya no se pisan, cada tren lleva una flecha con su sentido de marcha y los itinerarios se ven sobre todas sus vías.
+Agujas en color|En el puesto de mando, la rama puesta de cada aguja se marca en blanco si va a vía directa y en amarillo si va a desviada, y la otra queda cortada; si lleva un itinerario o un tren, se ve de su color.
+Escapes en tijera|Las agujas en X tienen su propio símbolo en el puesto de mando y en el mapa grande del HUD. Con un clic (en el mapa grande, en la bolita blanca del centro) eliges vía directa, una diagonal, la otra o las dos, y se mueven sus cuatro agujas a la vez.
+Varios caminos al mismo destino|Al establecer un itinerario, si hay más de un camino hasta la misma señal, el menú te deja elegir por cuál.
+Trenes que no tienes|En la sala compartida, el tren de otro jugador que no tienes se muestra con una composición tuya parecida, y Open Rails ya no se cierra al cargar algunos vehículos sustitutos.
+CYZYRails|Las señales vuelven a sus colores de serie, la Línea 9 de Metro de Madrid tiene luces en estaciones y túneles, las farolas ya no dejan bolitas flotando con niebla y se corrige un cierre con las luces de algunos coches.
+Editor de composiciones|Cambiar el nombre de una composición ya no renombra su archivo .con, así que horarios y actividades la siguen encontrando.

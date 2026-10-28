@@ -71,10 +71,11 @@ namespace SelectOR
             await EnsureLists();
             if (IsDisposed || gen != _pathsGen || _g == null) return;
             var g = _g;
-            var want = _services.Select(s => (s.Origin, s.Destination)).Distinct().Where(p => !_paths.ContainsKey(p.Origin + "|" + p.Destination)).ToList();
+            // (1.2.81) con su «Recorrido» (vías de salida, de llegada y de paso) y la vuelta si es de ida y vuelta o circular
+            var want = _services.GroupBy(KeyOf).Select(x => x.First()).Where(s => !_paths.ContainsKey(KeyOf(s))).ToList();
             if (want.Count > 0)
             {
-                var got = await Task.Run(() => want.Select(p => (key: p.Origin + "|" + p.Destination, pts: PathPoints(g, p.Origin, p.Destination))).ToList());
+                var got = await Task.Run(() => want.Select(s => (key: KeyOf(s), pts: PathPoints(g, s.Origin, s.Destination, s.Hint, s.Trip))).ToList());
                 if (IsDisposed) return;
                 foreach (var (key, pts) in got) _paths[key] = pts;
             }
@@ -84,7 +85,8 @@ namespace SelectOR
             _map.Invalidate();
         }
 
-        List<(double lat, double lon)> PathOf(Service s) => _paths.TryGetValue(s.Origin + "|" + s.Destination, out var p) ? p : null;
+        static string KeyOf(Service s) => s.Origin + "|" + s.Destination + "|" + (s.Hint ?? "") + "|" + (s.Trip ?? "");
+        List<(double lat, double lon)> PathOf(Service s) => _paths.TryGetValue(KeyOf(s), out var p) ? p : null;
 
         void FocusSelected()
         {
@@ -106,7 +108,7 @@ namespace SelectOR
         void UpdateMapStatus()
         {
             if (_map == null) return;
-            int sinVia = _services.Count(s => _paths.TryGetValue(s.Origin + "|" + s.Destination, out var p) && p == null);
+            int sinVia = _services.Count(s => _paths.TryGetValue(KeyOf(s), out var p) && p == null);
             string st = string.Format(Tr("{0} servicios"), _services.Count);
             if (_aiTrains != null) st += " · " + (_ai.Count == 1 ? Tr("1 tren IA circulando") : string.Format(Tr("{0} trenes IA circulando"), _ai.Count));
             if (sinVia > 0) st += " · " + string.Format(Tr("{0} sin vía"), sinVia);
@@ -217,7 +219,75 @@ namespace SelectOR
         public static List<(double lat, double lon)> PathPoints(RouteGraph g, string from, string to)
         {
             if (g == null) return null;
+            var (starts, targets) = Ends(g, from, to, -1, -1);
+            return Core(g, starts, targets, out _);
+        }
+
+        // (1.2.81) Con el recorrido marcado (HorarioRecorridoForm: «o=nodo;d=nodo;v=nodo,nodo», nodos vectoriales) y la vuelta
+        // («vuelta»: otra vez al origen; «circular»: del destino al origen). Lo que no se pueda seguir, como si no estuviera.
+        public static List<(double lat, double lon)> PathPoints(RouteGraph g, string from, string to, string hint, string trip)
+        {
+            if (g == null) return null;
+            int o = -1, d = -1; var vias = new List<int>();
+            foreach (var part in (hint ?? "").Split(';'))
+            {
+                var kv = part.Split('='); if (kv.Length != 2) continue;
+                if (kv[0] == "o" && int.TryParse(kv[1], out int x)) o = x;
+                else if (kv[0] == "d" && int.TryParse(kv[1], out int y)) d = y;
+                else if (kv[0] == "v") foreach (var z in kv[1].Split(',')) if (int.TryParse(z, out int v)) vias.Add(v);
+            }
+            if (o < 0 && d < 0 && vias.Count == 0 && string.IsNullOrEmpty(trip)) return PathPoints(g, from, to);
+            var (starts, targets) = Ends(g, from, to, o, d);
+            var all = new List<(double lat, double lon)>();
+            // por cada vía de paso, un trozo hasta su mitad; el último, hasta el destino
+            foreach (int v in vias)
+            {
+                var mid = new List<(int e, double off)>();
+                for (int e = 0; e < g.Edges.Length; e++) if (g.Edges[e].Vec == v) mid.Add((e, g.Edges[e].Len / 2));
+                if (mid.Count == 0) continue;
+                var seg = Core(g, starts, mid, out var reached);
+                if (seg == null) continue;
+                all.AddRange(all.Count > 0 ? seg.Skip(1) : seg);
+                starts = new List<(int, double)> { reached };
+            }
+            var last = Core(g, starts, targets, out var arrived);
+            if (last == null) return all.Count > 0 ? all : PathPoints(g, from, to);
+            all.AddRange(all.Count > 0 ? last.Skip(1) : last);
+            // la vuelta al origen (ida y vuelta o circular): desde donde llega, al andén de salida (el marcado, si lo hay)
+            if (trip == "vuelta" || trip == "circular")
+            {
+                var (_, home) = Ends(g, to, from, -1, o);
+                var back = Core(g, new List<(int, double)> { arrived }, home, out _);
+                if (back != null) all.AddRange(back.Skip(1));
+            }
+            return all.Count > 1 ? all : null;
+        }
+
+        // Los andenes (o apartaderos) de salida y de llegada; si se marcó una vía (nodo vectorial), solo los de esa vía
+        static (List<(int e, double off)> starts, List<(int e, double off)> targets) Ends(RouteGraph g, string from, string to, int o, int d)
+        {
             bool Is(string n, string want) => n != null && string.Equals(n.Trim(), want?.Trim(), StringComparison.CurrentCultureIgnoreCase);
+            var s = new List<(int, double)>(); var t = new List<(int, double)>();
+            for (int e = 0; e < g.Edges.Length; e++)
+            {
+                var E = g.Edges[e];
+                foreach (var (off, n) in E.Platforms.Concat(E.Sidings))
+                {
+                    if (Is(n, from)) s.Add((e, off));
+                    if (Is(n, to)) t.Add((e, off));
+                }
+            }
+            if (o >= 0 && s.Any(x => g.Edges[x.Item1].Vec == o)) s = s.Where(x => g.Edges[x.Item1].Vec == o).ToList();
+            if (d >= 0 && t.Any(x => g.Edges[x.Item1].Vec == d)) t = t.Where(x => g.Edges[x.Item1].Vec == d).ToList();
+            return (s, t);
+        }
+
+        // Dijkstra por la red de la ruta de cualquiera de «starts» al más cercano de «targets» (tramo y distancia desde su
+        // principio); «reached», el punto al que llega. null si no hay vía.
+        static List<(double lat, double lon)> Core(RouteGraph g, List<(int e, double off)> starts, List<(int e, double off)> targets, out (int e, double off) reached)
+        {
+            reached = (-1, 0);
+            if (starts.Count == 0 || targets.Count == 0) return null;
             var dist = new Dictionary<int, double>(); var pq = new PriorityQueue<int, double>();
             var prev = new Dictionary<int, (int node, int edge)>();
             var seed = new Dictionary<int, (int edge, double off)>();
@@ -226,26 +296,12 @@ namespace SelectOR
                 if (n < 0) return;
                 if (!dist.TryGetValue(n, out double o) || d < o) { dist[n] = d; pq.Enqueue(n, d); seed[n] = (e, off); prev.Remove(n); }
             }
-            var targets = new List<(int e, double off)>();
-            for (int e = 0; e < g.Edges.Length; e++)
-            {
-                var E = g.Edges[e];
-                foreach (var (off, n) in E.Platforms.Concat(E.Sidings))
-                {
-                    if (Is(n, from)) { Seed(E.A, off, e, off); Seed(E.B, E.Len - off, e, off); }
-                    if (Is(n, to)) targets.Add((e, off));
-                }
-            }
+            foreach (var (e, off) in starts) { var E = g.Edges[e]; Seed(E.A, off, e, off); Seed(E.B, E.Len - off, e, off); }
             double best = double.MaxValue; int bestNode = -1, bestEdge = -1; double bestOff = 0;
             (int e, double o1, double o2)? same = null;
-            for (int e = 0; e < g.Edges.Length; e++)
-            {
-                var E = g.Edges[e];
-                foreach (var (o1, n1) in E.Platforms.Concat(E.Sidings))
-                    if (Is(n1, from))
-                        foreach (var (_, o2) in targets.Where(t => t.e == e))
-                            if (Math.Abs(o2 - o1) < best) { best = Math.Abs(o2 - o1); same = (e, o1, o2); }
-            }
+            foreach (var (e, o1) in starts)
+                foreach (var (_, o2) in targets.Where(t => t.e == e))
+                    if (Math.Abs(o2 - o1) < best) { best = Math.Abs(o2 - o1); same = (e, o1, o2); }
             while (pq.TryDequeue(out int n, out double dn))
             {
                 if (dn > dist[n] + 1e-6 || dn > best) continue;
@@ -266,7 +322,8 @@ namespace SelectOR
             if (best == double.MaxValue) return null;
             var outPts = new List<(double lat, double lon)>();
             void Add(int e, double a, double b) { foreach (var (x, y) in Slice(g.Edges[e], a, b)) outPts.Add(g.Unproj(x, y)); }
-            if (same != null) { Add(same.Value.e, same.Value.o1, same.Value.o2); return outPts.Count > 1 ? outPts : null; }
+            if (same != null) { Add(same.Value.e, same.Value.o1, same.Value.o2); reached = (same.Value.e, same.Value.o2); return outPts.Count > 1 ? outPts : null; }
+            reached = (bestEdge, bestOff);
             // de atrás hacia delante: el último tramo, los enteros y el primero
             var parts = new List<(int e, double a, double b)>();
             var Et = g.Edges[bestEdge];

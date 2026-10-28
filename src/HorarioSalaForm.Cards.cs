@@ -174,7 +174,7 @@ namespace SelectOR
                 y += Theme.Px(26) + Theme.Px(6);
 
                 // recorrido, composición y paradas, enteros
-                TextRenderer.DrawText(g, s.Origin + "  →  " + s.Destination, FText, new Rectangle(x, y, avail, Theme.Px(20)), dim, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(g, s.RouteText, FText, new Rectangle(x, y, avail, Theme.Px(20)), dim, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                 y += Theme.Px(20);
                 Line(g, Tr("Composición"), s.Consist, x, y, tw);
                 y += Theme.Px(20);

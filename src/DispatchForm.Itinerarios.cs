@@ -19,6 +19,7 @@ namespace SelectOR
     public sealed partial class DispatchForm
     {
         Label _manualBtn;
+        Label _viewBtn;   // (1.2.81) «Esquema» / «Trazado real» en una dependencia
         (RoomMapGeo.Sig origin, List<SchematicCircuits.ItinOption> opts)? _pick;   // (1.2.76: la señal de la ruta, en el tablero o en un esquema)
         string _itinMsg; bool _itinMsgOk; DateTime _itinMsgUntil;
 
@@ -39,6 +40,31 @@ namespace SelectOR
             new ToolTip().SetToolTip(_manualBtn, Tr("Mando manual: en esta dependencia las señales no se abren sin un itinerario. Automático: se abren solas al llegar el tren (también puedes establecer itinerarios)."));
             var gap = new Panel { Dock = DockStyle.Right, Width = Theme.Px(6), BackColor = top.BackColor };
             top.Controls.Add(_manualBtn); top.Controls.Add(gap);
+            // (1.2.81) la vista de la dependencia: esquema recto o trazado real
+            _viewBtn = new Label
+            {
+                AutoSize = false, TextAlign = ContentAlignment.MiddleCenter, Font = Theme.Font(9f, FontStyle.Bold), Cursor = Cursors.Hand,
+                Dock = DockStyle.Right, Visible = false, Width = Theme.Px(170), Margin = Padding.Empty, ForeColor = Theme.Text, BackColor = Theme.Surface2
+            };
+            _viewBtn.Click += (s, e) =>
+            {
+                if (_curZone == null) return;
+                _schema = !_schema;
+                string z = _curZone;
+                ShowZone(z);
+                UpdateViewBtn();
+                _canvas.Invalidate();
+            };
+            new ToolTip().SetToolTip(_viewBtn, Tr("Cambia la vista de la dependencia: el esquema recto (vías en filas, agujas a 45°, todo separado) o el trazado real de las vías."));
+            var gap2 = new Panel { Dock = DockStyle.Right, Width = Theme.Px(6), BackColor = top.BackColor };
+            top.Controls.Add(_viewBtn); top.Controls.Add(gap2);
+        }
+
+        void UpdateViewBtn()
+        {
+            if (_viewBtn == null) return;
+            _viewBtn.Visible = _curZone != null && _board != null && !_noSchema.Contains(_curZone);
+            _viewBtn.Text = _schema ? Tr("Ver: trazado real") : Tr("Ver: esquema");
         }
 
         void PrepareItins()
@@ -53,6 +79,7 @@ namespace SelectOR
                          : e == "busy" ? Tr("Open Rails no deja cambiarla: hay un tren encima o en la ruta que tiene reservada.")
                          : e == "nobot" || e == "nodisp" ? Tr("La sala no tiene ahora mismo el despachador fijo de SelectOR.")
                          : e == "notmine" ? Tr("Fuera de tus dependencias, las agujas solo las mueve quien está conduciendo.")
+                         : e == "notin" ? Tr("Para eso tienes que estar conduciendo en la sala o tener el mando de esta dependencia.")   // (1.2.81)
                          : null;
                 if (t != null) try { if (!IsDisposed) BeginInvoke(new Action(() => ItinSay(t, false))); } catch { }
             };
@@ -77,6 +104,7 @@ namespace SelectOR
 
         void UpdateManualBtn()
         {
+            UpdateViewBtn();
             if (_manualBtn == null) return;
             var h = _sel;
             bool mine = HeaderMine(h) && (Board || !Overview);
@@ -136,15 +164,56 @@ namespace SelectOR
         bool PickClick(Point p)
         {
             if (_pick is not { } pk) return false;
-            _pick = null;
             var o = PickAt(pk, p);
-            if (o != null)
+            // (1.2.81) a ese destino se llega por más de un camino: a elegir (al pasar por cada uno, se ve en el mapa)
+            var vars = o == null ? null : pk.opts.Where(x => x.Dest == o.Dest && (o.Dest >= 0 || x.EndEdge == o.EndEdge)).OrderBy(x => x.Len).ToList();
+            if (vars != null && vars.Count > 1)
             {
-                _pilot.ItinSet(pk.origin.Obj, o.Dest, o.Switches);
-                ItinSay(string.Format(Tr("Estableciendo el itinerario {0} → {1}…"), pk.origin.Obj, o.Dest >= 0 ? o.Dest.ToString() : Tr("topera")), true);
+                var m = MenuStyle.Apply(new ContextMenuStrip());
+                m.Items.Add(new ToolStripMenuItem(string.Format(Tr("A {0} se llega por {1} caminos:"), o.Dest >= 0 ? o.Dest.ToString() : Tr("topera"), vars.Count)) { Enabled = false });
+                bool chosen = false;
+                for (int i = 0; i < vars.Count; i++)
+                {
+                    var v = vars[i];
+                    var mi = new ToolStripMenuItem(VariantText(v, i, vars), null, (s2, e2) => { chosen = true; _pickVariant = null; _pick = null; SetItin(pk.origin, v); }) { ForeColor = SchematicDraw.RouteColor };
+                    mi.MouseEnter += (s2, e2) => { _pickVariant = v; _canvas.Invalidate(); };
+                    m.Items.Add(mi);
+                }
+                m.Closed += (s2, e2) => { if (!chosen) { _pickVariant = null; _canvas.Invalidate(); } };
+                m.Show(_canvas, p);
+                return true;
             }
+            _pick = null;
+            if (o != null) SetItin(pk.origin, o);
             _canvas.Invalidate();
             return true;
+        }
+
+        SchematicCircuits.ItinOption _pickVariant;   // (1.2.81) el camino que se está mirando en el menú de caminos
+
+        void SetItin(RoomMapGeo.Sig origin, SchematicCircuits.ItinOption o)
+        {
+            _pilot.ItinSet(origin.Obj, o.Dest, o.Switches);
+            ItinSay(string.Format(Tr("Estableciendo el itinerario {0} → {1}…"), origin.Obj, o.Dest >= 0 ? o.Dest.ToString() : Tr("topera")), true);
+            _canvas.Invalidate();
+        }
+
+        // «El más corto (420 m)» / «Por la otra rama de la aguja 7 (480 m)»: lo que cambia frente al más corto
+        string VariantText(SchematicCircuits.ItinOption v, int i, List<SchematicCircuits.ItinOption> all)
+        {
+            string len = string.Format("{0:0} m", v.Len);
+            if (i == 0) return string.Format(Tr("El más corto ({0})"), len);
+            var first = all[0].Switches.ToDictionary(w => w.node, w => w.pos);
+            var diff = v.Switches.Where(w => !first.TryGetValue(w.node, out int pp) || pp != w.pos)
+                                 .Select(w => { int n = SwNumber(w.node); return n > 0 ? n.ToString() : "#" + w.node; }).Distinct().ToList();
+            return diff.Count == 0 ? string.Format(Tr("Otro camino ({0})"), len)
+                 : string.Format(diff.Count == 1 ? Tr("Por la otra rama de la aguja {0} ({1})") : Tr("Por la otra rama de las agujas {0} ({1})"), string.Join(", ", diff), len);
+        }
+
+        int SwNumber(int node)
+        {
+            if (Board) return _board?.Switches.FirstOrDefault(s => s.Node == node)?.Number ?? 0;
+            return _cur != null ? SchematicDraw.SwitchNumber(_cur, node) : 0;
         }
 
         // (1.2.76) un punto de un tramo y un trozo de vía, en pantalla: en el tablero o en el esquema que se ve
@@ -174,7 +243,7 @@ namespace SelectOR
             return best;
         }
 
-        bool PickCancel() { if (_pick == null) return false; _pick = null; _canvas.Invalidate(); return true; }
+        bool PickCancel() { if (_pick == null) return false; _pick = null; _pickVariant = null; _canvas.Invalidate(); return true; }
 
         // (Paint_) los caminos posibles mientras se elige, y el mensaje de la sala
         void DrawPick(Graphics g, Rectangle area)
@@ -182,7 +251,7 @@ namespace SelectOR
             if (_pick is { } pk && (Board || _cur != null))
             {
                 var mouse = _canvas.PointToClient(Cursor.Position);
-                var hov = PickAt(pk, mouse);
+                var hov = _pickVariant ?? PickAt(pk, mouse);
                 foreach (var o in pk.opts.OrderBy(o => o == hov))
                 {
                     bool h = o == hov;
@@ -216,6 +285,9 @@ namespace SelectOR
             TextRenderer.DrawText(g, t, f, r, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
         }
 
+        // (1.2.81) ¿esta señal tiene un itinerario establecido (no en cola)? Entonces su camino es el del itinerario
+        bool HasItin(int obj) => _pilot != null && _pilot.Itins.Any(i => i.Origin == obj && i.State != "queue");
+
         // (Live) los itinerarios de la sala en el esquema: su camino (verde; anulándose, ámbar) y sus agujas, enclavadas
         void AddItins(SchematicLive live, Func<int, int> posNode, HashSet<int> lockedOrders)
         {
@@ -226,6 +298,13 @@ namespace SelectOR
                 if (sg == null || !SchematicCircuits.SignalPlace(_sbe, sg, out int e, out double off, out int dir)) continue;
                 var pos = it.Switches.ToDictionary(x => x.node, x => x.pos);
                 if (it.State != "queue") foreach (var (n, _) in it.Switches) if (_geo.OrderOf.TryGetValue(n, out int o)) lockedOrders.Add(o);   // (en cola: aún no enclava)
+                // (1.2.81) agujas que no están como dice el itinerario (las ha movido otro): en rojo
+                if (it.State == "set" || it.State == "in")
+                    foreach (var (n, pp) in it.Switches)
+                    {
+                        int real = posNode(n);
+                        if (real >= 0 && real != pp && _geo.OrderOf.TryGetValue(n, out int o2)) live.Discord.Add(o2);
+                    }
                 bool cancel = it.State == "cancel", queue = it.State == "queue";
                 SchematicCircuits.Walk(_g, _sbe, e, off, dir, n => pos.TryGetValue(n, out int pp) ? pp : posNode(n), (ed, a, b) =>
                 {

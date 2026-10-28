@@ -17,6 +17,11 @@
 //    con las 24 plazas y las lámparas tenues de los túneles (100 lm) se apagaban. El haz de los faros no es de estas (va aparte);
 //  · (1.2.75) los carteles de varias caras (Facades): sus luces se funden igual, por celdas, pero solo con las de su misma cara. Antes, de lejos,
 //    las de las tres caras se juntaban en el centro del cartel, dentro, y alumbraban su interior en vez de las caras.
+//  · (1.2.81) las farolas (y luces de estación: las de CyzyLamps.txt) no van en el halo de la niebla: CYZYRails pinta en el
+//    aire un resplandor alrededor de cada luz de la lista de «todas» (HighDefinitionRenderer.SetPointLights: la luz que
+//    dispersa la niebla, pensada para faros y señales) y, con las de conjunto de lejos (en el centro de sus luces, en el
+//    aire) o las puestas un poco por debajo de la lámpara, se veían bolitas de luz flotando. Siguen alumbrando igual (la
+//    lista de superficie); los faros y las señales conservan su halo. SELECTOR_LUCES_NIEBLA=1: como antes.
 // Solo con los gráficos mejorados de CYZYRails (si no, no dibuja luces de punto). En otro Open Rails no se pone nada.
 // (La luz en el interior de los coches de viajeros se probó y se quitó a petición en la 1.2.72.)
 
@@ -123,6 +128,7 @@ namespace SelectOR.MapAgent
         static readonly Dictionary<long, Cand> _last = new Dictionary<long, Cand>();   // lo que se mandó el fotograma anterior
         static readonly List<Cand> _pool = new List<Cand>();
         static double _lastT = -1; static Vector3 _lastCam;
+        static readonly bool FogLamps = Environment.GetEnvironmentVariable("SELECTOR_LUCES_NIEBLA") == "1";
 
         // (en lugar de GetPointLights) false = ya está hecho
         static bool BeforeLights(object __instance, Vector4[] positions, Vector4[] colors, float sceneUnitsPerCandela, bool surfaceLightsOnly, ref int __result)
@@ -137,6 +143,7 @@ namespace SelectOR.MapAgent
                 {
                     var l = _out[k];
                     if (surfaceLightsOnly && !l.Surf) continue;
+                    if (!surfaceLightsOnly && l.Surf && !FogLamps) continue;   // (1.2.81) farolas, sin halo en la niebla (ver arriba)
                     positions[n] = new Vector4(l.P, l.I * l.W * sceneUnitsPerCandela);
                     colors[n] = new Vector4(l.C, l.Down ? 1 : 0);
                     n++;

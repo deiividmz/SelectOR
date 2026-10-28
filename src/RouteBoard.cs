@@ -1,4 +1,4 @@
-// PUESTO DE MANDO en una sola pantalla (1.2.76): toda la ruta en un tablero que se mueve y se amplía, con el trazado real
+﻿// PUESTO DE MANDO en una sola pantalla (1.2.76): toda la ruta en un tablero que se mueve y se amplía, con el trazado real
 // de las vías (la proyección local del .tdb, como el mapa) y lo del videográfico encima: cantones (libres, ocupados,
 // itinerarios, anulándose, en cola), agujas (el lado puesto, su número de la estación, azul si está enclavada), señales
 // con su figura del RCF (el mástil hacia el lado en el que está la señal y la figura a lo largo de la vía), andenes con el
@@ -18,10 +18,15 @@ namespace SelectOR
     {
         public RouteGraph G; public RoomMapGeo Geo;
         public List<(int e, double a, double b)> Circuits = new();
-        public sealed class Sw { public RouteGraph.SwitchGeo S; public int Node, Order; public PointF At; public PointF[][] Legs = new PointF[2][]; public int Number; public string Station; }
+        public sealed class Sw { public RouteGraph.SwitchGeo S; public int Node, Order; public PointF At; public PointF[][] Legs = new PointF[2][]; public int Number; public string Station; public string Label; }   // Label: (1.2.81) como en su esquema («7», «12a»)
         public sealed class Sg { public RoomMapGeo.Sig S; public PointF At; public PointF Dir; public PointF SideV; }   // Dir: hacia donde rige; SideV: hacia donde está la señal
         public sealed class Plat { public int E; public double A, B; public int Side; public string Label; public string Station; }
         public readonly List<Sw> Switches = new();
+        // (1.2.81, petición) los escapes en tijera, como en el esquema: S = a0, a1 (una paralela), b0, b1 (la otra); diagonales a0-b1
+        // y b0-a1; StraightK: la rama paralela de cada aguja; Edges: paralela a, paralela b, diagonal a0-b1, diagonal b0-a1
+        public sealed class Tij { public Sw[] S = new Sw[4]; public int[] StraightK = new int[4]; public int[] Edges = new int[4]; public string Name; }
+        public readonly List<Tij> Scissors = new();
+        public readonly HashSet<int> ScissorNodes = new();
         public readonly List<Sg> Signals = new();
         public readonly List<Plat> Platforms = new();
         public readonly List<(string name, PointF at, RectangleF box)> Stations = new();   // box: lo que ocupan sus andenes
@@ -33,7 +38,11 @@ namespace SelectOR
         // (4,5 m entre vías → unos 18 m), con su eje (el de sus andenes) y un paso suave hacia la línea. Todo lo del tablero
         // (vías, agujas, señales, andenes, trenes) pasa por Warp, así que no cambia el orden de las vías ni hay cruces nuevos.
         public const double Spread = 4.0;
-        sealed class Field { public double Cx, Cy, Ax, Ay, U0, U1, V0; public string Name; }
+        // (1.2.81) y a lo largo: las cabeceras (entre el final de los andenes y las últimas agujas) se estiran Stretch veces,
+        // para que agujas y señales no se amontonen; la vía de línea de al lado (la rampa) se encoge lo mismo, así que fuera
+        // de ella no se mueve nada. P0..P1: lo que no se estira (los andenes; en un grupo de agujas, su centro).
+        public static double Stretch = 1;   // (probado 1,7: al encuadrar una estación el zoom baja lo mismo y no gana sitio; apagado)
+        sealed class Field { public double Cx, Cy, Ax, Ay, U0, U1, V0, P0, P1; public string Name; }
         readonly List<Field> _fields = new();
         public (double x, double y) Warp(double x, double y)
         {
@@ -43,19 +52,41 @@ namespace SelectOR
                 double dx = x - f.Cx, dy = y - f.Cy, u = dx * f.Ax + dy * f.Ay, v = -dx * f.Ay + dy * f.Ax;
                 const double Ramp = 260, Side = 220;
                 double wu = u < f.U0 ? Smooth(1 - (f.U0 - u) / Ramp) : u > f.U1 ? Smooth(1 - (u - f.U1) / Ramp) : 1;
-                if (wu <= 0) continue;
+                double au = Along(f, u, Ramp);   // (1.2.81) a lo largo (su rampa puede ser más larga que la del ensanche)
+                if (wu <= 0 && au == 0) continue;
                 double av = Math.Abs(v);
                 if (av > f.V0 + Side) continue;
                 // a lo ancho: dentro de la estación, × Spread; fuera, se aparta lo mismo que el borde (y se apaga lejos)
                 double nv = av <= f.V0 ? av * Spread : f.V0 * Spread + (av - f.V0);
                 double fade = av <= f.V0 ? 1 : Smooth(1 - (av - f.V0) / Side);
                 double dv = (nv - av) * Math.Sign(v) * wu * fade;
-                sx += -f.Ay * dv; sy += f.Ax * dv; sw += wu * fade;
+                double du = au * fade;   // (1.2.81) la estación, estirada a lo largo
+                sx += -f.Ay * dv + f.Ax * du; sy += f.Ax * dv + f.Ay * du; sw += wu * fade;
             }
             if (sw > 1) { sx /= sw; sy /= sw; }
             return (x + sx, y + sy);
         }
         static double Smooth(double t) { t = Math.Max(0, Math.Min(1, t)); return t * t * (3 - 2 * t); }
+        // (1.2.81) cuánto se mueve a lo largo un punto en «u» del eje de un ensanche: en las cabeceras, hacia fuera en
+        // proporción a lo que se aleja de los andenes; en la rampa, de vuelta a cero poco a poco (sin plegarse: la pendiente
+        // de la vuelta nunca pasa de 0,6)
+        static double Along(Field f, double u, double ramp)
+        {
+            if (Stretch <= 1) return 0;
+            double k = Stretch - 1, tl = Math.Max(0, f.P0 - f.U0), tr = Math.Max(0, f.U1 - f.P1);
+            // la rampa de vuelta, lo larga que haga falta para no plegarse (pendiente ≤ 0,6)
+            double rl = Math.Max(ramp, 1.5 * k * tl / 0.6), rr = Math.Max(ramp, 1.5 * k * tr / 0.6);
+            if (u >= f.P0 && u <= f.P1) return 0;
+            if (u < f.P0)
+            {
+                if (u >= f.U0) return -k * (f.P0 - u);
+                if (u >= f.U0 - rl) return -k * tl * Smooth((u - (f.U0 - rl)) / rl);
+                return 0;
+            }
+            if (u <= f.U1) return k * (u - f.P1);
+            if (u <= f.U1 + rr) return k * tr * Smooth(((f.U1 + rr) - u) / rr);
+            return 0;
+        }
         public PointF W(double x, double y) { var (a, b) = Warp(x, y); return new PointF((float)a, (float)b); }
         // (pruebas) los ensanches: nombre, centro, medio ancho
         public IEnumerable<(string name, double cx, double cy, double v0, double u0, double u1)> FieldsInfo => _fields.Select(f => (f.Name, f.Cx, f.Cy, f.V0, f.U0, f.U1));
@@ -78,7 +109,7 @@ namespace SelectOR
                 double u0 = double.MaxValue, u1 = double.MinValue, v0 = 0;
                 foreach (var (x, y) in pts) { double u = (x - cx) * ax + (y - cy) * ay, v = -(x - cx) * ay + (y - cy) * ax; u0 = Math.Min(u0, u); u1 = Math.Max(u1, u); v0 = Math.Max(v0, Math.Abs(v)); }
                 // (lo que hay a lo ancho entre sus andenes y un poco más; a lo largo, las cabeceras con sus agujas)
-                _fields.Add(new Field { Name = kv.Key, Cx = cx, Cy = cy, Ax = ax, Ay = ay, U0 = u0 - 120, U1 = u1 + 120, V0 = Math.Max(14, v0 + 10) });
+                _fields.Add(new Field { Name = kv.Key, Cx = cx, Cy = cy, Ax = ax, Ay = ay, U0 = u0 - 120, U1 = u1 + 120, V0 = Math.Max(14, v0 + 10), P0 = (u0 + u1) / 2, P1 = (u0 + u1) / 2 });   // (toda la estación, desde su centro)
             }
             // fuera de las estaciones: los grupos de agujas (escaleras y escapes entre vías de una línea de varias vías)
             int nst = _fields.Count;
@@ -123,7 +154,7 @@ namespace SelectOR
                 foreach (var (x, y) in at) { double u = (x - cx) * ax + (y - cy) * ay; u0 = Math.Min(u0, u); u1 = Math.Max(u1, u); }
                 foreach (var (x, y) in pts) { double u = (x - cx) * ax + (y - cy) * ay, v = -(x - cx) * ay + (y - cy) * ax; if (u >= u0 - 40 && u <= u1 + 40) v0 = Math.Max(v0, Math.Abs(v)); }
                 if (v0 > 70) continue;   // (no es un haz de vías paralelas: un nudo de líneas que se cruzan)
-                _fields.Add(new Field { Name = "agujas", Cx = cx, Cy = cy, Ax = ax, Ay = ay, U0 = u0 - 60, U1 = u1 + 60, V0 = Math.Max(10, v0 + 6) });
+                _fields.Add(new Field { Name = "agujas", Cx = cx, Cy = cy, Ax = ax, Ay = ay, U0 = u0 - 60, U1 = u1 + 60, V0 = Math.Max(10, v0 + 6), P0 = (u0 + u1) / 2, P1 = (u0 + u1) / 2 });
             }
         }
 
@@ -241,9 +272,10 @@ namespace SelectOR
                 if (E.B < 0) b.Buffers.Add(b.At(e, E.Len));
             }
             // agujas: su punto y el principio de sus dos ramas (la 0 y la 1, como THROWNODE)
+            // (1.2.81) también las «unidas» de las travesías y tijeras (comparten identificador): el puesto las pide por su nodo
+            // (THROWNODE), como el mapa grande del HUD desde la 1.2.71
             foreach (var sw in geo.Switches)
             {
-                if (sw.Hidden) continue;
                 var (ax, ay) = g.Proj(sw.Lat, sw.Lon);
                 var w = new Sw { S = sw, Node = sw.Node, Order = sw.Order, At = b.W(ax, ay) };
                 for (int k = 0; k < 2; k++)
@@ -252,6 +284,13 @@ namespace SelectOR
                 var num = numberOf?.Invoke(sw.Node);
                 if (num.HasValue) { w.Station = num.Value.st; w.Number = num.Value.n; }
                 b.Switches.Add(w);
+            }
+            foreach (var t in geo.ScissorList)
+            {
+                var ws = t.S.Select(s => b.Switches.FirstOrDefault(w => w.Node == s.Node)).ToArray();
+                if (ws.Any(w => w == null)) continue;
+                b.Scissors.Add(new Tij { S = ws, StraightK = t.StraightK.ToArray(), Edges = t.Edges.ToArray() });
+                foreach (var w in ws) b.ScissorNodes.Add(w.Node);
             }
             // señales: en su vía, mirando hacia donde rigen, y el lado en el que están
             foreach (var sg in geo.Signals)
@@ -311,7 +350,10 @@ namespace SelectOR
         }
 
         // el lado del tramo e en el metro off sin otra vía cerca (+1 a la derecha del sentido A→B, −1 a la izquierda)
-        int FreeSide(int e, double off)
+        int FreeSide(int e, double off) => PlatformSide(G, e, off);
+        // (1.2.81, también para el esquema) el lado de la vía en el que está su andén: +1 a la izquierda de su sentido (A→B), −1
+        // a la derecha; el de la vía vecina más lejana
+        public static int PlatformSide(RouteGraph G, int e, double off)
         {
             var (x1, y1) = G.PointAt(e, Math.Max(0, off - 2)); var (x2, y2) = G.PointAt(e, Math.Min(G.Edges[e].Len, off + 2));
             double dx = x2 - x1, dy = y2 - y1, l = Math.Sqrt(dx * dx + dy * dy); if (l < 1e-6) return 1;
@@ -382,6 +424,14 @@ namespace SelectOR
             RouteBoard.Sg best = null; float bd = float.MaxValue;
             foreach (var (sg, box) in l) { var r = RectangleF.Inflate(box, slack, slack); if (!r.Contains(p)) continue; float d = Sq(r, p); if (d < bd) { bd = d; best = sg; } }
             return best;
+        }
+        static readonly ConditionalWeak<RouteBoard, List<(RouteBoard.Tij t, RectangleF box)>> _tijBoxes = new();
+        // (1.2.81) la tijera bajo el ratón (en el último dibujo)
+        public static RouteBoard.Tij ScissorAt(RouteBoard b, Point p)
+        {
+            if (b == null || !_tijBoxes.Get(b, out var l)) return null;
+            foreach (var (t, box) in l) if (box.Contains(p)) return t;
+            return null;
         }
         public static RouteBoard.Sw SwitchAt(RouteBoard b, Point p, float slack = 6)
         {
@@ -454,40 +504,114 @@ namespace SelectOR
 
             // agujas: el lado que no está puesto, cortado junto a la aguja; su número de la estación (azul si está enclavada)
             var swBoxes = new List<(RouteBoard.Sw, RectangleF)>(); _swBoxes.Set(b, swBoxes);
+            var numTaken = new List<RectangleF>();   // (1.2.81) los números de agujas ya puestos
             if (near)
             {
-                using var cut = new Pen(SchematicDraw.Bg, lw + 2.2f) { StartCap = LineCap.Flat, EndCap = LineCap.Flat };
                 using var nf = Theme.Font(Math.Max(6.4f, Math.Min(9f, 2.6f * zoom)));
                 foreach (var sw in b.Switches)
                 {
+                    if (b.ScissorNodes.Contains(sw.Node)) continue;   // (1.2.81: van con su tijera)
                     var q = P(sw.At); if (!view.Contains(q)) continue;
                     int pos = live?.SwitchPos != null && sw.Order >= 0 ? live.SwitchPos(sw.Order) : -1;
-                    if (pos == 0 || pos == 1)
+                    // (1.2.81) la rama puesta marcada y la otra cortada (SchematicDraw.DrawSwitchState)
+                    if (live?.SwitchPos != null)
                     {
-                        var leg = sw.Legs[1 - pos];
-                        if (leg != null && leg.Length >= 2)
-                        {
-                            var sl = leg.Select(P).ToArray();
-                            float L = 0; for (int i = 1; i < sl.Length; i++) L += Dist(sl[i - 1], sl[i]);
-                            var c1 = At(sl, Math.Min(L * 0.6f, lw * 0.9f + 1.5f)); var c2 = At(sl, Math.Min(L * 0.9f, lw * 0.9f + 1.5f + Math.Max(5f, 2.2f * zoom)));
-                            g.DrawLine(cut, c1, c2);
-                        }
+                        bool lk = live.Locked != null && sw.Order >= 0 && live.Locked(sw.Order);
+                        var l0 = sw.Legs[0]?.Select(P).ToArray(); var l1 = sw.Legs[1]?.Select(P).ToArray();
+                        Color? lc = null;
+                        if ((pos == 0 || pos == 1) && b.G.JunctionOf(sw.Node, out _, out _, out _, out var outs) && outs != null && pos < outs.Length && outs[pos] >= 0)
+                            lc = SchematicDraw.LegLiveCol(live, outs[pos], b.G.Edges[outs[pos]].A == sw.Node, b.G.Edges[outs[pos]].Len);
+                        SchematicDraw.DrawSwitchState(g, pos == 1 ? l1 : l0, pos == 1 ? l0 : l1, pos, lk, lw, sw.S?.Straight ?? -1, lc);
+                        if (sw.Order >= 0 && live.Discord.Contains(sw.Order)) SchematicDraw.DrawDiscord(g, q, lw);
                     }
                     var hb = new RectangleF(q.X - 5, q.Y - 5, 10, 10);
                     if (zoom >= 0.8f && sw.Number > 0)
                     {
                         bool locked = live?.Locked != null && sw.Order >= 0 && live.Locked(sw.Order);
-                        string t = sw.Number.ToString();
+                        string t = sw.Label ?? sw.Number.ToString();
                         var sz = g.MeasureString(t, nf);
                         // del lado contrario a la rama desviada
                         var away = Away(sw);
-                        var box = new RectangleF(q.X + away.X * (lw + 8) - sz.Width / 2 - 1, q.Y + away.Y * (lw + 8) - sz.Height / 2, sz.Width + 2, sz.Height);
+                        // (1.2.81) donde no pise a otro número: más lejos de la aguja o del otro lado (con una raya fina hasta él)
+                        RectangleF BoxAt(float sgn, float d) => new RectangleF(q.X + sgn * away.X * d - sz.Width / 2 - 1, q.Y + sgn * away.Y * d - sz.Height / 2, sz.Width + 2, sz.Height);
+                        var box = BoxAt(1, lw + 8);
+                        foreach (var (sgn, d) in new[] { (1f, lw + 8), (1f, lw + 20), (-1f, lw + 8), (-1f, lw + 20), (1f, lw + 34), (-1f, lw + 34) })
+                        {
+                            var cand = BoxAt(sgn, d); var inf = RectangleF.Inflate(cand, 1, 1);
+                            if (numTaken.Any(r => r.IntersectsWith(inf))) continue;
+                            box = cand;
+                            if (d > lw + 8) using (var lp = new Pen(Color.FromArgb(120, 95, 105, 115), 1f)) g.DrawLine(lp, q.X, q.Y, box.X + box.Width / 2, box.Y + box.Height / 2);
+                            break;
+                        }
+                        numTaken.Add(box);
                         using (var bb = new SolidBrush(Color.FromArgb(230, 22, 26, 32))) g.FillRectangle(bb, box);
                         using (var bp = new Pen(locked ? SchematicDraw.LockCol : Color.FromArgb(95, 105, 115), 1f)) g.DrawRectangle(bp, box.X, box.Y, box.Width, box.Height);
                         using (var tb = new SolidBrush(locked ? SchematicDraw.LockCol : Color.FromArgb(190, 196, 204))) g.DrawString(t, nf, tb, box.X + 1, box.Y);
                         hb = RectangleF.Union(hb, box);
                     }
                     swBoxes.Add((sw, hb));
+                }
+            }
+
+            // (1.2.81, petición) las tijeras: sus cuatro vías sobre su trazado, lo puesto iluminado como en el esquema (paralela a
+            // directa en blanco, diagonal en amarillo; con un tren, en rojo; con un itinerario, de su color), lo demás apagado; y su
+            // nombre (T1…) en vez de los cuatro números
+            var tijBoxes = new List<(RouteBoard.Tij, RectangleF)>(); _tijBoxes.Set(b, tijBoxes);
+            if (near)
+            {
+                using var nf2 = Theme.Font(Math.Max(6.4f, Math.Min(9f, 2.6f * zoom)), FontStyle.Bold);
+                foreach (var t in b.Scissors)
+                {
+                    var sp = t.S.Select(w => P(w.At)).ToArray();
+                    if (!sp.Any(q => view.Contains(q))) continue;
+                    int[] pos = t.S.Select(w => live?.SwitchPos != null && w.Order >= 0 ? live.SwitchPos(w.Order) : -1).ToArray();
+                    bool known = pos.All(x => x >= 0);
+                    bool Par(int i, int j) => known && pos[i] == t.StraightK[i] && pos[j] == t.StraightK[j];
+                    bool Dia(int i, int j) => known && t.StraightK[i] >= 0 && t.StraightK[j] >= 0 && pos[i] == 1 - t.StraightK[i] && pos[j] == 1 - t.StraightK[j];
+                    bool locked = live?.Locked != null && t.S.Any(w => w.Order >= 0 && live.Locked(w.Order));
+                    var off = Color.FromArgb(62, 70, 80);
+                    Color Col(int e, bool set, Color sc)
+                    {
+                        if (live != null && live.Occupied.TryGetValue(e, out var oc) && oc.Count > 0) return SchematicDraw.Busy;
+                        if (live != null && live.Cancelling.TryGetValue(e, out var cn) && cn.Count > 0) return SchematicDraw.CancelCol;
+                        if (live != null && live.Route.TryGetValue(e, out var rl) && rl.Count > 0) return rl.All(q => q.callOn) ? SchematicDraw.CallOnCol : SchematicDraw.RouteCol;
+                        return set ? (locked ? SchematicDraw.LockCol : sc) : off;
+                    }
+                    var vias = new[] { (t.Edges[0], Par(0, 1), SchematicDraw.SwitchStraightCol), (t.Edges[1], Par(2, 3), SchematicDraw.SwitchStraightCol),
+                                       (t.Edges[2], Dia(0, 3), SchematicDraw.SwitchDivergeCol), (t.Edges[3], Dia(2, 1), SchematicDraw.SwitchDivergeCol) };
+                    foreach (bool lit in new[] { false, true })
+                        foreach (var (e, set, sc) in vias)
+                        {
+                            if (e < 0) continue;
+                            var col = live?.SwitchPos != null ? Col(e, set, sc) : SchematicDraw.TrackCol; bool on = col != off;
+                            if (on != lit) continue;
+                            var pc = b.Piece(e, 0, b.G.Edges[e].Len); if (pc == null || pc.Length < 2) continue;
+                            using var pn = new Pen(col, on ? lw + 0.6f : lw) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+                            g.DrawLines(pn, pc.Select(P).ToArray());
+                        }
+                    // (1.2.81) itinerario en cola por la tijera: el discontinuo azul, encima de ella
+                    if (live != null && live.Queued.Count > 0)
+                        using (var qp = new Pen(SchematicDraw.QueueColor, Math.Max(1.4f, lw - 1.5f)) { DashStyle = DashStyle.Dash })
+                            foreach (var (e, _, _) in vias)
+                            {
+                                if (e < 0 || !live.Queued.TryGetValue(e, out var ql) || ql.Count == 0) continue;
+                                if (live.Route.TryGetValue(e, out var rq) && rq.Count > 0) continue;
+                                foreach (var (a, bb) in ql) { var pc = b.Piece(e, a, bb); if (pc != null && pc.Length >= 2) g.DrawLines(qp, pc.Select(P).ToArray()); }
+                            }
+                    var hb =RectangleF.Inflate(Bounds(sp), 6, 6);
+                    if (zoom >= 0.8f && t.Name != null)
+                    {
+                        var sz = g.MeasureString(t.Name, nf2);
+                        float cx = sp.Average(q => q.X), cy = sp.Min(q => q.Y);
+                        var box = new RectangleF(cx - sz.Width / 2 - 1, cy - lw - 6 - sz.Height, sz.Width + 2, sz.Height);
+                        for (int k = 0; k < 4 && numTaken.Any(r => r.IntersectsWith(RectangleF.Inflate(box, 1, 1))); k++) box.Y -= sz.Height + 3;
+                        numTaken.Add(box);
+                        using (var bb = new SolidBrush(Color.FromArgb(230, 22, 26, 32))) g.FillRectangle(bb, box);
+                        using (var bp = new Pen(locked ? SchematicDraw.LockCol : !known && live?.SwitchPos != null ? SchematicDraw.SwitchUnknownCol : Color.FromArgb(95, 105, 115), 1f)) g.DrawRectangle(bp, box.X, box.Y, box.Width, box.Height);
+                        using (var tb = new SolidBrush(locked ? SchematicDraw.LockCol : Color.FromArgb(190, 196, 204))) g.DrawString(t.Name, nf2, tb, box.X + 1, box.Y);
+                        hb = RectangleF.Union(hb, box);
+                    }
+                    tijBoxes.Add((t, hb));
                 }
             }
 
@@ -507,7 +631,17 @@ namespace SelectOR
                     if (ang > 90 || ang <= -90) { ang += ang > 90 ? -180 : 180; face = -1; }
                     double ar = ang * Math.PI / 180;
                     float ly = (float)(-Math.Sin(ar) * sg.SideV.X + Math.Cos(ar) * sg.SideV.Y);   // el lado de la señal en el giro
-                    float dy = (ly < 0 ? -1 : 1) * (lw / 2 + 6f * sk);
+                    // (1.2.81) si su figura pisaría la de otra señal o un número de aguja, el mástil más largo (una fila más
+                    // afuera, como las señales apiladas del esquema)
+                    float side = ly < 0 ? -1 : 1, baseDy = lw / 2 + 6f * sk, stepDy = 5f * lr0 + 2;
+                    int lvl = 0;
+                    for (int L = 0; L < 4; L++)
+                    {
+                        var est = EstBox(q, ar, 3.5f * sk, side * (baseDy + L * stepDy), face, lr0);
+                        if (!sigBoxes.Any(x => x.Item2.IntersectsWith(est)) && !numTaken.Any(r => r.IntersectsWith(est))) { lvl = L; break; }
+                        if (L == 3) lvl = 0;
+                    }
+                    float dy = side * (baseDy + lvl * stepDy);
                     var st = g.Save();
                     g.TranslateTransform(q.X, q.Y); g.RotateTransform((float)ang);
                     float arm = 3.5f * sk;
@@ -591,7 +725,10 @@ namespace SelectOR
                         var pts = tr.body.Select(P).ToArray();
                         if (!InView(pts)) continue;
                         if (pts.Length >= 2)
+                        {
                             using (var pen = new Pen(Color.FromArgb(235, col), Math.Max(2.5f, lw - 1.5f)) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLines(pen, pts);
+                            SchematicDraw.DrawHeadArrow(g, pts, col, lw);   // (1.2.81) hacia dónde va
+                        }
                         else using (var bb = new SolidBrush(col)) g.FillEllipse(bb, pts[0].X - 4, pts[0].Y - 4, 8, 8);
                         var mid = pts[pts.Length / 2];
                         var sz = g.MeasureString(tr.name, f);
@@ -631,6 +768,15 @@ namespace SelectOR
         }
 
         // hacia dónde poner el número de una aguja: al lado contrario de sus ramas
+        // (1.2.81) lo que ocupará en pantalla la figura de una señal (aproximado: 8 luces de largo y 5 de alto) con su mástil a dy
+        static RectangleF EstBox(PointF q, double ar, float arm, float dy, int face, float lr)
+        {
+            float x0 = face > 0 ? arm : -arm - 8 * lr, x1 = face > 0 ? arm + 8 * lr : -arm, y0 = dy - 2.5f * lr, y1 = dy + 2.5f * lr;
+            float c = (float)Math.Cos(ar), s = (float)Math.Sin(ar);
+            var pts = new[] { (x0, y0), (x1, y0), (x1, y1), (x0, y1) }.Select(p => new PointF(q.X + p.Item1 * c - p.Item2 * s, q.Y + p.Item1 * s + p.Item2 * c)).ToArray();
+            return Bounds(pts);
+        }
+
         static PointF Away(RouteBoard.Sw sw)
         {
             float sx = 0, sy = 0; int n = 0;

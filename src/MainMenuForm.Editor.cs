@@ -765,24 +765,17 @@ namespace SelectOR
             if (_edDoc.Cars.Count == 0) { Msg(_edMsg, Tr("El tren no tiene ningún coche: añade al menos uno."), true); return; }
             _edDoc.DisplayName = (_edName.Box.Text ?? "").Trim();
             if (_edDoc.DisplayName.Length == 0) _edDoc.DisplayName = Path.GetFileNameWithoutExtension(_edDoc.Path);
-            // Al cambiar el nombre del tren, el identificador de TrainCfg ( … ) lo sigue, igual que el
-            // Name y el nombre del archivo (si no se ha renombrado, se respeta el que traía).
-            if (_edOriginal == null || !string.Equals(_edOriginal.DisplayName, _edDoc.DisplayName, StringComparison.Ordinal))
-                _edDoc.Id = _edDoc.DisplayName;
+            // (1.2.81) El identificador de TrainCfg ( … ) es siempre el nombre del archivo .con; el jugador solo cambia
+            // el Name ( … ), el nombre que se ve. El archivo no se renombra.
+            _edDoc.Id = Path.GetFileNameWithoutExtension(_edDoc.Path);
             string before = _edDoc.Path;
             string err = _edDoc.Save();
             ClearContentCaches();   // el .con ha cambiado: sus datos se releerán
             if (err != null) { Msg(_edMsg, Tr("No se pudo guardar: ") + err, true); return; }
-            // El archivo .con acompaña al nombre del tren: si cambia, se renombra solo.
-            string renamed = SyncFileNameToTrainName();
             _edOriginal = _edDoc.Clone();
             UpdateEditorDirty();
             ReloadConsistsAfterEdit(changed: new[] { before, _edDoc.Path });   // Conducción libre: datos, ficha y 2D al día
-            if (renamed != null) LoadEditorConsists(_edDoc.Path);   // la lista debe apuntar al archivo nuevo
-            if (!silent)
-                Msg(_edMsg, renamed != null
-                    ? string.Format(Tr("Guardado y archivo renombrado a {0}"), renamed)
-                    : string.Format(Tr("Guardado: {0}"), Path.GetFileName(_edDoc.Path)), false);
+            if (!silent) Msg(_edMsg, string.Format(Tr("Guardado: {0}"), Path.GetFileName(_edDoc.Path)), false);
         }
 
         void RevertConsistDoc()
@@ -807,35 +800,13 @@ namespace SelectOR
             if (name.Length == 0) return;
             string file = Path.Combine(dir, SafeFileName(name) + ".con");
             if (File.Exists(file)) { Msg(_edMsg, Tr("Ya existe una composición con ese nombre de archivo."), true); return; }
-            var doc = new ConsistDoc { Path = file, Id = name, DisplayName = name };
+            var doc = new ConsistDoc { Path = file, Id = Path.GetFileNameWithoutExtension(file), DisplayName = name };   // (TrainCfg = nombre del archivo)
             string err = doc.Save(file);
             ClearContentCaches();
             if (err != null) { Msg(_edMsg, Tr("No se pudo crear: ") + err, true); return; }
             ReloadConsistsAfterEdit(changed: new[] { file });
             LoadEditorConsists(file);
             Msg(_edMsg, Tr("Composición creada: añade coches y pulsa Guardar cambios."), false);
-        }
-
-        // Mantiene el nombre del ARCHIVO .con igual que el nombre del tren (al guardar).
-        // Devuelve el nombre nuevo si lo renombró, o null si no hizo falta.
-        string SyncFileNameToTrainName()
-        {
-            try
-            {
-                string old = _edDoc?.Path;
-                if (old == null) return null;
-                string want = SafeFileName(_edDoc.DisplayName ?? "");
-                if (want.Length == 0) return null;
-                string cur = Path.GetFileNameWithoutExtension(old);
-                if (string.Equals(want, cur, StringComparison.OrdinalIgnoreCase)) return null;
-                string dst = Path.Combine(Path.GetDirectoryName(old) ?? "", want + ".con");
-                if (File.Exists(dst)) return null;   // ya existe otro con ese nombre: se deja como estaba
-                File.Move(old, dst);
-                _edDoc.Path = dst;
-                if (_edOriginal != null) _edOriginal.Path = dst;
-                return Path.GetFileName(dst);
-            }
-            catch { return null; }
         }
 
         // Rellena la columna COCHES de la lista (nº de vehículos de cada .con), en segundo plano.

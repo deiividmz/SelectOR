@@ -300,6 +300,13 @@ namespace SelectOR.MapAgent
                     Agent.Log($"TRAIN {num} ({ids.Length} coches: {Span(ids)}): ya lo tienes ({Desc(same)}), no se crea otro{ren}");
                     return false;
                 }
+                // (1.2.81) el mismo número con parte de esos coches (le faltaba alguno que no se pudo sustituir): no otro tren encima
+                var part = all.FirstOrDefault(t => t.Number == num && t.Cars != null && t.Cars.Count > 0 && t.Cars.Count < ids.Length && t.Cars.All(c => c != null && want.Contains(c.CarID)));
+                if (part != null)
+                {
+                    Agent.Log($"TRAIN {num} ({ids.Length} coches: {Span(ids)}): ya está ({Desc(part)}, con {part.Cars.Count} de sus coches), no se crea otro encima");
+                    return false;
+                }
                 Agent.Log($"TRAIN {num} ({ids.Length} coches: {Span(ids)})"
                           + (holders.Count > 0 ? $"; esos coches ya están en {Desc(holders)}" : "")
                           + (all.Any(t => t.Number == num) ? $"; ya hay un tren nº{num}" : ""));

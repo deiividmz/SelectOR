@@ -27,7 +27,13 @@ namespace SelectOR
             public long Id; public string Name = "", Kind = "cercanias", Origin = "", Destination = "", Consist = "", First = "07:00", Last = "23:00", Stops = "todas";
             public int Every = 30; public bool Active = true;
             public string Hint = "";   // (1.2.79) el recorrido marcado en el mapa: «o=nodo;d=nodo;v=nodo,nodo» (HorarioRecorridoForm)
+            public string Trip = "";   // (1.2.81) "" solo ida · "vuelta" ida y vuelta (cambio de cabina en el destino) · "circular"
+            // (1.2.81) cómo se lee el recorrido: «A → B», «A → B → A» o «A → B ↻ A»
+            public string RouteText => Trip == "vuelta" ? Origin + "  →  " + Destination + "  →  " + Origin
+                                     : Trip == "circular" ? Origin + "  →  " + Destination + "  ↻  " + Origin
+                                     : Origin + "  →  " + Destination;
         }
+        public static readonly string[] Trips = { "", "vuelta", "circular" };
 
         public static readonly string[] Kinds = { "cercanias", "media", "larga", "mercancias" };   // (media: sql/horario-media.sql)
         public static readonly string[] FranjaNames = { "0–6 h", "6–10 h", "10–17 h", "17–21 h", "21–24 h" };
@@ -48,18 +54,23 @@ namespace SelectOR
         RouteGraph _g;
         public Func<string, object, Task<(string json, string err)>> Rpc = Supa.RpcAsync;   // (las pruebas la cambian)
         public Func<string, Task<string>> RetireAi;   // (1.2.78) retirar ya los trenes IA (null = todos; o un servicio): null si fue bien
+        // (1.2.81) el administrador lo puede todo; un gestor del horario (sql/horario-gestores-vueltas.sql) solo los servicios:
+        // los ajustes se ven pero no se cambian, y ni «Retirar trenes IA» ni «Gestores…»
+        readonly bool _admin;
 
         public HorarioSalaForm(string routeDir, Func<Task<RouteGraph>> graph, string route = "CGL_V22N_RE",
-                               Func<Task<RouteMapData>> mapData = null, Func<List<(string name, double lat, double lon, double kmh)>> aiTrains = null)
+                               Func<Task<RouteMapData>> mapData = null, Func<List<(string name, double lat, double lon, double kmh)>> aiTrains = null,
+                               bool admin = true)
         {
-            _routeDir = routeDir; _graph = graph; _route = route; _mapData = mapData; _aiTrains = aiTrains;
+            _routeDir = routeDir; _graph = graph; _route = route; _mapData = mapData; _aiTrains = aiTrains; _admin = admin;
             Text = Tr("Horario de la sala");
             StartPosition = FormStartPosition.CenterParent;
             Size = new Size(Theme.Px(1480), Theme.Px(780)); MinimumSize = new Size(Theme.Px(1100), Theme.Px(540));   // (1.2.77) con el mapa a la derecha
             DialogKit.Dress(this);
             Font = Theme.Font(9.5f);
 
-            var head = new DialogKit.Header(Tr("Horario de la sala"), Tr("Trenes IA de la sala compartida de CGL · solo el administrador"), "🚆") { Dock = DockStyle.Top };
+            var head = new DialogKit.Header(Tr("Horario de la sala"), admin ? Tr("Trenes IA de la sala compartida de CGL · el administrador y los gestores del horario")
+                                                                            : Tr("Trenes IA de la sala compartida de CGL · como gestor del horario: los servicios (los ajustes, solo el administrador)"), "🚆") { Dock = DockStyle.Top };
 
             // ajustes
             var top = new Panel { Dock = DockStyle.Top, Height = Theme.Px(78), BackColor = Theme.Surface, Padding = new Padding(Theme.Px(16), Theme.Px(10), Theme.Px(16), Theme.Px(6)) };
@@ -83,6 +94,12 @@ namespace SelectOR
             top.Resize += (s, e) => saveSet.Left = top.ClientSize.Width - saveSet.Width - Theme.Px(16);
             saveSet.Click += async (s, e) => await SaveSettings();
             top.Controls.Add(saveSet);
+            if (!admin)   // (1.2.81) gestor: los ajustes, a la vista
+            {
+                saveSet.Visible = false;
+                _enabled.Enabled = false; _max.Enabled = false;
+                foreach (var c in _density) c.Enabled = false;
+            }
 
             _cards = new ServiceCards { Dock = DockStyle.Fill, ColorOf = ColorOf, KindName = KindName };
             _cards.Open += async s => await Edit(s);
@@ -105,7 +122,10 @@ namespace SelectOR
             del.Click += async (s, e) => await Delete(_cards.Selected);
             test.Click += async (s, e) => await TestPath(_cards.Selected);
             close.Click += (s, e) => Close();
-            foot.AddRight(close, test, routeBtn, del, edit, add, retire);
+            var editors = DialogKit.Secondary(Tr("Gestores…"), 120);   // (1.2.81) quién más puede cambiar los servicios
+            editors.Click += async (s, e) => await EditEditors();
+            if (admin) foot.AddRight(close, test, routeBtn, del, edit, add, retire, editors);
+            else foot.AddRight(close, test, routeBtn, del, edit, add);
             _status = new Label { AutoSize = false, Width = Theme.Px(160), ForeColor = Theme.Subtle, BackColor = foot.BackColor, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Px(16), 0, 0, 0) };
             foot.AddLeft(_status);
 
@@ -154,7 +174,8 @@ namespace SelectOR
                                 Consist = S("consist"), First = S("first_time"), Last = S("last_time"), Stops = S("stops"),
                                 Every = x.TryGetProperty("every_min", out var ev) && ev.TryGetInt32(out int e) ? e : 0,
                                 Active = !x.TryGetProperty("active", out var ac) || ac.ValueKind != JsonValueKind.False,
-                                Hint = S("route_hint") ?? ""
+                                Hint = S("route_hint") ?? "",
+                                Trip = S("trip") ?? ""
                             });
                         }
                 }
@@ -280,7 +301,10 @@ namespace SelectOR
             dlg.AddCombo("kind", Tr("Tipo"), Kinds.Select(KindName), Math.Max(0, Array.IndexOf(Kinds, s.Kind)));
             int StIdx(string n) => Math.Max(0, stations.FindIndex(x => string.Equals(x, n, StringComparison.CurrentCultureIgnoreCase)));
             dlg.AddCombo("origin", Tr("Origen"), stations, StIdx(s.Origin));
-            dlg.AddCombo("dest", Tr("Destino"), stations, StIdx(s.Destination));
+            dlg.AddCombo("dest", Tr("Destino (en circular: por dónde da la vuelta)"), stations, StIdx(s.Destination));
+            // (1.2.81) solo ida, ida y vuelta o circular
+            string[] trips = { Tr("Solo ida"), Tr("Ida y vuelta (cambia de cabina en el destino y vuelve al origen)"), Tr("Circular (pasa por el destino sin cambiar de cabina y acaba en el origen)") };
+            dlg.AddCombo("trip", Tr("Recorrido"), trips, Math.Max(0, Array.IndexOf(Trips, s.Trip ?? "")));
             dlg.AddCombo("con", Tr("Composición"), cons, Math.Max(0, cons.IndexOf(s.Consist)));
             dlg.AddText("first", Tr("Primera salida (HH:MM, hora de la sala)"), s.First);
             dlg.AddText("every", Tr("Cada cuántos minutos (0 = una sola salida)"), s.Every.ToString(CultureInfo.InvariantCulture));
@@ -313,13 +337,15 @@ namespace SelectOR
                 string baseDir = Path.GetDirectoryName(Path.GetDirectoryName(_routeDir.TrimEnd('\\', '/'))) ?? "";
                 string spec = AiConsistSpec.Build(baseDir, cons[ci]);
                 if (spec == null) return string.Format(Tr("No se puede leer la composición «{0}» en tu Open Rails."), cons[ci]);
-                var (json, err) = await Rpc("room_ai_service_save", new
+                string trip = Trips[Math.Max(0, Math.Min(Trips.Length - 1, d.Index("trip")))];
+                var (json, err) = await Rpc("room_ai_service_save_trip", new
                 {
                     p_id = !isNew ? (long?)s.Id : null, p_name = name, p_kind = Kinds[Math.Max(0, d.Index("kind"))], p_origin = stations[oi], p_destination = stations[di],
                     p_consist = cons[ci], p_first_time = first, p_every_min = ev, p_last_time = last, p_stops = stops, p_active = d.Index("active") == 0, p_route = _route,
-                    p_consist_spec = spec
+                    p_consist_spec = spec, p_trip = trip
                 });
-                if (err != null && err.IndexOf("p_consist_spec", StringComparison.OrdinalIgnoreCase) >= 0) return Tr("El servidor aún no guarda la composición de los servicios (falta horario-composicion.sql).");
+                if (err != null && (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 || err.IndexOf("room_ai_service_save_trip", StringComparison.OrdinalIgnoreCase) >= 0))
+                    return Tr("El servidor aún no guarda el recorrido de ida y vuelta (falta horario-gestores-vueltas.sql).");
                 return err;
             };
             if (dlg.ShowDialog(this) == DialogResult.OK) await Reload();

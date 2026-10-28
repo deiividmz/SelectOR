@@ -304,19 +304,57 @@ namespace SelectOR
         {
             var v = RoomMapNow();
             var items = new List<(string, Color, Action)>();
-            for (int i = 0; i < list.Count; i++)
+            // (1.2.81) una tijera: sus tres posiciones de una vez (las agujas van por parejas), y debajo cada aguja suelta
+            var tj = v?.Geo?.ScissorList.FirstOrDefault(t => list.Count == 4 && t.S.All(list.Contains));
+            // cada aguja suelta (de una tijera, no: solo sus cuatro combinaciones)
+            void Singles(List<(string, Color, Action)> into)
             {
-                var s = list[i];
-                int pos = v?.SwitchPos?.Invoke(s) ?? -1;
-                string how = pos == 0 ? Tr("vía directa") : pos == 1 ? Tr("vía desviada") : Tr("sin dato");
-                if (v != null && RoomMapDraw.IsLocked(v, s)) how += " · " + Tr("enclavada");
-                items.Add((string.Format(Tr("Aguja {0}: {1}"), i + 1, how), Color.Empty, () =>
+                for (int i = 0; i < list.Count; i++)
                 {
-                    string msg = RoomMapClick(s, screen);
-                    if (msg != null) try { _serviceHud?.MapNotice(msg); } catch { }
-                }));
+                    var s = list[i];
+                    int pos = v?.SwitchPos?.Invoke(s) ?? -1;
+                    string how = pos == 0 ? Tr("vía directa") : pos == 1 ? Tr("vía desviada") : Tr("sin dato");
+                    if (v != null && RoomMapDraw.IsLocked(v, s)) how += " · " + Tr("enclavada");
+                    into.Add((string.Format(Tr("Aguja {0}: {1}"), i + 1, how), Color.Empty, () =>
+                    {
+                        string msg = RoomMapClick(s, screen);
+                        if (msg != null) try { _serviceHud?.MapNotice(msg); } catch { }
+                    }));
+                }
             }
-            _serviceHud?.BigMapMenu(screen, string.Format(Tr("{0} agujas aquí (de izquierda a derecha)"), list.Count), items);
+            if (tj != null && tj.StraightK.All(k => k >= 0))
+            {
+                int Num(int i) => list.IndexOf(tj.S[i]) + 1;   // (su número en la lista, de izquierda a derecha)
+                // (1.2.81, petición) sus cuatro combinaciones (cada una pone las cuatro agujas): las dos paralelas, cada diagonal y las
+                // dos diagonales (se usa una u otra: se cruzan). S: a0, a1 (una paralela), b0, b1; diagonales a0-b1 y b0-a1
+                int[] Dir(params int[] dv) => Enumerable.Range(0, 4).Select(i => dv.Contains(i) ? 1 - tj.StraightK[i] : tj.StraightK[i]).ToArray();
+                var opts = new[]
+                {
+                    (Tr("Vía directa (las dos paralelas)"), Dir()),
+                    (string.Format(Tr("Diagonal {0} → {1}"), Num(0), Num(3)), Dir(0, 3)),
+                    (string.Format(Tr("Diagonal {0} → {1}"), Num(2), Num(1)), Dir(2, 1)),
+                    (Tr("Las dos diagonales (una u otra: se cruzan)"), Dir(0, 1, 2, 3)),
+                };
+                foreach (var (text, to) in opts)
+                {
+                    var tt = to; bool now = Enumerable.Range(0, 4).All(i => (v.SwitchPos?.Invoke(tj.S[i]) ?? -1) == tt[i]);
+                    items.Add(((now ? "✓ " : "") + text, Color.Empty, () =>
+                    {
+                        var need = Enumerable.Range(0, 4).Where(i => (v.SwitchPos?.Invoke(tj.S[i]) ?? -1) != tt[i]).ToList();
+                        // con alguna de las que hay que mover enclavada, ninguna (si no, la tijera quedaba a medias)
+                        if (need.Any(i => RoomMapDraw.IsLocked(v, tj.S[i]))) { try { _serviceHud?.MapNotice(Tr("Alguna aguja de la tijera está enclavada: no se cambia ninguna.")); } catch { } return; }
+                        string msg = null;
+                        foreach (int i in need) msg = RoomMapClick(tj.S[i], screen) ?? msg;   // (RoomMapClick cambia a la contraria)
+                        if (msg != null) try { _serviceHud?.MapNotice(msg); } catch { }
+                    }));
+                }
+                _serviceHud?.BigMapMenu(screen, Tr("Escape en tijera"), items);
+            }
+            else
+            {
+                Singles(items);
+                _serviceHud?.BigMapMenu(screen, string.Format(Tr("{0} agujas aquí (de izquierda a derecha)"), list.Count), items);
+            }
             RoomLog($"varias agujas bajo el ratón: {string.Join(", ", list.Select(s => s.Node))}");
         }
 
