@@ -1,4 +1,4 @@
-// Lista de SERVICIOS en tarjetas: una por servicio, agrupadas por día (con el total de cada día). Cada
+﻿// Lista de SERVICIOS en tarjetas: una por servicio, agrupadas por día (con el total de cada día). Cada
 // tarjeta lleva el maquinista, la ruta, la composición 2D del tren (la imagen que subió su SelectOR al
 // ponerse de servicio), los datos del viaje y el neto.
 // Solo los 5 días más recientes van en tarjetas; los anteriores, en filas finas sin la composición
@@ -302,7 +302,7 @@ namespace SelectOR
         {
             sub = "";
             if (day == DateTime.MinValue) return I18n.T("Sin fecha");
-            var ci = I18n.English ? CultureInfo.GetCultureInfo("en-GB") : Es;
+            var ci = I18n.Culture;
             string full = day.ToString(I18n.English ? "dddd d MMMM" : "dddd d 'de' MMMM", ci);
             var today = DateTime.Today;
             if (day == today) { sub = full; return I18n.T("Hoy"); }

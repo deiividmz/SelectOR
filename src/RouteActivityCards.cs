@@ -1,4 +1,4 @@
-// RUTA y ACTIVIDAD con el estilo común: portada de la ruta (imagen, datos en pastillas y descripción con
+﻿// RUTA y ACTIVIDAD con el estilo común: portada de la ruta (imagen, datos en pastillas y descripción con
 // «Leer más»), accesos «Empezar a conducir» con sus cifras, actividades en tarjetas y la ficha de la elegida.
 
 using System;
@@ -221,7 +221,7 @@ namespace SelectOR
         int PaintLive(Graphics g, Rectangle card, int y)
         {
             if (Online < 0) { _liveDot = Rectangle.Empty; return y; }
-            var ci = I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : System.Globalization.CultureInfo.GetCultureInfo("es-ES");
+            var ci = I18n.Culture;
             string t1 = string.Format(Online == 1 ? LblOnline1 : LblOnlineN, Online.ToString("N0", ci));
             string t2 = Driving > 0 ? string.Format(LblDriving, Driving.ToString("N0", ci)) : "";
             int capW = TextRenderer.MeasureText(g, LblLive, _fLiveCap, Size.Empty, TextFormatFlags.NoPadding).Width;

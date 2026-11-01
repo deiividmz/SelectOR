@@ -1,4 +1,4 @@
-// Calendario de los servicios (al lado de la lista de Servicios): un mes, con los días que tienen
+﻿// Calendario de los servicios (al lado de la lista de Servicios): un mes, con los días que tienen
 // servicios coloreados según cuántos hubo (más intenso = más servicios). Un clic en un día lleva la
 // lista a ese día; las flechas cambian de mes. Al desplazar la lista, el calendario la sigue.
 
@@ -57,7 +57,7 @@ namespace SelectOR
             Invalidate();
         }
 
-        CultureInfo Ci => I18n.English ? CultureInfo.GetCultureInfo("en-GB") : Es;
+        CultureInfo Ci => I18n.Culture;
 
         protected override void OnPaint(PaintEventArgs e)
         {

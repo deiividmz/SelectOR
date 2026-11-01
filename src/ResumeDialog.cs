@@ -1,4 +1,4 @@
-// Diálogo de partidas guardadas: lista los .save de OR (los que se crean con la tecla de guardar del
+﻿// Diálogo de partidas guardadas: lista los .save de OR (los que se crean con la tecla de guardar del
 // simulador, F2 por defecto) y permite reanudar (-resume) o repetir (-replay). Muestra la captura que
 // OR guarda junto a cada partida (.png), la ruta, el recorrido y cuándo se guardó.
 
@@ -28,7 +28,7 @@ namespace SelectOR
         }
 
         // Fechas en el idioma de SelectOR (el de Open Rails), no en el de Windows.
-        static System.Globalization.CultureInfo Cul => I18n.English ? new System.Globalization.CultureInfo("en-GB") : new System.Globalization.CultureInfo("es-ES");
+        static System.Globalization.CultureInfo Cul => I18n.Culture;
 
         ListBox _list;
         Label _detail;

@@ -48,7 +48,7 @@ namespace SelectOR
         {
             _rutaDocs = new Panel { Dock = DockStyle.Top, Height = 132, BackColor = Theme.Bg, Padding = new Padding(0, 12, 0, 0), Visible = false };
             var box = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(14, 8, 14, 10) };
-            var head = new Label { Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Text = Tr("DOCUMENTOS DE LA RUTA") };
+            var head = new Label { Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8.5f, FontStyle.Bold), Text = Tr("DOCUMENTOS DE LA RUTA") };
             _rutaDocsFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Surface, WrapContents = false, AutoScroll = false, Margin = new Padding(0) };
             _rutaDocsFlow.Resize += (s, e) => FitDocCards();
             box.Controls.Add(_rutaDocsFlow); box.Controls.Add(head);
@@ -125,10 +125,10 @@ namespace SelectOR
             var card = new Panel { Width = 400, Height = 84, Margin = new Padding(0, 0, 12, 0), BackColor = Theme.Surface2 };
             var cover = new PictureBox { Left = 8, Top = 6, Width = 52, Height = 72, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.SurfaceHi };
             string title = I18n.English && !string.IsNullOrWhiteSpace(d.TitleEn) ? d.TitleEn : d.Title ?? Path.GetFileNameWithoutExtension(d.File);
-            var lt = new Label { Left = 70, Top = 6, Width = 322, Height = 20, ForeColor = Theme.Text, BackColor = Theme.Surface2, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Text = title, AutoEllipsis = true };
+            var lt = new Label { Left = 70, Top = 6, Width = 322, Height = 20, ForeColor = Theme.Text, BackColor = Theme.Surface2, Font = Theme.Font(9.5f, FontStyle.Bold), Text = title, AutoEllipsis = true };
             string sub = "PDF" + (d.Pages > 0 ? " · " + Plural(d.Pages, "{0} página", "{0} páginas") : "") + (d.Bytes > 0 ? " · " + (d.Bytes / 1048576.0).ToString("0.0") + " MB" : "")
                          + (string.IsNullOrWhiteSpace(d.Author) ? "" : " · " + string.Format(Tr("por {0}"), d.Author));
-            var ls = new Label { Left = 70, Top = 26, Width = 322, Height = 18, ForeColor = Theme.Subtle, BackColor = Theme.Surface2, Font = new Font("Segoe UI", 8.5f), Text = sub, AutoEllipsis = true };
+            var ls = new Label { Left = 70, Top = 26, Width = 322, Height = 18, ForeColor = Theme.Subtle, BackColor = Theme.Surface2, Font = Theme.Font(8.5f), Text = sub, AutoEllipsis = true };
             var bOpen = new RoundButton { Left = 70, Top = 48, Width = 92, Height = 28, Radius = 7, Text = Tr("Abrir"), BaseColor = Theme.Accent2, HoverColor = Theme.Accent, TextColor = Color.White, FontSize = 9f };
             var bSave = new RoundButton { Left = 168, Top = 48, Width = 164, Height = 28, Radius = 7, Text = Tr("Guardar en Descargas"), BaseColor = Theme.SurfaceHi, HoverColor = Theme.Border, TextColor = Theme.Text, FontSize = 9f };
             bOpen.Click += async (s, e) => await DocAction(route, d, bOpen, false);

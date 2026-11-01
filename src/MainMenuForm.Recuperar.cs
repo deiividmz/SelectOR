@@ -1,4 +1,4 @@
-// Servicio interrumpido: si Open Rails y SelectOR se cierran de golpe (cuelgue, corte de luz…), el viaje
+﻿// Servicio interrumpido: si Open Rails y SelectOR se cierran de golpe (cuelgue, corte de luz…), el viaje
 // no se pierde.
 //  · Mientras se conduce un servicio, SelectOR guarda cada pocos segundos en disco lo recogido hasta ese
 //    momento: km, tiempo de marcha, viajeros, paradas e infracciones detectadas.
@@ -136,7 +136,7 @@ namespace SelectOR
                 foreach (var i in j.Infr) _infrItems.Add((i.Code, i.Detail ?? new Dictionary<string, object>()));
                 _svcRouteOverride = j.Route;
                 _svcRecoveredNote = string.Format(Tr("Viaje recuperado: Open Rails y SelectOR se cerraron durante el servicio. Se han usado los datos recogidos hasta el {0}."),
-                    j.SavedUtc.ToLocalTime().ToString(I18n.English ? "d MMM · HH:mm" : "d 'de' MMMM 'a las' HH:mm", I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : EsEs));
+                    j.SavedUtc.ToLocalTime().ToString(I18n.English ? "d MMM · HH:mm" : "d 'de' MMMM 'a las' HH:mm", I18n.Culture));
 
                 if (showDialog) ShowPage(PageEmpresas);
                 var (ok, _) = await EmpCloseServiceCore(showDialog);

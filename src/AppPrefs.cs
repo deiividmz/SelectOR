@@ -1,4 +1,4 @@
-// Preferencias propias del selector (favoritos y ultima seleccion).
+﻿// Preferencias propias del selector (favoritos y ultima seleccion).
 // Se guardan en %AppData%\Open Rails\MenuParalelo.json para no tocar nada de OR.
 
 using System;
@@ -72,6 +72,8 @@ namespace SelectOR
         public int CabPanelX { get; set; } = -1;     // -1 = abajo a la derecha
         public int CabPanelY { get; set; } = -1;
         public float CabHudScale { get; set; } = 1f;
+        public int HudScalePct { get; set; } = 100;   // (1.2.82) tamaño del HUD, la hoja de ruta y el chat (HudScale), en %
+        public string UiLanguage { get; set; } = "auto";   // (1.2.82) idioma de SelectOR: «auto» (el de Open Rails o Windows) o un código de I18n.Languages
         // HUD del chat de empresa: si lo dejaste abierto, dónde, su tamaño y si estaba plegado.
         public bool ChatHudOn { get; set; }
         public bool TrainListView { get; set; }        // Conducción libre: trenes en lista (true) o en tarjetas

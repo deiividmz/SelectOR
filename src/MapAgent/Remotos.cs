@@ -9,11 +9,16 @@
 //    (Train.CheckBackwardClearance): su ruta aquí es solo la de cuando llegaron y, al salirse de ella, Open Rails los ponía
 //    fuera de control y rehacía su ruta, que fallaba (NullReferenceException en GenerateValidRoute en cada fotograma desde
 //    que hay trenes IA en la sala). Quien los mueve es su dueño (o el despachador): aquí solo se dibujan.
+//  · (1.2.82) Tren de la sala al que le faltan coches para siempre (vehículos que no tienes y sin sustituto): Open Rails,
+//    al ver que no cuadran los coches, lo pedía otra vez (GETTRAIN), lo recargaba entero cada 11 s y, mientras tanto, no
+//    lo movía (en tu pantalla se quedaba quieto donde apareció). Ahora, tras 30 s pidiéndolo sin que cuadre, se mueve con
+//    los coches que tiene y no se vuelve a pedir (registro de Iván del 27/10: nueve trenes recargados toda la sesión).
 //  · Si aun así Open Rails no puede colocar el tren de otro (le falta todo, o su vía te sale ocupada), queda en el
 //    registro del agente con el motivo (OnlineTrains.AddPlayers), para saber por qué no se ve.
 // Con Harmony, en memoria (no cambia ningún archivo de Open Rails).
 
 using System;
+using System.Linq;
 using HarmonyLib;
 using Orts.MultiPlayer;
 using Orts.Simulation.RollingStocks;
@@ -33,6 +38,8 @@ namespace SelectOR.MapAgent
             {
                 var sub = AccessTools.Method(typeof(MPManager), "SubCar");
                 if (sub != null) { h.Patch(sub, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeSub)), postfix: new HarmonyMethod(typeof(Remotos), nameof(AfterSub))); n++; }
+                var mv = AccessTools.Method(typeof(MSGMove), "HandleMsg");
+                if (mv != null) { h.Patch(mv, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeMove))); n++; }
                 var back = AccessTools.Method(typeof(Orts.Simulation.Physics.Train), "CheckBackwardClearance");
                 if (back != null) { h.Patch(back, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeBackward))); n++; }
                 var add = AccessTools.Method(typeof(OnlineTrains), "AddPlayers");
@@ -69,6 +76,42 @@ namespace SelectOR.MapAgent
         }
 
         static void BeforeAdd(MSGPlayer player) { _subs = 0; _adding = player; }
+
+        // (1.2.82) trenes de la sala cuyos coches no cuadran: cuántas veces seguidas (cada aviso de posición) y desde cuándo
+        static readonly System.Collections.Generic.Dictionary<int, (int count, int times, long since)> _short = new System.Collections.Generic.Dictionary<int, (int, int, long)>();
+        static readonly System.Collections.Generic.HashSet<int> _shortSaid = new System.Collections.Generic.HashSet<int>();
+        static readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+        static void BeforeMove(object __instance)
+        {
+            try
+            {
+                if (!MPManager.IsClient()) return;
+                var items = Traverse.Create(__instance).Field("items").GetValue() as System.Collections.IList;
+                if (items == null) return;
+                var trains = MPManager.Simulator?.Trains?.ToArray();
+                if (trains == null) return;
+                long now = _clock.ElapsedMilliseconds;
+                foreach (var it0 in items)
+                {
+                    var it = Traverse.Create(it0);
+                    string user = it.Field("user").GetValue<string>() ?? "";
+                    if (!(user.Contains("0xAI") || user.Contains("0xUC"))) continue;
+                    int num = it.Field("num").GetValue<int>(), want = it.Field("count").GetValue<int>();
+                    Orts.Simulation.Physics.Train t = null;
+                    foreach (var x in trains) if (x != null && x.Number == num && x.TrainType == Orts.Simulation.Physics.Train.TRAINTYPE.REMOTE) { t = x; break; }
+                    if (t == null || t.Cars == null) continue;
+                    int have = t.Cars.Count;
+                    if (have == want || have == 0) { _short.Remove(num); continue; }
+                    // coches que no cuadran: los primeros avisos, como siempre (Open Rails lo pide); pasados 30 s, se mueve con los suyos
+                    if (!_short.TryGetValue(num, out var st) || st.count != have) st = (have, 0, now);
+                    st.times++; _short[num] = st;
+                    if (now - st.since < 30000) continue;
+                    it.Field("count").SetValue(have);
+                    if (_shortSaid.Add(num)) Agent.Log($"tren de la sala nº{num} ({user}): le faltan coches ({have} de {want}: vehículos que no tienes); se mueve con los que tiene y no se vuelve a pedir");
+                }
+            }
+            catch { }
+        }
 
         // (1.2.81) en un jugador, los trenes de los demás no se comprueban hacia atrás (ver arriba)
         static bool BeforeBackward(Orts.Simulation.Physics.Train __instance, ref int __result)

@@ -41,6 +41,11 @@ namespace SelectOR
     public class ChatView : Control
     {
         public bool Compact;              // HUD: sin burbujas, más apretado
+        // (1.2.82) en el chat del HUD: a su tamaño (HudScale). Se maqueta en píxeles lógicos (LW × LH) y se pinta ampliado
+        float _zoom = 1f;
+        public float Zoom { get => _zoom; set { float v = Math.Max(1f, Math.Min(2f, value)); if (Math.Abs(v - _zoom) < 0.001f) return; _zoom = v; _layoutW = -1; Invalidate(); } }
+        int LW => _zoom == 1f ? Width : (int)Math.Round(Width / _zoom);
+        int LH => _zoom == 1f ? Height : (int)Math.Round(Height / _zoom);
         public string MyUserId = "";
         public string EmptyText = "";
         // Mis mensajes: editar o eliminar (clic derecho). Null = sin esas opciones.
@@ -77,7 +82,7 @@ namespace SelectOR
             bool more = last > _lastId && _lastId > 0;
             bool mineLast = more && msgs[^1].UserId == MyUserId;
             // ¿Estaba abajo del todo ANTES de añadir los nuevos? (después, con más alto, ya no lo parece)
-            bool wasAtBottom = _stick || _scroll >= Math.Max(0, _contentH - Height) - 24;
+            bool wasAtBottom = _stick || _scroll >= Math.Max(0, _contentH - LH) - 24;
             _msgs = msgs == null ? new List<ChatMsg>() : new List<ChatMsg>(msgs);
             _lastId = last;
             _layoutW = -1;
@@ -89,7 +94,7 @@ namespace SelectOR
 
         public void ScrollToBottom()
         {
-            _scroll = Math.Max(0, _contentH - Height);
+            _scroll = Math.Max(0, _contentH - LH);
             _stick = true; _newBelow = false;
             Invalidate();
         }
@@ -126,7 +131,7 @@ namespace SelectOR
 
         void Relayout(bool keepBottom = true)
         {
-            int w = Math.Max(60, ClientSize.Width);
+            int w = Math.Max(60, LW);
             if (w == _layoutW) return;
             bool stick = _stick;
             _layoutW = w;
@@ -183,7 +188,7 @@ namespace SelectOR
             finally { mg?.Dispose(); }
             _contentH = y + (Compact ? 6 : 12);
             ClampScroll();
-            if (keepBottom && stick) { _scroll = Math.Max(0, _contentH - Height); _stick = true; _newBelow = false; }
+            if (keepBottom && stick) { _scroll = Math.Max(0, _contentH - LH); _stick = true; _newBelow = false; }
         }
 
         static string ShownText(ChatMsg m) => m.Deleted ? I18n.T("Mensaje eliminado") : m.Body;
@@ -198,7 +203,7 @@ namespace SelectOR
 
         void ClampScroll()
         {
-            int max = Math.Max(0, _contentH - Height);
+            int max = Math.Max(0, _contentH - LH);
             _scroll = Math.Max(0, Math.Min(_scroll, max));
             _stick = _scroll >= max - 2;
             if (_stick) _newBelow = false;
@@ -208,7 +213,7 @@ namespace SelectOR
         {
             bool stick = _stick;
             _layoutW = -1; Relayout();
-            if (stick) _scroll = Math.Max(0, _contentH - Height);
+            if (stick) _scroll = Math.Max(0, _contentH - LH);
             ClampScroll();
             base.OnResize(e);
         }
@@ -223,6 +228,7 @@ namespace SelectOR
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            if (_zoom != 1f) e = new MouseEventArgs(e.Button, e.Clicks, (int)(e.X / _zoom), (int)(e.Y / _zoom), e.Delta);   // (1.2.82: en lógicos)
             if (_newBelow && _newPill.Contains(e.Location)) { ScrollToBottom(); return; }
             if (e.Button == MouseButtons.Right)
             {
@@ -250,7 +256,7 @@ namespace SelectOR
                                 }
                             });
                     }
-                    OverlayMenu.Show(PointToScreen(e.Location), null, items);
+                    OverlayMenu.Show(PointToScreen(new Point((int)(e.X * Zoom), (int)(e.Y * Zoom))), null, items);
                 }
             }
             base.OnMouseUp(e);
@@ -282,11 +288,12 @@ namespace SelectOR
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             using (var bg = new SolidBrush(BackColor)) g.FillRectangle(bg, ClientRectangle);
-            if (_layoutW != ClientSize.Width) Relayout();
+            if (_zoom != 1f) g.ScaleTransform(_zoom, _zoom);   // (1.2.82) a su tamaño en el HUD
+            if (_layoutW != LW) Relayout();
 
             if (_items.Count == 0)
             {
-                TextRenderer.DrawText(g, EmptyText ?? "", Theme.Font(Compact ? 8.5f : 10f), new Rectangle(12, 0, Width - 24, Height), Theme.Subtle,
+                HudScale.Text(g, EmptyText ?? "", Theme.Font(Compact ? 8.5f : 10f), new Rectangle(12, 0, LW - 24, LH), Theme.Subtle,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
                 return;
             }
@@ -294,18 +301,18 @@ namespace SelectOR
             foreach (var it in _items)
             {
                 int top = it.Y - _scroll;
-                if (top > Height || top + it.H < 0) continue;
+                if (top > LH || top + it.H < 0) continue;
                 if (it.Day != null)
                 {
-                    var r = new Rectangle(0, top, Width, it.H);
+                    var r = new Rectangle(0, top, LW, it.H);
                     var sz = TextRenderer.MeasureText(it.Day, FSmall);
-                    var pill = new Rectangle((Width - sz.Width - 18) / 2, top + (it.H - sz.Height - 4) / 2, sz.Width + 18, sz.Height + 4);
+                    var pill = new Rectangle((LW - sz.Width - 18) / 2, top + (it.H - sz.Height - 4) / 2, sz.Width + 18, sz.Height + 4);
                     using (var p = new Pen(Color.FromArgb(60, 255, 255, 255)))
                     {
                         g.DrawLine(p, Pad, r.Top + r.Height / 2, pill.Left - 8, r.Top + r.Height / 2);
-                        g.DrawLine(p, pill.Right + 8, r.Top + r.Height / 2, Width - Pad, r.Top + r.Height / 2);
+                        g.DrawLine(p, pill.Right + 8, r.Top + r.Height / 2, LW - Pad, r.Top + r.Height / 2);
                     }
-                    TextRenderer.DrawText(g, it.Day, FSmall, pill, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    HudScale.Text(g, it.Day, FSmall, pill, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                     continue;
                 }
                 var m = it.M;
@@ -322,16 +329,16 @@ namespace SelectOR
                     var tsz = TextRenderer.MeasureText(time, FSmall, Size.Empty, TextFormatFlags.NoPadding);
                     int total = nsz.Width + (role.Length > 0 ? rsz.Width + 14 : 0) + tsz.Width + 8;
                     int x = (!Compact && it.Mine) ? hr.Right - total : hr.Left + (Compact ? 0 : 2);
-                    TextRenderer.DrawText(g, name, FName, new Point(x, hr.Top), nc, TextFormatFlags.NoPadding);
+                    HudScale.Text(g, name, FName, new Point(x, hr.Top), nc, TextFormatFlags.NoPadding);
                     x += nsz.Width + 6;
                     if (role.Length > 0)
                     {
                         var rr = new Rectangle(x, hr.Top + (nsz.Height - rsz.Height) / 2 - 1, rsz.Width + 8, rsz.Height + 2);
                         using (var rb = new SolidBrush(Color.FromArgb(40, RoleColor(m.Role)))) using (var rp = Theme.Round(rr, 4)) g.FillPath(rb, rp);
-                        TextRenderer.DrawText(g, role, FSmall, new Point(rr.Left + 4, rr.Top + 1), RoleColor(m.Role), TextFormatFlags.NoPadding);
+                        HudScale.Text(g, role, FSmall, new Point(rr.Left + 4, rr.Top + 1), RoleColor(m.Role), TextFormatFlags.NoPadding);
                         x = rr.Right + 6;
                     }
-                    TextRenderer.DrawText(g, time, FSmall, new Point(x, hr.Top + (nsz.Height - tsz.Height) / 2), Theme.Subtle, TextFormatFlags.NoPadding);
+                    HudScale.Text(g, time, FSmall, new Point(x, hr.Top + (nsz.Height - tsz.Height) / 2), Theme.Subtle, TextFormatFlags.NoPadding);
                 }
                 var tr = it.Text; tr.Offset(dy);
                 if (!Compact)
@@ -341,36 +348,36 @@ namespace SelectOR
                     using (var b = new SolidBrush(fill)) using (var p = Theme.Round(br, 10)) g.FillPath(b, p);
                 }
                 if (m.Deleted)
-                    TextRenderer.DrawText(g, ShownText(m), FItalic, tr, Theme.Subtle, BodyFlags);
+                    HudScale.Text(g, ShownText(m), FItalic, tr, Theme.Subtle, BodyFlags);
                 else
                 {
                     if (ColorText.HasEmoji(m.Body) && ColorText.Available) ColorText.Draw(g, m.Body, BodyFont(m), tr, Theme.Text);   // emojis en color
-                    else TextRenderer.DrawText(g, m.Body, FBody, tr, Theme.Text, BodyFlags);
+                    else HudScale.Text(g, m.Body, FBody, tr, Theme.Text, BodyFlags);
                     if (m.Edited)
                     {
                         int sh = TextRenderer.MeasureText("Ág", FSmall).Height;
-                        TextRenderer.DrawText(g, I18n.T("Editado"), FSmall, new Rectangle(tr.Left, tr.Bottom - sh, tr.Width, sh),
+                        HudScale.Text(g, I18n.T("Editado"), FSmall, new Rectangle(tr.Left, tr.Bottom - sh, tr.Width, sh),
                             Color.FromArgb(150, 156, 162), TextFormatFlags.NoPadding | (!Compact && it.Mine ? TextFormatFlags.Right : TextFormatFlags.Left));
                     }
                 }
             }
 
             // Barra de desplazamiento fina
-            if (_contentH > Height)
+            if (_contentH > LH)
             {
-                int th = Math.Max(24, Height * Height / _contentH);
-                int ty = (int)((Height - th) * (_scroll / (double)Math.Max(1, _contentH - Height)));
+                int th = Math.Max(24, LH * LH / _contentH);
+                int ty = (int)((LH - th) * (_scroll / (double)Math.Max(1, _contentH - LH)));
                 using var b = new SolidBrush(Color.FromArgb(70, 255, 255, 255));
-                using var p = Theme.Round(new Rectangle(Width - 6, ty + 2, 4, th - 4), 2);
+                using var p = Theme.Round(new Rectangle(LW - 6, ty + 2, 4, th - 4), 2);
                 g.FillPath(b, p);
             }
             if (_newBelow)
             {
                 string t = "↓ " + I18n.T("Mensajes nuevos");
                 var sz = TextRenderer.MeasureText(t, FSmall);
-                _newPill = new Rectangle((Width - sz.Width - 20) / 2, Height - sz.Height - 14, sz.Width + 20, sz.Height + 6);
+                _newPill = new Rectangle((LW - sz.Width - 20) / 2, LH - sz.Height - 14, sz.Width + 20, sz.Height + 6);
                 using (var b = new SolidBrush(Theme.Accent)) using (var p = Theme.Round(_newPill, _newPill.Height / 2)) g.FillPath(b, p);
-                TextRenderer.DrawText(g, t, FSmall, _newPill, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                HudScale.Text(g, t, FSmall, _newPill, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
         }
     }
@@ -417,7 +424,8 @@ namespace SelectOR
             _view.EditRequested = m => EditMsg?.Invoke(m);
             _view.DeleteRequested = m => DeleteMsg?.Invoke(m);
             Controls.Add(_view);
-            Size = TargetSize();
+            Size = HudScale.Up(TargetSize());
+            HudScale.Changed += OnHudScale; Disposed += (s2, e2) => HudScale.Changed -= OnHudScale;   // (1.2.82)
             Location = InitialLocation();
             LayoutView(); ApplyRegion();
             _tick = new System.Windows.Forms.Timer { Interval = 250 };
@@ -444,6 +452,17 @@ namespace SelectOR
 
         public bool Collapsed => _collapsed;
 
+        // (1.2.82) el tamaño en píxeles lógicos; el de verdad es este × HudScale.F
+        int LW => HudScale.Down(Width);
+        int LH => HudScale.Down(Height);
+        void OnHudScale()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { try { BeginInvoke((Action)OnHudScale); } catch { } return; }
+            int bottom = Bottom; Size = HudScale.Up(TargetSize()); Top = Math.Max(0, bottom - Height);
+            LayoutView(); ApplyRegion(); Invalidate();
+        }
+
         Size TargetSize()
         {
             int w = Math.Max(MinW, Math.Min(MaxW, _prefs?.ChatHudW ?? 360));
@@ -467,12 +486,12 @@ namespace SelectOR
         void LayoutView()
         {
             _view.Visible = !_collapsed;
-            if (!_collapsed) _view.Bounds = new Rectangle(1, HdrH, Width - 2, Math.Max(10, Height - HdrH - FootH));
+            if (!_collapsed) _view.Bounds = HudScale.Up(new Rectangle(1, HdrH, LW - 2, Math.Max(10, LH - HdrH - FootH))); _view.Zoom = HudScale.F;
         }
 
         void ApplyRegion()
         {
-            using var p = Theme.Round(new Rectangle(0, 0, Width, Height), 12);
+            using var p = Theme.Round(new Rectangle(0, 0, Width, Height), HudScale.Up(12));
             Region = new Region(p);
         }
 
@@ -504,7 +523,7 @@ namespace SelectOR
             _collapsed = !_collapsed;
             if (_prefs != null) _prefs.ChatHudCollapsed = _collapsed;
             int bottom = Bottom;
-            Size = TargetSize();
+            Size = HudScale.Up(TargetSize());
             Top = Math.Max(0, bottom - Height);   // crece o encoge hacia arriba
             if (!_collapsed) { _unread = 0; _view.ScrollToBottom(); }
             LayoutView(); ApplyRegion(); Invalidate();
@@ -515,7 +534,7 @@ namespace SelectOR
         {
             if (_prefs == null) return;
             _prefs.ChatHudX = Left; _prefs.ChatHudY = Top;
-            if (!_collapsed) { _prefs.ChatHudW = Width; _prefs.ChatHudH = Height; }
+            if (!_collapsed) { _prefs.ChatHudW = LW; _prefs.ChatHudH = LH; }
         }
 
         int Zone(Point p)
@@ -529,10 +548,11 @@ namespace SelectOR
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            e = HudScale.Down(e);   // (1.2.82: en píxeles lógicos)
             if (e.Button == MouseButtons.Left)
             {
                 _downScreen = Cursor.Position; _formAtDown = Location;
-                if (!_collapsed && _hitGrip.Contains(e.Location)) { _resizing = true; _sizeAtDown = Size; }
+                if (!_collapsed && _hitGrip.Contains(e.Location)) { _resizing = true; _sizeAtDown = new Size(LW, LH); }
                 else _down = true;
                 _dragging = false;
             }
@@ -541,12 +561,13 @@ namespace SelectOR
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            e = HudScale.Down(e);   // (1.2.82: en píxeles lógicos)
             var now = Cursor.Position;
             if (_resizing)
             {
-                int w = Math.Max(MinW, Math.Min(MaxW, _sizeAtDown.Width + now.X - _downScreen.X));
-                int h = Math.Max(MinH, Math.Min(MaxH, _sizeAtDown.Height + now.Y - _downScreen.Y));
-                if (w != Width || h != Height) Size = new Size(w, h);
+                int w = Math.Max(MinW, Math.Min(MaxW, _sizeAtDown.Width + HudScale.Down(now.X - _downScreen.X)));
+                int h = Math.Max(MinH, Math.Min(MaxH, _sizeAtDown.Height + HudScale.Down(now.Y - _downScreen.Y)));
+                if (w != LW || h != LH) Size = HudScale.Up(new Size(w, h));
             }
             else if (_down)
             {
@@ -564,6 +585,7 @@ namespace SelectOR
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            e = HudScale.Down(e);   // (1.2.82: en píxeles lógicos)
             bool click = _down && !_dragging;
             bool moved = _dragging || _resizing;
             _down = _dragging = _resizing = false;
@@ -600,20 +622,21 @@ namespace SelectOR
         }
 
         // Rectángulo de la línea de escribir, en pantalla (ahí se abre la cajita).
-        public Rectangle ComposeScreenRect() => RectangleToScreen(new Rectangle(0, Height - FootH, Width, FootH));
+        public Rectangle ComposeScreenRect() => RectangleToScreen(HudScale.Up(new Rectangle(0, LH - FootH, LW, FootH)));
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
+            HudScale.Begin(g);   // (1.2.82) el tamaño del HUD (Ajustes → Gráficos)
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-            using (var bg = new SolidBrush(Theme.Surface)) g.FillRectangle(bg, ClientRectangle);
-            using (var acc = new SolidBrush(Teal)) g.FillRectangle(acc, 0, 0, Width, 2);
+            using (var bg = new SolidBrush(Theme.Surface)) g.FillRectangle(bg, new Rectangle(0, 0, LW, LH));
+            using (var acc = new SolidBrush(Teal)) g.FillRectangle(acc, 0, 0, LW, 2);
 
             // Cabecera: bocadillo · «Chat · Empresa ▾» · nuevos · plegar · cerrar
             var ico = new Rectangle(10, (HdrH - 16) / 2 + 1, 18, 15);
             DrawBubble(g, ico, Teal);
-            _hitClose = new Rectangle(Width - 28, 5, 22, HdrH - 10);
+            _hitClose = new Rectangle(LW - 28, 5, 22, HdrH - 10);
             _hitCollapse = new Rectangle(_hitClose.Left - 24, 5, 22, HdrH - 10);
             string badge = _collapsed && _unread > 0 ? string.Format(I18n.T("{0} nuevos"), _unread) : null;
             int badgeW = badge != null ? TextRenderer.MeasureText(badge, Theme.Font(8f, FontStyle.Bold)).Width + 12 : 0;
@@ -622,37 +645,37 @@ namespace SelectOR
             if (_hoverZone == 2) using (var hb = new SolidBrush(Theme.SurfaceHi)) using (var hp = Theme.Round(_hitCo, 7)) g.FillPath(hb, hp);
             string title = string.IsNullOrEmpty(_title) ? I18n.T("Chat") : _title;
             var tf = Theme.Font(9.5f, FontStyle.Bold);
-            TextRenderer.DrawText(g, title + "  ▾", tf, new Rectangle(_hitCo.Left + 6, _hitCo.Top, _hitCo.Width - 8, _hitCo.Height), Theme.Text,
+            HudScale.Text(g, title + "  ▾", tf, new Rectangle(_hitCo.Left + 6, _hitCo.Top, _hitCo.Width - 8, _hitCo.Height), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             if (badge != null)
             {
                 var br = new Rectangle(_hitCollapse.Left - 6 - badgeW, (HdrH - 18) / 2, badgeW, 18);
                 using (var b = new SolidBrush(Color.FromArgb(224, 86, 86))) using (var p = Theme.Round(br, 9)) g.FillPath(b, p);
-                TextRenderer.DrawText(g, badge, Theme.Font(8f, FontStyle.Bold), br, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                HudScale.Text(g, badge, Theme.Font(8f, FontStyle.Bold), br, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
             DrawHdrBtn(g, _hitCollapse, _collapsed ? "+" : "–", _hoverZone == 1);
             DrawHdrBtn(g, _hitClose, "×", _hoverZone == 0);
             if (_collapsed) return;
 
             // Pie: escribir
-            var fr = new Rectangle(0, Height - FootH, Width, FootH);
-            using (var p = new Pen(Color.FromArgb(50, 255, 255, 255))) g.DrawLine(p, 8, fr.Top, Width - 8, fr.Top);
+            var fr = new Rectangle(0, LH - FootH, LW, FootH);
+            using (var p = new Pen(Color.FromArgb(50, 255, 255, 255))) g.DrawLine(p, 8, fr.Top, LW - 8, fr.Top);
             var ws = SafeWrite();
-            _hitCompose = new Rectangle(8, fr.Top + 4, Width - 34, FootH - 8);
+            _hitCompose = new Rectangle(8, fr.Top + 4, LW - 34, FootH - 8);
             if (ws.can && _hoverZone == 3) using (var hb = new SolidBrush(Theme.SurfaceHi)) using (var hp = Theme.Round(_hitCompose, 7)) g.FillPath(hb, hp);
             string ft = ws.can ? "✎  " + I18n.T("Escribe un mensaje…") : (ws.why ?? "");
-            TextRenderer.DrawText(g, ft, Theme.Font(8.8f), new Rectangle(_hitCompose.Left + 6, _hitCompose.Top, _hitCompose.Width - 8, _hitCompose.Height),
+            HudScale.Text(g, ft, Theme.Font(8.8f), new Rectangle(_hitCompose.Left + 6, _hitCompose.Top, _hitCompose.Width - 8, _hitCompose.Height),
                 ws.can ? Theme.Subtle : Color.FromArgb(229, 150, 115), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             // Asa para agrandar
-            _hitGrip = new Rectangle(Width - 18, Height - 18, 18, 18);
+            _hitGrip = new Rectangle(LW - 18, LH - 18, 18, 18);
             using (var gp = new Pen(Color.FromArgb(110, 255, 255, 255), 1.2f))
-                for (int k = 4; k <= 12; k += 4) g.DrawLine(gp, Width - 3 - k, Height - 3, Width - 3, Height - 3 - k);
+                for (int k = 4; k <= 12; k += 4) g.DrawLine(gp, LW - 3 - k, LH - 3, LW - 3, LH - 3 - k);
         }
 
         void DrawHdrBtn(Graphics g, Rectangle r, string t, bool hover)
         {
             if (hover) using (var b = new SolidBrush(Theme.SurfaceHi)) using (var p = Theme.Round(r, 6)) g.FillPath(b, p);
-            TextRenderer.DrawText(g, t, Theme.Font(11f, FontStyle.Bold), r, hover ? Theme.Text : Theme.Subtle,
+            HudScale.Text(g, t, Theme.Font(11f, FontStyle.Bold), r, hover ? Theme.Text : Theme.Subtle,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
@@ -699,22 +722,24 @@ namespace SelectOR
             StartPosition = FormStartPosition.Manual;
             BackColor = Theme.Surface2;
             KeyPreview = true;
-            int h = 58;
+            // (1.2.82) al tamaño del HUD: medidas y letra × HudScale.F (es la cajita del chat del HUD)
+            static int U(int v) => HudScale.Up(v);
+            int h = U(58);
             Bounds = new Rectangle(over.Left, over.Bottom - h, over.Width, h);
-            using (var p = Theme.Round(new Rectangle(0, 0, Width, Height), 10)) Region = new Region(p);
+            using (var p = Theme.Round(new Rectangle(0, 0, Width, Height), U(10))) Region = new Region(p);
             _baseH = h;
             _box = new TextBox
             {
-                BorderStyle = BorderStyle.None, BackColor = Theme.Surface2, ForeColor = Theme.Text, Font = Theme.Font(10f),
-                MaxLength = 500, Bounds = new Rectangle(12, 10, Width - 24 - 34, 22),
+                BorderStyle = BorderStyle.None, BackColor = Theme.Surface2, ForeColor = Theme.Text, Font = Theme.Font(10f * HudScale.F),
+                MaxLength = 500, Bounds = new Rectangle(U(12), U(10), Width - U(24 + 34), U(22)),
                 PlaceholderText = string.Format(I18n.T("Mensaje para {0}"), company)
             };
             _note = new Label
             {
-                AutoSize = false, Bounds = new Rectangle(12, 34, Width - 24, 18), ForeColor = Theme.Subtle, Font = Theme.Font(8f),
+                AutoSize = false, Bounds = new Rectangle(U(12), U(34), Width - U(24), U(18)), ForeColor = Theme.Subtle, Font = Theme.Font(8f * HudScale.F),
                 Text = I18n.T("Intro para enviar · Esc para cancelar"), BackColor = Theme.Surface2
             };
-            _emojiBtn = new EmojiButtonFlat { Bounds = new Rectangle(Width - 12 - 30, 6, 30, 30), BackColor = Theme.Surface2 };
+            _emojiBtn = new EmojiButtonFlat { Bounds = new Rectangle(Width - U(12 + 30), U(6), U(30), U(30)), BackColor = Theme.Surface2 };
             _emojiBtn.Click += (s, e) => ToggleEmojis();
             Controls.Add(_box); Controls.Add(_note); Controls.Add(_emojiBtn);
             if (initialText != null)

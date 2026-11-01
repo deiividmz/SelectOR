@@ -445,8 +445,27 @@ namespace SelectOR
                     if (b.Locate(a, o, out int e, out double off)) { Occ(e, off); body.Add(b.At(e, off)); }
                     else { var (x, y) = _g.Proj(a, o); body.Add(b.W(x, y)); }
                 }
+                // (1.2.82) por los trozos de vía que recorre (no pegando cada punto a la vía más cercana: junto a una aguja caía
+                // en la de al lado y el tren y su rojo se salían de la vía)
                 try
                 {
+                    if (p.TrainTrack.TryGetValue(t.name, out var k0))
+                    {
+                        var pcs = geo.Graph.PathPieces(k0.node, la, lo, k0.dir, k0.mu, 0, Math.Max(k0.len, 5), PosNode);
+                        if (pcs != null)
+                            foreach (var (e, f, t2) in pcs)
+                            {
+                                OccRange(live, e, f, t2);
+                                var pp = b.Piece(e, f, t2); if (pp == null) continue;
+                                if (f > t2) Array.Reverse(pp);
+                                foreach (var q in pp) if (body.Count == 0 || Math.Abs(body[^1].X - q.X) + Math.Abs(body[^1].Y - q.Y) > 0.01f) body.Add(q);
+                            }
+                    }
+                }
+                catch { body.Clear(); }
+                if (body.Count < 2) try
+                {
+                    body.Clear();
                     if (p.TrainTrack.TryGetValue(t.name, out var k))
                     {
                         var pts = geo.Graph.PathAhead(k.node, la, lo, k.dir, k.mu, 0, Math.Max(k.len, 5), PosNode, out _);
@@ -615,6 +634,16 @@ namespace SelectOR
                     g.DrawString(Tr("Plano general · clic en una estación o en un tramo para abrir esa dependencia"), hf, tb, area.Left + Theme.Px(14), area.Bottom - Theme.Px(30));
         }
 
+        // (1.2.82) lo que ocupa un tren en un tramo: de un metro a otro, juntando con lo que ya había pegado
+        static void OccRange(SchematicLive live, int e, double f, double t)
+        {
+            double a = Math.Min(f, t), b = Math.Max(f, t);
+            if (!live.Occupied.TryGetValue(e, out var l)) live.Occupied[e] = l = new();
+            for (int i = 0; i < l.Count; i++)
+                if (a <= l[i].b + 1 && l[i].a - 1 <= b) { l[i] = (Math.Min(a, l[i].a), Math.Max(b, l[i].b)); return; }
+            l.Add((a, b));
+        }
+
         static RectangleF Bounds(PointF[] p)
         {
             float x0 = p.Min(q => q.X), y0 = p.Min(q => q.Y), x1 = p.Max(q => q.X), y1 = p.Max(q => q.Y);
@@ -670,8 +699,26 @@ namespace SelectOR
                     if (s.Map(a, o, out var q)) body.Add(q);
                     if (s.Locate(a, o, out int e, out double off)) Occ(e, off);
                 }
+                // (1.2.82) por los trozos de vía que recorre, sobre la vía dibujada de cada uno (también dentro de una tijera)
                 try
                 {
+                    if (p.TrainTrack.TryGetValue(t.name, out var k0))
+                    {
+                        var pcs = geo.Graph.PathPieces(k0.node, la, lo, k0.dir, k0.mu, 0, Math.Max(k0.len, 5), PosNode);
+                        if (pcs != null)
+                            foreach (var (e, f, t2) in pcs)
+                            {
+                                if (!s.Drawn(e)) continue;   // (fuera de esta dependencia)
+                                OccRange(live, e, f, t2);
+                                var pp = s.PieceDir(e, f, t2, _zoom); if (pp == null) continue;
+                                foreach (var q in pp) if (body.Count == 0 || Math.Abs(body[^1].X - q.X) + Math.Abs(body[^1].Y - q.Y) > 0.01f) body.Add(q);
+                            }
+                    }
+                }
+                catch { body.Clear(); }
+                if (body.Count < 2) try
+                {
+                    body.Clear();
                     if (p.TrainTrack.TryGetValue(t.name, out var k))
                     {
                         var pts = geo.Graph.PathAhead(k.node, la, lo, k.dir, k.mu, 0, Math.Max(k.len, 5), PosNode, out _);

@@ -1,4 +1,4 @@
-// Actualización automática al arrancar: mientras se ve la pantalla de carga, SelectOR mira si hay una
+﻿// Actualización automática al arrancar: mientras se ve la pantalla de carga, SelectOR mira si hay una
 // versión publicada más nueva y, si la hay, la descarga, comprueba su firma, la instala y se reinicia en
 // ella, sin preguntar. La barra de la pantalla de carga enseña el progreso.
 //  · Si no hay conexión o el servidor tarda, se sigue arrancando la versión actual (no se espera más de
@@ -86,10 +86,8 @@ namespace SelectOR
             try
             {
                 string lang = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\OpenRails\ORTS", "Language", null) as string;
-                if (string.IsNullOrEmpty(lang)) lang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
-                I18n.English = !lang.StartsWith("es", StringComparison.OrdinalIgnoreCase);
-                var force = Environment.GetEnvironmentVariable("SELECTOR_LANG");
-                if (!string.IsNullOrEmpty(force)) I18n.English = !force.StartsWith("es", StringComparison.OrdinalIgnoreCase);
+                string chosen = null; try { chosen = AppPrefs.Load()?.UiLanguage; } catch { }
+                I18n.Lang = I18n.Resolve(chosen, lang);   // (1.2.82) como el menú: Ajustes → General, o el de Open Rails, o el de Windows
             }
             catch { }
         }

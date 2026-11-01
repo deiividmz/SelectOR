@@ -1,4 +1,4 @@
-// Dibujo del detalle del .tdb en el mapa del HUD (MapDetail.cs), igual en el mini-mapa y en el mapa grande. Cada
+﻿// Dibujo del detalle del .tdb en el mapa del HUD (MapDetail.cs), igual en el mini-mapa y en el mapa grande. Cada
 // capa sale a partir de un zoom (px por metro) para no llenar el mapa: la vía siempre (de un solo color; sustituye
 // al trazado antiguo); los PK desde un zoom medio; andenes y apartaderos un poco más cerca; cruces y puntos de
 // carga más cerca aún; los nombres de los apartaderos y las toperas, con zoom de estación.
@@ -163,7 +163,7 @@ namespace SelectOR
                 float minGap = 70f * Math.Max(1f, scale * 0.55f);
                 using var fPk = Theme.Font(7.5f * Math.Max(1f, scale * 0.55f) * (compact ? 0.9f : 1f));
                 using var dot = new SolidBrush(Color.FromArgb(185, 190, 195));
-                var ci = I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : System.Globalization.CultureInfo.GetCultureInfo("es-ES");
+                var ci = I18n.Culture;
                 foreach (var (la, lo, v) in d.Pk)
                 {
                     var p = proj(la, lo); if (!In(vis, p)) continue;

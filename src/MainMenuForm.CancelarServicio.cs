@@ -1,7 +1,7 @@
 // El maquinista cancela su servicio en curso (sql/cancelar-servicio.sql): en lugar de registrarlo, se elimina
 // en el servidor como un viaje corto (sin ingresos, sin km, sin ranking) y la unidad queda libre. Desde la barra
 // superior mientras conduce (sigue en conducción libre, como al registrar a mitad de viaje) o desde Empresas,
-// junto a «Registrar servicio», si el servicio quedó pendiente. Las infracciones detectadas sí se mandan antes.
+// junto a «Registrar servicio», si el servicio quedó pendiente. Desde la 1.2.83, sus infracciones tampoco cuentan.
 
 using System;
 using System.Drawing;
@@ -41,7 +41,7 @@ namespace SelectOR
         async void CancelPendingService()
         {
             if (_pendingServiceId == null) return;
-            if (ThemedBox.Show(this, Tr("¿Cancelar el servicio en curso? No se registrará: ni ingresos, ni km, ni ranking, y la unidad quedará libre. Las infracciones detectadas sí cuentan."),
+            if (ThemedBox.Show(this, Tr("¿Cancelar el servicio en curso? No se registrará: ni ingresos, ni km, ni ranking, y la unidad quedará libre. Las infracciones detectadas no cuentan."),
                     "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             Msg(_empHomeMsg, Tr("Cancelando el servicio…"), false);
             var (ok, msg) = await CancelOwnServiceCore();
@@ -53,30 +53,26 @@ namespace SelectOR
         {
             var svc = _pendingServiceId;
             if (svc == null) return (false, null);
-            // Las infracciones detectadas cuentan igual que al registrar (cancelar no sirve para librarse de
-            // ellas); en un viaje corto, como siempre, no cuenta ninguna.
-            int durRule = ServiceSecondsForRule();
-            bool corto = _estimatedKm < MinServiceKm || durRule < MinServiceSeconds;
-            var infr = await ReportInfractionsAsync(svc, _estimatedKm, durRule == int.MaxValue ? _tripDurationS : durRule, corto);
-            if (infr.Err != null) return (false, Tr("No se pudo cancelar el servicio: ") + infr.Err);
-            if (!infr.Voided)   // anulado por una infracción: el servidor ya lo ha borrado
+            // (1.2.83) Un servicio cancelado no cuenta para nada, tampoco sus infracciones: no se mandan (solo las
+            // manda SelectOR, al registrar o al cancelar) y se olvidan, con el exceso de velocidad que siguiera en curso.
+            var (_, err) = await Supa.RpcAsync("cancel_my_service", new { p_service = svc });
+            if (err != null)
             {
-                var (_, err) = await Supa.RpcAsync("cancel_my_service", new { p_service = svc });
-                if (err != null)
-                {
-                    bool sinFuncion = err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
-                                      || err.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0;
-                    return (false, sinFuncion ? Tr("No se puede cancelar: el servidor aún no está actualizado.")
-                                              : Tr("No se pudo cancelar el servicio: ") + err);
-                }
+                bool sinFuncion = err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0
+                                  || err.IndexOf("Could not find the function", StringComparison.OrdinalIgnoreCase) >= 0;
+                return (false, sinFuncion ? Tr("No se puede cancelar: el servidor aún no está actualizado.")
+                                          : Tr("No se pudo cancelar el servicio: ") + err);
             }
+            InfrOverspeedClose();
+            bool hadInfr = _infrItems.Count > 0;
+            _infrItems.Clear();
             _pendingServiceId = null; _svcOpenedUtc = null; DeleteServiceJournal();
             _estimatedKm = 0;
             UpdateDutyUi();
             LoadCompanies(soft: true);
             RefreshActiveSubtab(skipCompanyLists: true);
             string m = Tr("Servicio cancelado: no se ha registrado y la unidad queda libre.");
-            if (infr.Items != null && infr.Items.Count > 0) m += " " + Tr("Las infracciones detectadas sí cuentan.");
+            if (hadInfr) m += " " + Tr("Las infracciones detectadas no cuentan.");
             return (true, m);
         }
 

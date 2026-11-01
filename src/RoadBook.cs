@@ -138,8 +138,25 @@ namespace SelectOR
             return pts.Count >= 2 ? pts : null;
         }
 
+        // (1.2.82) Lo mismo que PathAhead, pero los trozos de vía por los que pasa (tramo, desde, hasta: en metros del tramo y en
+        // el sentido de la marcha) en vez de puntos: para dibujar el tren sobre la vía de un esquema sin pegar cada punto a la
+        // vía más cercana (junto a una aguja caía en la de al lado). null si no se puede.
+        public List<(int e, double from, double to)> PathPieces(int vec, double lat, double lon, int dir, int mu, double len, double maxM, Func<int, int> pos)
+        {
+            WalkStop = null;
+            if (_vecEdge == null) { var d = new Dictionary<int, int>(); for (int i = 0; i < Edges.Length; i++) d[Edges[i].Vec] = i; _vecEdge = d; }
+            if (!_vecEdge.TryGetValue(vec, out int e0) || !NearestOn(new[] { e0 }, lat, lon, 80, out int e, out double off)) return null;
+            bool fwd = dir == 1;
+            if (mu == 1) fwd = !fwd;
+            else if (!Walk(ref e, ref off, ref fwd, len, pos, null, out _)) return null;
+            var pieces = new List<(int e, double from, double to)>();
+            Walk(ref e, ref off, ref fwd, maxM, pos, null, out _, pieces);
+            return pieces.Count > 0 ? pieces : null;
+        }
+
         public string WalkStop;   // (diagnóstico: por qué se paró el último camino)
-        bool Walk(ref int e, ref double off, ref bool fwd, double dist, Func<int, int> pos, List<(double lat, double lon)> pts, out (double lat, double lon)? against)
+        bool Walk(ref int e, ref double off, ref bool fwd, double dist, Func<int, int> pos, List<(double lat, double lon)> pts, out (double lat, double lon)? against,
+                  List<(int e, double from, double to)> pieces = null)
         {
             against = null;
             if (pts != null) { var (x0, y0) = PointAt(e, off); pts.Add(Unproj(x0, y0)); }
@@ -153,6 +170,7 @@ namespace SelectOR
                     else { for (int i = E.Cum.Length - 1; i >= 0; i--) if (E.Cum[i] < off && E.Cum[i] > to) pts.Add(Unproj(E.X[i], E.Y[i])); }
                     var (x1, y1) = PointAt(e, to); pts.Add(Unproj(x1, y1));
                 }
+                if (pieces != null && Math.Abs(to - off) > 1e-6) pieces.Add((e, off, to));
                 off = to; dist -= step;
                 if (dist <= 0.01) break;
                 // al final del tramo: el desvío, otro tramo pegado (sin desvío en medio) o un final de vía (se acaba)

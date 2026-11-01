@@ -1,4 +1,4 @@
-// Formulario principal del selector de trenes y rutas (diseño moderno, toque ferroviario ES).
+﻿// Formulario principal del selector de trenes y rutas (diseño moderno, toque ferroviario ES).
 // Reutiliza las clases de ORTS.Menu para descubrir el contenido y lanza RunActivity.exe.
 
 using System;
@@ -130,6 +130,7 @@ namespace SelectOR
         {
             _kiosk = kiosk;
             _prefs = AppPrefs.Load();
+            HudScale.Set(int.TryParse(Environment.GetEnvironmentVariable("SELECTOR_HUDSCALE"), out int hsEnv) ? hsEnv : _prefs.HudScalePct);   // (1.2.82) tamaño del HUD (SELECTOR_HUDSCALE: pruebas)
             NotifySound.Enabled = () => _prefs?.NotifySound != false;
             VehicleThumbs.ConsistFile = ConsistStripFileAsync;   // vistas 2D de un tren entero (Compra y Flota)
             PathMapDialog.DetailFor = RouteTrackAsync;           // la vía del HUD en «Mapa» (Conducción libre, Actividad, Horarios)
@@ -161,15 +162,9 @@ namespace SelectOR
         {
             try
             {
-                var lang = _settings?.Language ?? "";
-                if (string.IsNullOrEmpty(lang))
-                    lang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
-                // SelectOR está en español SOLO si Open Rails está en español; cualquier otro
-                // idioma (o ninguno) → inglés.
-                I18n.English = !lang.StartsWith("es", StringComparison.OrdinalIgnoreCase);
-                // Override opcional de idioma (útil para pruebas): SELECTOR_LANG=es → español, cualquier otro → inglés.
-                var force = Environment.GetEnvironmentVariable("SELECTOR_LANG");
-                if (!string.IsNullOrEmpty(force)) I18n.English = !force.StartsWith("es", StringComparison.OrdinalIgnoreCase);
+                // (1.2.82) el elegido en Ajustes → General; «Automático»: el de Open Rails o, si no tiene, el de Windows
+                // (SELECTOR_LANG, para las pruebas, manda sobre todo)
+                I18n.Lang = I18n.Resolve(_prefs?.UiLanguage, _settings?.Language);
             }
             catch { }
         }
@@ -492,9 +487,9 @@ namespace SelectOR
             var btnOptions = MakeChip("", 36, "gear");
             btnOptions.Click += (s, e) => LaunchSibling("Menu.exe", "");
             tip.SetToolTip(btnOptions, Tr("Opciones OR"));
-            var btnSettings = MakeChip("", 36, "joystick");
+            var btnSettings = MakeChip("", 36, "sliders");   // (1.2.82: antes un mando; Ajustes ya es mucho más que mandos)
             btnSettings.Click += (s, e) => ShowSelectorSettings();
-            tip.SetToolTip(btnSettings, Tr("Ajustes de SelectOR (mandos)"));
+            tip.SetToolTip(btnSettings, Tr("Ajustes de SelectOR"));
             var btnAbout = MakeChip("", 36, "info");
             btnAbout.Click += (s, e) => ShowAbout();
             tip.SetToolTip(btnAbout, Tr("Acerca de SelectOR"));
@@ -948,7 +943,7 @@ namespace SelectOR
             {
                 var loc = DateTime.SpecifyKind(last, DateTimeKind.Utc).ToLocalTime();
                 int days = (DateTime.Today - loc.Date).Days;
-                lastTxt = days <= 0 ? Tr("hoy") : days == 1 ? Tr("ayer") : days < 30 ? string.Format(Tr("hace {0} días"), days) : loc.ToString("d MMM yyyy", I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : EsEs);
+                lastTxt = days <= 0 ? Tr("hoy") : days == 1 ? Tr("ayer") : days < 30 ? string.Format(Tr("hace {0} días"), days) : loc.ToString("d MMM yyyy", I18n.Culture);
                 lastSub = Plural(n, "{0} servicio registrado", "{0} servicios registrados");
             }
             _routeStats = (lastTxt, lastSub, km.ToString("N0", EsEs) + " km", Tr("en esta ruta"));

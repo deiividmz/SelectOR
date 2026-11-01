@@ -1,4 +1,4 @@
-// HISTORIAL DEL CARNÉ (Mi perfil): línea de tiempo en tarjetas, la más reciente arriba. Cada infracción con su
+﻿// HISTORIAL DEL CARNÉ (Mi perfil): línea de tiempo en tarjetas, la más reciente arriba. Cada infracción con su
 // código (A1, B6…), el detalle, la empresa, los puntos y el estado; las recuperaciones en verde.
 
 using System;
@@ -61,7 +61,7 @@ namespace SelectOR
             if (_rows.Count > 1)
                 using (var p = new Pen(Color.FromArgb(78, 84, 90), Theme.Px(2)))
                     g.DrawLine(p, lineX, _rows[0].r.Y + _rows[0].r.Height / 2, lineX, _rows[_rows.Count - 1].r.Y + _rows[_rows.Count - 1].r.Height / 2);
-            var ci = System.Globalization.CultureInfo.GetCultureInfo(I18n.English ? "en-GB" : "es-ES");
+            var ci = I18n.Culture;
             foreach (var (e, r0) in _rows)
             {
                 var r = r0; r.Offset(0, -top);

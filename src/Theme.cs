@@ -1,4 +1,4 @@
-// Sistema de diseño: paleta (inspiración ferroviaria española) y controles con esquinas
+﻿// Sistema de diseño: paleta (inspiración ferroviaria española) y controles con esquinas
 // redondeadas y antialiasing. WinForms no trae nada de esto, se dibuja a mano.
 
 using System;
@@ -25,7 +25,11 @@ namespace SelectOR
         public static readonly Color Accent2 = Color.FromArgb(46, 125, 50);  // verde oscuro (degradados)
         public static readonly Color Gold = Color.FromArgb(240, 196, 90);    // estrella de favoritos
 
-        public static readonly string FontFamily = "Segoe UI";
+        // (1.2.82) en japonés y chino, la letra de Windows para ese idioma (Segoe UI no tiene esos caracteres y Windows los
+        // sacaba de otra, pequeña y borrosa en negrita)
+        public static string FontFamily => I18n.Lang == "ja" ? "Yu Gothic UI" : I18n.Lang == "zh" ? "Microsoft YaHei UI" : "Segoe UI";
+        static bool Cjk => I18n.Lang == "ja" || I18n.Lang == "zh";
+        static float Min(float size) => Cjk ? Math.Max(size, 8.25f) : size;   // (los rótulos de 7-8 pt no se leen en CJK)
 
         // ---- Escala de la interfaz ----
         // La maqueta está pensada para un escritorio de 1600×900 útiles. En pantallas menores
@@ -75,8 +79,8 @@ namespace SelectOR
             catch { DpiComp = 1f; }
         }
 
-        public static Font Font(float size) => new Font(FontFamily, Math.Max(5f, size * UiScale) * DpiComp);
-        public static Font Font(float size, FontStyle style) => new Font(FontFamily, Math.Max(5f, size * UiScale) * DpiComp, style);
+        public static Font Font(float size) => new Font(FontFamily, Math.Max(5f, Min(size) * UiScale) * DpiComp);
+        public static Font Font(float size, FontStyle style) => new Font(FontFamily, Math.Max(5f, Min(size) * UiScale) * DpiComp, style);
 
         // Medida en píxeles a la escala actual (para los tamaños que se calculan en ejecución).
         public static int Px(double v) => (int)Math.Round(v * UiScale);
@@ -224,13 +228,13 @@ namespace SelectOR
             string text = Text ?? "", count = null;
             var m = CountRx.Match(text);
             if (m.Success) { text = m.Groups[1].Value; count = m.Groups[2].Value; }
-            int ts = Math.Min(r.Height - 8, 26);
+            int ts = Math.Max(Math.Min(16, r.Height - 2), Math.Min(r.Height - 8, 26));   // (1.2.82: filas bajas del menú, el icono no desaparece)
             var tile = new Rectangle(r.X + 10, r.Y + (r.Height - ts) / 2, ts, ts);
             if (!string.IsNullOrEmpty(GlyphKind) && ShowGlyph)
             {
                 Theme.FillRound(g, tile, 7, Active ? Blend(bg, NavTint, 0.40f) : Blend(bg, NavTint, 0.16f));
-                int gs = ts - 8;
-                Glyphs.Draw(g, GlyphKind, new Rectangle(tile.X + 4, tile.Y + 4, gs, gs), Active ? Color.White : Theme.Text);
+                int pad = ts < 20 ? 3 : 4, gs = ts - 2 * pad;
+                if (gs >= 6) Glyphs.Draw(g, GlyphKind, new Rectangle(tile.X + pad, tile.Y + pad, gs, gs), Active ? Color.White : Theme.Text);
             }
             int x = tile.Right + 10, right = r.Right - 8;
             using var f = Theme.Font(FontSize, Active ? FontStyle.Bold : FontStyle);

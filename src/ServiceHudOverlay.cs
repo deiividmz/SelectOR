@@ -217,9 +217,10 @@ namespace SelectOR
             DoubleBuffered = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             Opacity = 0.88;
-            Size = TargetSize();
+            Size = HudScale.Up(TargetSize());
             Location = InitialLocation();
             ApplyRegion();
+            HudScale.Changed += OnHudScale; Disposed += (s, e) => HudScale.Changed -= OnHudScale;   // (1.2.82)
 
             _tick = new System.Windows.Forms.Timer { Interval = 500 };
             _tick.Tick += (s, e) => OnTick();
@@ -252,7 +253,7 @@ namespace SelectOR
             }
             if (!moved) { var mm = CurMates(); moved = mm != null && mm.Count > 0; }   // los demás también se mueven
             if (moved && _mapOpen && !_collapsed && Visible)
-                Invalidate(new Rectangle(0, 0, Width, MapBlockH));
+                Invalidate(HudScale.Up(new Rectangle(0, 0, LW, MapBlockH)));
         }
 
         // No robar el foco al simulador al aparecer.
@@ -299,7 +300,7 @@ namespace SelectOR
 
         void ApplyRegion()
         {
-            int r = _collapsed ? 16 : 12;
+            int r = HudScale.Up(_collapsed ? 16 : 12);
             using var p = RoundPath(new Rectangle(0, 0, Width, Height), r);
             Region = new Region(p);
         }
@@ -312,6 +313,16 @@ namespace SelectOR
 
         static int Clamp(int v, int min, int max) => v < min ? min : v > max ? max : v;
 
+        // (1.2.82) el tamaño en píxeles lógicos (los de la maqueta); el de verdad es este × HudScale.F
+        int LW => HudScale.Down(Width);
+        int LH => HudScale.Down(Height);
+        void OnHudScale()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { try { BeginInvoke((Action)OnHudScale); } catch { } return; }
+            ApplySize(); ApplyRegion(); Invalidate();
+        }
+
         Size TargetSize()
         {
             if (_collapsed) return new Size(CollapsedW, CollapsedH);
@@ -323,7 +334,7 @@ namespace SelectOR
         // y el mapa crece hacia arriba).
         void ApplySize()
         {
-            var target = TargetSize();
+            var target = HudScale.Up(TargetSize());
             if (target == Size) return;
             int bottom = Top + Height;
             Size = target;
@@ -414,6 +425,7 @@ namespace SelectOR
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            e = HudScale.Down(e);   // (1.2.82: en píxeles lógicos del HUD)
             if (e.Button == MouseButtons.Left)
             {
                 // Esquina inferior derecha: agrandar o encoger el mini-mapa.
@@ -434,22 +446,23 @@ namespace SelectOR
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            e = HudScale.Down(e);   // (1.2.82: en píxeles lógicos del HUD)
             if (_resizing)
             {
                 var now = Cursor.Position;
-                int w = Clamp(_sizeAtDown.Width + (now.X - _downScreen.X), MapMinW, MapMaxW);
-                int h = Clamp(_sizeAtDown.Height + (now.Y - _downScreen.Y), MapMinH, MapMaxH);
+                int w = Clamp(_sizeAtDown.Width + HudScale.Down(now.X - _downScreen.X), MapMinW, MapMaxW);
+                int h = Clamp(_sizeAtDown.Height + HudScale.Down(now.Y - _downScreen.Y), MapMinH, MapMaxH);
                 try
                 {
                     var wa = Screen.FromControl(this).WorkingArea;      // nunca más grande que la pantalla
-                    w = Math.Min(w, Math.Max(MapMinW, wa.Width - 40));
-                    h = Math.Min(h, Math.Max(MapMinH, wa.Height - InfoHeight() - 60));
+                    w = Math.Min(w, Math.Max(MapMinW, HudScale.Down(wa.Width - 40)));
+                    h = Math.Min(h, Math.Max(MapMinH, HudScale.Down(wa.Height) - InfoHeight() - 60));
                 }
                 catch { }
                 if (w != _mapW || h != _mapH)
                 {
                     _mapW = w; _mapH = h;
-                    Size = TargetSize();
+                    Size = HudScale.Up(TargetSize());
                     ApplyRegion();
                     Invalidate();
                 }
@@ -470,6 +483,7 @@ namespace SelectOR
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            e = HudScale.Down(e);   // (1.2.82: en píxeles lógicos del HUD)
             if (_resizing)
             {
                 _resizing = false;
@@ -509,22 +523,23 @@ namespace SelectOR
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
+            HudScale.Begin(g);   // (1.2.82) el tamaño del HUD (Ajustes → Gráficos)
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             int r = _collapsed ? 16 : 12;
-            var rc = new Rectangle(0, 0, Width - 1, Height - 1);
+            var rc = new Rectangle(0, 0, LW - 1, LH - 1);
             using (var bg = new SolidBrush(Theme.Surface)) FillRound(g, rc, r, bg);
             using (var pen = new Pen(Blend(Theme.Surface, Color.Black, 0.35f))) DrawRound(g, rc, r, pen);
             using (var accent = new SolidBrush(Rec))
-                g.FillRectangle(accent, new Rectangle(0, 6, 3, Height - 12));
+                g.FillRectangle(accent, new Rectangle(0, 6, 3, LH - 12));
 
             if (_collapsed)
             {
-                DrawDot(g, 14, Height / 2, _service ? Rec : Teal, _service ? _blink : true);
+                DrawDot(g, 14, LH / 2, _service ? Rec : Teal, _service ? _blink : true);
                 string pillTxt = _service ? Elapsed() : (_km != null ? KmText() : "SelectOR");
-                TextRenderer.DrawText(g, pillTxt, Theme.Font(_service ? 12.5f : 10f, FontStyle.Bold),
-                    new Rectangle(28, 0, Width - 32, Height), Theme.Text,
+                HudScale.Text(g, pillTxt, Theme.Font(_service ? 12.5f : 10f, FontStyle.Bold),
+                    new Rectangle(28, 0, LW - 32, LH), Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
                 _hitBigMap = _hitMap = _hitCollapse = _hitClose = _hitGrip = _hitCab = Rectangle.Empty;
                 _hitPaIcon = _hitPaLine = _hitZoomIn = _hitZoomOut = Rectangle.Empty;
@@ -547,16 +562,16 @@ namespace SelectOR
             int y = top + InfoHeight() - PaRow - NetRowH;
             var col = _net.level == 1 ? Teal : _net.level == 2 ? Theme.Gold : Rec;
             DrawDot(g, 15, y + NetRowH / 2, col, _net.level != 2 || _blink);
-            int right = Width - 10;
+            int right = LW - 10;
             if (!string.IsNullOrEmpty(_net.extra))
             {
                 using var fx = Theme.Font(9f, FontStyle.Bold);
                 int xw = TextRenderer.MeasureText(g, _net.extra, fx, Size.Empty, TextFormatFlags.NoPadding).Width;
-                TextRenderer.DrawText(g, _net.extra, fx, new Rectangle(right - xw, y, xw, NetRowH), Theme.Gold,
+                HudScale.Text(g, _net.extra, fx, new Rectangle(right - xw, y, xw, NetRowH), Theme.Gold,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 right -= xw + 8;
             }
-            TextRenderer.DrawText(g, _net.text ?? "", Theme.Font(9.25f, FontStyle.Bold), new Rectangle(28, y, Math.Max(10, right - 28), NetRowH),
+            HudScale.Text(g, _net.text ?? "", Theme.Font(9.25f, FontStyle.Bold), new Rectangle(28, y, Math.Max(10, right - 28), NetRowH),
                 _net.level == 1 ? Blend(Teal, Theme.Text, 0.25f) : Blend(col, Theme.Text, 0.2f),
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }
@@ -579,8 +594,8 @@ namespace SelectOR
             {
                 _hitPaLine = Rectangle.Empty;
                 if (_hover)
-                    TextRenderer.DrawText(g, I18n.T("megafonía desconectada"), Theme.Font(8.5f),
-                        new Rectangle(TxtX, y + 3, Width - TxtX - 8, IcoW), Blend(Rec, Theme.Surface, 0.3f),
+                    HudScale.Text(g, I18n.T("megafonía desconectada"), Theme.Font(8.5f),
+                        new Rectangle(TxtX, y + 3, LW - TxtX - 8, IcoW), Blend(Rec, Theme.Surface, 0.3f),
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
                 return;
             }
@@ -589,18 +604,18 @@ namespace SelectOR
             string txt = vol ? string.Format(I18n.T("volumen {0} %"), _prefs.PaVolume)
                              : string.IsNullOrEmpty(st.line) ? I18n.T("sin línea") : st.line;
             using var f = Theme.Font(9.25f, vol ? FontStyle.Regular : FontStyle.Bold);
-            int maxW = Width - TxtX - 20;
+            int maxW = LW - TxtX - 20;
             int tw = Math.Min(TextRenderer.MeasureText(g, txt, f, Size.Empty, TextFormatFlags.NoPadding).Width, maxW);
             var txtRect = new Rectangle(TxtX, y + 3, maxW, IcoW);
-            TextRenderer.DrawText(g, txt, f, txtRect, st.on ? Blend(Teal, Theme.Text, 0.25f) : Theme.Subtle,
+            HudScale.Text(g, txt, f, txtRect, st.on ? Blend(Teal, Theme.Text, 0.25f) : Theme.Subtle,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
 
             // Flechita: avisa de que ahí se elige la línea. La zona clicable abarca texto y flecha.
-            int ax = Math.Min(TxtX + tw + 9, Width - 14);
+            int ax = Math.Min(TxtX + tw + 9, LW - 14);
             using (var pen = new Pen(Blend(Theme.Subtle, Theme.Surface, _hover ? 0.1f : 0.45f), 1.5f)
                    { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
                 g.DrawLines(pen, new[] { new Point(ax, cy - 2), new Point(ax + 4, cy + 2), new Point(ax + 8, cy - 2) });
-            _hitPaLine = new Rectangle(TxtX, y + 3, Math.Min(tw + 22, Width - TxtX - 6), IcoW);
+            _hitPaLine = new Rectangle(TxtX, y + 3, Math.Min(tw + 22, LW - TxtX - 6), IcoW);
         }
 
         static void DrawSpeakerGlyph(Graphics g, Rectangle b, Color col, bool on)
@@ -635,6 +650,7 @@ namespace SelectOR
         // La rueda del ratón sobre la fila de megafonía sube y baja el volumen de los avisos.
         protected override void OnMouseWheel(MouseEventArgs e)
         {
+            e = HudScale.Down(e);   // (1.2.82: en píxeles lógicos del HUD)
             if (PaAvail && _prefs != null && (_hitPaIcon.Contains(e.Location) || _hitPaLine.Contains(e.Location)))
             {
                 _prefs.PaVolume = Math.Max(0, Math.Min(100, _prefs.PaVolume + (e.Delta > 0 ? 10 : -10)));
@@ -704,7 +720,7 @@ namespace SelectOR
         void DrawResizeGrip(Graphics g)
         {
             if (!_mapOpen || _collapsed) { _hitGrip = Rectangle.Empty; return; }
-            _hitGrip = new Rectangle(Width - 18, Height - 18, 16, 16);
+            _hitGrip = new Rectangle(LW - 18, LH - 18, 16, 16);
             var col = _resizing ? Theme.Accent : Blend(Theme.Text, Theme.Surface, _hover ? 0.35f : 0.65f);
             using var pen = new Pen(col, 1.6f);
             for (int i = 0; i < 3; i++)
@@ -719,7 +735,7 @@ namespace SelectOR
             // separador entre mapa e info
             if (top > 0)
                 using (var pen = new Pen(Blend(Theme.Surface, Color.Black, 0.3f)))
-                    g.DrawLine(pen, 8, top, Width - 8, top);
+                    g.DrawLine(pen, 8, top, LW - 8, top);
 
             // Fila 1: (logo) + título + iconos (mapa grande / mapa / plegar / cerrar)
             int lx = 12, ly = top + 9, ls = 24;
@@ -733,23 +749,23 @@ namespace SelectOR
             }
             int titleX = hasLogo ? lx + ls + 8 : lx;
             if (_service)
-                TextRenderer.DrawText(g, _company, Theme.Font(12f, FontStyle.Bold),
-                    new Rectangle(titleX, ly - 1, Width - titleX - 112, ls + 2), Theme.Text,
+                HudScale.Text(g, _company, Theme.Font(12f, FontStyle.Bold),
+                    new Rectangle(titleX, ly - 1, LW - titleX - 112, ls + 2), Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             else if (_km != null)
             {
                 // Conducción normal: solo los km recorridos, en la misma fila que los iconos.
                 DrawDot(g, 15, ly + ls / 2, Teal, true);
-                TextRenderer.DrawText(g, KmText(), Theme.Font(10f, FontStyle.Bold),
-                    new Rectangle(28, ly - 1, Width - 28 - 112, ls + 2), Blend(Theme.Text, Teal, 0.15f),
+                HudScale.Text(g, KmText(), Theme.Font(10f, FontStyle.Bold),
+                    new Rectangle(28, ly - 1, LW - 28 - 112, ls + 2), Blend(Theme.Text, Teal, 0.15f),
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             }
 
-            _hitClose = new Rectangle(Width - 23, top + 8, 16, 16);
-            _hitCollapse = new Rectangle(Width - 44, top + 8, 16, 16);
-            _hitMap = new Rectangle(Width - 66, top + 8, 16, 16);
-            _hitBigMap = new Rectangle(Width - 88, top + 8, 16, 16);
-            _hitCab = ToggleCab != null ? new Rectangle(Width - 110, top + 8, 16, 16) : Rectangle.Empty;
+            _hitClose = new Rectangle(LW - 23, top + 8, 16, 16);
+            _hitCollapse = new Rectangle(LW - 44, top + 8, 16, 16);
+            _hitMap = new Rectangle(LW - 66, top + 8, 16, 16);
+            _hitBigMap = new Rectangle(LW - 88, top + 8, 16, 16);
+            _hitCab = ToggleCab != null ? new Rectangle(LW - 110, top + 8, 16, 16) : Rectangle.Empty;
             var icoCol = _hover ? Theme.Subtle : Blend(Theme.Subtle, Theme.Surface, 0.35f);
             var mapCol = _mapOpen ? Teal : icoCol;
             var bigCol = (_bigMap != null && !_bigMap.IsDisposed) ? Teal : icoCol;
@@ -781,14 +797,14 @@ namespace SelectOR
                 // Quieto mientras carga el escenario; en pausa, fijo (sin parpadear).
                 DrawDot(g, 15, timerRect.Top + timerRect.Height / 2, Rec, running && (paused || _blink));
                 using var fT = Theme.Font(15f, FontStyle.Bold);
-                TextRenderer.DrawText(g, Elapsed(), fT, timerRect, paused ? Theme.Subtle : Theme.Text,
+                HudScale.Text(g, Elapsed(), fT, timerRect, paused ? Theme.Subtle : Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 if (_km != null || paused)
                 {
                     int tw = TextRenderer.MeasureText(g, Elapsed(), fT, Size.Empty, TextFormatFlags.NoPadding).Width;
                     string extra = paused ? "  ·  " + I18n.T("EN PAUSA") : "  ·  " + KmText();
-                    TextRenderer.DrawText(g, extra, Theme.Font(10f, FontStyle.Bold),
-                        new Rectangle(28 + tw, top + 36, Width - 28 - tw - 8, 28), paused ? Theme.Gold : Blend(Theme.Text, Theme.Subtle, 0.35f),
+                    HudScale.Text(g, extra, Theme.Font(10f, FontStyle.Bold),
+                        new Rectangle(28 + tw, top + 36, LW - 28 - tw - 8, 28), paused ? Theme.Gold : Blend(Theme.Text, Theme.Subtle, 0.35f),
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 }
             }
@@ -800,18 +816,18 @@ namespace SelectOR
                 DrawDot(g, 15, py + 10, Teal, true);
                 using var fOn = Theme.Font(10.5f, FontStyle.Bold);
                 string onTxt = string.Format(I18n.T("{0} a bordo"), _pOn.ToString("N0"));
-                TextRenderer.DrawText(g, onTxt, fOn, new Rectangle(28, py, Width - 34, 20), Teal,
+                HudScale.Text(g, onTxt, fOn, new Rectangle(28, py, LW - 34, 20), Teal,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 int onW = TextRenderer.MeasureText(g, onTxt, fOn, Size.Empty, TextFormatFlags.NoPadding).Width;
                 using var fSub = Theme.Font(9f);
-                TextRenderer.DrawText(g, "  ·  " + string.Format(I18n.T("{0} subidos"), _pBoard.ToString("N0")),
-                    fSub, new Rectangle(28 + onW, py, Width - 34 - onW, 20), Theme.Subtle,
+                HudScale.Text(g, "  ·  " + string.Format(I18n.T("{0} subidos"), _pBoard.ToString("N0")),
+                    fSub, new Rectangle(28 + onW, py, LW - 34 - onW, 20), Theme.Subtle,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 // Próxima parada (esperan N) o, justo tras una parada, cuántos subieron/bajaron.
                 if (!string.IsNullOrEmpty(_pNote))
                 {
                     using var fNote = Theme.Font(8.5f);
-                    TextRenderer.DrawText(g, "▸ " + _pNote, fNote, new Rectangle(28, py + 21, Width - 36, 18), Blend(Teal, Theme.Text, 0.35f),
+                    HudScale.Text(g, "▸ " + _pNote, fNote, new Rectangle(28, py + 21, LW - 36, 18), Blend(Teal, Theme.Text, 0.35f),
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
                 }
             }
@@ -820,7 +836,7 @@ namespace SelectOR
 
         void DrawMap(Graphics g)
         {
-            var area = new Rectangle(6, MapHeaderH, Width - 12, _mapH - 4);
+            var area = new Rectangle(6, MapHeaderH, LW - 12, _mapH - 4);
             double anchoM = MapWorldWidthM(area);
             var mates = CurMates();
             HudMapRender.Draw(g, area, _segLat, _segLon, _trkLat, _trkLon, _stLat, _stLon, _stName, _crumb,
@@ -859,7 +875,7 @@ namespace SelectOR
                 var sz = TextRenderer.MeasureText(g, t, f, Size.Empty, TextFormatFlags.NoPadding);
                 var rc = new Rectangle(area.Right - sz.Width - 16, area.Top + 4, sz.Width + 10, sz.Height + 6);
                 using (var b = new SolidBrush(Color.FromArgb(215, Theme.Surface))) FillRound(g, rc, 5, b);
-                TextRenderer.DrawText(g, t, f, rc, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                HudScale.Text(g, t, f, rc, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
         }
 
@@ -1028,7 +1044,7 @@ namespace SelectOR
             if (!haveSeg && !haveTrk && !haveCrumb && !hasPos && (mates == null || mates.Count == 0))
             {
                 using var f0 = Theme.Font(Math.Max(9f, labelPt));
-                TextRenderer.DrawText(g, loadingText, f0, area, Theme.Subtle, TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                HudScale.Text(g, loadingText, f0, area, Theme.Subtle, TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return null;
             }
 
@@ -1179,7 +1195,7 @@ namespace SelectOR
                         bool hecho = i < book.ReachedPoints;
                         using (var b = new SolidBrush(hecho ? Color.FromArgb(150, 130, 110) : ItineraryCol)) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
                         using (var pen = new Pen(Color.FromArgb(40, 30, 10), 1.4f)) g.DrawEllipse(pen, p.X - r, p.Y - r, 2 * r, 2 * r);
-                        TextRenderer.DrawText(g, num.ToString(), fN, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.FromArgb(30, 22, 8),
+                        HudScale.Text(g, num.ToString(), fN, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.FromArgb(30, 22, 8),
                             TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     }
 
@@ -1213,9 +1229,9 @@ namespace SelectOR
                     {
                         int lw = (int)(labelPt * 22);
                         var lblRect = new Rectangle((int)p.X + (int)(r + 3), (int)p.Y - (int)labelPt, lw, (int)(labelPt * 2));
-                        TextRenderer.DrawText(g, nm, fSt, new Rectangle(lblRect.X + 1, lblRect.Y + 1, lblRect.Width, lblRect.Height),
+                        HudScale.Text(g, nm, fSt, new Rectangle(lblRect.X + 1, lblRect.Y + 1, lblRect.Width, lblRect.Height),
                             Color.FromArgb(190, 0, 0, 0), TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
-                        TextRenderer.DrawText(g, nm, fSt, lblRect, Blend(Theme.Text, Teal, 0.25f),
+                        HudScale.Text(g, nm, fSt, lblRect, Blend(Theme.Text, Teal, 0.25f),
                             TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
                     }
                 }
@@ -1680,7 +1696,7 @@ namespace SelectOR
             using (var b = new SolidBrush(fill)) using (var p = Theme.Round(r, 7)) g.FillPath(b, p);
             if (active) using (var pen = new Pen(amber, 1.2f)) using (var p = Theme.Round(r, 7)) g.DrawPath(pen, p);
             using var f = Theme.Font(8.8f, FontStyle.Bold);
-            TextRenderer.DrawText(g, text, f, r, active ? amber : Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            HudScale.Text(g, text, f, r, active ? amber : Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         void ZoomAt(Point m, double factor)
@@ -1755,7 +1771,7 @@ namespace SelectOR
                    : rb.Graph == null && rb.Problem != null ? rb.Problem
                    : I18n.T("Clic en la vía: añadir · arrastra el trazado o un punto a otra vía · clic derecho: quitar · Ctrl+Z: deshacer"))
                 : I18n.T("rueda: zoom · arrastra: mirar en otro sitio · doble clic: volver al tren");
-            TextRenderer.DrawText(g, hdr, Theme.Font(9.5f, FontStyle.Bold), new Rectangle(14, 0, bx - 20, HdrH),
+            HudScale.Text(g, hdr, Theme.Font(9.5f, FontStyle.Bold), new Rectangle(14, 0, bx - 20, HdrH),
                 rb != null && rb.Editing ? Color.FromArgb(240, 180, 70) : Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             using (var pen = new Pen(Theme.Subtle, 1.8f))
@@ -1814,7 +1830,7 @@ namespace SelectOR
             using (var b = new SolidBrush(Color.FromArgb(225, hover ? Blend(Theme.Surface2, amber, 0.25f) : Theme.Surface2)))
             using (var p = Theme.Round(_hitFollow, h / 2)) g.FillPath(b, p);
             using (var pen = new Pen(amber, 1.2f)) using (var p = Theme.Round(_hitFollow, h / 2)) g.DrawPath(pen, p);
-            TextRenderer.DrawText(g, t, f, _hitFollow, amber, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            HudScale.Text(g, t, f, _hitFollow, amber, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         // Pestaña «Guardados»: a la derecha del mapa, los itinerarios guardados de esta ruta.
@@ -1839,16 +1855,16 @@ namespace SelectOR
                 using (var b = new SolidBrush(Color.FromArgb(242, 30, 33, 36))) g.FillPath(b, path);
                 using (var pen = new Pen(Color.FromArgb(120, HudMapRender.ItineraryCol), 1.2f)) g.DrawPath(pen, path);
             }
-            TextRenderer.DrawText(g, "★ " + I18n.T("Itinerarios guardados"), fT, new Rectangle(_savedPanel.X + Pad, _savedPanel.Y + 8, w - 2 * Pad, fT.Height + 2),
+            HudScale.Text(g, "★ " + I18n.T("Itinerarios guardados"), fT, new Rectangle(_savedPanel.X + Pad, _savedPanel.Y + 8, w - 2 * Pad, fT.Height + 2),
                 HudMapRender.ItineraryCol, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
             int y = _savedPanel.Y + headH;
             if (list.Count == 0)
             {
-                TextRenderer.DrawText(g, I18n.T("Aún no hay itinerarios guardados en esta ruta. Márcalo con «+ Itinerario» y pulsa «Guardar»."), fS,
+                HudScale.Text(g, I18n.T("Aún no hay itinerarios guardados en esta ruta. Márcalo con «+ Itinerario» y pulsa «Guardar»."), fS,
                     new Rectangle(_savedPanel.X + Pad, y, w - 2 * Pad, RowH + 16), Theme.Subtle, TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
                 return;
             }
-            var ci = I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : System.Globalization.CultureInfo.GetCultureInfo("es-ES");
+            var ci = I18n.Culture;
             var mouse = PointToClient(Cursor.Position);
             for (int i = _savedScroll; i < list.Count && i < _savedScroll + maxRows; i++)
             {
@@ -1857,12 +1873,12 @@ namespace SelectOR
                 var del = new Rectangle(row.Right - 30, row.Y + (row.Height - 24) / 2, 24, 24);
                 bool hov = row.Contains(mouse);
                 if (hov) using (var b = new SolidBrush(Theme.SurfaceHi)) using (var p = Theme.Round(row, 7)) g.FillPath(b, p);
-                TextRenderer.DrawText(g, it.Name ?? "", fN, new Rectangle(row.X + 8, row.Y + 4, row.Width - 46, fN.Height + 2), Theme.Text,
+                HudScale.Text(g, it.Name ?? "", fN, new Rectangle(row.X + 8, row.Y + 4, row.Width - 46, fN.Height + 2), Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                 int pts = it.Points?.Count(p => !p.Guide) ?? 0;
                 string sub = string.Format(I18n.T("{0} km · {1} puntos · {2}"), it.Km.ToString("0.#", ci), pts,
                     it.Created.ToString(I18n.English ? "d MMM yyyy" : "d 'de' MMM yyyy", ci));
-                TextRenderer.DrawText(g, sub, fS, new Rectangle(row.X + 8, row.Y + 6 + fN.Height, row.Width - 46, fS.Height + 2), Theme.Subtle,
+                HudScale.Text(g, sub, fS, new Rectangle(row.X + 8, row.Y + 6 + fN.Height, row.Width - 46, fS.Height + 2), Theme.Subtle,
                     TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
                 bool confirm = _confirmDelId == it.Id && DateTime.UtcNow < _confirmDelUntil;
                 var delCol = confirm ? Color.FromArgb(235, 110, 110) : del.Contains(mouse) ? Theme.Text : Theme.Subtle;
@@ -1876,7 +1892,7 @@ namespace SelectOR
                 y += RowH;
             }
             if (list.Count > maxRows)
-                TextRenderer.DrawText(g, $"{_savedScroll + 1}-{Math.Min(list.Count, _savedScroll + maxRows)} / {list.Count}", fS,
+                HudScale.Text(g, $"{_savedScroll + 1}-{Math.Min(list.Count, _savedScroll + maxRows)} / {list.Count}", fS,
                     new Rectangle(_savedPanel.X, _savedPanel.Bottom - 14, w - Pad, 12), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.NoPadding);
         }
 
@@ -1950,7 +1966,7 @@ namespace SelectOR
             using var sep = new Pen(Color.FromArgb(60, 255, 255, 255), 1f);
             if (!string.IsNullOrEmpty(m.Title))
             {
-                TextRenderer.DrawText(g, m.Title, fT, new Rectangle(x + Pad, cy, w - 2 * Pad, TitleH), Theme.Subtle,
+                HudScale.Text(g, m.Title, fT, new Rectangle(x + Pad, cy, w - 2 * Pad, TitleH), Theme.Subtle,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                 cy += TitleH; g.DrawLine(sep, x + Pad, cy + SepH / 2, x + w - Pad, cy + SepH / 2); cy += SepH;
             }
@@ -1960,7 +1976,7 @@ namespace SelectOR
                 if (it.text == null) { g.DrawLine(sep, x + Pad, cy + SepH / 2, x + w - Pad, cy + SepH / 2); cy += SepH; continue; }
                 var row = new Rectangle(x + 5, cy, w - 10, RowH);
                 if (m.Hover == i) using (var hp = Theme.Round(row, 7)) using (var hb = new SolidBrush(Color.FromArgb(60, 255, 255, 255))) g.FillPath(hb, hp);
-                TextRenderer.DrawText(g, it.text, f, new Rectangle(x + Pad, cy, w - 2 * Pad, RowH), it.col.IsEmpty ? Theme.Text : it.col,
+                HudScale.Text(g, it.text, f, new Rectangle(x + Pad, cy, w - 2 * Pad, RowH), it.col.IsEmpty ? Theme.Text : it.col,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
                 m.Rows.Add((row, i));
                 cy += RowH;
@@ -1980,7 +1996,7 @@ namespace SelectOR
                 using (var b = new SolidBrush(Color.FromArgb(240, 30, 33, 36))) g.FillPath(b, path);
                 using (var pen = new Pen(HudMapRender.ItineraryCol, 1.3f)) g.DrawPath(pen, path);
             }
-            TextRenderer.DrawText(g, _notice, f, r, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+            HudScale.Text(g, _notice, f, r, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         }
 
         // (1.2.77) por qué no se abre la señal de tu tren (RoomMapView.Banner): fija, abajo, mientras dure
@@ -1997,7 +2013,7 @@ namespace SelectOR
                 using (var pen = new Pen(RoomMapDraw.WhyColor, 1.3f)) g.DrawPath(pen, path);
             }
             RoomMapDraw.WhyBadge(g, r.X + 14, r.Y + r.Height / 2f, 1.1f);
-            TextRenderer.DrawText(g, t, f, new Rectangle(r.X + 26, r.Y, r.Width - 30, r.Height), Color.FromArgb(255, 224, 178), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+            HudScale.Text(g, t, f, new Rectangle(r.X + 26, r.Y, r.Width - 30, r.Height), Color.FromArgb(255, 224, 178), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         }
 
         // Leyenda del detalle del .tdb (arriba a la izquierda): plegada, solo su título.
@@ -2022,7 +2038,7 @@ namespace SelectOR
             var box = new Rectangle(area.X + 8, area.Y + 8, w, h);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Theme.Round(box, 9)) { using var b = new SolidBrush(Color.FromArgb(235, 30, 33, 36)); g.FillPath(b, path); }
-            TextRenderer.DrawText(g, title, fT, new Point(box.X + padX, box.Y + 7), Color.FromArgb(185, 190, 195), TextFormatFlags.NoPadding);
+            HudScale.Text(g, title, fT, new Point(box.X + padX, box.Y + 7), Color.FromArgb(185, 190, 195), TextFormatFlags.NoPadding);
             _hitKey = new Rectangle(box.X, box.Y, box.Width, 8 + fT.Height + 6);
             if (!open) return;
             int y = box.Y + 8 + fT.Height + 8;
@@ -2059,7 +2075,7 @@ namespace SelectOR
                         using (var b = new SolidBrush(MapDetailDraw.EndCol)) using (var pen = new Pen(Color.FromArgb(40, 44, 48), 1f)) { g.FillRectangle(b, box.X + padX + 10, cy - 3, 6, 6); g.DrawRectangle(pen, box.X + padX + 10, cy - 3, 6, 6); }
                         break;
                 }
-                TextRenderer.DrawText(g, text, f, new Point(box.X + 34, y + 1), Color.FromArgb(230, 232, 234), TextFormatFlags.NoPadding);
+                HudScale.Text(g, text, f, new Point(box.X + 34, y + 1), Color.FromArgb(230, 232, 234), TextFormatFlags.NoPadding);
                 y += rowH;
             }
         }

@@ -58,10 +58,12 @@ namespace SelectOR.MapAgent
             int local = LocalLink.Install(h);   // conducción libre: el mapa grande de SelectOR (LocalLink.cs)
             int spawn = Spawn.Install(h);       // sala compartida: el .pat solo para la salida (Spawn.cs)
             int roomSw = AgujasSala.Install(h); // sala compartida: las agujas, solo las de la sala; la tecla G, a la sala (AgujasSala.cs)
+            int gotSw = AgujasRecibidas.Install(h);   // (1.2.83) las que cambia la sala, también para tu tren, como NY 174 (AgujasRecibidas.cs)
             int remote = Remotos.Install(h);    // los trenes de los demás: vehículos que faltan y por qué no se ve uno (Remotos.cs)
             int couples = Acoples.Install(h);   // acoples y desacoples de los demás: registro y trenes por sus coches (Acoples.cs)
             int vehicles = Vehiculos.Install(h);   // (1.2.80) vehículos que faltan: la lista para sustituirlos, ya hecha (Vehiculos.cs)
             int subs = Sustitutos.Install(h);      // (1.2.81) el tren que falta, con una composición tuya parecida (Sustitutos.cs)
+            int own = TrenPropio.Install(h);       // (1.2.82) tu tren nunca se toca por un mensaje de otro tren; y vigilado (TrenPropio.cs)
             int release = Liberar.Install(h);   // Ctrl+Tab en multijugador: liberar la señal de tu tren (Liberar.cs)
             int sun = Sol.Install(h);            // el sol de las rutas CGL a la hora de España (Sol.cs)
             int threads = Hilos.Install(h);      // .NET 6: que un corte de la sala no cierre Open Rails (Hilos.cs)
@@ -69,7 +71,7 @@ namespace SelectOR.MapAgent
             int esc = Pausa.Install(h);          // Esc en multijugador: menú con «Salir» y «Continuar» (Pausa.cs)
             int events = SelectOR.Comun.Eventos.Install(h, Log);   // bocina, puertas, luces… de otras versiones de Open Rails (Eventos.cs)
             int clock = SelectOR.Comun.Hora.Install(h, Log);       // la hora de la sala, también a los que ya están dentro (Hora.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(roomSw > 0 ? " + agujas de la sala" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(couples > 0 ? " + acoples" : "")}{(vehicles > 0 ? " + vehículos que faltan" : "")}{(subs > 0 ? " + sustitutos parecidos" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(esc > 0 ? " + Esc" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(roomSw > 0 ? " + agujas de la sala" : "")}{(gotSw > 0 ? " + agujas recibidas" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(couples > 0 ? " + acoples" : "")}{(vehicles > 0 ? " + vehículos que faltan" : "")}{(subs > 0 ? " + sustitutos parecidos" : "")}{(own > 0 ? " + tu tren protegido" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(esc > 0 ? " + Esc" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
             if (sun == 0 || keys == 0 || esc == 0) Later(h, sun == 0, keys == 0, esc == 0);
         }
 
@@ -112,6 +114,7 @@ namespace SelectOR.MapAgent
         {
             if (_errors > 20) return;
             try { PuertasIA.Apply(); } catch { }   // (1.2.79) las puertas de los trenes IA (PuertasIA.cs)
+            try { TrenPropio.Check(); } catch { }  // (1.2.82) ¿ha cambiado tu tren sin que lo hayas hecho tú? (TrenPropio.cs)
             try
             {
                 if (!MPManager.IsMultiPlayer() || !MPManager.IsServer()) return;

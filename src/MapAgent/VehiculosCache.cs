@@ -1,4 +1,4 @@
-// Los vehículos de la carpeta de trenes con su largo, para sustituir los que faltan (1.2.80). Lo comparten el agente de
+﻿// Los vehículos de la carpeta de trenes con su largo, para sustituir los que faltan (1.2.80). Lo comparten el agente de
 // SelectOR (en el Open Rails de cada jugador) y SelectOR.
 // Cuando a un jugador le falta un vehículo del tren de otro, Open Rails busca uno de largo parecido entre TODOS los
 // .eng/.wag de su carpeta de trenes, abriéndolos uno a uno (MPManager.GetList). Con una colección grande tarda minutos y
@@ -25,7 +25,7 @@ namespace SelectOR.Comun
     public static class VehiculosCache
     {
         sealed class Item { public string Rel; public long Ticks; public double Len; public char Cls = '?'; }
-        public sealed class Con { public string Name; public List<(string rel, bool eng)> Cars = new List<(string, bool)>(); }
+        public sealed class Con { public string Name; public List<(string rel, bool eng)> Cars = new List<(string, bool)>(); public List<bool> Flips = new List<bool>(); }   // (1.2.82) Flips: girado en el .con
         // (1.2.81) lo último que se ha preparado: cada vehículo (ruta relativa) con su largo y su clase, y las composiciones enteras
         public static Dictionary<string, (double len, char cls)> Info = new Dictionary<string, (double, char)>(StringComparer.OrdinalIgnoreCase);
         public static List<Con> Consists = new List<Con>();
@@ -117,6 +117,8 @@ namespace SelectOR.Comun
 
         // (1.2.81) Las composiciones de TRAINS\CONSISTS con todos sus vehículos en la carpeta de trenes (las demás no sirven
         // para sustituir). Guardadas en disco por fecha, como los vehículos.
+        static readonly Regex BlockRx = new Regex(@"\b(Engine|Wagon)\s*\(", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        static readonly Regex FlipRx = new Regex(@"\bFlip\s*\(", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         static readonly Regex CarRx = new Regex(@"\b(EngineData|WagonData)\s*\(\s*(?:""([^""]*)""|(\S+))\s+(?:""([^""]*)""|([^\s)]+))\s*\)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         static List<Con> BuildConsists(string basePath, Dictionary<string, (double, char)> have)
         {
@@ -125,7 +127,7 @@ namespace SelectOR.Comun
             if (!Directory.Exists(dir)) return res;
             string cache;
             using (var sha = SHA1.Create())
-                cache = Path.Combine(CacheDir(), "composiciones-" + BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Path.GetFullPath(dir).TrimEnd('\\', '/').ToLowerInvariant())), 0, 6).Replace("-", "").ToLowerInvariant() + ".txt");
+                cache = Path.Combine(CacheDir(), "composiciones2-" + BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Path.GetFullPath(dir).TrimEnd('\\', '/').ToLowerInvariant())), 0, 6).Replace("-", "").ToLowerInvariant() + ".txt");
             var old = new Dictionary<string, (long t, string cars)>(StringComparer.OrdinalIgnoreCase);
             try { if (File.Exists(cache)) foreach (var l in File.ReadAllLines(cache, Encoding.UTF8)) { var p = l.Split('|'); if (p.Length == 3 && long.TryParse(p[1], out long t)) old[p[0]] = (t, p[2]); } } catch { }
             var lines = new List<string>(); bool changed = false;
@@ -141,11 +143,17 @@ namespace SelectOR.Comun
                     changed = true;
                     var sb = new StringBuilder();
                     string t = Read(fi.FullName) ?? "";
+                    var blocks = BlockRx.Matches(t).Cast<Match>().Select(b => b.Index).ToList();
                     foreach (Match m in CarRx.Matches(t))
                     {
+                        // girado: «Flip ( )» dentro de su bloque Engine/Wagon (entre su comienzo y el del siguiente)
+                        int b0 = blocks.LastOrDefault(x => x <= m.Index), b1 = blocks.FirstOrDefault(x => x > m.Index);
+                        if (b1 <= b0) b1 = t.Length;
+                        bool flip = FlipRx.Match(t.Substring(b0, b1 - b0)).Success;
                         bool eng = m.Groups[1].Value.StartsWith("E", StringComparison.OrdinalIgnoreCase);
                         string name = m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value, folder = m.Groups[4].Success ? m.Groups[4].Value : m.Groups[5].Value;
                         if (sb.Length > 0) sb.Append(';');
+                        if (flip) sb.Append('!');
                         sb.Append(folder.Trim()).Append('\\').Append(name.Trim()).Append(eng ? ".eng" : ".wag");
                     }
                     cars = sb.ToString().Replace("|", "");
@@ -154,10 +162,11 @@ namespace SelectOR.Comun
                 if (cars.Length == 0) continue;
                 var c = new Con { Name = Path.GetFileNameWithoutExtension(fi.Name) };
                 bool all = true;
-                foreach (var r in cars.Split(';'))
+                foreach (var r0 in cars.Split(';'))
                 {
+                    bool fl = r0.StartsWith("!"); string r = fl ? r0.Substring(1) : r0;
                     if (!have.ContainsKey(r)) { all = false; break; }
-                    c.Cars.Add((r, r.EndsWith(".eng", StringComparison.OrdinalIgnoreCase)));
+                    c.Cars.Add((r, r.EndsWith(".eng", StringComparison.OrdinalIgnoreCase))); c.Flips.Add(fl);
                 }
                 if (all && c.Cars.Count > 0) res.Add(c);
             }

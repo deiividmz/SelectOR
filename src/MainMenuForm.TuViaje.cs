@@ -1,4 +1,4 @@
-// Cabecera «TU VIAJE» de Conducción libre, en forma de BILLETE: salida y llegada unidas por la línea del recorrido (con
+﻿// Cabecera «TU VIAJE» de Conducción libre, en forma de BILLETE: salida y llegada unidas por la línea del recorrido (con
 // el tren, los km y cuántos recorridos hay entre las dos), un botón para intercambiarlas y otro para el mapa; debajo,
 // una fila de chips con la hora, la estación del año, el clima y el modo actividad. Un clic en un chip abre su selector.
 
@@ -298,7 +298,7 @@ namespace SelectOR
                 using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, tr.X - 2, tr.Y, tr.Width + 4, tr.Height);
                 Theme.FillRound(g, tr, 9, Color.FromArgb(52, 74, 58));
                 Glyphs.Draw(g, "train", new Rectangle(tr.X + tw / 2 - 8, tr.Y + th / 2 - 8, 16, 16), Theme.Text);
-                string txt = Empty ?? (Km > 0 ? Km.ToString("N1", System.Globalization.CultureInfo.GetCultureInfo(I18n.English ? "en-GB" : "es-ES")) + " km" : "")
+                string txt = Empty ?? (Km > 0 ? Km.ToString("N1", I18n.Culture) + " km" : "")
                              + (Empty == null && Count > 0 ? (Km > 0 ? "  ·  " : "") + string.Format(I18n.T(Count == 1 ? "{0} recorrido" : "{0} recorridos"), Count) : "");
                 TextRenderer.DrawText(g, txt, _f, new Rectangle(0, cy + 11, Width, Height - cy - 11), Theme.Subtle,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);

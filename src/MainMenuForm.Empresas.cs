@@ -516,12 +516,12 @@ namespace SelectOR
         }
 
         // Secciones de Empresas (el índice es el que usan ShowSubtab / UpdateSubtabVisibility).
-        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía", "Chat", "Normas", "Préstamos", "Rutas", "Catálogo de rutas" };
-        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "shield", "connect", "globe", "train", "train", "speaker", "chat", "rules", "bank", "map", "map" };
+        static readonly string[] SubNames = { "Servicios", "Banca", "Socios", "Ajustes", "Ranking", "Mi perfil", "Revisión", "Usuarios", "Administración", "Flota", "Compra", "Megafonía", "Chat", "Normas", "Préstamos", "Rutas", "Catálogo de rutas", "Tablón" };
+        static readonly string[] SubGlyphs = { "clock", "bank", "connect", "gear", "activity", "info", "shield", "connect", "globe", "train", "train", "speaker", "chat", "rules", "bank", "map", "map", "board" };
         // Agrupación del menú lateral.
         static readonly (string title, int[] items)[] NavGroupDefs =
         {
-            ("OPERACIÓN", new[] { 0, 9, 10 }),        // Servicios · Flota · Compra
+            ("OPERACIÓN", new[] { 0, 9, 10, 17 }),    // Servicios · Flota · Compra · Tablón (1.2.82)
             ("FINANZAS", new[] { 1, 4 }),             // Banca · Ranking
             ("EMPRESA", new[] { 12, 2, 13, 15, 3, 11, 5 }),   // Chat · Socios · Normas · Rutas · Ajustes · Megafonía · Mi perfil
             ("ADMINISTRACIÓN", new[] { 6, 14, 16, 7, 8 }),    // Revisión (carné) · Préstamos · Catálogo de rutas · Usuarios · Administración
@@ -535,7 +535,8 @@ namespace SelectOR
             Color.FromArgb(120, 144, 226), Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191), Color.FromArgb(150, 160, 170),
             Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(229, 115, 115), Color.FromArgb(45, 212, 191),
             Color.FromArgb(167, 139, 250), Color.FromArgb(251, 146, 60), Color.FromArgb(102, 197, 106), Color.FromArgb(167, 139, 250), Color.FromArgb(120, 144, 226),
-            Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191), Color.FromArgb(240, 180, 70), Color.FromArgb(240, 180, 70)
+            Color.FromArgb(240, 196, 90), Color.FromArgb(45, 212, 191), Color.FromArgb(240, 180, 70), Color.FromArgb(240, 180, 70),
+            Color.FromArgb(240, 196, 90)   // Tablón
         };
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
         bool _subtabAutoFallback;       // se abrió Ranking automáticamente (sin empresas aún): al cargar, volver a Servicios
@@ -702,7 +703,7 @@ namespace SelectOR
         }
 
         // Alturas del menú lateral (se encogen si hace falta para que quepa todo sin barras).
-        const int NavItemH = 36, NavItemHMin = 24, NavHeaderH = 30, NavHeaderH0 = 20, NavHeaderHMin = 14;
+        const int NavItemH = 36, NavItemHMin = 21, NavHeaderH = 30, NavHeaderH0 = 20, NavHeaderHMin = 14;   // (1.2.82: con el Tablón, filas de 21 como mínimo)
         TableLayoutPanel _empNav;
         List<(Control c, int tipo)> _navRows;   // tipo: 0 sección · 1 primer encabezado · 2 encabezado
 
@@ -871,7 +872,8 @@ namespace SelectOR
             BuildLoansAdminSubpanel();                    // préstamos de todas las empresas (superadmin)
             BuildCoRoutesSubpanel();                      // rutas que afectan a la empresa
             BuildCatalogSubpanel();                       // catálogo global de rutas (superadmin)
-            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel, _chatPanel, _rulesPanel, _loansAdminPanel, _coRoutesPanel, _catPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
+            BuildTablonSubpanel();                        // (1.2.82) tablón: escaparate, anuncios, empleo y mercado de trenes
+            foreach (var pnl in new[] { _svcPanel, _bankPanel, _memberPanel, _tariffPanel, _rankPanel, _soloPanel, _reviewPanel, _usersPanel, _allCompPanel, _fleetPanel, _buyPanel, _paPanel, _chatPanel, _rulesPanel, _loansAdminPanel, _coRoutesPanel, _catPanel, _tabPanel }) { pnl.Dock = DockStyle.Fill; pnl.Visible = false; host.Controls.Add(pnl); }
 
             _empHomeMsg = EmpMsg(); _empHomeMsg.Dock = DockStyle.Bottom;
 
@@ -1006,7 +1008,7 @@ namespace SelectOR
         string BankDayTitle(DateTime d)
         {
             var today = DateTime.Today;
-            var ci = System.Globalization.CultureInfo.GetCultureInfo(I18n.English ? "en-GB" : "es-ES");
+            var ci = I18n.Culture;
             string full = d.ToString(I18n.English ? "dddd d MMMM yyyy" : "dddd, d 'de' MMMM 'de' yyyy", ci);
             if (d == today) return Tr("HOY") + " · " + full.ToUpper(ci);
             if (d == today.AddDays(-1)) return Tr("AYER") + " · " + full.ToUpper(ci);
@@ -1588,6 +1590,7 @@ namespace SelectOR
             if (_loansAdminPanel != null && !(i == PrestamosSubtab)) _loansAdminPanel.Visible = false;
             if (_coRoutesPanel != null && !(i == RutasSubtab)) _coRoutesPanel.Visible = false;
             if (_catPanel != null && !(i == CatalogoSubtab)) _catPanel.Visible = false;
+            if (_tabPanel != null && !(i == TablonSubtab)) _tabPanel.Visible = false;
             ApplyCompanyKpisVisibility();   // el hueco ya con su tamaño definitivo (la tira se rellena al final)
             _pageEmpresas?.PerformLayout();
             if (i == 0) ShowFast(_svcPanel, true);
@@ -1608,6 +1611,7 @@ namespace SelectOR
             if (i == PrestamosSubtab) ShowFast(_loansAdminPanel, true);
             if (i == RutasSubtab) ShowFast(_coRoutesPanel, true);
             if (i == CatalogoSubtab) ShowFast(_catPanel, true);
+            if (i == TablonSubtab) ShowFast(_tabPanel, true);
             __vis.Dispose();
             var __load = Perf.T("ShowSubtab " + i + " · carga");
             // Cada subpestaña recarga sus datos al abrirse (ya no hay botón "Actualizar"); en la precarga visual de la
@@ -1630,6 +1634,7 @@ namespace SelectOR
             if (i == PrestamosSubtab) LoadLoansAdmin();
             if (i == RutasSubtab) LoadCoRoutes();
             if (i == CatalogoSubtab) LoadCatalog();
+            if (i == TablonSubtab) LoadTablon();
             __load.Dispose();
             using (Perf.T("ShowSubtab " + i + " · kpis"))
             UpdateCompanyKpis();                  // la tira de la empresa se muestra u oculta según la sección
@@ -2421,7 +2426,7 @@ namespace SelectOR
         {
             if (_bankSummary == null) return;
             var from = BankPeriodStart();
-            var ci = System.Globalization.CultureInfo.GetCultureInfo(I18n.English ? "en-GB" : "es-ES");
+            var ci = I18n.Culture;
             double inc = 0, exp = 0;
             var costs = new Dictionary<string, double>();
             foreach (var m in _ledgerAll)
@@ -3769,6 +3774,7 @@ namespace SelectOR
         // «en taller» en cuanto los km pasaban del intervalo y, sin el botón «Llevar al taller», se quedaba bloqueada.
         static string RealUnitStatus(string status, string id, HashSet<string> open, double kmSinceMaint, double maintInterval)
         {
+            if (status == "for_sale") return "for_sale";   // (1.2.82) a la venta en el mercado: no sale en servicios
             if (open != null ? open.Contains(id ?? "") : status == "in_use") return "in_use";
             if (status == "maintenance_due") return "maintenance_due";
             return "available";
@@ -3796,7 +3802,7 @@ namespace SelectOR
             //    (Con dos unidades compradas de la MISMA librea sí pueden salir las dos a la vez.)
             //  · Si esa librea no está en la flota —el maquinista tiene el contenido en otra
             //    carpeta—, vale cualquier unidad libre del modelo: lo que se compró es la máquina.
-            string firstStatus = null; bool anyMaint = false, anyInUse = false;
+            string firstStatus = null; bool anyMaint = false, anyInUse = false, anySale = false;
             int total = 0, enUso = 0, enTaller = 0;
             string idMiLibrea = null, plateMiLibrea = null;   // libre y de la librea de este tren
             string idOtra = null, plateOtra = null;           // libre, de otra librea
@@ -3825,6 +3831,7 @@ namespace SelectOR
                     total++;
                     if (st == "maintenance_due") { anyMaint = true; enTaller++; }
                     if (st == "in_use") { anyInUse = true; enUso++; }
+                    if (st == "for_sale") anySale = true;
                     firstStatus = st;
                 }
             }
@@ -3850,6 +3857,8 @@ namespace SelectOR
             string cuantas = total == 1
                 ? string.Format(Tr("la única unidad de «{0}»"), engName)
                 : string.Format(Tr("las {0} unidades de «{1}»"), total, engName);
+            if (anySale && !anyInUse && !anyMaint)
+                return (null, string.Format(Tr("Tren no operativo: {0} está(n) a la venta en el mercado. Un gestor puede retirarlo en Flota."), cuantas));
             if (anyInUse && !anyMaint)
                 return (null, string.Format(Tr("Tren no operativo: {0} está(n) en servicio con otro maquinista. Espera a que termine o compra otra unidad."), cuantas));
             if (anyMaint && !anyInUse)
@@ -5425,18 +5434,38 @@ namespace SelectOR
             bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             _fleetHeaderLbl = new Label { Text = Tr("TRENES DE LA EMPRESA"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 0, 12, 0) };
             _fleetTabs = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 4, 0, 0) };
-            string[] states = { "Todos", "Disponibles", "En servicio" };   // sin «En taller»: el taller es automático
-            for (int k = 0; k < states.Length; k++)
+            // sin «En taller»: el taller es automático · (1.2.82) «En venta»: los que están en el mercado
+            for (int k = 0; k < FleetTabNames.Length; k++)
             {
                 int idx = k;
-                var b = BankChip(Tr(states[k]), k == 0);
-                b.Click += (s2, e2) => { SetChipActive(_fleetTabs, idx); _fleetCards.StateFilter = idx - 1; };
+                var b = BankChip(Tr(FleetTabNames[k]), k == 0);
+                b.Click += (s2, e2) => { SetChipActive(_fleetTabs, idx); _fleetCards.StateFilter = FleetTabStates[idx]; };
                 _fleetTabs.Controls.Add(b);
             }
             var fleetSearch = new RoundedInput(I18n.T("🔎  Matrícula o tren…")) { Width = 240, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 5, 0, 5) };
             fleetSearch.Box.TextChanged += (s2, e2) => _fleetCards.Filter(fleetSearch.Box.Text);
             bar.Controls.Add(_fleetHeaderLbl, 0, 0); bar.Controls.Add(_fleetTabs, 1, 0); bar.Controls.Add(fleetSearch, 2, 0);
             t.Controls.Add(bar, 0, 0);
+            // (1.2.82) ventana estrecha: el buscador encoge (y, si aún no cabe, se esconde el rótulo) para que quepan las pastillas
+            void FitFleetBar()
+            {
+                // lo que ocupan de verdad las pastillas (la última visible, ya colocada) y lo que queda para el rótulo y el buscador
+                int need = 0; foreach (Control c in _fleetTabs.Controls) if (c.Visible) need = Math.Max(need, c.Right + c.Margin.Right);
+                need += 6;
+                int lblW = _fleetHeaderLbl.PreferredWidth + _fleetHeaderLbl.Margin.Horizontal, sm = fleetSearch.Margin.Horizontal;
+                int avail = bar.ClientSize.Width;
+                bool lbl = avail - need - lblW - sm >= 150;
+                if (_fleetHeaderLbl.Visible != lbl) _fleetHeaderLbl.Visible = lbl;
+                int w = Math.Max(120, Math.Min(240, avail - need - sm - (lbl ? lblW : 0)));
+                if (fleetSearch.Width != w) fleetSearch.Width = w;
+                if (bar.ColumnStyles[2].SizeType != SizeType.Absolute || (int)bar.ColumnStyles[2].Width != w + sm)
+                {
+                    bar.ColumnStyles[2] = new ColumnStyle(SizeType.Absolute, w + sm);   // (la columna no sigue sola al buscador)
+                    if (bar.IsHandleCreated) bar.BeginInvoke((Action)(() => bar.PerformLayout()));   // (fuera de la maquetación en curso)
+                }
+            }
+            bar.Resize += (s2, e2) => FitFleetBar();
+            _fleetTabs.Layout += (s2, e2) => FitFleetBar();
 
             // ---- la lista: una línea por tren, con su composición ----
             _thumbs ??= new VehicleThumbs(this);
@@ -5480,8 +5509,8 @@ namespace SelectOR
                 using var fb = Theme.Font(9.5f, FontStyle.Bold); b.Width = TextRenderer.MeasureText(b.Text, fb).Width + 36;
                 return b;
             }
-            _fleetRemoveBtn = Act("Dar de baja"); _fleetRemoveBtn.BaseColor = Theme.Surface2; _fleetRemoveBtn.HoverColor = Color.FromArgb(150, 60, 60); _fleetRemoveBtn.TextColor = RedC;
-            _fleetRemoveBtn.Click += (s2, e2) => RemoveVehicle();
+            _fleetRemoveBtn = Act("Vender o desguazar…"); _fleetRemoveBtn.BaseColor = Theme.Surface2; _fleetRemoveBtn.HoverColor = Color.FromArgb(150, 60, 60); _fleetRemoveBtn.TextColor = RedC;
+            _fleetRemoveBtn.Click += (s2, e2) => SellOrScrapUi();   // (1.2.82) antes «Dar de baja» (MainMenuForm.Tablon.cs)
             _fleetPlateBtn = Act("Asignar matrícula"); _fleetPlateBtn.BaseColor = Theme.Surface2; _fleetPlateBtn.HoverColor = Theme.SurfaceHi; _fleetPlateBtn.TextColor = Theme.Text;
             _fleetPlateBtn.Click += (s2, e2) => AssignPlateUi();
             // sin «Llevar al taller»: el mantenimiento se hace solo al cumplir los km (taller-automatico.sql)
@@ -5547,7 +5576,7 @@ namespace SelectOR
                 if (r < _fleetStatus.Count) { if (_fleetStatus[r] == "in_use") inUse++; else if (_fleetStatus[r] == "maintenance_due") due++; }
             }
             _fleetOwnTitle.Text = string.Format(Tr("{0} ejemplares elegidos"), rows.Count);
-            if (_fleetOwnSub != null) _fleetOwnSub.Text = Tr("«Dar de baja» y «Añadir a mi contenido» actúan sobre todos  ·  Esc: quitar la selección");
+            if (_fleetOwnSub != null) _fleetOwnSub.Text = Tr("«Vender o desguazar» y «Añadir a mi contenido» actúan sobre todos  ·  Esc: quitar la selección");
             if (_voKind != null) _voKind.Text = string.Format(trains.Count == 1 ? Tr("{0} tren") : Tr("{0} trenes"), trains.Count);
             if (_voEstado != null) { _voEstado.Text = string.Format(Tr("{0} libres"), rows.Count - inUse - due); _voEstado.ForeColor = Theme.Accent; }
             if (_voProp != null) _voProp.Text = string.Format(Tr("{0} en servicio"), inUse);
@@ -5904,11 +5933,11 @@ namespace SelectOR
                     double remaining = Math.Max(0, interval - since);
                     string maint = interval > 0 ? remaining.ToString("N0", EsEs) + " km" : "—";
                     string real = RealUnitStatus(status, Str(e, "id"), openUnits, since, interval);
-                    bool inUse = real == "in_use", due = real == "maintenance_due";
-                    bool soon = !due && !inUse && interval > 0 && remaining <= interval * 0.1;   // revisión pronto
-                    int state = due ? 2 : inUse ? 1 : soon ? 3 : 0;
+                    bool inUse = real == "in_use", due = real == "maintenance_due", sale = real == "for_sale";
+                    bool soon = !due && !inUse && !sale && interval > 0 && remaining <= interval * 0.1;   // revisión pronto
+                    int state = sale ? 4 : due ? 2 : inUse ? 1 : soon ? 3 : 0;
                     // Los mismos nombres cortos que las pestañas: caben en la celda ESTADO sin encogerse ni cortarse.
-                    string estado = due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
+                    string estado = sale ? Tr("En venta") : due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
                     Color estadoColor = FleetCardList.StateColors[state];   // el mismo color que su chip
                     // Vista de disponibilidad para el maquinista: gris si NO tiene el modelo en local (no la puede conducir).
                     // El MODELO es la carpeta con la que se compró la unidad; si no la guardó (backend
@@ -5969,6 +5998,7 @@ namespace SelectOR
             OnFleetVehicleSelected();  // refresca la ficha/vista del vehículo seleccionado
             UpdateRoleUi();
             UpdateFleetValuation();   // recalcula el desglose del consist elegido (la propiedad puede haber cambiado)
+            MarketTickIfListed();     // (1.2.82) anuncios caducados: el tren vuelve a estar disponible
         }
 
         // Un ejemplar de un tren en Flota: su tarjeta es la del tren (composición 2D si lo tienes; si no, su máquina de cabeza).
@@ -5983,9 +6013,9 @@ namespace SelectOR
             double since = Num(e, "km_since_maint"), interval = Num(e, "maint_interval_km"), cap = Num(e, "capacity"), rent = Num(e, "rental_per_service");
             double remaining = Math.Max(0, interval - since);
             string real = RealUnitStatus(status, Str(e, "id"), openUnits, since, interval);
-            bool inUse = real == "in_use", due = real == "maintenance_due", soon = !due && !inUse && interval > 0 && remaining <= interval * 0.1;
-            int state = due ? 2 : inUse ? 1 : soon ? 3 : 0;
-            string estado = due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
+            bool inUse = real == "in_use", due = real == "maintenance_due", sale = real == "for_sale", soon = !due && !inUse && !sale && interval > 0 && remaining <= interval * 0.1;
+            int state = sale ? 4 : due ? 2 : inUse ? 1 : soon ? 3 : 0;
+            string estado = sale ? Tr("En venta") : due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
             string prop = ownership == "rented" ? Tr("Alquilado") + " · " + rent.ToString("N0", EsEs) + " €/serv." : Tr("Comprado");
             string leadPath = lead.Length > 0 && engPath.TryGetValue(lead, out var lp) ? lp : "";
             bool local = trainId.Length > 0 && _trainCon.TryGetValue(trainId, out _);
@@ -8010,12 +8040,13 @@ namespace SelectOR
         void UpdateFleetTabCounts()
         {
             if (_fleetTabs == null || _fleetCards == null) return;
-            string[] names = { "Todos", "Disponibles", "En servicio", "En taller" };
+            var names = FleetTabNames;
             using var f = Theme.Font(9f, FontStyle.Bold);   // las pastillas, como las de Conducción libre
             for (int k = 0; k < names.Length && k < _fleetTabs.Controls.Count; k++)
             {
                 if (_fleetTabs.Controls[k] is not RoundButton b) continue;
-                int n = _fleetCards.Count(k - 1);
+                int n = _fleetCards.Count(FleetTabStates[k]);
+                if (k == 3) { bool vis = n > 0 || _fleetCards.StateFilter == 4; if (b.Visible != vis) b.Visible = vis; }   // «En venta», solo si hay
                 b.Text = Tr(names[k]) + (_fleetIds.Count > 0 ? "  " + n.ToString("N0", EsEs) : "");
                 b.Width = TextRenderer.MeasureText(b.Text, f).Width + 28;
                 b.Invalidate();
@@ -8033,6 +8064,7 @@ namespace SelectOR
         void OnFleetVehicleSelected()
         {
             if (_fleetOwnTitle == null) return;
+            UpdateSellButton();   // (1.2.82) «Vender o desguazar…» o «Retirar del mercado»
             if (_fleetCards != null && _fleetCards.MarkedCount > 1) { ShowFleetMulti(); return; }
             foreach (var b in new[] { _fleetPlateBtn, _fleetSeatsBtn, _fleetInfoBtn }) if (b != null) b.Enabled = true;
             int i = FleetSelectedRow();
@@ -8918,7 +8950,7 @@ namespace SelectOR
             var r = new ServiceResultDialog.Data
             {
                 Company = companyName, Route = route, ServiceId = svc, Consist = _drivenLabel ?? "", Path = _drivenPath ?? "",
-                Driver = Supa.Username ?? "", DateText = DateTime.Now.ToString(I18n.English ? "d MMM yyyy · HH:mm" : "d 'de' MMMM · HH:mm", I18n.English ? CultureInfo.GetCultureInfo("en-GB") : EsEs)
+                Driver = Supa.Username ?? "", DateText = DateTime.Now.ToString(I18n.English ? "d MMM yyyy · HH:mm" : "d 'de' MMMM · HH:mm", I18n.Culture)
             };
             // Paradas comerciales (solo trenes de viajeros): las de este servicio, desde que se abrió.
             if (_svcTrainCap > 0)
@@ -9197,7 +9229,7 @@ namespace SelectOR
                     if (p.until != null)
                     {
                         card.Suspended = true; card.PointsColor = Carne.Red;
-                        card.PointsText = string.Format(Tr("suspendido hasta el {0}"), p.until.Value.ToLocalTime().ToString("d MMM", I18n.English ? CultureInfo.GetCultureInfo("en-GB") : EsEs));
+                        card.PointsText = string.Format(Tr("suspendido hasta el {0}"), p.until.Value.ToLocalTime().ToString("d MMM", I18n.Culture));
                     }
                     else
                     {
@@ -9412,8 +9444,8 @@ namespace SelectOR
             // gestiona solo la ve si está habilitada; el superadmin la ve siempre (para habilitarla).
             bool pa = su || (PaEnabledHere() && CanManage());
             bool[] show = hasCompany
-                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true, true, su, su || _routeMode != "collect", su }   // Compra: solo gestión · Revisión, Préstamos y Catálogo de rutas: superadmin · Rutas: no en «solo recopilar»
-                : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false, false, su, false, su };
+                ? new[] { true, true, CanManage() || su, su, true, true, su, su, su, true, CanManage() || su, pa, true, true, su, su || _routeMode != "collect", su, true }   // Compra: solo gestión · Revisión, Préstamos y Catálogo de rutas: superadmin · Rutas: no en «solo recopilar»
+                : new[] { false, false, false, false, true, true, su, su, su, false, false, false, false, false, su, false, su, true };   // Tablón: también sin empresa (empleo, escaparate)
             _empSubShow = show;   // (con la ventana oculta, Visible siempre dice false: la precarga mira esto)
             for (int k = 0; k < _empSubtabs.Length && k < show.Length; k++)
                 if (_empSubtabs[k] != null) _empSubtabs[k].Visible = show[k];

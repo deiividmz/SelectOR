@@ -1,4 +1,4 @@
-// Liga mensual de empresas (liga-mensual.sql): clasificación del mes, campeones, aviso de premio y
+﻿// Liga mensual de empresas (liga-mensual.sql): clasificación del mes, campeones, aviso de premio y
 // ajustes del superadmin. Las cuentas y el reparto de premios los hace SIEMPRE el servidor.
 
 using System;
@@ -23,7 +23,7 @@ namespace SelectOR
         int _rankTab;                 // 0 = Liga del mes · 1 = Campeones · 2 = Empresas · 3 = Maquinistas
         bool _leagueChecked;          // aviso de premios: una vez por sesión
 
-        static CultureInfo LeagueCul => new CultureInfo(I18n.English ? "en-GB" : "es-ES");
+        static CultureInfo LeagueCul => I18n.Culture;
         // «noviembre de 2026» / «November 2026»; capital = mayúscula inicial (al empezar una celda o frase).
         static string MonthName(DateTime m, bool capital = false)
         {

@@ -1,4 +1,4 @@
-// Socios → Estadísticas (gerente, gestores y superadmin): una tarjeta por socio con lo que ha hecho en el
+﻿// Socios → Estadísticas (gerente, gestores y superadmin): una tarjeta por socio con lo que ha hecho en el
 // periodo elegido (servicios, km, horas, neto, viajeros, velocidad media, infracciones, anulados), su
 // actividad mes a mes (12 meses) y cuándo condujo por última vez. Filtros: periodo, rol, actividad
 // (activos, inactivos, sin servicio en 30 días o nunca), búsqueda y orden.
@@ -110,7 +110,7 @@ namespace SelectOR
                 int v = d.Months[m], h = v == 0 ? Theme.Px(2) : Math.Max(Theme.Px(4), hMax * v / max);
                 var bar = new Rectangle(chartX + m * bw + 2, baseY - h, bw - 4, h);
                 using (var b = new SolidBrush(v == 0 ? Theme.Surface2 : m == 11 ? Theme.AccentHi : Theme.Accent)) g.FillRectangle(b, bar);
-                string ml = d.MonthZero.AddMonths(m).ToString(I18n.English ? "MMM" : "MMM", I18n.English ? CultureInfo.GetCultureInfo("en-GB") : Es);
+                string ml = d.MonthZero.AddMonths(m).ToString(I18n.English ? "MMM" : "MMM", I18n.Culture);
                 TextRenderer.DrawText(g, ml.Substring(0, 1).ToUpperInvariant(), _fTiny, new Rectangle(chartX + m * bw, baseY + 2, bw, Theme.Px(14)), Theme.Subtle, C1);
             }
         }

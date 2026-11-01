@@ -1,4 +1,4 @@
-// FLOTA y COMPRA en tarjetas, con la vista 2D (de costado) de cada modelo.
+﻿// FLOTA y COMPRA en tarjetas, con la vista 2D (de costado) de cada modelo.
 //
 //  · VehicleThumbs: la vista 2D de un .eng se dibuja UNA vez y se guarda en disco (caché de SelectOR);
 //    la clave lleva la fecha y el tamaño del archivo, así que si cambias el modelo se rehace sola.
@@ -257,13 +257,13 @@ namespace SelectOR
     {
         public int Row;          // fila en las listas de datos de Flota
         public string Id = "", Label = "";
-        public int State;        // 0 disponible · 1 en servicio · 2 en taller · 3 revisión pronto
+        public int State;        // 0 disponible · 1 en servicio · 2 en taller · 3 revisión pronto · 4 en venta (1.2.82)
         internal int W;          // ancho del chip
     }
 
     public class FleetCardList : Panel
     {
-        public static readonly Color[] StateColors = { Theme.Accent, Color.FromArgb(120, 144, 226), Color.FromArgb(229, 115, 115), Color.FromArgb(240, 196, 90) };
+        public static readonly Color[] StateColors = { Theme.Accent, Color.FromArgb(120, 144, 226), Color.FromArgb(229, 115, 115), Color.FromArgb(240, 196, 90), Color.FromArgb(186, 104, 200) };
         sealed class Card { public FleetModel M; public List<FleetUnit> Shown = new(); public int Y, H; public List<Rectangle> Chips = new(); }
 
         readonly List<FleetModel> _models = new();
@@ -457,7 +457,7 @@ namespace SelectOR
                 if (us) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.DrawRoundBorder(g, r, Theme.Px(7), Theme.Accent); g.SmoothingMode = SmoothingMode.None; }
                 int d = Theme.Px(8);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var b = new SolidBrush(StateColors[Math.Max(0, Math.Min(3, u.State))])) g.FillEllipse(b, r.X + Theme.Px(9), r.Y + (r.Height - d) / 2, d, d);
+                using (var b = new SolidBrush(StateColors[Math.Max(0, Math.Min(StateColors.Length - 1, u.State))])) g.FillEllipse(b, r.X + Theme.Px(9), r.Y + (r.Height - d) / 2, d, d);
                 g.SmoothingMode = SmoothingMode.None;
                 TextRenderer.DrawText(g, u.Label, _fChip, new Rectangle(r.X + Theme.Px(22), r.Y, r.Width - Theme.Px(24), r.Height), Theme.Text, CardPaint.Line);
             }

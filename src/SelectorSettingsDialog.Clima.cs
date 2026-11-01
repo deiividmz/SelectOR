@@ -1,4 +1,4 @@
-// Ajustes de SelectOR → Clima (ClimaFiles.cs): activar el clima de SelectOR (de serie, desactivado), elegir los grupos
+﻿// Ajustes de SelectOR → Clima (ClimaFiles.cs): activar el clima de SelectOR (de serie, desactivado), elegir los grupos
 // (nubes, lluvia, nieve, brillo de las luces, cielo nocturno) y ver cada imagen de Open Rails al lado de la de SelectOR.
 // El administrador, además, cambia las imágenes del clima sin publicar versión: añade imágenes (o una carpeta entera:
 // solo las que tienen el nombre de una imagen de clima de Open Rails y no son iguales a la suya), las quita y publica el
@@ -155,7 +155,7 @@ namespace SelectOR
             if (_climaGroups == null) return;
             var shown = ClimaShown();
             _lblClimaVer.Text = _climaPub == null ? I18n.T("Sin clima publicado")
-                : string.Format(I18n.T("Clima n.º {0} · {1}"), _climaPub.ver, DateTime.TryParse(_climaPub.date, out var d) ? d.ToLocalTime().ToString("d MMM yyyy", I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : System.Globalization.CultureInfo.GetCultureInfo("es-ES")) : "");
+                : string.Format(I18n.T("Clima n.º {0} · {1}"), _climaPub.ver, DateTime.TryParse(_climaPub.date, out var d) ? d.ToLocalTime().ToString("d MMM yyyy", I18n.Culture) : "");
             _lblClimaVer.Parent?.PerformLayout();
             _climaGroups.Rows = ClimaFiles.Groups.Select(g =>
             {
@@ -343,7 +343,7 @@ namespace SelectOR
             public void ClickBox(string id) => Toggled?.Invoke(id);   // (pruebas)
         }
 
-        static string FmtBytes(long b) => b >= 1024 * 1024 ? (b / 1048576.0).ToString("0.0", I18n.English ? System.Globalization.CultureInfo.GetCultureInfo("en-GB") : System.Globalization.CultureInfo.GetCultureInfo("es-ES")) + " MB" : Math.Max(1, b / 1024) + " KB";
+        static string FmtBytes(long b) => b >= 1024 * 1024 ? (b / 1048576.0).ToString("0.0", I18n.Culture) + " MB" : Math.Max(1, b / 1024) + " KB";
 
         // ---------------------------------------------------------------- vista previa: Open Rails | SelectOR
         sealed class ClimaPreview : Control

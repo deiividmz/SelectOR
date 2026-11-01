@@ -210,6 +210,12 @@ namespace SelectOR
                 case "purchase_rejected":
                     icon = "❌"; c = bad; title = Tr("Solicitud de compra rechazada");
                     body = string.Format(Tr("{0} ha decidido no comprar {1}."), co, machine); sub = 10; break;
+                case "market_sold":   // (1.2.82) mercado de trenes (tablon-mercado.sql)
+                    icon = "💶"; c = ok; title = Tr("Tren vendido en el mercado");
+                    body = string.Format(Tr("{0} ha comprado «{1}» a {2}: {2} recibe {3} € (ya descontada la comisión)."),
+                               DataOr(r, "buyer", Tr("Otra empresa")), DataStr(r, "name"), co,
+                               double.TryParse(DataStr(r, "gets"), NumberStyles.Float, CultureInfo.InvariantCulture, out var gets) ? gets.ToString("N0", I18n.Culture) : "—");
+                    sub = 9; break;   // Flota (cuando exista la sección Tablón, llevar allí)
                 case "service_validated":
                     icon = "✅"; c = ok; title = Tr("Servicio validado");
                     body = string.Format(Tr("Tu servicio {0} en {1} ya es válido y se ha pagado."), routeTxt, co); sub = 0; break;
@@ -345,7 +351,7 @@ namespace SelectOR
             double d;
             if (v.ValueKind == JsonValueKind.Number) d = v.GetDouble();
             else if (!double.TryParse(v.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out d)) return v.ToString();
-            return d.ToString(Math.Abs(d % 1) < 0.005 ? "N0" : "N2", I18n.English ? CultureInfo.GetCultureInfo("en-GB") : CultureInfo.GetCultureInfo("es-ES"));
+            return d.ToString(Math.Abs(d % 1) < 0.005 ? "N0" : "N2", I18n.Culture);
         }
 
         // ---- Pila de avisos: abajo a la derecha, el más nuevo encima; como mucho 4 a la vez ----

@@ -1,4 +1,4 @@
-// Ajustes de SelectOR (botón junto a «Opciones OR» y «Acerca de SelectOR»), en tres pestañas: Gráficos (ReShade;
+﻿// Ajustes de SelectOR (botón junto a «Opciones OR» y «Acerca de SelectOR»), en tres pestañas: Gráficos (ReShade;
 // SelectorSettingsDialog.Graficos.cs), Clima (SelectorSettingsDialog.Clima.cs) y Mandos: los joysticks y
 // cuadrantes conectados (en vivo), las palancas (regulador, frenos, inversor: «Asignar» y se mueve la palanca) y los
 // botones («Asignar un botón»: se pulsa y se elige qué hace). Se guarda al momento (AppPrefs.JoyBindings) y vale para
@@ -50,16 +50,18 @@ namespace SelectOR
             KeyPreview = true;
 
             var stripe = new LiveryStripe { Dock = DockStyle.Top };
-            var header = new DialogKit.Header(I18n.T("Ajustes de SelectOR"), I18n.T("Tus mandos para conducir, los gráficos y el clima de Open Rails"), "🎮");
+            var header = new DialogKit.Header(I18n.T("Ajustes de SelectOR"), I18n.T("Idioma, tamaño del HUD, tus mandos, los gráficos y el clima de Open Rails"), "🎛");
             // pestañas
             var tabs = new Panel { Dock = DockStyle.Top, Height = Theme.Px(52), BackColor = Theme.Bg, Padding = new Padding(Theme.Px(20), Theme.Px(12), Theme.Px(20), 0) };
             _tabJoy = DialogKit.Fit(DialogKit.Secondary(I18n.T("Mandos")), 130); _tabGfx = DialogKit.Fit(DialogKit.Secondary(I18n.T("Gráficos")), 130);
             _tabClima = DialogKit.Fit(DialogKit.Secondary(I18n.T("Clima")), 130);
-            _tabJoy.Height = _tabGfx.Height = _tabClima.Height = Theme.Px(36);
-            _tabJoy.Location = new Point(Theme.Px(20), Theme.Px(12)); _tabGfx.Location = new Point(_tabJoy.Right + Theme.Px(8), Theme.Px(12));
+            _tabGen = DialogKit.Fit(DialogKit.Secondary(I18n.T("Idioma y pantalla")), 150);   // (1.2.82) idioma y tamaño del HUD (SelectorSettingsDialog.General.cs)
+            _tabGen.Height = _tabJoy.Height = _tabGfx.Height = _tabClima.Height = Theme.Px(36);
+            _tabGen.Location = new Point(Theme.Px(20), Theme.Px(12));
+            _tabJoy.Location = new Point(_tabGen.Right + Theme.Px(8), Theme.Px(12)); _tabGfx.Location = new Point(_tabJoy.Right + Theme.Px(8), Theme.Px(12));
             _tabClima.Location = new Point(_tabGfx.Right + Theme.Px(8), Theme.Px(12));
-            _tabJoy.Click += (s, e) => ShowPage("mandos"); _tabGfx.Click += (s, e) => ShowPage("graficos"); _tabClima.Click += (s, e) => ShowPage("clima");
-            tabs.Controls.Add(_tabJoy); tabs.Controls.Add(_tabGfx); tabs.Controls.Add(_tabClima);
+            _tabGen.Click += (s, e) => ShowPage("general"); _tabJoy.Click += (s, e) => ShowPage("mandos"); _tabGfx.Click += (s, e) => ShowPage("graficos"); _tabClima.Click += (s, e) => ShowPage("clima");
+            tabs.Controls.Add(_tabGen); tabs.Controls.Add(_tabJoy); tabs.Controls.Add(_tabGfx); tabs.Controls.Add(_tabClima);
             // (1.2.77) Sala: los tiempos del multijugador, solo el administrador (SelectorSettingsDialog.Sala.cs)
             if (Supa.IsSuperadmin)
             {
@@ -122,10 +124,10 @@ namespace SelectOR
             footer.AddRight(close, reset);
             footer.AddLeft(_lblStatus);
 
-            _pageJoy = body; _pageGfx = BuildGfxPage(); _pageClima = BuildClimaPage();
+            _pageJoy = body; _pageGfx = BuildGfxPage(); _pageClima = BuildClimaPage(); _pageGen = BuildGeneralPage();
             if (_tabSala != null) { _pageSala = BuildSalaPage(); Controls.Add(_pageSala); }
-            Controls.Add(_pageClima); Controls.Add(_pageGfx); Controls.Add(body); Controls.Add(footer); Controls.Add(tabs); Controls.Add(header); Controls.Add(stripe);
-            ShowPage(page ?? "mandos");
+            Controls.Add(_pageGen); Controls.Add(_pageClima); Controls.Add(_pageGfx); Controls.Add(body); Controls.Add(footer); Controls.Add(tabs); Controls.Add(header); Controls.Add(stripe);
+            ShowPage(page ?? "general");
 
             Enumerate();
             Rebuild();
@@ -137,12 +139,12 @@ namespace SelectOR
 
         public void ShowPage(string page)
         {
-            bool sala = page == "sala" && _pageSala != null, gfx = page == "graficos", clima = page == "clima", joy = !gfx && !clima && !sala;
-            _pageGfx.Visible = gfx; _pageClima.Visible = clima; _pageJoy.Visible = joy;
+            bool sala = page == "sala" && _pageSala != null, gfx = page == "graficos", clima = page == "clima", gen = page == "general", joy = !gfx && !clima && !sala && !gen;
+            _pageGfx.Visible = gfx; _pageClima.Visible = clima; _pageJoy.Visible = joy; _pageGen.Visible = gen;
             if (_pageSala != null) _pageSala.Visible = sala;
             if (_tabSala != null) { _tabSala.BaseColor = sala ? Theme.Accent : Theme.Surface2; _tabSala.HoverColor = sala ? Theme.AccentHi : Theme.SurfaceHi; _tabSala.TextColor = sala ? Color.White : Theme.Text; _tabSala.Invalidate(); }
             if (_reset != null) _reset.Visible = joy;
-            foreach (var (b, on) in new[] { (_tabJoy, joy), (_tabGfx, gfx), (_tabClima, clima) })
+            foreach (var (b, on) in new[] { (_tabGen, gen), (_tabJoy, joy), (_tabGfx, gfx), (_tabClima, clima) })
             { b.BaseColor = on ? Theme.Accent : Theme.Surface2; b.HoverColor = on ? Theme.AccentHi : Theme.SurfaceHi; b.TextColor = on ? Color.White : Theme.Text; b.Invalidate(); }
             _status = null;
         }

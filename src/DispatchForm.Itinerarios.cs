@@ -231,12 +231,60 @@ namespace SelectOR
             return Board ? pc.Select(Bp).ToArray() : pc.Select(q => new PointF(_origin.X + q.X * _zoom, _origin.Y + q.Y * _zoom)).ToArray();
         }
 
+        // (1.2.82) dónde se pulsa un destino: en su señal; si esa señal no está en este esquema (es de la estación siguiente o
+        // del trayecto), donde su camino sale del esquema (away: el rótulo lleva «→» y la dependencia de la señal). Antes no
+        // salía ningún círculo y no se podía establecer el itinerario de salida hacia la otra estación.
+        bool EndScreen(SchematicCircuits.ItinOption o, out PointF s, out bool away)
+        {
+            away = false;
+            if (ScreenOff(o.EndEdge, o.EndOff, out s)) return true;
+            if (Board || _cur == null || _g == null) return false;
+            for (int i = o.Pieces.Count - 1; i >= 0; i--)
+            {
+                var (e, a, b) = o.Pieces[i];
+                if (!_cur.DrawnRange(e, out double da, out double db)) continue;
+                double lo = Math.Max(a, da), hi = Math.Min(b, db);
+                if (hi - lo < 0.5) { double m = Math.Max(da, Math.Min(db, (a + b) / 2)); lo = Math.Max(da, m - 0.5); hi = Math.Min(db, m + 0.5); }   // (el camino sale del esquema justo ahí: su borde)
+                // hacia dónde sigue el camino en ese trozo: al final del itinerario, o al nodo que comparte con el siguiente
+                double far;
+                if (i == o.Pieces.Count - 1) far = o.EndOff;
+                else
+                {
+                    var E = _g.Edges[e]; var N = _g.Edges[o.Pieces[i + 1].e];
+                    int n = E.A == N.A || E.A == N.B ? E.A : E.B;
+                    far = E.A == n ? 0 : E.Len;
+                }
+                double off = Math.Abs(far - lo) < Math.Abs(far - hi) ? lo : hi;
+                double back = off == lo ? Math.Min(hi, lo + 1) : Math.Max(lo, hi - 1);   // (un metro hacia dentro: el borde exacto puede no tener sitio)
+                if (ScreenOff(e, off, out s) || ScreenOff(e, back, out s)) { away = true; return true; }
+                var pc = ScreenPiece(e, lo, hi);
+                if (pc != null && pc.Length > 0) { s = off == lo ? pc[0] : pc[^1]; away = true; return true; }
+            }
+            return false;
+        }
+
+        // (1.2.82) el sitio de cada destino; los que caen en el mismo punto (varios fuera del esquema por la misma salida), uno
+        // debajo de otro
+        Dictionary<SchematicCircuits.ItinOption, (PointF at, bool away)> EndPlaces(List<SchematicCircuits.ItinOption> opts)
+        {
+            var d = new Dictionary<SchematicCircuits.ItinOption, (PointF, bool)>();
+            var used = new List<PointF>(); float step = Theme.Px(22);
+            foreach (var o in opts)
+            {
+                if (!EndScreen(o, out var at, out bool away)) continue;
+                for (int k = 0; k < 8 && used.Any(u => Math.Abs(u.X - at.X) < step * 0.8f && Math.Abs(u.Y - at.Y) < step * 0.8f); k++) at = new PointF(at.X, at.Y + step);
+                used.Add(at); d[o] = (at, away);
+            }
+            return d;
+        }
+
         SchematicCircuits.ItinOption PickAt((RoomMapGeo.Sig origin, List<SchematicCircuits.ItinOption> opts) pk, Point p)
         {
             SchematicCircuits.ItinOption best = null; float bd = Theme.Px(16) * Theme.Px(16);
+            var places = EndPlaces(pk.opts);
             foreach (var o in pk.opts)
             {
-                if (!ScreenOff(o.EndEdge, o.EndOff, out var s)) continue;
+                if (!places.TryGetValue(o, out var pl)) continue; var s = pl.at;
                 float d = (s.X - p.X) * (s.X - p.X) + (s.Y - p.Y) * (s.Y - p.Y);
                 if (d < bd) { bd = d; best = o; }
             }
@@ -252,6 +300,7 @@ namespace SelectOR
             {
                 var mouse = _canvas.PointToClient(Cursor.Position);
                 var hov = _pickVariant ?? PickAt(pk, mouse);
+                var places = EndPlaces(pk.opts);
                 foreach (var o in pk.opts.OrderBy(o => o == hov))
                 {
                     bool h = o == hov;
@@ -261,11 +310,13 @@ namespace SelectOR
                         var pc = ScreenPiece(e, a, b);
                         if (pc != null && pc.Length >= 2) g.DrawLines(pen, pc);
                     }
-                    if (!ScreenOff(o.EndEdge, o.EndOff, out var s)) continue;
+                    if (!places.TryGetValue(o, out var pl)) continue;
+                    var s = pl.at; bool away = pl.away;
                     float r = Theme.Px(h ? 10 : 8);
                     using (var fb = new SolidBrush(Color.FromArgb(h ? 230 : 160, 20, 60, 30))) g.FillEllipse(fb, s.X - r, s.Y - r, 2 * r, 2 * r);
                     using (var rp = new Pen(h ? SchematicDraw.RouteColor : Color.White, 2f)) g.DrawEllipse(rp, s.X - r, s.Y - r, 2 * r, 2 * r);
                     string lab = o.Dest >= 0 ? o.Dest.ToString() : Tr("topera");
+                    if (away) lab = "→ " + lab + (o.Dest >= 0 && _sigZone != null && _sigZone.TryGetValue(o.Dest, out var zn) ? " (" + zn + ")" : "");   // (1.2.82: en otra dependencia)
                     using var f = Theme.Font(8f, FontStyle.Bold);
                     TextRenderer.DrawText(g, lab, f, new Point((int)(s.X + r + 3), (int)(s.Y - r - 2)), h ? SchematicDraw.RouteColor : Color.White, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
                 }

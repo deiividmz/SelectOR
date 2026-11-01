@@ -1,4 +1,4 @@
-// Ajustes de SelectOR → Gráficos: la mejora de imagen con ReShade (ReShadeFiles.cs): activarla, un preajuste y los
+﻿// Ajustes de SelectOR → Gráficos: la mejora de imagen con ReShade (ReShadeFiles.cs): activarla, un preajuste y los
 // deslizadores (nitidez, saturación, contraste, brillo, calidez, viñeta, suavizado de bordes), con una vista previa
 // «antes / después» sobre una imagen de ejemplo de Open Rails (ReShade\ejemplo.jpg, siempre la misma). Se guarda al momento y vale desde la próxima vez que se
 // conduzca; dentro de Open Rails se puede afinar con la tecla Inicio (menú de ReShade).
@@ -91,6 +91,7 @@ namespace SelectOR
 
             _preview = new PreviewBox { Dock = DockStyle.Fill, Margin = new Padding(Theme.Px(12), 0, 0, 0) };
             cols.Controls.Add(left, 0, 0); cols.Controls.Add(_preview, 1, 0);
+
 
             page.Controls.Add(cols); page.Controls.Add(presets); page.Controls.Add(_lblGfxWarn); if (cyzy != null) page.Controls.Add(cyzy); page.Controls.Add(info); page.Controls.Add(top);
 

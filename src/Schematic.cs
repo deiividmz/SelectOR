@@ -1948,6 +1948,42 @@ namespace SelectOR
             l.Add(Along(tr.Pts, b));
             return l.ToArray();
         }
+        // (1.2.82) los puntos del esquema de un trozo de vía (tramo, desde, hasta: metros), en ese sentido, para dibujar un tren
+        // sobre su vía. En una tijera, por su símbolo como se ve a ese zoom: de la aguja a su esquina, la vía de dentro y de la
+        // otra esquina a la otra aguja (el ancho del símbolo depende del zoom: SchematicDraw.ScissorCorners).
+        public PointF[] PieceDir(int e, double from, double to, float zoom)
+        {
+            if (HiddenEdges.Contains(e))
+            {
+                var tg = ScissorGroups.FirstOrDefault(q => q.ParTop == e || q.ParBot == e || q.DiagDown == e || q.DiagUp == e);
+                var E = _g.Edges[e];
+                if (tg == null || E.Len <= 0) return null;
+                int ia = Array.IndexOf(tg.Nodes, E.A), ib = Array.IndexOf(tg.Nodes, E.B);
+                if (ia < 0 || ib < 0) return null;
+                float z = Math.Max(0.05f, zoom);
+                var c = SchematicDraw.ScissorCorners(tg, PointF.Empty, z).Select(q => new PointF(q.X / z, q.Y / z)).ToArray();
+                var line = new[] { tg.At[ia], c[ia], c[ib], tg.At[ib] };
+                return SubLine(line, Math.Clamp(from / E.Len, 0, 1), Math.Clamp(to / E.Len, 0, 1));
+            }
+            var p = Piece(e, from, to);
+            if (p == null) return null;
+            if (from > to) Array.Reverse(p);
+            return p;
+        }
+        // el trozo de una línea entre dos fracciones de su largo (f1 > f2: al revés)
+        static PointF[] SubLine(PointF[] pts, double f1, double f2)
+        {
+            bool rev = f1 > f2; if (rev) (f1, f2) = (f2, f1);
+            float total = 0; for (int i = 1; i < pts.Length; i++) total += Dist(pts[i - 1], pts[i]);
+            if (total <= 0) return null;
+            float a = (float)(f1 * total), b = (float)(f2 * total);
+            var l = new List<PointF> { Along(pts, a) }; float acc = 0;
+            for (int i = 1; i < pts.Length; i++) { acc += Dist(pts[i - 1], pts[i]); if (acc > a && acc < b) l.Add(pts[i]); }
+            l.Add(Along(pts, b));
+            if (rev) l.Reverse();
+            return l.ToArray();
+        }
+
         // lo que se dibuja de un tramo (metros)
         public bool DrawnRange(int e, out double a, out double b)
         {

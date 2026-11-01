@@ -191,7 +191,7 @@ namespace SelectOR
         // «hoy 18:00 – 19:30», «mañana …» o «sáb 18 oct 18:00 – 19:30»
         static string SchedWindow(DateTime a, DateTime b)
         {
-            var ci = I18n.English ? CultureInfo.GetCultureInfo("en-GB") : CultureInfo.GetCultureInfo("es-ES");
+            var ci = I18n.Culture;
             string day = a.Date == DateTime.Today ? Tr("hoy") : a.Date == DateTime.Today.AddDays(1) ? Tr("mañana")
                        : a.Date == DateTime.Today.AddDays(-1) ? Tr("ayer") : a.ToString(I18n.English ? "ddd d MMM" : "ddd d MMM", ci);
             string end = b.Date == a.Date ? b.ToString("HH:mm", ci) : b.ToString("HH:mm", ci) + " (+1)";
@@ -201,7 +201,7 @@ namespace SelectOR
         // El itinerario del turno («🧭 Setenil → Parchite · 42,5 km»); los de antes, con su recorrido.
         string SchedWhere(SchedRow r)
         {
-            var ci = I18n.English ? CultureInfo.GetCultureInfo("en-GB") : CultureInfo.GetCultureInfo("es-ES");
+            var ci = I18n.Culture;
             if (r.HasItin) return "🧭 " + (string.IsNullOrEmpty(r.ItinName) ? Tr("Itinerario") : r.ItinName) + (r.ItinKm > 0 ? "  ·  " + r.ItinKm.ToString("N1", ci) + " km" : "");
             return string.IsNullOrEmpty(r.Path) ? Tr("cualquier recorrido") : r.Path;
         }
@@ -232,7 +232,7 @@ namespace SelectOR
             if (_schedFilter == 0) _schedShown.Sort((a, b) => a.Start.CompareTo(b.Start));
             else _schedShown.Sort((a, b) => b.Start.CompareTo(a.Start));
             string selId = SelectedSched()?.Id;
-            var ci = I18n.English ? CultureInfo.GetCultureInfo("en-GB") : CultureInfo.GetCultureInfo("es-ES");
+            var ci = I18n.Culture;
             var rows = new List<SchedBoard.Row>();
             foreach (var r in _schedShown)
             {

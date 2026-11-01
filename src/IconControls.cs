@@ -1,4 +1,4 @@
-// Controles con iconos vectoriales (estación, clima, día) y un deslizador de hora elegante.
+﻿// Controles con iconos vectoriales (estación, clima, día) y un deslizador de hora elegante.
 
 using System;
 using System.Drawing;
@@ -159,12 +159,35 @@ namespace SelectOR
                 case "gear": DrawGear(g, b, cx, cy); break;
                 case "info": DrawInfo(g, b, cx, cy); break;
                 case "joystick": DrawJoystick(g, b, cx, cy); break;
+                case "sliders": DrawSliders(g, b, cx, cy); break;   // (1.2.82) Ajustes de SelectOR
                 case "shield": DrawShield(g, b, cx, cy); break;
                 case "chat": ChatHudOverlay.DrawBubble(g, new Rectangle(cx - (int)(b.Width * 0.38f), cy - (int)(b.Height * 0.36f), (int)(b.Width * 0.76f), (int)(b.Height * 0.72f)), Color.FromArgb(94, 190, 155)); break;
                 case "bank": DrawBank(g, b, cx, cy); break;
                 case "speaker": DrawSpeaker(g, b, cx, cy); break;
                 case "rules": DrawRules(g, b, cx, cy); break;
+                case "board": DrawBoard(g, b, cx, cy); break;   // (1.2.82) Empresas → Tablón
             }
+        }
+
+        // (1.2.82) Ajustes de SelectOR: tres controles deslizantes (una línea con su botón, cada uno a una altura)
+        static void DrawSliders(Graphics g, Rectangle b, int cx, int cy)
+        {
+            var old = g.SmoothingMode;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var col = Color.FromArgb(210, 214, 220);
+            float w = b.Width * 0.62f, x0 = cx - w / 2, gap = b.Height * 0.22f, r = Math.Max(2f, b.Height * 0.085f);
+            using var pen = new Pen(col, Math.Max(1.3f, b.Height * 0.075f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
+            using var knob = new SolidBrush(col);
+            using var hole = new SolidBrush(Theme.BgSidebar);
+            float[] at = { 0.30f, 0.72f, 0.48f };
+            for (int i = 0; i < 3; i++)
+            {
+                float y = cy + (i - 1) * gap, kx = x0 + w * at[i];
+                g.DrawLine(pen, x0, y, x0 + w, y);
+                g.FillEllipse(hole, kx - r - 1.2f, y - r - 1.2f, 2 * r + 2.4f, 2 * r + 2.4f);
+                g.FillEllipse(knob, kx - r, y - r, 2 * r, 2 * r);
+            }
+            g.SmoothingMode = old;
         }
 
         // Altavoz con dos ondas (megafonía).
@@ -308,7 +331,7 @@ namespace SelectOR
         {
             using (var pen = new Pen(Color.White, Math.Max(2f, b.Width * 0.09f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
             {
-                int r = (int)(b.Width * 0.18f);
+                int r = Math.Max(1, (int)(b.Width * 0.18f));
                 g.DrawArc(pen, cx - r * 2, cy - r, r * 2, r * 2, 40, 260);
                 g.DrawArc(pen, cx, cy - r, r * 2, r * 2, 220, 260);
                 g.DrawLine(pen, cx - r / 2, cy, cx + r / 2, cy);
@@ -390,6 +413,23 @@ namespace SelectOR
                 int ly = y + fold + 2 + k * (h - fold - 4) / 3;
                 g.DrawLine(line, x + w / 5, ly, x + w - w / 5, ly);
             }
+        }
+
+        // (1.2.82) Tablón: un panel de corcho con dos notas clavadas
+        static void DrawBoard(Graphics g, Rectangle b, int cx, int cy)
+        {
+            var sm = g.SmoothingMode; g.SmoothingMode = SmoothingMode.AntiAlias;
+            float w = b.Width * 0.74f, h = b.Height * 0.58f, x = cx - w / 2, y = cy - h / 2;
+            using (var frame = new Pen(Color.FromArgb(214, 218, 222), Math.Max(1.2f, b.Width / 14f))) g.DrawRectangle(frame, x, y, w, h);
+            using (var n1 = new SolidBrush(Color.FromArgb(240, 196, 90))) g.FillRectangle(n1, x + w * 0.12f, y + h * 0.22f, w * 0.34f, h * 0.56f);
+            using (var n2 = new SolidBrush(Color.FromArgb(214, 218, 222))) g.FillRectangle(n2, x + w * 0.56f, y + h * 0.18f, w * 0.32f, h * 0.44f);
+            using (var pin = new SolidBrush(Color.FromArgb(229, 115, 115)))
+            {
+                float r = Math.Max(1.6f, b.Width * 0.06f);
+                g.FillEllipse(pin, x + w * 0.29f - r, y + h * 0.22f - r, 2 * r, 2 * r);
+                g.FillEllipse(pin, x + w * 0.72f - r, y + h * 0.18f - r, 2 * r, 2 * r);
+            }
+            g.SmoothingMode = sm;
         }
 
         // Palanca de mando sobre su base (Ajustes de SelectOR: mandos).

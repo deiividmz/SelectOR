@@ -1,12 +1,98 @@
-﻿// Traducción ligera del menú (español por defecto, inglés según la config de idioma de Open Rails).
+﻿// Traducción del menú. El español es el original (y la clave); el inglés está aquí mismo (En); los demás idiomas (1.2.82:
+// alemán, francés, italiano, portugués de Brasil y de Portugal, polaco, ruso, japonés y chino simplificado) van en
+// Lang\<código>.json, incrustados en SelectOR («lang.<código>.json»): { "<español>": "<traducción>" }. Si a un idioma le
+// falta una frase, sale la inglesa. El idioma lo elige el jugador en Ajustes → Idioma y pantalla (por defecto, el de Open Rails o, si
+// no tiene, el de Windows) y vale desde que se vuelve a abrir SelectOR.
 
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace SelectOR
 {
     public static class I18n
     {
+        // (compatibilidad) true en cualquier idioma que no sea el español: fechas, textos que manda el servidor en español
+        // e inglés, etc. van en inglés salvo en español
         public static bool English = false;
+
+        // (1.2.82) los idiomas de SelectOR: código y nombre en su propio idioma
+        public static readonly (string code, string name)[] Languages =
+        {
+            ("es", "Español"), ("en", "English"), ("de", "Deutsch"), ("fr", "Français"), ("it", "Italiano"),
+            ("pt-BR", "Português (Brasil)"), ("pt-PT", "Português (Portugal)"), ("pl", "Polski"), ("ru", "Русский"),
+            ("ja", "日本語"), ("zh", "简体中文"),
+        };
+        static string _lang = "es";
+        static Dictionary<string, string> _other;
+        public static string Lang
+        {
+            get => _lang;
+            set { _lang = Normalize(value); English = _lang != "es"; _other = null; }
+        }
+        // un código de idioma cualquiera (el de Open Rails, el de Windows: «de-DE», «pt-BR», «zh-Hans»…) → uno de los nuestros
+        public static string Normalize(string code)
+        {
+            var c = (code ?? "").Trim().Replace('_', '-').ToLowerInvariant();
+            if (c.StartsWith("es")) return "es";
+            if (c.StartsWith("de")) return "de";
+            if (c.StartsWith("fr")) return "fr";
+            if (c.StartsWith("it")) return "it";
+            if (c.StartsWith("pt-br")) return "pt-BR";
+            if (c.StartsWith("pt")) return "pt-PT";
+            if (c.StartsWith("pl")) return "pl";
+            if (c.StartsWith("ru")) return "ru";
+            if (c.StartsWith("ja")) return "ja";
+            if (c.StartsWith("zh")) return "zh";
+            return "en";
+        }
+        // el idioma con el que arranca SelectOR: SELECTOR_LANG (pruebas) > el elegido en Ajustes > el de Open Rails > Windows
+        public static string Resolve(string chosen, string orLanguage)
+        {
+            var force = Environment.GetEnvironmentVariable("SELECTOR_LANG");
+            if (!string.IsNullOrEmpty(force)) return Normalize(force);
+            if (!string.IsNullOrEmpty(chosen) && chosen != "auto") return Normalize(chosen);
+            return Normalize(string.IsNullOrEmpty(orLanguage) ? CultureInfo.CurrentUICulture.Name : orLanguage);
+        }
+        // fechas y números con los nombres del idioma
+        public static string CultureName => _lang switch
+        {
+            "es" => "es-ES", "de" => "de-DE", "fr" => "fr-FR", "it" => "it-IT", "pt-BR" => "pt-BR", "pt-PT" => "pt-PT",
+            "pl" => "pl-PL", "ru" => "ru-RU", "ja" => "ja-JP", "zh" => "zh-CN", _ => "en-GB"
+        };
+        public static CultureInfo Culture { get { try { return CultureInfo.GetCultureInfo(CultureName); } catch { return CultureInfo.InvariantCulture; } } }
+
+        static Dictionary<string, string> Other
+        {
+            get
+            {
+                if (_other != null || _lang == "es" || _lang == "en") return _other;
+                var d = new Dictionary<string, string>(StringComparer.Ordinal);
+                try
+                {
+                    using var st = typeof(I18n).Assembly.GetManifestResourceStream("lang." + _lang + ".json");
+                    if (st != null)
+                    {
+                        var m = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(st);
+                        if (m != null) foreach (var kv in m) if (!string.IsNullOrEmpty(kv.Value)) d[kv.Key] = kv.Value;
+                    }
+                }
+                catch { }
+                _other = d;
+                return d;
+            }
+        }
+        public static int Count(string code)   // (Ajustes, pruebas) frases traducidas de un idioma
+        {
+            if (code == "es" || code == "en") return En.Count;
+            try
+            {
+                using var st = typeof(I18n).Assembly.GetManifestResourceStream("lang." + code + ".json");
+                if (st == null) return 0;
+                return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(st)?.Count ?? 0;
+            }
+            catch { return 0; }
+        }
 
         static readonly Dictionary<string, string> En = new Dictionary<string, string>
         {
@@ -833,6 +919,15 @@ namespace SelectOR
             ["El más corto ({0})"] = "The shortest ({0})",   // (1.2.81)
             ["Otro camino ({0})"] = "Another route ({0})",   // (1.2.81)
             ["Ver: trazado real"] = "View: real layout",   // (1.2.81)
+            ["Tamaño del HUD, la hoja de ruta y el chat:"] = "Size of the HUD, the route sheet and the chat:",   // (1.2.82)
+            ["Para pantallas grandes. Se aplica al momento."] = "For large screens. Applied at once.",
+            ["Idioma, tamaño del HUD, tus mandos, los gráficos y el clima de Open Rails"] = "Language, HUD size, your controllers, Open Rails graphics and weather",
+            ["Idioma y pantalla"] = "Language and display",
+            ["Automático (el de Open Rails o Windows)"] = "Automatic (Open Rails or Windows language)",
+            ["Volver a abrir SelectOR"] = "Restart SelectOR",
+            ["Se aplica al volver a abrir SelectOR."] = "Applied when SelectOR is opened again.",
+            ["Idioma de SelectOR"] = "SelectOR language",
+            ["Para pantallas grandes: el HUD, la hoja de ruta y el chat, más grandes y nítidos. Se aplica al momento."] = "For large screens: the HUD, the route sheet and the chat, bigger and sharp. Applied at once.",
             ["Ver: esquema"] = "View: diagram",
             ["Cambia la vista de la dependencia: el esquema recto (vías en filas, agujas a 45°, todo separado) o el trazado real de las vías."] = "Switches the post's view: the straight diagram (tracks in rows, switches at 45°, everything spaced out) or the real track layout.",
             ["rueda: zoom · arrastrar: mover · doble clic: toda la ruta · clic en una estación: acercar"] = "wheel: zoom · drag: move · double-click: whole route · click a station: zoom in",
@@ -2620,12 +2715,12 @@ namespace SelectOR
             ["Escribe el motivo de la anulación."] = "Enter the reason for the annulment.",
             ["Cancelar servicio"] = "Cancel service",
             ["Pulsa otra vez para cancelar"] = "Click again to cancel",
-            ["¿Cancelar el servicio en curso? No se registrará: ni ingresos, ni km, ni ranking, y la unidad quedará libre. Las infracciones detectadas sí cuentan."] = "Cancel the service in progress? It won't be recorded: no income, no km, no ranking, and the unit will be freed. Detected infractions still count.",
+            ["¿Cancelar el servicio en curso? No se registrará: ni ingresos, ni km, ni ranking, y la unidad quedará libre. Las infracciones detectadas no cuentan."] = "Cancel the service in progress? It won't be recorded: no income, no km, no ranking, and the unit will be freed. Detected infractions don't count.",
             ["Cancelando el servicio…"] = "Cancelling the service…",
             ["No se pudo cancelar el servicio: "] = "Couldn't cancel the service: ",
             ["No se puede cancelar: el servidor aún no está actualizado."] = "Can't cancel: the server hasn't been updated yet.",
             ["Servicio cancelado: no se ha registrado y la unidad queda libre."] = "Service cancelled: it hasn't been recorded and the unit is free.",
-            ["Las infracciones detectadas sí cuentan."] = "Detected infractions still count.",
+            ["Las infracciones detectadas no cuentan."] = "Detected infractions don't count.",
             ["Anulando servicio…"] = "Annulling service…",
             ["Servicio anulado. El maquinista ha recibido un aviso."] = "Service annulled. The driver has been notified.",
             ["🗝  Copiar clave"] = "🗝  Copy key",
@@ -3626,11 +3721,174 @@ namespace SelectOR
             ["{0} ha solicitado al administrador la ruta «{1}» que propusiste para {2}."] = "{0} has requested from the administrator the route «{1}» you proposed for {2}.",
             ["Propuesta de ruta descartada"] = "Route proposal dismissed",
             ["{0} ha descartado la ruta «{1}» que propusiste para {2}."] = "{0} has dismissed the route «{1}» you proposed for {2}.",
+            // (1.2.82) mercado de trenes, tablón y otras frases nuevas
+            ["3 días"] = "3 days",
+            ["7 días"] = "7 days",
+            ["A la venta por {0}: ya lo ven las demás empresas en Tablón → Mercado de trenes."] = "On sale for {0}: other companies can already see it in Board → Train market.",
+            ["A la venta {0} días; puedes retirarlo antes."] = "On sale for {0} days; you can withdraw it earlier.",
+            ["Alquilado: no se vende, se devuelve."] = "Rented: it can't be sold, it is returned.",
+            ["Anuncio publicado."] = "Ad published.",
+            ["Anuncio quitado."] = "Ad removed.",
+            ["Anuncios"] = "Ads",
+            ["Anuncios de las empresas: novedades, servicios nuevos, quedadas en la sala… Duran 3 o 7 días; los destacados salen primero."] = "Company ads: news, new services, meet-ups in the room… They last 3 or 7 days; featured ones come first.",
+            ["Apuntarme"] = "Apply",
+            ["Apuntarme…"] = "Apply…",
+            ["Busca socios"] = "Looking for members",
+            ["Busca socios: puedes pedir unirte."] = "Looking for members: you can ask to join.",
+            ["Buscamos socios (se puede pedir unirse desde el escaparate)"] = "We're looking for members (people can ask to join from the showcase)",
+            ["Calculando el precio…"] = "Working out the price…",
+            ["Cedido por el administrador: no se puede vender."] = "Granted by the administrator: it can't be sold.",
+            ["Cerrar oferta"] = "Close offer",
+            ["Comisión del mercado: {0} ({1} %)"] = "Market fee: {0} ({1} %)",
+            ["Como mucho 3 anuncios activos por empresa. El administrador puede quitar los que no sean apropiados."] = "At most 3 active ads per company. The administrator can remove inappropriate ones.",
+            ["Comprado: «{0}» ya está en la flota de {1}."] = "Bought: «{0}» is now in {1}'s fleet.",
+            ["Comprar…"] = "Buy…",
+            ["Cumples los requisitos"] = "You meet the requirements",
+            ["DESGUAZAR"] = "SCRAP",
+            ["DEVOLVER"] = "RETURN",
+            ["Deja de pagarse el alquiler."] = "The rent stops being paid.",
+            ["Descripción (400 caracteres como mucho)"] = "Description (400 characters at most)",
+            ["Desguazado: la empresa recibe {0}."] = "Scrapped: the company receives {0}.",
+            ["Desguazando…"] = "Scrapping…",
+            ["Desguazar"] = "Scrap",
+            ["Desguazar todos"] = "Scrap all",
+            ["Destacado"] = "Featured",
+            ["Destacado (sale el primero)"] = "Featured (shown first)",
+            ["Devolver"] = "Return",
+            ["Duración"] = "Duration",
+            ["El eslogan es demasiado largo (60 caracteres como mucho)."] = "The slogan is too long (60 characters at most).",
+            ["El gerente o un gestor de la empresa verán tu solicitud y la aceptarán o rechazarán."] = "The company's owner or a manager will see your request and accept or reject it.",
+            ["El mensaje es demasiado largo (400 caracteres como mucho)."] = "The message is too long (400 characters at most).",
+            ["El precio lo fija SelectOR: no lo decide la empresa"] = "SelectOR sets the price: the company doesn't decide it",
+            ["El servidor aún no tiene el tablón (falta tablon-mercado.sql)."] = "The server doesn't have the board yet (tablon-mercado.sql is missing).",
+            ["El texto es demasiado largo."] = "The text is too long.",
+            ["El tren desaparece de la flota para siempre."] = "The train leaves the fleet for good.",
+            ["El título de la oferta es demasiado corto."] = "The offer title is too short.",
+            ["El título del anuncio es demasiado corto."] = "The ad title is too short.",
+            ["El {0} % del precio nuevo: mucho menos que venderlo."] = "{0} % of the new price: much less than selling it.",
+            ["Elegir imagen"] = "Choose image",
+            ["Elegir imagen…"] = "Choose image…",
+            ["Empleo"] = "Jobs",
+            ["En venta"] = "For sale",
+            ["Escaparate"] = "Showcase",
+            ["Ese tren ya no está a la venta."] = "That train is no longer for sale.",
+            ["Eslogan (60 caracteres como mucho)"] = "Slogan (60 characters at most)",
+            ["Está en un servicio: espera a que termine."] = "It's on a service: wait until it ends.",
+            ["Ficha de mi empresa…"] = "My company's profile…",
+            ["Ficha de {0}"] = "{0}'s profile",
+            ["Ficha guardada."] = "Profile saved.",
+            ["Junto a la ficha salen los datos del mes: socios, trenes, km, servicios y el puesto en la Liga. Nada de dinero."] = "Next to the profile you'll see the month's figures: members, trains, km, services and League position. No money.",
+            ["La presentación es demasiado larga (600 caracteres como mucho)."] = "The introduction is too long (600 characters at most).",
+            ["Las empresas que quieren darse a conocer, con sus datos del mes. Si una busca socios, puedes pedir unirte desde aquí."] = "Companies that want to make themselves known, with this month's figures. If one is looking for members, you can ask to join from here.",
+            ["Lo que ven las demás empresas y los maquinistas en el escaparate"] = "What other companies and drivers see in the showcase",
+            ["Lo verán todos en Tablón → Anuncios, con el nombre de {0}"] = "Everyone will see it in Board → Ads, under {0}'s name",
+            ["Maquinista de mercancías"] = "Freight driver",
+            ["Maquinista de viajeros"] = "Passenger driver",
+            ["Mensaje para la empresa (opcional)"] = "Message for the company (optional)",
+            ["Mensaje para la empresa (opcional): tu experiencia, horarios…"] = "Message for the company (optional): your experience, hours…",
+            ["Mercado de trenes"] = "Train market",
+            ["Mientras esté a la venta no puede salir en servicios."] = "While it's on sale it can't run services.",
+            ["Mostrar la empresa en el escaparate"] = "Show the company in the showcase",
+            ["No cumples los requisitos"] = "You don't meet the requirements",
+            ["No cumples los requisitos de esta oferta."] = "You don't meet this offer's requirements.",
+            ["No hay anuncios ahora mismo."] = "There are no ads right now.",
+            ["No hay ofertas de empleo abiertas ahora mismo."] = "There are no open job offers right now.",
+            ["No hay saldo suficiente."] = "There isn't enough balance.",
+            ["No hay trenes a la venta ahora mismo. Una empresa pone uno a la venta desde Flota → «Vender o desguazar…»."] = "There are no trains for sale right now. A company puts one on sale from Fleet → «Sell or scrap…».",
+            ["No puedes comprar un tren de tu propia empresa."] = "You can't buy a train from your own company.",
+            ["No se pudo leer la imagen."] = "The image couldn't be read.",
+            ["Oferta cerrada."] = "Offer closed.",
+            ["Oferta publicada. Las solicitudes llegan a Socios → Solicitudes de ingreso."] = "Offer published. Applications arrive in Members → Join requests.",
+            ["Ofertas de empleo de las empresas. Si cumples los requisitos, apúntate con un mensaje: la empresa acepta o rechaza tu solicitud."] = "Job offers from companies. If you meet the requirements, apply with a message: the company accepts or rejects your request.",
+            ["Otra empresa"] = "Another company",
+            ["Para {0}: dura 30 días o hasta que la cierres"] = "For {0}: it lasts 30 days or until you close it",
+            ["Pasa a la flota de {0} con sus {1} km. Saldo de la empresa: {2}."] = "It joins {0}'s fleet with its {1} km. Company balance: {2}.",
+            ["Pedir unirme a {0}"] = "Ask to join {0}",
+            ["Pedir unirme…"] = "Ask to join…",
+            ["Poner a la venta"] = "Put on sale",
+            ["Poner todos a la venta"] = "Put all on sale",
+            ["Poniendo a la venta…"] = "Putting on sale…",
+            ["Por ejemplo: maquinistas para el turno de tarde"] = "For example: drivers for the afternoon shift",
+            ["Por ejemplo: nuevo servicio Sur – Norte cada hora"] = "For example: new South – North service every hour",
+            ["Por ejemplo: puntuales por vocación"] = "For example: punctual by vocation",
+            ["Precio de venta: {0} (lo fija SelectOR por el uso y el estado)"] = "Sale price: {0} (set by SelectOR from use and condition)",
+            ["Precio nuevo {0} · {1} km · estado {2} %"] = "New price {0} · {1} km · condition {2} %",
+            ["Presentación (600 caracteres como mucho)"] = "Introduction (600 characters at most)",
+            ["Publicar anuncio"] = "Publish ad",
+            ["Publicar anuncio…"] = "Publish ad…",
+            ["Publicar oferta de empleo"] = "Publish job offer",
+            ["Publicar oferta…"] = "Publish offer…",
+            ["Puesto"] = "Position",
+            ["Puntos mínimos del carné"] = "Minimum licence points",
+            ["Quitar anuncio"] = "Remove ad",
+            ["Requisitos: "] = "Requirements: ",
+            ["Retirar del mercado"] = "Withdraw from market",
+            ["Se envía como solicitud de ingreso: la empresa la acepta o la rechaza y te llega el aviso."] = "It's sent as a join request: the company accepts or rejects it and you get notified.",
+            ["Se pueden vender {0} de {1}."] = "{0} of {1} can be sold.",
+            ["Servicios hechos como mínimo"] = "Minimum services completed",
+            ["Sin imagen (opcional)"] = "No image (optional)",
+            ["Sin mínimo"] = "No minimum",
+            ["Solicitud enviada"] = "Request sent",
+            ["Solicitud enviada a {0}."] = "Request sent to {0}.",
+            ["Sí: {0} de la empresa"] = "Yes: {0} from the company",
+            ["Tablón"] = "Board",
+            ["Te has apuntado a «{0}»: {1} revisará tu solicitud."] = "You've applied to «{0}»: {1} will review your request.",
+            ["Texto (400 caracteres como mucho)"] = "Text (400 characters at most)",
+            ["Todavía no hay empresas en el escaparate. El gerente o un gestor la añade con «Ficha de mi empresa…»."] = "There are no companies in the showcase yet. The owner or a manager adds theirs with «My company's profile…».",
+            ["Tren devuelto."] = "Train returned.",
+            ["Tren no operativo: {0} está(n) a la venta en el mercado. Un gestor puede retirarlo en Flota."] = "Train not available: {0} is/are on sale in the market. A manager can withdraw it in Fleet.",
+            ["Tren vendido en el mercado"] = "Train sold in the market",
+            ["Trenes que venden otras empresas, al precio que fija SelectOR según su uso y estado. El comprador paga ese precio y el tren pasa a su flota con sus km."] = "Trains other companies are selling, at the price SelectOR sets from their use and condition. The buyer pays that price and the train joins their fleet with its km.",
+            ["Tu empresa"] = "Your company",
+            ["Título (80 caracteres como mucho)"] = "Title (80 characters at most)",
+            ["VENDER EN EL MERCADO"] = "SELL IN THE MARKET",
+            ["Vender o desguazar"] = "Sell or scrap",
+            ["Vender o desguazar…"] = "Sell or scrap…",
+            ["Ver imagen"] = "View image",
+            ["Viajeros y mercancías"] = "Passengers and freight",
+            ["Ya eres socio"] = "Already a member",
+            ["Ya eres socio de esa empresa."] = "You're already a member of that company.",
+            ["Ya está a la venta."] = "It's already on sale.",
+            ["Ya te has apuntado a esta oferta."] = "You've already applied to this offer.",
+            ["acaba en menos de una hora"] = "ends in less than an hour",
+            ["carné con {0} puntos o más"] = "licence with {0} points or more",
+            ["con imagen"] = "with image",
+            ["en la Liga"] = "in the League",
+            ["lo que paga el desguace, al momento"] = "what the scrapyard pays, right away",
+            ["lo que recibe la empresa al venderse"] = "what the company receives when it sells",
+            ["queda 1 día"] = "1 day left",
+            ["quedan {0} días"] = "{0} days left",
+            ["quedan {0} h"] = "{0} h left",
+            ["sin requisitos"] = "no requirements",
+            ["un tren alquilado se devuelve sin cobrar nada"] = "a rented train is returned without being paid anything",
+            ["{0} % del precio nuevo"] = "{0} % of the new price",
+            ["{0} apuntado"] = "{0} applicant",
+            ["{0} apuntados"] = "{0} applicants",
+            ["{0} ejemplares elegidos."] = "{0} units selected.",
+            ["{0} ha comprado «{1}» a {2}: {2} recibe {3} € (ya descontada la comisión)."] = "{0} has bought «{1}» from {2}: {2} receives {3} € (after the fee).",
+            ["{0} km y {1} servicios este mes"] = "{0} km and {1} services this month",
+            ["{0} km · estado {1} % · de {2}"] = "{0} km · condition {1} % · from {2}",
+            ["{0} plaza"] = "{0} seat",
+            ["{0} servicios hechos"] = "{0} services completed",
+            ["{0} socios · {1} trenes · {2} km este mes"] = "{0} members · {1} trains · {2} km this month",
+            ["{0} trenes a la venta por {1} en total."] = "{0} trains on sale for {1} in total.",
+            ["{0} trenes desguazados o devueltos: la empresa recibe {1}."] = "{0} trains scrapped or returned: the company receives {1}.",
+            ["{0} · {1} km · estado {2} %"] = "{0} · {1} km · condition {2} %",
+            ["«Vender o desguazar» y «Añadir a mi contenido» actúan sobre todos  ·  Esc: quitar la selección"] = "«Sell or scrap» and «Add to my content» act on all of them  ·  Esc: clear the selection",
+            ["«{0}» retirado del mercado: vuelve a estar disponible."] = "«{0}» withdrawn from the market: it's available again.",
+            ["¿Cerrar la oferta «{0}»? Las solicitudes que ya hay siguen en Socios."] = "Close the offer «{0}»? Existing applications stay in Members.",
+            ["¿Comprar «{0}» a {1} por {2}?"] = "Buy «{0}» from {1} for {2}?",
+            ["¿Quitar el anuncio «{0}»?"] = "Remove the ad «{0}»?",
+            ["¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios."] = "Withdraw «{0}» from the market? It goes back to the fleet and can run services.",
+            ["🔎  Buscar…"] = "🔎  Search…",
+                    // (1.2.82) mercado de trenes, tablón y otras frases nuevas
+            ["Cedido por el administrador: desguazarlo no paga nada."] = "Granted by the administrator: scrapping it pays nothing.",
         };
 
         public static string T(string es)
         {
-            if (!English || string.IsNullOrEmpty(es)) return es;
+            if (string.IsNullOrEmpty(es) || _lang == "es") return es;
+            if (_lang != "en") { var o = Other; if (o != null && o.TryGetValue(es, out var t)) return t; }
             return En.TryGetValue(es, out var v) ? v : es;
         }
     }

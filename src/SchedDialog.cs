@@ -41,7 +41,7 @@ namespace SelectOR
         readonly Ticket _ticket;
         int _kind, _rep, _imgTok;
         readonly Dictionary<string, Bitmap> _imgs = new();
-        static CultureInfo Ci => I18n.English ? CultureInfo.GetCultureInfo("en-GB") : CultureInfo.GetCultureInfo("es-ES");
+        static CultureInfo Ci => I18n.Culture;
         static string T(string s) => I18n.T(s);
 
         public SchedDialog(IList<string> routes, int routeIndex, List<(string id, string name)> trains, string company)
