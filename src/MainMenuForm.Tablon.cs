@@ -300,10 +300,17 @@ namespace SelectOR
                 return c;
             }
             _showList = Cards(2, 96, 460); _showList.ItemActivated += _ => ShowCompanyCard();
-            _adsList = Cards(1, 92, 520); _adsList.Icon = null; _adsList.ItemActivated += _ => ShowAdImage();
+            _adsList = Cards(1, 150, 520); _adsList.Icon = null; _adsList.ItemActivated += _ => ShowAdImage();
+            // la imagen del anuncio a la vista, a la izquierda de su tarjeta (doble clic: en grande)
+            _adsList.ThumbSlot = row => _adRows.FirstOrDefault(a => a.Id == row.Key)?.HasImage == true;
+            _adsList.Thumb = row => row.Key != null && _adImgs.TryGetValue(row.Key, out var im) ? im : null;
             _jobsList = Cards(1, 92, 520); _jobsList.ItemActivated += _ => ApplyJob();
             _mktList = Cards(2, 96, 460); _mktList.ItemActivated += _ => ShowMarketImage();
             _mktList.SubCols = new[] { 2 }; _mktList.QuoteCol = 3; _mktList.QuoteMarks = false;   // el uso (km, estado, de quién, plazo) en su propia línea
+            // la composición 2D de cada tren abajo de su tarjeta, como en Flota (la imagen guardada con el tren)
+            _mktList.StripHeight = 56; _mktList.StripRows = 1; _mktList.CardHeight = 96 + 66;   // el tren entero en un renglón
+            _mktList.Strip = row => row.Key != null && _mktStrips.TryGetValue(row.Key, out var b) ? b : null;
+            _mktList.StripNote = row => _mktRows.FirstOrDefault(m => m.Id == row.Key) is MktRow m && !m.HasImage ? Tr("Sin composición guardada") : null;
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
             _tabPages = new Panel[4];
             var lists = new[] { _showList, _adsList, _jobsList, _mktList };
@@ -516,12 +523,52 @@ namespace SelectOR
             foreach (var r in _adRows)
             {
                 if (r.Featured) _adsList.Badges[k] = Tr("Destacado");
-                _adsList.AddRow(new[] { r.Title, r.HasImage ? "🖼 " + Tr("con imagen") : "", r.Company, DaysLeft(r.Expires), r.Body, "", "" },
+                _adsList.AddRow(new[] { r.Title, "", r.Company, DaysLeft(r.Expires), r.Body, "", "" },
                     new Color?[] { null, Theme.Subtle, Theme.AccentHi, Theme.Subtle, null, null, null }, r.Logo, r.Id);
                 k++;
             }
             if (_adRows.Count == 0) _adsList.SetEmpty(Tr("No hay anuncios ahora mismo."));
             UpdateTablonButtons();
+            FetchAdImages(seq);
+        }
+
+        // Las imágenes de los anuncios (ad_image, una vez por anuncio), en memoria y reducidas para la tarjeta.
+        readonly Dictionary<string, Image> _adImgs = new(StringComparer.OrdinalIgnoreCase);
+
+        async void FetchAdImages(int seq)
+        {
+            foreach (var r in _adRows.ToList())
+            {
+                if (seq != _tabSeq || IsDisposed) return;
+                if (!r.HasImage || _adImgs.ContainsKey(r.Id)) continue;
+                var (json, err) = await Supa.RpcAsync("ad_image", new { p_ad = r.Id });
+                if (err != null) return;
+                string uri = JsonText(json);
+                var img = await Task.Run(() => AdThumb(uri));
+                if (img == null || IsDisposed) continue;
+                _adImgs[r.Id] = img;
+                _adsList?.Invalidate();
+            }
+        }
+
+        // data URI (o base64) → imagen de como mucho 480 px de ancho
+        static Image AdThumb(string data)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(data)) return null;
+                int comma = data.IndexOf(',');
+                string b64 = data.StartsWith("data:") && comma > 0 ? data.Substring(comma + 1) : data;
+                if (b64.Length > 300_000) return null;
+                using var ms = new System.IO.MemoryStream(Convert.FromBase64String(b64.Trim()));
+                using var raw = Image.FromStream(ms);
+                if (raw.Width < 1 || raw.Height < 1 || raw.Width > 2048 || raw.Height > 2048) return null;
+                float k = Math.Min(1f, 480f / raw.Width);
+                var bmp = new Bitmap(Math.Max(1, (int)(raw.Width * k)), Math.Max(1, (int)(raw.Height * k)));
+                using (var g = Graphics.FromImage(bmp)) { g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic; g.DrawImage(raw, 0, 0, bmp.Width, bmp.Height); }
+                return bmp;
+            }
+            catch { return null; }
         }
 
         async void NewAd()
@@ -749,6 +796,35 @@ namespace SelectOR
             }
             if (_mktRows.Count == 0) _mktList.SetEmpty(Tr("No hay trenes a la venta ahora mismo. Una empresa pone uno a la venta desde Flota → «Vender o desguazar…»."));
             UpdateTablonButtons();
+            FetchMarketStrips(seq);
+        }
+
+        // La composición 2D de cada tren a la venta: se pide una vez (market_image), se guarda en la caché de disco y se
+        // queda en memoria para pintarla en su tarjeta.
+        readonly Dictionary<string, Bitmap> _mktStrips = new(StringComparer.OrdinalIgnoreCase);
+
+        async void FetchMarketStrips(int seq)
+        {
+            foreach (var r in _mktRows.ToList())
+            {
+                if (seq != _tabSeq || IsDisposed) return;
+                if (!r.HasImage || _mktStrips.ContainsKey(r.Id)) continue;
+                string file = SavedImageFile("mercado", r.Id);
+                if (!System.IO.File.Exists(file))
+                {
+                    var (json, err) = await Supa.RpcAsync("market_image", new { p_listing = r.Id });
+                    if (err != null) return;
+                    string b64 = JsonText(json);
+                    int comma = b64?.IndexOf(',') ?? -1;
+                    if (b64 != null && b64.StartsWith("data:") && comma > 0) b64 = b64.Substring(comma + 1);
+                    if (await Task.Run(() => SaveB64Image(b64, file)) == null) continue;
+                }
+                var bmp = await Task.Run(() => LoadStripFile(file));
+                if (bmp == null || IsDisposed) continue;
+                if (_mktStrips.TryGetValue(r.Id, out var old)) old.Dispose();
+                _mktStrips[r.Id] = bmp;
+                _mktList?.Invalidate();
+            }
         }
 
         async void ShowMarketImage()

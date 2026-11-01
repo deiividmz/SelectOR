@@ -1,11 +1,3 @@
-﻿1.2.82
-SelectOR in 11 languages|Settings → «Language and display» lets you choose the language: Spanish, English, German, French, Italian, Brazilian and European Portuguese, Polish, Russian, Japanese and Simplified Chinese. By default, Open Rails' or Windows' language; dates are shown in the chosen language.
-Train market|Companies → Board → Train market: companies sell and buy trains from each other. SelectOR sets the price from the train's use and condition, and the seller gets that price minus a small fee. While a train is on sale it shows «For sale» in Fleet and can't run services.
-Sell or scrap|In Fleet, «Retire» becomes «Sell or scrap…»: put the train on sale in the market or scrap it straight away for much less.
-Company board|A new Companies section with the company showcase (their profile and this month's figures, with «Ask to join» if they are looking for members), ads with images and job offers with requirements you can apply to.
-Trains you don't have, in full|In the shared room, another player's train that you don't have is replaced in full by a similar consist of yours, with its coaches in order and its cabs in place: no more mixed formations.
-Dispatcher's desk|Trains are drawn on their track through switches and scissors crossovers too, and routes ending in another control area show where they go.
-HUD size|In Settings you can enlarge the HUD, the route sheet and the chat up to 200 % for large screens; it applies straight away.
-AI trains in the room|They run more smoothly on single track, choose their arrival platform better and depart on time every day.
-Room switches with CYZY|In the shared room, when another player or the dispatcher's desk throws a switch, your train recalculates its path straight away also with CYZY and with the Stable, Testing and Unstable versions of Open Rails, as it already did with NY.
-Cancelling a service|If you cancel a service, the offences detected during it no longer count towards your licence. In return, the service is not recorded: no income, km or ranking.
+﻿1.2.83
+Market trains in 2D|In Companies → Board → Train market, each train on sale is drawn in 2D on its card, whole and on a single line, as in Fleet; no need to press «View composition» any more.
+Ads with their image in view|In Board → Ads, each ad's image shows on its card without pressing «View image»; double-click opens it large.

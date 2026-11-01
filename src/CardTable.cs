@@ -1,4 +1,4 @@
-// Lista en tarjetas que sustituye a una tabla (StyledTable) sin cambiar el código que la usa: las mismas
+﻿// Lista en tarjetas que sustituye a una tabla (StyledTable) sin cambiar el código que la usa: las mismas
 // operaciones (AddRow, ClearRows, SetEmpty, BeginReload/EndReload, SelectedRow, SelectRow, Filter,
 // ShowLoading, RowKey, RowFilter) y una plantilla que dice qué celda va en cada sitio de la tarjeta:
 //
@@ -38,6 +38,16 @@ namespace SelectOR
         public readonly Dictionary<int, string> Formats = new Dictionary<int, string>();   // celda → «{0} parada|{0} paradas» (singular|plural)
         public readonly Dictionary<int, string> Badges = new Dictionary<int, string>();    // fila (orden de inserción) → distintivo
         public int CardHeight = 72, MinWidth = 420, Columns = 1;
+        // Franja 2D de la composición abajo de la tarjeta (como en Flota): Strip da la imagen de cada fila (null mientras
+        // no está); StripHeight es su alto (sin escalar) y entra en CardHeight; 0 = sin franja.
+        public Func<Row, Bitmap> Strip;
+        public Func<Row, string> StripNote;              // texto en el hueco si la fila no tiene imagen (null = hueco vacío)
+        public int StripHeight, StripRows = 1;
+        // Imagen grande a la izquierda en lugar del logotipo (anuncios): ThumbSlot dice si la fila la tiene (se reserva el
+        // hueco aunque aún no haya llegado) y Thumb la da (null mientras se descarga). Ocupa el alto de la tarjeta.
+        public Func<Row, bool> ThumbSlot;
+        public Func<Row, Image> Thumb;
+        public double ThumbAspect = 16 / 9.0;
 
         protected override int CardH => Theme.Px(CardHeight);
         protected override int MinCardW => Theme.Px(MinWidth);
@@ -162,6 +172,8 @@ namespace SelectOR
         }
         Color? Col(Row r, int c) => r.Colors != null && c >= 0 && c < r.Colors.Length ? r.Colors[c] : null;
 
+        bool SafeSlot(Row r) { try { return ThumbSlot(r); } catch { return false; } }
+
         static string Initials(string name)
         {
             var p = (name ?? "").Split(new[] { ' ', '_', '.', '-' }, StringSplitOptions.RemoveEmptyEntries);
@@ -176,6 +188,19 @@ namespace SelectOR
             if (selected) Stroke(g, rc, Theme.Px(10), Theme.Accent);
             int pad = Theme.Px(14), x = rc.X + pad, right = rc.Right - pad;
 
+            // franja 2D abajo; el resto de la tarjeta queda encima
+            if (StripHeight > 0 && Strip != null)
+            {
+                int sh = Theme.Px(StripHeight), gap = Theme.Px(10);
+                var sr = new Rectangle(rc.X + pad, rc.Bottom - gap - sh, rc.Width - 2 * pad, sh);
+                Bitmap img = null;
+                try { img = Strip(r); } catch { }
+                string note = null;
+                if (img == null) try { note = StripNote?.Invoke(r); } catch { }
+                if (img != null || !string.IsNullOrEmpty(note)) StripPaint.Draw(g, sr, img, note, _fSub, maxRows: StripRows, left: true);
+                rc = new Rectangle(rc.X, rc.Y, rc.Width, Math.Max(Theme.Px(40), sr.Top - rc.Y));
+            }
+
             // casilla
             if (CheckCol >= 0)
             {
@@ -185,6 +210,26 @@ namespace SelectOR
                 if (on) Fill(g, cb, Theme.Px(5), Theme.Accent); else Stroke(g, cb, Theme.Px(5), Theme.Subtle, 1.4f);
                 if (on) TextRenderer.DrawText(g, "✓", _fCheck, cb, Color.White, C1);
                 x = cb.Right + Theme.Px(12);
+            }
+            // imagen grande (anuncios)
+            else if (ThumbSlot != null && SafeSlot(r))
+            {
+                int th = rc.Height - Theme.Px(20), tw = (int)Math.Round(th * ThumbAspect);
+                var tr = new Rectangle(x - Theme.Px(4), rc.Y + Theme.Px(10), tw, th);
+                Fill(g, tr, Theme.Px(8), Color.FromArgb(24, 26, 28));
+                Image im = null;
+                try { im = Thumb?.Invoke(r); } catch { }
+                if (im != null && im.Width > 0 && im.Height > 0)
+                {
+                    double k = Math.Min(tr.Width / (double)im.Width, tr.Height / (double)im.Height);
+                    int w = (int)Math.Round(im.Width * k), h = (int)Math.Round(im.Height * k);
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    g.DrawImage(im, new Rectangle(tr.X + (tr.Width - w) / 2, tr.Y + (tr.Height - h) / 2, w, h));
+                    g.PixelOffsetMode = PixelOffsetMode.Default;
+                }
+                else TextRenderer.DrawText(g, "🖼", _fIcon, tr, Theme.Subtle, C1);
+                x = tr.Right + Theme.Px(14);
             }
             // icono, logotipo o iniciales
             else if (ShowAvatar)

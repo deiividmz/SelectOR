@@ -1,11 +1,3 @@
-﻿1.2.82
-SelectOR en 11 idiomas|Ajustes → «Idioma y pantalla» deja elegir el idioma: español, inglés, alemán, francés, italiano, portugués de Brasil y de Portugal, polaco, ruso, japonés y chino simplificado. Por defecto, el de Open Rails o el de Windows; las fechas salen en el idioma elegido.
-Mercado de trenes|Empresas → Tablón → Mercado de trenes: las empresas venden y compran trenes entre ellas. El precio lo fija SelectOR según el uso y el estado del tren, y quien vende cobra ese precio menos una pequeña comisión. Mientras un tren está a la venta sale «En venta» en Flota y no puede salir en servicios.
-Vender o desguazar|En Flota, «Dar de baja» pasa a ser «Vender o desguazar…»: poner el tren a la venta en el mercado o desguazarlo al momento, cobrando bastante menos.
-Tablón de empresas|Nueva sección en Empresas con el escaparate de las empresas (su ficha y sus datos del mes, con «Pedir unirme» si buscan socios), anuncios con imagen y ofertas de empleo con requisitos a las que te puedes apuntar.
-Trenes que no tienes, enteros|En la sala compartida, el tren de otro jugador que no tienes se cambia entero por una composición tuya parecida, con sus coches en orden y sus cabinas en su sitio: se acabaron las formaciones mezcladas.
-Puesto de mando|Los trenes se dibujan sobre su vía también en las agujas y en las tijeras, y los itinerarios que acaban en otra dependencia muestran adónde van.
-Tamaño del HUD|En Ajustes puedes agrandar el HUD, la hoja de ruta y el chat hasta el 200 %, para pantallas grandes; se aplica al momento.
-Trenes IA de la sala|Circulan con más fluidez por la vía única, eligen mejor el andén de llegada y salen cada día a su hora.
-Agujas de la sala con CYZY|En la sala compartida, cuando otro jugador o el puesto de mando cambia una aguja, tu tren rehace su camino al momento también con CYZY y con las versiones Estable, Testing e Inestable de Open Rails, como ya pasaba con NY.
-Cancelar un servicio|Si cancelas un servicio, las infracciones detectadas en él ya no cuentan para el carné. A cambio, el servicio no se registra: ni ingresos, ni km, ni ranking.
+﻿1.2.83
+Trenes del mercado en 2D|En Empresas → Tablón → Mercado de trenes, cada tren a la venta sale dibujado en 2D en su tarjeta, entero y en una sola línea, como en Flota; ya no hace falta pulsar «Ver composición».
+Anuncios con imagen a la vista|En Tablón → Anuncios, la imagen de cada anuncio se ve en su tarjeta sin pulsar «Ver imagen»; con doble clic se abre en grande.
