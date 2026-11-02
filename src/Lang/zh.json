@@ -1027,6 +1027,9 @@
 "Versión {0} publicada. Los usuarios verán el aviso al abrir SelectOR.": "版本 {0} 已发布。用户打开 SelectOR 时会看到提示。",
 "Empaquetando…": "正在打包…",
 "Subiendo paquete…": "正在上传安装包…",
+"Falta el paquete de la gente en los andenes (Gente.pack) junto a SelectOR, o no es el de esta versión.": "SelectOR 旁边缺少站台人群包（Gente.pack），或者它不是此版本的。",
+"Subiendo la gente de los andenes…": "正在上传站台人群…",
+"No se pudo subir la gente de los andenes: ": "无法上传站台人群：",
 "Registrando versión…": "正在登记版本…",
 "No se pudo descartar el viaje corto: ": "无法丢弃短途行程： ",
 "Viaje de {0} km: los viajes de menos de 3 km no se registran.": "{0} km 行程：短于 3 km 的行程不予登记。",
@@ -3806,5 +3809,5 @@
 "Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "接近时，你行程中的道岔会自动转换（自由驾驶）。",
 "Poner las agujas según el itinerario al conducir": "驾驶时按行程转换道岔",
 "Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "仅限自由驾驶：接近时，行程中的每个道岔会自动转向你的路线。如果你手动转换了某个道岔，会保持你的设置。",
-"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "站台上的人上下列车（测试；带有 CGL 人物模型的线路）"
+"Gente en los andenes que sube y baja del tren": "站台上的人上下列车"
 }

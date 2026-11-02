@@ -1027,6 +1027,9 @@
 "Versión {0} publicada. Los usuarios verán el aviso al abrir SelectOR.": "バージョン {0} を公開しました。ユーザーは SelectOR を開いたときに通知を見ます。",
 "Empaquetando…": "パッケージ化中…",
 "Subiendo paquete…": "パッケージをアップロード中…",
+"Falta el paquete de la gente en los andenes (Gente.pack) junto a SelectOR, o no es el de esta versión.": "SelectOR の横にホームの人々のパッケージ（Gente.pack）がないか、このバージョンのものではありません。",
+"Subiendo la gente de los andenes…": "ホームの人々をアップロード中…",
+"No se pudo subir la gente de los andenes: ": "ホームの人々をアップロードできませんでした: ",
 "Registrando versión…": "バージョンを登録中…",
 "No se pudo descartar el viaje corto: ": "短い乗務を破棄できませんでした： ",
 "Viaje de {0} km: los viajes de menos de 3 km no se registran.": "{0} km の乗務：3 km 未満の乗務は記録されません。",
@@ -3806,5 +3809,5 @@
 "Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "走行ルートの分岐器は、近づくと自動で切り替わります（フリー運転）。",
 "Poner las agujas según el itinerario al conducir": "運転中、走行ルートに合わせて分岐器を切り替える",
 "Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "フリー運転のみ：近づくと、走行ルート上の各分岐器が自動でルートの方向に切り替わります。手動で切り替えた分岐器はそのままです。",
-"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "ホームの人々が列車に乗り降りする（テスト。CGLの人物モデルがある路線）"
+"Gente en los andenes que sube y baja del tren": "ホームの人々が列車に乗り降りする"
 }

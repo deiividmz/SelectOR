@@ -232,7 +232,7 @@ namespace SelectOR
             ["Señal {0} en parada para «{1}»: {2}"] = "Signal {0} at stop for «{1}»: {2}",
             ["Puesto de mando de la sala"] = "Room control centre", ["Hora de la sala"] = "Room time",
             ["PN"] = "LC",   // (1.2.84) paso a nivel, en el puesto de mando
-            ["Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)"] = "People on the platforms getting on and off the train (test; routes with the CGL figures)",
+            ["Gente en los andenes que sube y baja del tren"] = "People on the platforms getting on and off the train",
             ["Poner las agujas según el itinerario al conducir"] = "Set the switches along the route while driving",
             ["Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta."] = "Only in Free driving: as you approach, each switch on your route is set by itself the way your route goes. If you change one by hand, it is respected.",
             ["Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre)."] = "The switches on your route set themselves as you approach (Free driving).",
@@ -1010,6 +1010,9 @@ namespace SelectOR
             ["Versión {0} publicada. Los usuarios verán el aviso al abrir SelectOR."] = "Version {0} published. Users will see the prompt when they open SelectOR.",
             ["Empaquetando…"] = "Packaging…",
             ["Subiendo paquete…"] = "Uploading package…",
+            ["Falta el paquete de la gente en los andenes (Gente.pack) junto a SelectOR, o no es el de esta versión."] = "The platform people package (Gente.pack) is missing next to SelectOR, or it is not the one for this version.",
+            ["Subiendo la gente de los andenes…"] = "Uploading the platform people…",
+            ["No se pudo subir la gente de los andenes: "] = "Could not upload the platform people: ",
             ["Registrando versión…"] = "Registering version…",
             ["No se pudo descartar el viaje corto: "] = "Could not discard the short trip: ",
             ["Viaje de {0} km: los viajes de menos de 3 km no se registran."] = "{0} km trip: trips under 3 km are not recorded.",

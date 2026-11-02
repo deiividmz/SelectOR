@@ -1,9 +1,4 @@
-﻿1.2.84
-Sonido y tren en la sala compartida|Si al entrar en la sala cerrabas con Esc el menú de pausa del principio, Open Rails se quedaba en pausa sin decirlo: no se oía nada y el tren no respondía. Ahora Esc lo cierra y la partida sigue con normalidad.
-Señales más claras en el puesto de mando|Cada señal va siempre del mismo lado de su vía, con el mástil corto y la figura hacia donde mira. Cuando hay varias juntas se escalonan a lo largo de la vía, en vez de cambiar de lado o darse la vuelta.
-Pasos a nivel en el puesto de mando|Salen en el esquema y en el trazado real: en rojo con las barreras bajadas y oscuros con el paso abierto. Se cierran como en Open Rails, cuando se acerca un tren.
-Jugadores conectados en el HUD|Junto a «En línea» se ve cuántos jugadores hay en la sala compartida.
-Agujas según tu itinerario en Conducción libre|El itinerario que marcas en «Tu viaje» pone también las agujas: al acercarte, cada una se coloca por donde va tu recorrido. Solo en Conducción libre; si cambias una a mano, se respeta, y se puede apagar en «Tu viaje» → Itinerario.
-Tablón más claro|Las tarjetas del Escaparate, los Anuncios, el Empleo y el Mercado se ven enteras, sin texto cortado, con los datos en pastillas y la imagen del anuncio a su tamaño.
-Teleindicadores con más letras|Si el texto no cabe, se ajusta solo: las letras se juntan o se estrechan y, en los carteles de dos líneas, la frase se parte en dos.
-Gente en los andenes (prueba)|En las rutas que traen las figuras de personas de la CGL hay viajeros esperando en los andenes. Al abrir las puertas, bajan desde dentro del tren y suben los que esperan, solo por el lado en que se abren y a la altura del andén. Viene activado; si no lo quieres, se quita en Ajustes → Gráficos, «Gente en los andenes».
+﻿1.2.85
+Gente de verdad en los andenes|Personas realistas (hombres, mujeres y niños) que andan, esperan, miran al tren que llega y se acercan a las puertas cuando para. Sirve para cualquier ruta, ya no solo la CGL. La primera vez, SelectOR prepara las personas en segundo plano (descarga unos 27 MB); hasta entonces, los andenes van vacíos. Se quita en Ajustes → Gráficos.
+Los viajeros que tocan|En cada andén espera la gente que tiene puesta la ruta, y bajan y suben según las plazas del tren. En servicio y en Conducción libre, bajan y suben exactamente los que marca el contador de viajeros, al mismo ritmo: primero bajan y después suben, por turnos en cada puerta.
+Al cerrar las puertas|Ya no entra nadie más: los que no han llegado a la puerta se quedan en el andén, y los que iban a bajar y no habían salido se quedan dentro.

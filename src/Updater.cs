@@ -464,6 +464,22 @@ namespace SelectOR
                 }
                 string url = $"{Supa.BuiltInUrl.TrimEnd('/')}/storage/v1/object/public/{Bucket}/{Uri.EscapeDataString(obj)}";
 
+                // (1.2.85) la gente en los andenes: su paquete, al mismo sitio (cada SelectOR lo descarga y comprueba su huella)
+                string pack = GenteFiles.LocalPack;
+                if (!File.Exists(pack) || !GenteFiles.ShaOk(pack))
+                    return I18n.T("Falta el paquete de la gente en los andenes (Gente.pack) junto a SelectOR, o no es el de esta versión.");
+                status?.Report(I18n.T("Subiendo la gente de los andenes…"));
+                using (var http = NewHttp(600))
+                using (var req = SupaReq(HttpMethod.Post, $"/storage/v1/object/{Bucket}/{Uri.EscapeDataString(GenteFiles.PackName)}", Supa.AccessToken))
+                {
+                    req.Headers.TryAddWithoutValidation("x-upsert", "true");
+                    req.Content = new ByteArrayContent(File.ReadAllBytes(pack));
+                    req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    using var resp = await http.SendAsync(req);
+                    if (!resp.IsSuccessStatusCode)
+                        return I18n.T("No se pudo subir la gente de los andenes: ") + await resp.Content.ReadAsStringAsync();
+                }
+
                 status?.Report(I18n.T("Registrando versión…"));
                 var (_, err) = await Supa.RpcAsync("publish_release", new { p_version = ver, p_url = url, p_sha256 = sha, p_notes = notes ?? "", p_signature = sig });
                 return err;

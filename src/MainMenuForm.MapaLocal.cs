@@ -33,7 +33,9 @@ namespace SelectOR
                 bool wantMap = args.StartsWith("-start", StringComparison.OrdinalIgnoreCase) && args.IndexOf("-explore", StringComparison.OrdinalIgnoreCase) >= 0
                                && args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) < 0;
                 bool wantJoy = JoyWanted();
-                if (!wantMap && !wantJoy) return;
+                // (1.2.85) gente en los andenes: el contador de viajeros le pasa sus cifras al agente (PaxTell), en cualquier modo
+                bool wantPeople = _prefs?.GenteAndenes == true && args.StartsWith("-start", StringComparison.OrdinalIgnoreCase);
+                if (!wantMap && !wantJoy && !wantPeople) return;
                 var link = LocalMapLink.Start();
                 if (link == null) { RoomLog("conducción libre: no se puede escuchar en 127.0.0.1 (sin mapa de agujas)"); return; }
                 if (!MapAgentFiles.Apply(psi)) { link.Dispose(); RoomLog("conducción libre: no se ha podido poner el agente (sin mapa de agujas)"); return; }
@@ -72,6 +74,7 @@ namespace SelectOR
             {
                 _localSeen = _localMap.Connected;
                 RoomLog(_localSeen ? "conducción libre: Open Rails conectado" : "conducción libre: Open Rails desconectado");
+                if (_localSeen && (_paxActive || _paxWanted)) PaxTell("ON");   // (el agente espera las cifras del contador)
             }
             if (!_localSeen) return;
             MapGeoEnsure();

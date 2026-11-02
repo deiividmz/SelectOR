@@ -1027,6 +1027,9 @@
 "Versión {0} publicada. Los usuarios verán el aviso al abrir SelectOR.": "Version {0} veröffentlicht. Die Benutzer sehen den Hinweis beim Öffnen von SelectOR.",
 "Empaquetando…": "Wird gepackt…",
 "Subiendo paquete…": "Paket wird hochgeladen…",
+"Falta el paquete de la gente en los andenes (Gente.pack) junto a SelectOR, o no es el de esta versión.": "Das Paket der Menschen auf den Bahnsteigen (Gente.pack) fehlt neben SelectOR oder gehört nicht zu dieser Version.",
+"Subiendo la gente de los andenes…": "Menschen auf den Bahnsteigen werden hochgeladen…",
+"No se pudo subir la gente de los andenes: ": "Die Menschen auf den Bahnsteigen konnten nicht hochgeladen werden: ",
 "Registrando versión…": "Version wird registriert…",
 "No se pudo descartar el viaje corto: ": "Die kurze Fahrt konnte nicht verworfen werden: ",
 "Viaje de {0} km: los viajes de menos de 3 km no se registran.": "Fahrt von {0} km: Fahrten unter 3 km werden nicht erfasst.",
@@ -3806,5 +3809,5 @@
 "Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "Die Weichen deiner Fahrstrecke stellen sich beim Heranfahren von selbst (Freies Fahren).",
 "Poner las agujas según el itinerario al conducir": "Weichen beim Fahren nach der Fahrstrecke stellen",
 "Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "Nur bei Freies Fahren: Beim Heranfahren stellt sich jede Weiche deiner Fahrstrecke von selbst in deine Richtung. Stellst du eine von Hand um, bleibt sie so.",
-"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "Menschen auf den Bahnsteigen, die ein- und aussteigen (Test; Strecken mit den CGL-Figuren)"
+"Gente en los andenes que sube y baja del tren": "Menschen auf den Bahnsteigen, die ein- und aussteigen"
 }

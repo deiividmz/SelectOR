@@ -4132,6 +4132,7 @@ namespace SelectOR
             _paxPlat.Clear(); _paxPlatKeys.Clear(); _paxTrail.Clear(); _paxTrainLenM = 0; _paxLeadAheadM = 0; _paxDoorNeed = 0; _paxWrongSideSaid = null; _paxPaused = false; _paxPausedNorm = null;
             string paxRouteDir = _curRoute?.Path;
             _paxBoarded = 0; _paxOnboard = 0; _paxCapacity = 0; _paxKm = 0; _paxBusy = false; _paxWanted = true;
+            PaxTell("ON");   // (si Open Rails ya está conectado: gente en los andenes al compás del contador)
             _pHavePrev = _pHaveDir = false; _paxNextName = null; _paxLastEvent = null; _paxHourUtc = DateTime.MinValue;            _paxSeed = Environment.TickCount;
             // Estación del año y clima elegidos para el viaje (Conducción libre / Horarios; en Actividad, neutros).
             try
@@ -4463,6 +4464,7 @@ namespace SelectOR
             // Ritmo: ~3 viajeros/s en paradas pequeñas; en las grandes sube el ritmo para no pasar de ~25 s.
             _paxAnimStep = Math.Max(1, (int)Math.Ceiling((alight + board) / 80.0));
             _paxAnimating = true;
+            PaxTell($"STOP {alight} {board} {_paxOnboard} {_paxCapacity}");   // (gente en los andenes: bajan y suben estos)
             if (_paxAnimTimer == null)
             {
                 _paxAnimTimer = new System.Windows.Forms.Timer { Interval = 300 };
@@ -4518,6 +4520,7 @@ namespace SelectOR
                 _paxOnboard += n; _paxBoarded += n;
             }
             else { EndPaxAnimation(); return; }
+            PaxTell($"STEP {_paxAnimAlighted} {_paxAnimBoarded}");   // (gente en los andenes: al mismo compás)
             PaxStopRecUpdate();   // la parada, al día en cada movimiento (si se registra el servicio a mitad, ya lleva sus cifras)
         }
 
@@ -4535,6 +4538,14 @@ namespace SelectOR
             if (!_paxAnimating) return;
             _paxAnimating = false;
             _paxPaused = true; _paxPausedNorm = _paxAnimNorm;
+            PaxTell("PAUSE");
+        }
+
+        // (1.2.85) las cifras del contador, al agente de Open Rails (gente en los andenes, MapAgent\Viajeros3D.cs): «PAX ON»,
+        // «PAX STOP bajan suben a-bordo plazas», «PAX STEP bajados subidos», «PAX PAUSE», «PAX RESUME», «PAX END»
+        void PaxTell(string s)
+        {
+            try { if (_localMap != null && _localMap.Connected) _localMap.Send("PAX " + s); } catch { }
         }
 
         void ResumePaxAnimation()
@@ -4542,6 +4553,7 @@ namespace SelectOR
             if (!_paxPaused) return;
             _paxPaused = false; _paxAnimating = true; _paxAnimDoorCheck = false; _paxAnimTicks = 0;
             _paxAnimTimer?.Start();
+            PaxTell("RESUME");
         }
 
         void EndPaxAnimation()
@@ -4549,6 +4561,7 @@ namespace SelectOR
             _paxAnimTimer?.Stop();
             if (!_paxAnimating && !_paxPaused) return;
             _paxAnimating = false; _paxPaused = false;
+            PaxTell("END");
             _paxLastEvent = $"{_paxAnimStation}:  +{_paxAnimBoarded} / −{_paxAnimAlighted}";
             _paxLastEventUtc = DateTime.UtcNow;
             _paxAnimClosedReads = 0;

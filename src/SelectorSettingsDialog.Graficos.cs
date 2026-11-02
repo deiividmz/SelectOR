@@ -36,7 +36,7 @@ namespace SelectOR
             top.Controls.Add(_chkGfx); top.Controls.Add(ver);
             // (prueba) gente en los andenes (MapAgent\Viajeros3D.cs): vale desde la próxima vez que se conduzca
             var people = new Panel { Dock = DockStyle.Top, Height = Theme.Px(34), BackColor = Theme.Bg };
-            var chkPeople = new ThemeCheck { Text = I18n.T("Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)"), Checked = _prefs.GenteAndenes, AutoSize = false, Location = new Point(0, Theme.Px(4)), Font = Theme.Font(9.5f) };
+            var chkPeople = new ThemeCheck { Text = I18n.T("Gente en los andenes que sube y baja del tren"), Checked = _prefs.GenteAndenes, AutoSize = false, Location = new Point(0, Theme.Px(4)), Font = Theme.Font(9.5f) };
             chkPeople.Size = new Size(TextRenderer.MeasureText(chkPeople.Text, chkPeople.Font).Width + Theme.Px(40), Theme.Px(28));
             chkPeople.CheckedChanged += (s, e) => { _prefs.GenteAndenes = chkPeople.Checked; Save(); };
             people.Controls.Add(chkPeople);

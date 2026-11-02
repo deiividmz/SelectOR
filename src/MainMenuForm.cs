@@ -214,6 +214,7 @@ namespace SelectOR
             Shown += (s, e) => StartPresence();      // usuarios conectados en la portada (MainMenuForm.Conectados.cs)
             Shown += (s, e) => ReShadeFiles.Remove();   // gráficos: si quedó el dxgi.dll de ReShade de otra vez, fuera (ReShadeFiles.cs)
             Shown += (s, e) => { ClimaFiles.Remove(); ClimaSyncSoon(); };
+            Shown += (s, e) => { if (_prefs?.GenteAndenes == true) GenteFiles.EnsureAsync(m => { try { BeginInvoke((Action)(() => RoomLog(m))); } catch { } }); };   // gente en los andenes: las posturas, en segundo plano la primera vez (GenteFiles.cs)
             Shown += (s, e) => CyzyLamps.Remove();   // farolas de CYZYRails: si quedó el archivo de otra vez, fuera (CyzyLamps.cs)   // clima: las imágenes de Open Rails en su sitio y el clima al día
             Shown += (s, e) => StartUpdateChecks();   // aviso de nueva versión (al arrancar y cada 3 h)            LayoutBottomBar();
         }
@@ -3436,7 +3437,14 @@ namespace SelectOR
                 // Y las luces de CYZY (Luces.cs) y el sol de CGL (Sol.cs). Sin sala ni enlace, el resto no hace nada.
                 if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase)) MapAgentFiles.Apply(psi);
                 // (prueba) gente en los andenes, si está pedida en Ajustes → Gráficos (MapAgent\Viajeros3D.cs)
-                if (_prefs?.GenteAndenes == true) psi.Environment["SELECTOR_VIAJEROS3D"] = "1";
+                if (_prefs?.GenteAndenes == true)
+                {
+                    psi.Environment["SELECTOR_VIAJEROS3D"] = "1";
+                    // personas realistas animadas (GenteFiles.cs): valen para cualquier ruta. Si aún se están preparando, esta vez sin ellas
+                    string gente = GenteFiles.ReadyDir();
+                    if (gente != null) psi.Environment["SELECTOR_GENTE_DIR"] = gente;
+                    else { GenteFiles.EnsureAsync(m => { try { BeginInvoke((Action)(() => RoomLog(m))); } catch { } }); RoomLog("gente en los andenes: preparando las personas (la primera vez); esta vez, sin ellas"); }
+                }
                 // Gráficos: ReShade junto a Open Rails mientras se conduce (ReShadeFiles.cs; se quita al volver)
                 { string why = ReShadeFiles.Install(_prefs); if (why != null) RoomLog("gráficos: sin ReShade: " + why); }
                 // Clima: las imágenes de clima de SelectOR en Content mientras se conduce (ClimaFiles.cs; se quitan al volver)

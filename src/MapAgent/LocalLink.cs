@@ -126,6 +126,7 @@ namespace SelectOR.MapAgent
                 while (_in.TryDequeue(out var cmd))
                 {
                     if (cmd.StartsWith("TYPING ", StringComparison.Ordinal)) { if (int.TryParse(cmd.Substring(7), out int secs)) Teclado.Typing(secs); continue; }   // (también en la sala)
+                    if (cmd.StartsWith("PAX ", StringComparison.Ordinal)) { Viajeros3D.Pax(cmd.Substring(4)); continue; }   // (el contador de viajeros: gente en los andenes)
                     if (Controls.Do(cmd, sim)) continue;
                     if (!mp && _mapOn && sim.Signals != null) Command(sim, cmd);
                 }

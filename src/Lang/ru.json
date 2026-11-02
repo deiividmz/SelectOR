@@ -1027,6 +1027,9 @@
 "Versión {0} publicada. Los usuarios verán el aviso al abrir SelectOR.": "Версия {0} опубликована. Пользователи увидят уведомление при запуске SelectOR.",
 "Empaquetando…": "Упаковка…",
 "Subiendo paquete…": "Отправка пакета…",
+"Falta el paquete de la gente en los andenes (Gente.pack) junto a SelectOR, o no es el de esta versión.": "Рядом с SelectOR нет пакета людей на платформах (Gente.pack), или он не от этой версии.",
+"Subiendo la gente de los andenes…": "Отправка людей на платформах…",
+"No se pudo subir la gente de los andenes: ": "Не удалось отправить людей на платформах: ",
 "Registrando versión…": "Регистрация версии…",
 "No se pudo descartar el viaje corto: ": "Не удалось отбросить короткую поездку: ",
 "Viaje de {0} km: los viajes de menos de 3 km no se registran.": "Поездка {0} км: поездки короче 3 км не записываются.",
@@ -3806,5 +3809,5 @@
 "Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "Стрелки твоего маршрута переводятся сами при приближении (Свободная езда).",
 "Poner las agujas según el itinerario al conducir": "Переводить стрелки по маршруту во время езды",
 "Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "Только в Свободной езде: при приближении каждая стрелка твоего маршрута сама переводится по направлению движения. Если переведёшь стрелку вручную, она так и останется.",
-"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "Люди на платформах садятся в поезд и выходят из него (тест; маршруты с фигурами CGL)"
+"Gente en los andenes que sube y baja del tren": "Люди на платформах садятся в поезд и выходят из него"
 }

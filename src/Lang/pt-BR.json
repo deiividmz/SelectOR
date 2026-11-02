@@ -1027,6 +1027,9 @@
 "Versión {0} publicada. Los usuarios verán el aviso al abrir SelectOR.": "Versão {0} publicada. Os usuários verão o aviso ao abrir o SelectOR.",
 "Empaquetando…": "Empacotando…",
 "Subiendo paquete…": "Enviando pacote…",
+"Falta el paquete de la gente en los andenes (Gente.pack) junto a SelectOR, o no es el de esta versión.": "Falta o pacote das pessoas nas plataformas (Gente.pack) ao lado do SelectOR, ou não é o desta versão.",
+"Subiendo la gente de los andenes…": "Enviando as pessoas nas plataformas…",
+"No se pudo subir la gente de los andenes: ": "Não foi possível enviar as pessoas nas plataformas: ",
 "Registrando versión…": "Registrando versão…",
 "No se pudo descartar el viaje corto: ": "Não foi possível descartar a viagem curta: ",
 "Viaje de {0} km: los viajes de menos de 3 km no se registran.": "Viagem de {0} km: as viagens de menos de 3 km não são registradas.",
@@ -3806,5 +3809,5 @@
 "Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "As agulhas do seu itinerário se ajustam sozinhas quando você se aproxima (Condução livre).",
 "Poner las agujas según el itinerario al conducir": "Ajustar as agulhas conforme o itinerário ao conduzir",
 "Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "Só na Condução livre: quando você se aproxima, cada agulha do seu itinerário se ajusta sozinha para o seu percurso. Se você mudar uma à mão, ela é respeitada.",
-"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "Pessoas nas plataformas embarcando e desembarcando do trem (teste; rotas com as figuras da CGL)"
+"Gente en los andenes que sube y baja del tren": "Pessoas nas plataformas embarcando e desembarcando do trem"
 }
