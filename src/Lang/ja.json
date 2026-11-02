@@ -3801,5 +3801,10 @@
 "¿Quitar el anuncio «{0}»?": "広告「{0}」を削除しますか？",
 "¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios.": "「{0}」をマーケットから取り下げますか？保有車両に戻り、運行に使えるようになります。",
 "🔎  Buscar…": "🔎  検索…",
-"Cedido por el administrador: desguazarlo no paga nada.": "管理者から譲渡された車両です。解体しても収入はありません。"
+"Cedido por el administrador: desguazarlo no paga nada.": "管理者から譲渡された車両です。解体しても収入はありません。",
+"PN": "踏切",
+"Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "走行ルートの分岐器は、近づくと自動で切り替わります（フリー運転）。",
+"Poner las agujas según el itinerario al conducir": "運転中、走行ルートに合わせて分岐器を切り替える",
+"Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "フリー運転のみ：近づくと、走行ルート上の各分岐器が自動でルートの方向に切り替わります。手動で切り替えた分岐器はそのままです。",
+"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "ホームの人々が列車に乗り降りする（テスト。CGLの人物モデルがある路線）"
 }

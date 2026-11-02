@@ -3801,5 +3801,10 @@
 "¿Quitar el anuncio «{0}»?": "Remover o anúncio «{0}»?",
 "¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios.": "Retirar «{0}» do mercado? Volta à frota e pode fazer serviços.",
 "🔎  Buscar…": "🔎  Procurar…",
-"Cedido por el administrador: desguazarlo no paga nada.": "Cedido pelo administrador: desmantelá-lo não rende nada."
+"Cedido por el administrador: desguazarlo no paga nada.": "Cedido pelo administrador: desmantelá-lo não rende nada.",
+"PN": "PN",
+"Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "As agulhas do teu itinerário colocam-se sozinhas quando te aproximas (Condução livre).",
+"Poner las agujas según el itinerario al conducir": "Colocar as agulhas conforme o itinerário ao conduzir",
+"Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "Só na Condução livre: quando te aproximas, cada agulha do teu itinerário coloca-se sozinha para o teu percurso. Se mudares uma à mão, é respeitada.",
+"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "Pessoas nas plataformas a entrar e sair do comboio (teste; rotas com as figuras da CGL)"
 }

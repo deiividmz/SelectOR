@@ -3801,5 +3801,10 @@
 "¿Quitar el anuncio «{0}»?": "移除公告《{0}》？",
 "¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios.": "将《{0}》撤出市场？它将回到车队，可以执行班次。",
 "🔎  Buscar…": "🔎  搜索…",
-"Cedido por el administrador: desguazarlo no paga nada.": "由管理员赠予：报废不会获得任何收入。"
+"Cedido por el administrador: desguazarlo no paga nada.": "由管理员赠予：报废不会获得任何收入。",
+"PN": "道口",
+"Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "接近时，你行程中的道岔会自动转换（自由驾驶）。",
+"Poner las agujas según el itinerario al conducir": "驾驶时按行程转换道岔",
+"Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "仅限自由驾驶：接近时，行程中的每个道岔会自动转向你的路线。如果你手动转换了某个道岔，会保持你的设置。",
+"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "站台上的人上下列车（测试；带有 CGL 人物模型的线路）"
 }

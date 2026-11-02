@@ -249,7 +249,7 @@ namespace SelectOR
         int _tabPage;
         CardTable _showList, _adsList, _jobsList, _mktList;
         Label _tabMsg, _tabIntro;
-        RoundButton _showJoinBtn, _showEditBtn, _adNewBtn, _adImgBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktImgBtn, _mktWithdrawBtn;
+        RoundButton _showJoinBtn, _showEditBtn, _adNewBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktImgBtn, _mktWithdrawBtn;
         FlowLayoutPanel _tabBtns;
         int _tabSeq;
         sealed class ShowRow { public string Id, Name, Code, Slogan, About, Kinds; public bool Seeking, Mine; public int Members, Trains, Services, LeaguePos; public double Km; public Image Logo; }
@@ -297,18 +297,20 @@ namespace SelectOR
                 var c = EmpCards(); c.Columns = cols; c.CardHeight = h; c.MinWidth = minW;
                 c.TitleCol = 0; c.PillCol = 1; c.SubCols = new[] { 2, 3 }; c.QuoteCol = 4; c.RightCol = 5; c.RightSubCols = new[] { 6 };
                 c.SelectedIndexChanged += (s, e) => UpdateTablonButtons();
+                // (1.2.84) cada tarjeta del alto de su texto (nada cortado) y los datos en pastillas
+                c.AutoHeight = true; c.SubChips = true;
                 return c;
             }
-            _showList = Cards(2, 96, 460); _showList.ItemActivated += _ => ShowCompanyCard();
-            _adsList = Cards(1, 150, 520); _adsList.Icon = null; _adsList.ItemActivated += _ => ShowAdImage();
+            _showList = Cards(2, 80, 460); _showList.AvatarSize = 46; _showList.ItemActivated += _ => ShowCompanyCard();
+            _adsList = Cards(1, 80, 520); _adsList.Icon = null; _adsList.ThumbWidth = 220; _adsList.QuoteMarks = false; _adsList.ItemActivated += _ => ShowAdImage();
             // la imagen del anuncio a la vista, a la izquierda de su tarjeta (doble clic: en grande)
             _adsList.ThumbSlot = row => _adRows.FirstOrDefault(a => a.Id == row.Key)?.HasImage == true;
             _adsList.Thumb = row => row.Key != null && _adImgs.TryGetValue(row.Key, out var im) ? im : null;
-            _jobsList = Cards(1, 92, 520); _jobsList.ItemActivated += _ => ApplyJob();
+            _jobsList = Cards(1, 72, 520); _jobsList.ItemActivated += _ => ApplyJob();
             _mktList = Cards(2, 96, 460); _mktList.ItemActivated += _ => ShowMarketImage();
             _mktList.SubCols = new[] { 2 }; _mktList.QuoteCol = 3; _mktList.QuoteMarks = false;   // el uso (km, estado, de quién, plazo) en su propia línea
             // la composición 2D de cada tren abajo de su tarjeta, como en Flota (la imagen guardada con el tren)
-            _mktList.StripHeight = 56; _mktList.StripRows = 1; _mktList.CardHeight = 96 + 66;   // el tren entero en un renglón
+            _mktList.StripHeight = 56; _mktList.StripRows = 1;   // el tren entero en un renglón (AutoHeight: debajo del texto)
             _mktList.Strip = row => row.Key != null && _mktStrips.TryGetValue(row.Key, out var b) ? b : null;
             _mktList.StripNote = row => _mktRows.FirstOrDefault(m => m.Id == row.Key) is MktRow m && !m.HasImage ? Tr("Sin composición guardada") : null;
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -335,7 +337,7 @@ namespace SelectOR
             _showJoinBtn = B("Pedir unirme…", true, JoinFromShowcase);
             _showEditBtn = B("Ficha de mi empresa…", false, EditCompanyProfile);
             _adNewBtn = B("Publicar anuncio…", true, NewAd);
-            _adImgBtn = B("Ver imagen", false, ShowAdImage);
+            // (1.2.84, petición) sin «Ver imagen»: la imagen se ve en la tarjeta y, en grande, con doble clic
             _adDelBtn = B("Quitar anuncio", false, DeleteAd);
             _jobApplyBtn = B("Apuntarme…", true, ApplyJob);
             _jobNewBtn = B("Publicar oferta…", false, NewJob);
@@ -343,7 +345,7 @@ namespace SelectOR
             _mktBuyBtn = B("Comprar…", true, BuyFromMarket);
             _mktImgBtn = B("Ver composición", false, ShowMarketImage);
             _mktWithdrawBtn = B("Retirar del mercado", false, WithdrawFromMarket);
-            _tabBtns.Controls.AddRange(new Control[] { _showJoinBtn, _showEditBtn, _adNewBtn, _adImgBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktImgBtn, _mktWithdrawBtn });
+            _tabBtns.Controls.AddRange(new Control[] { _showJoinBtn, _showEditBtn, _adNewBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktImgBtn, _mktWithdrawBtn });
             t.Controls.Add(_tabBtns);
             _tabMsg = EmpMsg(); _tabMsg.MaximumSize = new Size(900, 0); _tabMsg.Margin = new Padding(2, 4, 2, 2);
             t.Controls.Add(_tabMsg);
@@ -372,7 +374,6 @@ namespace SelectOR
             V(_showJoinBtn, _tabPage == 0); if (_showJoinBtn != null) _showJoinBtn.Enabled = sh != null && !sh.Mine && sh.Seeking;
             V(_showEditBtn, _tabPage == 0 && manage);
             V(_adNewBtn, _tabPage == 1 && manage);
-            V(_adImgBtn, _tabPage == 1); if (_adImgBtn != null) _adImgBtn.Enabled = ad?.HasImage == true;
             V(_adDelBtn, _tabPage == 1 && (manage || Supa.IsSuperadmin)); if (_adDelBtn != null) _adDelBtn.Enabled = ad != null && (ad.Mine || Supa.IsSuperadmin);
             V(_jobApplyBtn, _tabPage == 2); if (_jobApplyBtn != null) _jobApplyBtn.Enabled = jb != null && !jb.Member && string.IsNullOrEmpty(jb.MyStatus) && jb.MyPoints >= jb.MinPoints && jb.MyServices >= jb.MinServices;
             V(_jobNewBtn, _tabPage == 2 && manage);

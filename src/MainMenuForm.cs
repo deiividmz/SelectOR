@@ -3435,6 +3435,8 @@ namespace SelectOR
                 // scripts de seguridad (ASFA, LZB, ATO: Tcs.cs) para que compilen; sin él, en modo Timetable no había ninguno.
                 // Y las luces de CYZY (Luces.cs) y el sol de CGL (Sol.cs). Sin sala ni enlace, el resto no hace nada.
                 if (args.StartsWith("-start", StringComparison.OrdinalIgnoreCase)) MapAgentFiles.Apply(psi);
+                // (prueba) gente en los andenes, si está pedida en Ajustes → Gráficos (MapAgent\Viajeros3D.cs)
+                if (_prefs?.GenteAndenes == true) psi.Environment["SELECTOR_VIAJEROS3D"] = "1";
                 // Gráficos: ReShade junto a Open Rails mientras se conduce (ReShadeFiles.cs; se quita al volver)
                 { string why = ReShadeFiles.Install(_prefs); if (why != null) RoomLog("gráficos: sin ReShade: " + why); }
                 // Clima: las imágenes de clima de SelectOR en Content mientras se conduce (ClimaFiles.cs; se quitan al volver)
@@ -3460,6 +3462,8 @@ namespace SelectOR
                     // Horarios: la hoja de ruta sale ya con el recorrido del tren y sus horas de paso.
                     try { _roadTtPlan = args.IndexOf("-timetable", StringComparison.OrdinalIgnoreCase) >= 0 ? BuildTtRoadPlan() : null; } catch { _roadTtPlan = null; }
                     _launchExplore = args.IndexOf("-explore", StringComparison.OrdinalIgnoreCase) >= 0;   // -explorer / -exploreactivity: su itinerario
+                    _launchFreeDrive = _launchExplore && !svc && !_mpClientRun;   // (1.2.84) Conducción libre de verdad: sin servicio ni red (agujas del itinerario)
+                    ItinSwitchReset();
                     StartKmTracking(withPax: true); // posición para el mapa y viajeros (en servicio o conducción libre)
                     // Actividad: lo mismo con su recorrido y las paradas del tren del jugador (el .tdb se lee aparte).
                     if (args.IndexOf("-activity", StringComparison.OrdinalIgnoreCase) >= 0 && _lstActivities.SelectedItem is Activity actSel)

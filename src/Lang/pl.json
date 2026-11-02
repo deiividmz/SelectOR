@@ -3801,5 +3801,10 @@
 "¿Quitar el anuncio «{0}»?": "Usunąć ogłoszenie «{0}»?",
 "¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios.": "Wycofać «{0}» z rynku? Wraca do taboru i może jeździć w kursach.",
 "🔎  Buscar…": "🔎  Szukaj…",
-"Cedido por el administrador: desguazarlo no paga nada.": "Przekazany przez administratora: zezłomowanie nic nie daje."
+"Cedido por el administrador: desguazarlo no paga nada.": "Przekazany przez administratora: zezłomowanie nic nie daje.",
+"PN": "PK",
+"Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "Zwrotnice na twojej trasie przestawiają się same, gdy się zbliżasz (Jazda swobodna).",
+"Poner las agujas según el itinerario al conducir": "Przestawiaj zwrotnice według trasy podczas jazdy",
+"Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "Tylko w Jeździe swobodnej: gdy się zbliżasz, każda zwrotnica na twojej trasie przestawia się sama w kierunku jazdy. Jeśli przestawisz którąś ręcznie, zostanie tak.",
+"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "Ludzie na peronach wsiadający i wysiadający z pociągu (test; trasy z postaciami CGL)"
 }

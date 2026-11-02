@@ -34,7 +34,16 @@ namespace SelectOR
             if (pres == "in" || (pres == null && tcp && _scenarioReady))
             {
                 _netInAt = DateTime.UtcNow;
-                r = (1, Tr("En línea") + (pres == "in" && p.IsDispatcher ? " · " + Tr("despachador") : ""), extra);   // (sin el nombre de la sala: no cabe)
+                // (1.2.84) y cuántos jugadores hay en la sala: lo dice el servidor; uno de antes no, y se cuentan los trenes de
+                // jugadores que manda (sin las partes sueltas de un desacople)
+                int n = -1;
+                if (pres == "in")
+                {
+                    n = p.RoomPlayers;
+                    if (n < 0) try { n = p.Trains.Where(t => t.player && !RoomLoose.Is(t.name)).Select(t => t.name).Distinct(StringComparer.Ordinal).Count(); } catch { n = -1; }
+                }
+                r = (1, Tr("En línea") + (n > 0 ? " · " + Plural(n, "{0} conectado", "{0} conectados") : "")
+                        + (pres == "in" && p.IsDispatcher ? " · " + Tr("despachador") : ""), extra);   // (sin el nombre de la sala: no cabe)
             }
             else if (pres == "wait" || (!_scenarioReady && (tcp || _netInAt == DateTime.MinValue)))
                 r = (2, Tr("Conectando con el servidor…"), extra);

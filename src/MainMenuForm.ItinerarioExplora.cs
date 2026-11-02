@@ -95,9 +95,9 @@ namespace SelectOR
 
             // derecha: guardados, resumen y paradas
             var msg = new Label { AutoSize = true, MaximumSize = new Size(Theme.Px(330), 0), ForeColor = Theme.Subtle, Margin = new Padding(0, 0, 0, 2) };
-            var side = new TableLayoutPanel { Dock = DockStyle.Right, Width = Theme.Px(360), ColumnCount = 1, RowCount = 8, BackColor = Theme.Bg, Padding = new Padding(8, 12, 14, 8) };
+            var side = new TableLayoutPanel { Dock = DockStyle.Right, Width = Theme.Px(360), ColumnCount = 1, RowCount = 9, BackColor = Theme.Bg, Padding = new Padding(8, 12, 14, 8) };
             side.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 7; i++) side.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            for (int i = 0; i < 8; i++) side.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             side.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             Label Cap(string t) => new Label { Text = t, AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8f, FontStyle.Bold), Margin = new Padding(0, 8, 0, 4) };
             var help = new Label
@@ -130,7 +130,17 @@ namespace SelectOR
             RoundButton Small(string t) => new RoundButton { Text = t, Width = Theme.Px(120), Height = 30, Radius = 8, FontSize = 9f, Margin = new Padding(0, 0, 6, 0), BaseColor = Theme.Surface2, HoverColor = Theme.SurfaceHi, TextColor = Theme.Text };
             var bHaltAll = Small(Tr("Parar en todas")); var bHaltNone = Small(Tr("Ninguna"));
             allRow.Controls.Add(bHaltAll); allRow.Controls.Add(bHaltNone);
-            side.Controls.Add(sum); side.Controls.Add(msg); side.Controls.Add(Cap(Tr("PARADAS (clic: parar o pasar sin parar)"))); side.Controls.Add(allRow); side.Controls.Add(stops);
+            side.Controls.Add(sum); side.Controls.Add(msg);
+            // (1.2.84) las agujas según el itinerario, en Conducción libre (MainMenuForm.AgujasItinerario.cs): se puede quitar
+            var autoSw = new CheckBox
+            {
+                Text = Tr("Poner las agujas según el itinerario al conducir"), AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Theme.Text, BackColor = Theme.Bg,
+                Checked = _prefs?.ItinAutoSwitches != false, Margin = new Padding(0, 8, 0, 2), Visible = !forSched
+            };
+            new ToolTip().SetToolTip(autoSw, Tr("Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta."));
+            autoSw.Click += (s, e) => { if (_prefs == null) return; _prefs.ItinAutoSwitches = autoSw.Checked; try { _prefs.Save(); } catch { } };
+            side.Controls.Add(autoSw);
+            side.Controls.Add(Cap(Tr("PARADAS (clic: parar o pasar sin parar)"))); side.Controls.Add(allRow); side.Controls.Add(stops);
 
             // abajo: botones
             var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 64, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Padding = new Padding(14, 10, 14, 10) };

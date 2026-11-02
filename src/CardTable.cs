@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace SelectOR
@@ -48,6 +49,14 @@ namespace SelectOR
         public Func<Row, bool> ThumbSlot;
         public Func<Row, Image> Thumb;
         public double ThumbAspect = 16 / 9.0;
+
+        // (1.2.84, Tablón) Cada tarjeta del alto que pide su texto (sin cortar nada): el título, la segunda línea y la tercera
+        // pasan de línea; CardHeight es el mínimo. SubChips: la segunda línea en pastillas (cada celda, y dentro de ella lo
+        // separado por «  ·  »). ThumbWidth: el ancho de la imagen grande (sin escalar). AvatarSize: el del logotipo.
+        public bool AutoHeight, SubChips;
+        public int ThumbWidth = 200, AvatarSize = 40;
+        protected override bool VariableHeights => AutoHeight;
+        protected override int ItemHeight(int i, int cardW) => i >= 0 && i < Items.Count && Items[i] is Row r ? DrawAuto(null, r, new Rectangle(0, 0, cardW, Theme.Px(CardHeight)), false, false) : CardH;
 
         protected override int CardH => Theme.Px(CardHeight);
         protected override int MinCardW => Theme.Px(MinWidth);
@@ -184,6 +193,7 @@ namespace SelectOR
         protected override void PaintCard(Graphics g, int i, Rectangle rc, bool selected, bool hover)
         {
             if (Items[i] is not Row r) return;
+            if (AutoHeight) { DrawAuto(g, r, rc, selected, hover); return; }
             Fill(g, rc, Theme.Px(10), selected || hover ? Color.FromArgb(50, 54, 57) : Theme.Surface);
             if (selected) Stroke(g, rc, Theme.Px(10), Theme.Accent);
             int pad = Theme.Px(14), x = rc.X + pad, right = rc.Right - pad;
@@ -303,6 +313,185 @@ namespace SelectOR
             if (quote.Length > 0)
                 TextRenderer.DrawText(g, QuoteMarks ? "«" + quote + "»" : quote, _fQuote, new Rectangle(x, y, right - x, lh),
                     QuoteMarks ? Color.FromArgb(205, 210, 214) : Col(r, QuoteCol) ?? Color.FromArgb(205, 210, 214), L1);
+        }
+
+        // ---- (1.2.84) tarjeta del alto de su texto: con g = null solo mide y devuelve el alto que necesita ----
+        const TextFormatFlags Wrap = TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.TextBoxControl;
+        static int TH(string s, Font f, int w) => string.IsNullOrEmpty(s) ? 0 : TextRenderer.MeasureText(s, f, new Size(Math.Max(10, w), int.MaxValue), Wrap).Height;
+        static readonly Color ChipBg = Color.FromArgb(46, 50, 54), ChipText = Color.FromArgb(196, 202, 208), BodyText = Color.FromArgb(214, 218, 222);
+
+        int DrawAuto(Graphics g, Row r, Rectangle rc, bool selected, bool hover)
+        {
+            bool paint = g != null;
+            int pad = Theme.Px(14), gap = Theme.Px(5);
+            if (paint)
+            {
+                Fill(g, rc, Theme.Px(10), selected || hover ? Color.FromArgb(50, 54, 57) : Theme.Surface);
+                if (selected) Stroke(g, rc, Theme.Px(10), Theme.Accent);
+            }
+            int x = rc.X + pad, right = rc.Right - pad, top = rc.Y + pad, bottom = top;
+
+            // a la izquierda: la imagen grande (anuncios) o el logotipo
+            if (ThumbSlot != null && SafeSlot(r))
+            {
+                int tw = Math.Min(Theme.Px(ThumbWidth), (rc.Width - 2 * pad) / 3), th = (int)Math.Round(tw / ThumbAspect);
+                var tr = new Rectangle(x, top, tw, th);
+                if (paint)
+                {
+                    Fill(g, tr, Theme.Px(8), Color.FromArgb(24, 26, 28));
+                    Image im = null;
+                    try { im = Thumb?.Invoke(r); } catch { }
+                    if (im != null && im.Width > 0 && im.Height > 0)
+                    {
+                        double k = Math.Max(tr.Width / (double)im.Width, tr.Height / (double)im.Height);   // (llena el hueco: recorta lo que sobra)
+                        int w = (int)Math.Round(im.Width * k), h = (int)Math.Round(im.Height * k);
+                        var st = g.Save();
+                        using (var clip = RoundPath(tr, Theme.Px(8))) g.SetClip(clip);
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        g.DrawImage(im, new Rectangle(tr.X + (tr.Width - w) / 2, tr.Y + (tr.Height - h) / 2, w, h));
+                        g.Restore(st);
+                    }
+                    else TextRenderer.DrawText(g, "🖼", _fIcon, tr, Theme.Subtle, C1);
+                }
+                x = tr.Right + Theme.Px(16); bottom = Math.Max(bottom, tr.Bottom);
+            }
+            else if (ShowAvatar)
+            {
+                int av = Theme.Px(AvatarSize);
+                var ar = new Rectangle(x, top, av, av);
+                if (paint)
+                {
+                    if (r.Image != null) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(r.Image, ar); }
+                    else
+                    {
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        using (var b = new SolidBrush(Theme.Surface2)) g.FillEllipse(b, ar);
+                        g.SmoothingMode = SmoothingMode.None;
+                        if (Icon != null) TextRenderer.DrawText(g, Icon, _fIcon, ar, Theme.Text, C1);
+                        else TextRenderer.DrawText(g, Initials(Cell(r, TitleCol)), _fAv, ar, Theme.AccentHi, C1);
+                    }
+                }
+                x = ar.Right + Theme.Px(14); bottom = Math.Max(bottom, ar.Bottom);
+            }
+
+            // a la derecha: el valor grande y su detalle, arriba
+            if (RightCol >= 0)
+            {
+                string big = Cell(r, RightCol);
+                if (big.Length > 0)
+                {
+                    int rightW = Math.Max(TW(big, _fRight), Theme.Px(80));
+                    foreach (int c in RightSubCols) rightW = Math.Max(rightW, TW(Cell(r, c), _fSub));
+                    rightW = Math.Min(rightW + Theme.Px(4), Math.Max(Theme.Px(60), (right - x) / 3));
+                    int ry = top;
+                    int bh = Math.Max(Theme.Px(24), TH(big, _fRight, rightW));
+                    if (paint) TextRenderer.DrawText(g, big, _fRight, new Rectangle(right - rightW, ry, rightW, bh), Col(r, RightCol) ?? Theme.Text, Wrap | TextFormatFlags.Right);
+                    ry += bh;
+                    foreach (int c in RightSubCols)
+                    {
+                        string v = Cell(r, c); if (v.Length == 0) continue;
+                        int h = TH(v, _fSub, rightW);
+                        if (paint) TextRenderer.DrawText(g, v, _fSub, new Rectangle(right - rightW, ry, rightW, h), Col(r, c) ?? Theme.Subtle, Wrap | TextFormatFlags.Right);
+                        ry += h + Theme.Px(2);
+                    }
+                    bottom = Math.Max(bottom, ry);
+                    right -= rightW + Theme.Px(16);
+                }
+            }
+
+            // las pastillas (el distintivo y la de su columna): a la derecha del título si cabe; si no, debajo
+            var pills = new List<(string t, Color c)>();
+            if (Badges.TryGetValue(r.Orig, out var badge)) pills.Add((badge, Theme.Accent));
+            if (PillCol >= 0) { string pv = Cell(r, PillCol); if (pv.Length > 0 && pv != "—") pills.Add((pv, Col(r, PillCol) ?? Theme.AccentHi)); }
+            int ph = Theme.Px(20), pillsW = pills.Sum(p => TW(p.t, _fPill) + Theme.Px(22));
+            bool pillsInline = pills.Count == 0 || right - x - pillsW >= Theme.Px(170);
+            void DrawPills(int px, int py, bool fromRight)
+            {
+                foreach (var (t, c) in pills)
+                {
+                    int pw = TW(t, _fPill) + Theme.Px(16);
+                    var pr = fromRight ? new Rectangle(px - pw, py, pw, ph) : new Rectangle(px, py, pw, ph);
+                    if (paint) { Fill(g, pr, ph / 2, Color.FromArgb(40, c)); TextRenderer.DrawText(g, t, _fPill, pr, c, C1); }
+                    px = fromRight ? pr.Left - Theme.Px(6) : pr.Right + Theme.Px(6);
+                }
+            }
+
+            int y = top;
+            string title = Cell(r, TitleCol);
+            int titleW = pillsInline ? right - x - pillsW : right - x;
+            int tH = Math.Max(Theme.Px(20), TH(title, _fTitle, titleW));
+            if (paint) TextRenderer.DrawText(g, title, _fTitle, new Rectangle(x, y, titleW, tH), Col(r, TitleCol) ?? Theme.Text, Wrap);
+            if (pills.Count > 0 && pillsInline) DrawPills(right, y, true);
+            y += tH + gap;
+            if (pills.Count > 0 && !pillsInline) { DrawPills(x, y, false); y += ph + gap; }
+
+            // segunda línea: en pastillas o en texto
+            var subs = new List<(string t, Color c)>();
+            foreach (int c in SubCols)
+            {
+                string v = Cell(r, c); if (v.Length == 0 || v == "—") continue;
+                Color? sc = Col(r, c);
+                if (SubChips) foreach (var part in v.Split(new[] { "  ·  " }, StringSplitOptions.RemoveEmptyEntries)) subs.Add((part.Trim(), sc ?? ChipText));
+                else subs.Add((v, sc ?? Theme.Subtle));
+            }
+            if (subs.Count > 0)
+            {
+                if (SubChips)
+                {
+                    int cx = x, ch = Theme.Px(22), rowY = y + Theme.Px(1);
+                    foreach (var (t, c) in subs)
+                    {
+                        int cw = Math.Min(right - x, TW(t, _fSub) + Theme.Px(18));
+                        if (cx > x && cx + cw > right) { cx = x; rowY += ch + Theme.Px(5); }
+                        var cr = new Rectangle(cx, rowY, cw, ch);
+                        if (paint) { Fill(g, cr, ch / 2, ChipBg); TextRenderer.DrawText(g, t, _fSub, cr, c == Theme.Subtle ? ChipText : c, C1); }
+                        cx = cr.Right + Theme.Px(6);
+                    }
+                    y = rowY + ch + gap + Theme.Px(2);
+                }
+                else
+                {
+                    string sub = string.Join("   ·   ", subs.Select(q => q.t));
+                    Color sc = subs.Count == 1 ? subs[0].c : Theme.Subtle;
+                    int h = TH(sub, _fSub, right - x);
+                    if (paint) TextRenderer.DrawText(g, sub, _fSub, new Rectangle(x, y, right - x, h), sc, Wrap);
+                    y += h + gap;
+                }
+            }
+
+            // tercera: el texto entero
+            string quote = QuoteCol >= 0 ? Cell(r, QuoteCol) : "";
+            if (quote.Length > 0)
+            {
+                string q = QuoteMarks ? "«" + quote + "»" : quote;
+                int h = TH(q, _fQuote, right - x);
+                if (paint) TextRenderer.DrawText(g, q, _fQuote, new Rectangle(x, y, right - x, h), QuoteMarks ? BodyText : Col(r, QuoteCol) ?? BodyText, Wrap);
+                y += h + gap;
+            }
+            bottom = Math.Max(bottom, y - gap);
+
+            // la franja 2D (mercado), debajo de todo
+            if (StripHeight > 0 && Strip != null)
+            {
+                int sh = Theme.Px(StripHeight);
+                var sr = new Rectangle(rc.X + pad, bottom + Theme.Px(10), rc.Width - 2 * pad, sh);
+                if (paint)
+                {
+                    Bitmap img = null; try { img = Strip(r); } catch { }
+                    string note = null; if (img == null) try { note = StripNote?.Invoke(r); } catch { }
+                    if (img != null || !string.IsNullOrEmpty(note)) StripPaint.Draw(g, sr, img, note, _fSub, maxRows: StripRows, left: true);
+                }
+                bottom = sr.Bottom;
+            }
+            return Math.Max(Theme.Px(CardHeight), bottom + pad - rc.Y);
+        }
+
+        static GraphicsPath RoundPath(Rectangle r, int rad)
+        {
+            var p = new GraphicsPath(); int d = rad * 2;
+            p.AddArc(r.X, r.Y, d, d, 180, 90); p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); p.AddArc(r.X, r.Bottom - d, d, d, 90, 90); p.CloseFigure();
+            return p;
         }
     }
 }

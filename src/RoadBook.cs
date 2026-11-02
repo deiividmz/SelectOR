@@ -946,6 +946,9 @@ namespace SelectOR
         // Desvíos por los que pasa el itinerario: dónde (distancia desde el origen), cuál (como lo conoce Open Rails)
         // y en qué posición tiene que estar. Para el piloto de desvíos de las salas de SelectOR.
         public readonly List<(double d, int tx, int tz, int id, int sel)> Switches = new();
+        // (1.2.84) todas las agujas del itinerario por su nodo del .tdb (también las de travesías y tijeras, que comparten
+        // objeto): distancia a la que se cruzan y posición necesaria. Conducción libre las pone (MainMenuForm.AgujasItinerario.cs).
+        public readonly List<(double d, int node, int sel)> SwitchPlan = new();
         public readonly List<int> SwitchNodes = new();     // (el nodo del .tdb de cada uno, para el diagnóstico)
         public int SwitchesHidden;                          // desvíos del itinerario que no se pueden pedir (comparten número)
         public int ReachedPoints;                       // puntos ya alcanzados (no se vuelven a planificar)
@@ -963,7 +966,7 @@ namespace SelectOR
 
         void ClearPlan()
         {
-            Stops.Clear(); Limits.Clear(); LimitsAhead.Clear(); Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0;
+            Stops.Clear(); Limits.Clear(); LimitsAhead.Clear(); Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0; SwitchPlan.Clear();
             PathLat = PathLon = Array.Empty<double>(); _px = _py = Array.Empty<float>(); _pc = Array.Empty<double>();
             TotalLen = Progress = 0; OffRoute = false; Reversal = false; PointDist = Array.Empty<double>();
             OffSinceUtc = DateTime.MaxValue; Version++;
@@ -1338,7 +1341,7 @@ namespace SelectOR
         // Cada cambio de tramo en un nodo que es un desvío: su posición necesaria, a la distancia a la que se cruza.
         void FindSwitches(List<(int e, double from, double to)> parts)
         {
-            Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0;
+            Switches.Clear(); SwitchNodes.Clear(); SwitchesHidden = 0; SwitchPlan.Clear();
             double acc = 0; int prevE = -1, prevEnd = -1;
             foreach (var (e, from, to) in parts)
             {
@@ -1350,6 +1353,7 @@ namespace SelectOR
                 {
                     if (Graph.SwitchHidden(start)) SwitchesHidden++;   // pedirlo cambiaría otro desvío del mismo objeto
                     else { Switches.Add((acc, tx, tz, id, sel)); SwitchNodes.Add(start); }
+                    SwitchPlan.Add((acc, start, sel));
                 }
                 acc += len;
                 if (len > 0.5 || e != prevE) { prevE = e; prevEnd = to >= E.Len - 0.5 ? E.B : to <= 0.5 ? E.A : -1; }

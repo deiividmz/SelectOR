@@ -1,4 +1,4 @@
-// (1.2.77) Teleindicadores hechos por el usuario, en su PC: a partir de un destino del tren (el «modelo»: su carpeta
+﻿// (1.2.77) Teleindicadores hechos por el usuario, en su PC: a partir de un destino del tren (el «modelo»: su carpeta
 // Destinos\X\, con el .ace del cartel), un destino nuevo con el texto que se escriba, en la misma carpeta Destinos del tren
 // (Destinos\Nuevo\), así sale en el selector de Conducción libre y Horarios como los del autor (Teleindicadores.cs).
 //  · El cartel del modelo es destinos.ace o el primer .ace de su carpeta; el resto de sus archivos (placas…) se copian.
@@ -298,34 +298,68 @@ namespace SelectOR
                 for (int r = 0; r < nRows; r++) for (int c = 0; c < gridCols; c++) if (mask[r, c]) Dot(c0 + c * pitchX, r);
                 return;
             }
-            // 5×7, por celdas; dos líneas solo si hay 16 filas o más
+            // 5×7, por celdas; dos líneas si hay 16 filas o más (y, si la frase no cabe en una, se parte sola en dos)
+            string one = string.Join("  ", text);
+            if (nRows >= 16 && text.Count == 1 && !GlyphsFit(one, span, pitchX, charGap) && Split2(one) is (string a, string b)) text = new List<string> { a, b };
             if (nRows >= 16 && text.Count > 1)
             {
                 int half = nRows / 2;
                 Glyphs(text[0], Math.Max(0, (half - 7) / 2), c0, span, pitchX, charGap, Dot);
-                Glyphs(text[1], half + Math.Max(0, (nRows - half - 7) / 2), c0, span, pitchX, charGap, Dot);
+                Glyphs(string.Join("  ", text.Skip(1)), half + Math.Max(0, (nRows - half - 7) / 2), c0, span, pitchX, charGap, Dot);
             }
-            else Glyphs(string.Join("  ", text), Math.Max(0, (nRows - 7) / 2), c0, span, pitchX, charGap, Dot);
+            else Glyphs(one, Math.Max(0, (nRows - 7) / 2), c0, span, pitchX, charGap, Dot);
         }
 
         // una línea con la fuente 5×7, centrada; cada letra, 5 columnas a «pitch» y la siguiente a «gap» de su última
-        // columna. Si no cabe, primero con las letras más juntas y luego cortada (LastFits = false)
+        // columna. (1.2.84) Si no cabe, se ajusta sola: las letras más juntas; luego estrechas, de 4 columnas (la del centro
+        // se junta con la de su izquierda), primero separadas y luego más juntas (las de 3 ya no se leían). Solo si ni así
+        // cabe, se corta (LastFits = false).
+        static readonly (int cols, double gapK)[] GlyphSteps = { (5, -1), (5, 1.4), (4, 2.0), (4, 1.4) };
+        static int GlyphCols(byte[] g, int cols, int r) => cols == 5 ? g[r]
+            : ((g[r] >> 4 & 1) << 3) | (((g[r] >> 3) | (g[r] >> 2)) & 1) << 2 | (g[r] >> 1 & 1) << 1 | (g[r] & 1);
+        static double GlyphsWidth(List<byte[]> glyphs, int cols, double pitch, double gp)
+        {
+            double w = 0;
+            for (int i = 0; i < glyphs.Count; i++) w += glyphs[i].Length == 0 ? ((cols - 1) * pitch + gp) * 0.6 : (cols - 1) * pitch + (i < glyphs.Count - 1 ? gp : 0);
+            return w;
+        }
+        static List<byte[]> GlyphsOf(string s) => Normalize(s).Select(ch => Font5x7.TryGetValue(ch, out var g) ? g : Font5x7['?']).ToList();
+        static (int cols, double gap) GlyphFit(List<byte[]> glyphs, double span, double pitch, double gap, out bool fits)
+        {
+            foreach (var (cols, k) in GlyphSteps)
+            {
+                double gp = k < 0 ? gap : Math.Max(pitch * 1.0, Math.Min(gap, pitch * k));
+                if (GlyphsWidth(glyphs, cols, pitch, gp) <= span + 0.5) { fits = true; return (cols, gp); }
+            }
+            // (no cabe de ninguna manera: se corta, con la estrecha y junta, que mete más letras)
+            fits = false; return (4, Math.Max(pitch * 1.0, Math.Min(gap, pitch * 1.4)));
+        }
+        static bool GlyphsFit(string s, double span, double pitch, double gap) { GlyphFit(GlyphsOf(s), span, pitch, gap, out bool f); return f; }
+        // la frase en dos, por el espacio que deja las dos partes más parecidas (null: no tiene espacios)
+        static (string, string)? Split2(string s)
+        {
+            s = s.Trim(); int best = -1;
+            for (int i = 1; i < s.Length - 1; i++) if (s[i] == ' ' && (best < 0 || Math.Abs(s.Length - 2 * i) < Math.Abs(s.Length - 2 * best))) best = i;
+            return best < 0 ? null : (s.Substring(0, best).Trim(), s.Substring(best + 1).Trim());
+        }
         static void Glyphs(string s, int row0, double c0, double span, double pitch, double gap, Action<double, int> dot)
         {
-            var glyphs = Normalize(s).Select(ch => Font5x7.TryGetValue(ch, out var g) ? g : Font5x7['?']).ToList();
-            double Width(double gp) { double w = 0; for (int i = 0; i < glyphs.Count; i++) w += glyphs[i].Length == 0 ? (4 * pitch + gp) * 0.6 : 4 * pitch + (i < glyphs.Count - 1 ? gp : 0); return w; }
-            if (Width(gap) > span) gap = Math.Max(pitch * 1.0, Math.Min(gap, pitch * 1.4));
-            double width = Width(gap);
-            if (width > span + 0.5) LastFits = false;
+            var glyphs = GlyphsOf(s);
+            var (cols, gp) = GlyphFit(glyphs, span, pitch, gap, out bool fits);
+            if (!fits) LastFits = false;
+            double width = GlyphsWidth(glyphs, cols, pitch, gp);
             double x = c0 + Math.Max(0, (span - width) / 2);
             foreach (var g in glyphs)
             {
-                if (g.Length == 0) { x += (4 * pitch + gap) * 0.6; continue; }
-                if (x + 4 * pitch > c0 + span + 0.5) break;   // (no cabe: se corta)
+                if (g.Length == 0) { x += ((cols - 1) * pitch + gp) * 0.6; continue; }
+                if (x + (cols - 1) * pitch > c0 + span + 0.5) break;   // (no cabe: se corta)
                 for (int r = 0; r < 7; r++)
-                    for (int k = 0; k < 5; k++)
-                        if ((g[r] >> (4 - k) & 1) == 1) dot(x + k * pitch, row0 + r);
-                x += 4 * pitch + gap;
+                {
+                    int bits = GlyphCols(g, cols, r);
+                    for (int k = 0; k < cols; k++)
+                        if ((bits >> (cols - 1 - k) & 1) == 1) dot(x + k * pitch, row0 + r);
+                }
+                x += (cols - 1) * pitch + gp;
             }
         }
         static string Normalize(string s)
@@ -338,17 +372,28 @@ namespace SelectOR
         // matrices grandes: una letra normal a la resolución de la matriz
         static void MaskFromFont(bool[,] mask, int rows, int cols, List<string> text)
         {
-            int n = Math.Min(text.Count, rows >= 24 ? 2 : 1);
             using var b = new Bitmap(cols, rows);
             using var g = Graphics.FromImage(b);
             g.Clear(Color.Black); g.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+            // (1.2.84) si en una línea habría que estrecharla a menos de la mitad y caben dos, la frase se parte sola en dos
+            if (rows >= 20 && text.Count == 1)
+                using (var f0 = new Font("Arial", rows * 0.85f, FontStyle.Bold, GraphicsUnit.Pixel))
+                    if (cols / g.MeasureString(text[0], f0).Width < 0.5f && Split2(text[0]) is (string a, string bb)) text = new List<string> { a, bb };
+            int n = Math.Min(text.Count, rows >= 20 ? 2 : 1);
             int lineH = rows / n;
             for (int i = 0; i < n; i++)
             {
-                string t = n == 1 ? string.Join("  ", text) : text[i];
+                string t = n == 1 ? string.Join("  ", text) : i == n - 1 ? string.Join("  ", text.Skip(i)) : text[i];
                 float size = lineH * 0.85f;
-                using var f = new Font("Arial", size, FontStyle.Bold, GraphicsUnit.Pixel);
+                var f = new Font("Arial", size, FontStyle.Bold, GraphicsUnit.Pixel);
                 var sz = g.MeasureString(t, f);
+                // (1.2.84) antes que estrecharla mucho, más baja (hasta el 60 % del alto)
+                if (sz.Width * 0.75f > cols)
+                {
+                    float s2 = Math.Max(size * 0.6f, size * cols / (sz.Width * 0.75f));
+                    f.Dispose(); f = new Font("Arial", s2, FontStyle.Bold, GraphicsUnit.Pixel); sz = g.MeasureString(t, f);
+                }
+                using var fd = f;
                 float k = sz.Width > cols ? cols / sz.Width : 1;
                 var st = g.Save();
                 g.TranslateTransform((cols - sz.Width * k) / 2, i * lineH + (lineH - sz.Height) / 2);
@@ -418,12 +463,22 @@ namespace SelectOR
                     using var probe = new Font(family, 100, FontStyle.Bold, GraphicsUnit.Pixel);
                     float cap = CapHeight(g, probe);
                     float size = 100 * r.Height / Math.Max(1f, cap);
-                    using var f = new Font(family, size, FontStyle.Bold, GraphicsUnit.Pixel);
+                    var f = new Font(family, size, FontStyle.Bold, GraphicsUnit.Pixel);
                     var sz = g.MeasureString(t, f, int.MaxValue, StringFormat.GenericTypographic);
+                    // (1.2.84) si habría que estrecharla a menos del 70 %, más baja (hasta el 60 % del hueco), centrada en él
+                    float dy = 0;
+                    if (sz.Width * 0.7f > maxW)
+                    {
+                        float s2 = Math.Max(size * 0.6f, size * maxW / (sz.Width * 0.7f));
+                        dy = r.Height * (1 - s2 / size) / 2;
+                        f.Dispose(); f = new Font(family, s2, FontStyle.Bold, GraphicsUnit.Pixel);
+                        sz = g.MeasureString(t, f, int.MaxValue, StringFormat.GenericTypographic);
+                    }
+                    using var fd = f;
                     float k = sz.Width > maxW ? maxW / sz.Width : 1;
                     float capTop = CapTop(g, f);
                     var st = g.Save();
-                    g.TranslateTransform(cx - sz.Width * k / 2, r.Top - capTop);
+                    g.TranslateTransform(cx - sz.Width * k / 2, r.Top + dy - capTop);
                     g.ScaleTransform(k, 1);
                     g.DrawString(t, f, brush, 0, 0, StringFormat.GenericTypographic);
                     g.Restore(st);

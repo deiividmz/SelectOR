@@ -42,6 +42,8 @@ namespace SelectOR
         public string Presence { get; private set; }
         public bool IsDispatcher { get; private set; }
         public DateTime PresenceAt { get; private set; }
+        // (1.2.84) jugadores en la sala, según el servidor (−1: un servidor de antes, que no lo dice)
+        public int RoomPlayers { get; private set; } = -1;
         DateTime _whoAt = DateTime.MinValue;
         // La sala pasa a protegerla yo (se fue quien la abrió): token y contraseña (null = sin contraseña).
         public event Action<string, string> GateOwner;
@@ -283,7 +285,12 @@ namespace SelectOR
             if (t[0] == "SW" && t.Length >= 5 && int.TryParse(t[1], out int sx) && int.TryParse(t[2], out int sz) && int.TryParse(t[3], out int sid) && int.TryParse(t[4], out int sp))
             { try { SwitchSet?.Invoke(sx, sz, sid, sp); } catch { } return; }
             if (t[0] == "STATES" && t.Length >= 2) { var st = DecodeStates(t[1]); if (st != null) { States = st; StatesAt = DateTime.UtcNow; } return; }
-            if (t[0] == "YOU" && t.Length >= 3) { Presence = t[1]; IsDispatcher = t[2] == "d"; PresenceAt = DateTime.UtcNow; return; }
+            if (t[0] == "YOU" && t.Length >= 3)
+            {
+                Presence = t[1]; IsDispatcher = t[2] == "d"; PresenceAt = DateTime.UtcNow;
+                RoomPlayers = t.Length >= 4 && int.TryParse(t[3], out int np) && np >= 0 ? np : -1;
+                return;
+            }
             if (t[0] == "GATE" && t.Length >= 4 && t[1] == "OWNER") { try { GateOwner?.Invoke(t[2], t[3] == "-" ? null : t[3]); } catch { } return; }
             if (t.Length < 4) return;
             string key = t[1] + " " + t[2] + " " + t[3];

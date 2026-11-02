@@ -303,6 +303,7 @@ namespace SelectOR
                 _road.ComputeEtas(_roadLimit, _roadVmax, Math.Max(0, _prefs?.RoadDwellS ?? 30), RoadGameNow());
                 PilotTick();   // salas de SelectOR: si seguimos dentro (HUD) y la contraseña
                 LocalMapTick();   // conducción libre: mapa grande como Ctrl+9 (MainMenuForm.MapaLocal.cs)
+                ItinSwitchTick();   // (1.2.84) conducción libre: las agujas del itinerario (MainMenuForm.AgujasItinerario.cs)
                 if (RoadHudAlive && _roadHud.Visible) _roadHud.Invalidate();
             }
             catch { }

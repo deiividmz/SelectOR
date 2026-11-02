@@ -1,4 +1,4 @@
-// Listas en tarjetas del menú (rutas, actividades, trenes, salidas de un horario). CardListBase imita lo
+﻿// Listas en tarjetas del menú (rutas, actividades, trenes, salidas de un horario). CardListBase imita lo
 // que el resto del programa usaba del ListBox (Items, SelectedItem, SelectedIndex, BeginUpdate/EndUpdate,
 // SelectedIndexChanged), así que cambiar una lista por tarjetas no toca la lógica. Todo se dibuja a mano,
 // solo lo visible, en doble búfer.
@@ -34,8 +34,8 @@ namespace SelectOR
         }
         public int TopIndex
         {
-            get { int row = Math.Max(0, ScrollY / Math.Max(1, CardH + Gap)); return Math.Min(Items.Count == 0 ? 0 : Items.Count - 1, row * Cols); }
-            set { int row = Math.Max(0, value) / Math.Max(1, Cols); AutoScrollPosition = new Point(0, row * (CardH + Gap)); Invalidate(); }
+            get { int row = RowAtY(ScrollY); return Math.Min(Items.Count == 0 ? 0 : Items.Count - 1, row * Cols); }
+            set { int row = Math.Max(0, value) / Math.Max(1, Cols); AutoScrollPosition = new Point(0, RowTop(row)); Invalidate(); }
         }
         // Selección múltiple (opcional): Ctrl+clic marca o desmarca, Mayús+clic marca un tramo. Sin marcas,
         // la «selección» es la de siempre (SelectedItem).
@@ -96,10 +96,36 @@ namespace SelectOR
         int RowH => CardH + Gap;
         protected int ScrollY => -AutoScrollPosition.Y;
 
+        // (1.2.84) Altura de cada tarjeta según lo que lleva (VariableHeights): la de cada fila de la rejilla es la de su
+        // tarjeta más alta. Sin eso, todas CardH, como siempre.
+        protected virtual bool VariableHeights => false;
+        protected virtual int ItemHeight(int i, int cardW) => CardH;
+        int[] _rowTop = Array.Empty<int>(), _rowH = Array.Empty<int>();   // (con VariableHeights) arriba y alto de cada fila
+        int RowTop(int r) => !VariableHeights ? r * RowH : r < 0 ? 0 : r < _rowTop.Length ? _rowTop[r] : (_rowTop.Length == 0 ? 0 : _rowTop[^1] + _rowH[^1] + Gap);
+        int RowHeight(int r) => !VariableHeights ? CardH : r >= 0 && r < _rowH.Length ? _rowH[r] : CardH;
+        int RowAtY(int y)
+        {
+            if (!VariableHeights) return Math.Max(0, y / Math.Max(1, RowH));
+            int r = 0; while (r + 1 < _rowTop.Length && _rowTop[r + 1] <= y) r++;
+            return r;
+        }
+
         public void Relayout()
         {
             int rows = (Items.Count + Cols - 1) / Cols;
-            _total = rows * RowH + Theme.Px(4) + TopOffset;
+            if (VariableHeights)
+            {
+                _rowTop = new int[rows]; _rowH = new int[rows];
+                int acc = 0, w = CardW;
+                for (int r = 0; r < rows; r++)
+                {
+                    int h = 0;
+                    for (int i = r * Cols; i < Math.Min(Items.Count, (r + 1) * Cols); i++) h = Math.Max(h, ItemHeight(i, w));
+                    _rowTop[r] = acc; _rowH[r] = Math.Max(Theme.Px(30), h); acc += _rowH[r] + Gap;
+                }
+                _total = acc + Theme.Px(4) + TopOffset;
+            }
+            else _total = rows * RowH + Theme.Px(4) + TopOffset;
             AutoScrollMinSize = new Size(0, Items.Count == 0 ? 0 : _total);
             Invalidate();
         }
@@ -115,16 +141,16 @@ namespace SelectOR
         protected Rectangle CardRect(int i)
         {
             int c = i % Cols, r = i / Cols;
-            return new Rectangle(Theme.Px(2) + c * (CardW + Gap), Theme.Px(2) + TopOffset + r * RowH - ScrollY, CardW, CardH);
+            return new Rectangle(Theme.Px(2) + c * (CardW + Gap), Theme.Px(2) + TopOffset + RowTop(r) - ScrollY, CardW, RowHeight(r));
         }
 
         void EnsureVisible(int i)
         {
             if (i < 0 || !IsHandleCreated) return;
-            int y = (i / Cols) * RowH, top = ScrollY;
-            if (TopOffset > 0) { if (y < top) AutoScrollPosition = new Point(0, y); else if (y + RowH + TopOffset > top + ClientSize.Height) AutoScrollPosition = new Point(0, y + RowH + TopOffset - ClientSize.Height + Theme.Px(4)); return; }
+            int y = RowTop(i / Cols), rh = RowHeight(i / Cols) + Gap, top = ScrollY;
+            if (TopOffset > 0) { if (y < top) AutoScrollPosition = new Point(0, y); else if (y + rh + TopOffset > top + ClientSize.Height) AutoScrollPosition = new Point(0, y + rh + TopOffset - ClientSize.Height + Theme.Px(4)); return; }
             if (y < top) AutoScrollPosition = new Point(0, y);
-            else if (y + RowH > top + ClientSize.Height) AutoScrollPosition = new Point(0, y + RowH - ClientSize.Height + Theme.Px(4));
+            else if (y + rh > top + ClientSize.Height) AutoScrollPosition = new Point(0, y + rh - ClientSize.Height + Theme.Px(4));
         }
 
         protected abstract void PaintCard(Graphics g, int i, Rectangle rc, bool selected, bool hover);
@@ -140,14 +166,14 @@ namespace SelectOR
                     TextRenderer.DrawText(g, EmptyText, FMsg, new Rectangle(Theme.Px(10), Theme.Px(28), ClientSize.Width - Theme.Px(20), Theme.Px(60)), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
                 return;
             }
-            int first = Math.Max(0, (ScrollY / RowH) * Cols), last = Math.Min(Items.Count - 1, ((ScrollY + ClientSize.Height) / RowH + 2) * Cols - 1);
+            int first = Math.Max(0, RowAtY(ScrollY) * Cols), last = Math.Min(Items.Count - 1, (RowAtY(ScrollY + ClientSize.Height) + 2) * Cols - 1);
             for (int i = first; i <= last; i++) PaintCard(g, i, CardRect(i), _marked.Count > 0 ? _marked.Contains(Items[i]) : i == _sel, i == Hover);
             AfterPaint(g, first, last);
         }
 
         protected int IndexAt(Point p)
         {
-            for (int i = Math.Max(0, (ScrollY / Math.Max(1, RowH)) * Cols); i < Items.Count; i++)
+            for (int i = Math.Max(0, RowAtY(ScrollY) * Cols); i < Items.Count; i++)
             {
                 var r = CardRect(i);
                 if (r.Y > ClientSize.Height) break;

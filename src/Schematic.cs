@@ -62,6 +62,8 @@ namespace SelectOR
         public readonly List<int> Missing = new();     // (auditoría) tramos dentro de la zona que no se dibujan (los de dentro de una travesía)
         public readonly List<PointF> Buffers = new();
         public readonly List<Signal> Signals = new();
+        public sealed class LevelX { public PasosNivel.Cr Cr; public PointF At; }   // (1.2.84) un paso a nivel, en su vía del esquema
+        public readonly List<LevelX> LevelXs = new();
         public readonly List<Platform> Platforms = new();
         public readonly List<Exit> Exits = new();
         public RectangleF Bounds;
@@ -1814,6 +1816,14 @@ namespace SelectOR
                     // todas (el jefe de circulación las necesita todas); si coinciden con otra, una por encima de la otra
                     int stack = Signals.Count(o => o.Face == face && Math.Abs(o.At.X - p.X) < 8 && Math.Abs(o.At.Y - p.Y) < 2);
                     Signals.Add(new Signal { Sig = sg, At = p, Face = face, RowIdx = tr.RowIdx, Stack = stack });
+                }
+            // (1.2.84) pasos a nivel: los de la ruta en una vía del esquema (en lo dibujado de su tramo)
+            if (geo?.LevelCrossings != null)
+                foreach (var cr in geo.LevelCrossings)
+                {
+                    if (cr.Edge < 0 || !_byEdge.ContainsKey(cr.Edge) || !_offRange.TryGetValue(cr.Edge, out var orr2)) continue;
+                    if (cr.Off < orr2.a - 1 || cr.Off > orr2.b + 1 || !MapOff(cr.Edge, Math.Max(orr2.a, Math.Min(orr2.b, cr.Off)), out var p)) continue;
+                    LevelXs.Add(new LevelX { Cr = cr, At = p });
                 }
             // salidas: la estación siguiente por esa vía
             foreach (int e in T.Keys)

@@ -97,6 +97,8 @@ namespace SelectOR
         public int BigMapH { get; set; } = -1;
         public bool BigMapKey { get; set; } = true;   // leyenda del mapa grande desplegada (vía por límites, PK…)
         public bool RoadHudPcClock { get; set; }     // horas de la hoja de ruta: false = del simulador, true = del PC
+        public bool GenteAndenes { get; set; } = true;   // (1.2.84, activada de serie; nombre nuevo para no heredar el «false» de las pruebas) gente en los andenes en el 3D (MapAgent\Viajeros3D.cs; solo rutas con las figuras de la CGL)
+        public bool ItinAutoSwitches { get; set; } = true;   // (1.2.84) Conducción libre: poner las agujas según el itinerario (MainMenuForm.AgujasItinerario.cs)
         public int RoadDwellS { get; set; } = 30;    // segundos de parada en cada estación (para la hora estimada)
         // Empresa favorita: si perteneces a varias, es la que sale elegida al abrir Empresas.
         public string FavoriteCompany { get; set; }

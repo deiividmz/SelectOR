@@ -231,6 +231,11 @@ namespace SelectOR
             ["Espera porque {0}"] = "Waiting because {0}",
             ["Señal {0} en parada para «{1}»: {2}"] = "Signal {0} at stop for «{1}»: {2}",
             ["Puesto de mando de la sala"] = "Room control centre", ["Hora de la sala"] = "Room time",
+            ["PN"] = "LC",   // (1.2.84) paso a nivel, en el puesto de mando
+            ["Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)"] = "People on the platforms getting on and off the train (test; routes with the CGL figures)",
+            ["Poner las agujas según el itinerario al conducir"] = "Set the switches along the route while driving",
+            ["Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta."] = "Only in Free driving: as you approach, each switch on your route is set by itself the way your route goes. If you change one by hand, it is respected.",
+            ["Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre)."] = "The switches on your route set themselves as you approach (Free driving).",
             ["Con los demás jugadores"] = "With the other players", ["hora de España"] = "Spanish time", ["hora de España {0} h"] = "Spanish time {0} h",
             ["La de España"] = "Spain's", ["{0} h sobre la de España"] = "{0} h on Spain's time",
             ["Las nubes, la lluvia o la nieve, la niebla y la hora cambian para todos los que están dentro (en unos 10 s; la hora, con SelectOR 1.2.74). La estación la ve cada uno al entrar en la sala: quien ya está dentro, la próxima vez que entre."]

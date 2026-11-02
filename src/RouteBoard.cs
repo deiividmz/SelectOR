@@ -31,6 +31,8 @@ namespace SelectOR
         public readonly List<Plat> Platforms = new();
         public readonly List<(string name, PointF at, RectangleF box)> Stations = new();   // box: lo que ocupan sus andenes
         public readonly List<PointF> Buffers = new();
+        public sealed class Pn { public PasosNivel.Cr Cr; public PointF At; public PointF Dir; }   // (1.2.84) un paso a nivel en su vía (Dir: a lo largo de la vía)
+        public readonly List<Pn> LevelXs = new();
         public RectangleF Bounds;
         public Dictionary<int, List<(double off, int dir, int obj)>> Sbe;
 
@@ -313,6 +315,17 @@ namespace SelectOR
                 if (wl < 1e-6) { wdx = dx; wdy = dy; } else { wdx /= wl; wdy /= wl; }
                 b.Signals.Add(new Sg { S = sg, At = wp, Dir = new PointF((float)wdx, (float)wdy), SideV = new PointF((float)(-wdy * side), (float)(wdx * side)) });
             }
+            // (1.2.84) pasos a nivel: en su vía, con la dirección de la vía
+            if (geo.LevelCrossings != null)
+                foreach (var cr in geo.LevelCrossings)
+                {
+                    if (cr.Edge < 0 || b._wx[cr.Edge] == null) continue;
+                    var E = g.Edges[cr.Edge];
+                    var w1 = b.At(cr.Edge, Math.Max(0, cr.Off - 3)); var w2 = b.At(cr.Edge, Math.Min(E.Len, cr.Off + 3));
+                    double dx = w2.X - w1.X, dy = w2.Y - w1.Y, dl = Math.Sqrt(dx * dx + dy * dy);
+                    if (dl < 1e-6) { dx = 1; dy = 0; } else { dx /= dl; dy /= dl; }
+                    b.LevelXs.Add(new Pn { Cr = cr, At = b.At(cr.Edge, cr.Off), Dir = new PointF((float)dx, (float)dy) });
+                }
             // andenes: entre sus marcas de principio y fin en cada tramo; el número de la vía del nombre del andén
             for (int e = 0; e < g.Edges.Length; e++)
             {
@@ -502,9 +515,44 @@ namespace SelectOR
                 using (var bp = new Pen(SchematicDraw.TrackCol, lw))
                     foreach (var q0 in b.Buffers) { var q = P(q0); if (view.Contains(q)) g.DrawEllipse(bp, q.X - 2, q.Y - 2, 4, 4); }
 
+            // (1.2.84) pasos a nivel (de cerca): la carretera cruzando la vía, como en el esquema (un rectángulo atravesado, uno por
+            // cruce): rojo con las barreras bajadas, oscuro abierto, solo el borde si no se sabe; «PN» al lado, más de cerca
+            var pnBoxes = new List<RectangleF>();
+            if (near && b.LevelXs.Count > 0)
+            {
+                float hw = Math.Max(4f, Math.Min(8f, 2.4f * zoom)), hh = lw / 2 + Math.Max(6.5f, Math.Min(13f, 4f * zoom));
+                foreach (var grp in b.LevelXs.GroupBy(x => x.Cr.Cluster))
+                {
+                    var pts = grp.Select(x => P(x.At)).ToList();
+                    if (!pts.Any(view.Contains)) continue;
+                    var d = grp.First().Dir; var n = new PointF(-d.Y, d.X);
+                    float cx = pts.Average(q => q.X), cy = pts.Average(q => q.Y);
+                    // a lo ancho: lo que ocupan sus vías, más un poco por cada lado
+                    float a0 = pts.Min(q => (q.X - cx) * n.X + (q.Y - cy) * n.Y) - hh, a1 = pts.Max(q => (q.X - cx) * n.X + (q.Y - cy) * n.Y) + hh;
+                    PointF Pt(float along, float across) => new PointF(cx + d.X * along + n.X * across, cy + d.Y * along + n.Y * across);
+                    var poly = new[] { Pt(-hw, a0), Pt(hw, a0), Pt(hw, a1), Pt(-hw, a1) };
+                    bool? closed = live?.LevelClosed == null ? null : grp.Any(x => live.LevelClosed.Contains(x.Cr.Item));
+                    using (var fb = new SolidBrush(closed == true ? Color.FromArgb(214, 58, 46) : SchematicDraw.Bg)) g.FillPolygon(fb, poly);
+                    using (var op = new Pen(closed == true ? Color.FromArgb(255, 205, 200) : Color.FromArgb(190, 198, 206), 1.3f) { DashStyle = closed == null ? DashStyle.Dash : DashStyle.Solid })
+                        g.DrawPolygon(op, poly);
+                    using (var tp = new Pen(closed == true ? Color.FromArgb(255, 225, 220) : SchematicDraw.TrackCol, Math.Max(1f, lw * 0.6f)))
+                        foreach (var q in pts) g.DrawLine(tp, q.X - d.X * (hw - 1), q.Y - d.Y * (hw - 1), q.X + d.X * (hw - 1), q.Y + d.Y * (hw - 1));
+                    var box = RectangleF.FromLTRB(poly.Min(q => q.X), poly.Min(q => q.Y), poly.Max(q => q.X), poly.Max(q => q.Y));
+                    if (close)
+                    {
+                        using var pf = Theme.Font(Math.Max(6.4f, Math.Min(9f, 2.6f * zoom)), FontStyle.Bold);
+                        var sz = g.MeasureString(I18n.T("PN"), pf);
+                        var tip = Pt(0, a1 + 2); var tr = new RectangleF(tip.X - sz.Width / 2 + n.X * sz.Width / 2, tip.Y - sz.Height / 2 + n.Y * sz.Height / 2, sz.Width, sz.Height);
+                        using (var tb = new SolidBrush(closed == true ? Color.FromArgb(255, 120, 105) : Color.FromArgb(170, 178, 186))) g.DrawString(I18n.T("PN"), pf, tb, tr.X, tr.Y);
+                        box = RectangleF.Union(box, tr);
+                    }
+                    pnBoxes.Add(box);
+                }
+            }
+
             // agujas: el lado que no está puesto, cortado junto a la aguja; su número de la estación (azul si está enclavada)
             var swBoxes = new List<(RouteBoard.Sw, RectangleF)>(); _swBoxes.Set(b, swBoxes);
-            var numTaken = new List<RectangleF>();   // (1.2.81) los números de agujas ya puestos
+            var numTaken = new List<RectangleF>(pnBoxes);   // (1.2.81) los números de agujas ya puestos (1.2.84: y los pasos a nivel)
             if (near)
             {
                 using var nf = Theme.Font(Math.Max(6.4f, Math.Min(9f, 2.6f * zoom)));

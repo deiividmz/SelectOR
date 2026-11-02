@@ -34,6 +34,12 @@ namespace SelectOR
             _chkGfx.CheckedChanged += (s, e) => { if (_gfxLoading) return; _prefs.GfxEnabled = _chkGfx.Checked; Save(); UpdateGfxState(); };
             var ver = new Label { Text = "ReShade " + ReShadeFiles.Version + " · " + I18n.T("incluido en SelectOR"), AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8.5f), Anchor = AnchorStyles.Top | AnchorStyles.Right };
             top.Controls.Add(_chkGfx); top.Controls.Add(ver);
+            // (prueba) gente en los andenes (MapAgent\Viajeros3D.cs): vale desde la próxima vez que se conduzca
+            var people = new Panel { Dock = DockStyle.Top, Height = Theme.Px(34), BackColor = Theme.Bg };
+            var chkPeople = new ThemeCheck { Text = I18n.T("Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)"), Checked = _prefs.GenteAndenes, AutoSize = false, Location = new Point(0, Theme.Px(4)), Font = Theme.Font(9.5f) };
+            chkPeople.Size = new Size(TextRenderer.MeasureText(chkPeople.Text, chkPeople.Font).Width + Theme.Px(40), Theme.Px(28));
+            chkPeople.CheckedChanged += (s, e) => { _prefs.GenteAndenes = chkPeople.Checked; Save(); };
+            people.Controls.Add(chkPeople);
             top.Layout += (s, e) => ver.Location = new Point(top.ClientSize.Width - ver.PreferredWidth, Theme.Px(12));
 
             var info = new Label
@@ -93,7 +99,7 @@ namespace SelectOR
             cols.Controls.Add(left, 0, 0); cols.Controls.Add(_preview, 1, 0);
 
 
-            page.Controls.Add(cols); page.Controls.Add(presets); page.Controls.Add(_lblGfxWarn); if (cyzy != null) page.Controls.Add(cyzy); page.Controls.Add(info); page.Controls.Add(top);
+            page.Controls.Add(cols); page.Controls.Add(presets); page.Controls.Add(_lblGfxWarn); if (cyzy != null) page.Controls.Add(cyzy); page.Controls.Add(info); page.Controls.Add(people); page.Controls.Add(top);
 
             _previewTimer = new Timer { Interval = 140 };
             _previewTimer.Tick += (s, e) => { _previewTimer.Stop(); RenderPreview(); };

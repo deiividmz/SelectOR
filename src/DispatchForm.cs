@@ -436,9 +436,12 @@ namespace SelectOR
                 if (l.Count > 0 && off >= l[^1].a - 12 && off <= l[^1].b + 12) l[^1] = (Math.Min(l[^1].a, off - 2), Math.Max(l[^1].b, off + 2));
                 else l.Add((off - 2, off + 2));
             }
+            var ends = new List<(double x, double y, double mps, bool loose)>();   // (1.2.84) cola y cabeza de cada tren: pasos a nivel
             foreach (var t in p.Trains)
             {
                 if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
+                bool tLoose = RoomLoose.Is(t.name); double tMps = t.kmh / 3.6;
+                try { var (rx, ry) = geo.Graph.Proj(la, lo); ends.Add((rx, ry, tMps, tLoose)); } catch { }
                 var body = new List<PointF>();
                 void At(double a, double o)
                 {
@@ -452,6 +455,7 @@ namespace SelectOR
                     if (p.TrainTrack.TryGetValue(t.name, out var k0))
                     {
                         var pcs = geo.Graph.PathPieces(k0.node, la, lo, k0.dir, k0.mu, 0, Math.Max(k0.len, 5), PosNode);
+                        if (pcs != null && pcs.Any()) { var lp = pcs.Last(); var (hx, hy) = geo.Graph.PointAt(lp.Item1, lp.Item3); ends.Add((hx, hy, tMps, tLoose)); }
                         if (pcs != null)
                             foreach (var (e, f, t2) in pcs)
                             {
@@ -690,9 +694,12 @@ namespace SelectOR
                 if (l.Count > 0 && off >= l[^1].a - 12 && off <= l[^1].b + 12) l[^1] = (Math.Min(l[^1].a, off - 2), Math.Max(l[^1].b, off + 2));
                 else l.Add((off - 2, off + 2));
             }
+            var ends = new List<(double x, double y, double mps, bool loose)>();   // (1.2.84) cola y cabeza de cada tren: pasos a nivel
             foreach (var t in p.Trains)
             {
                 if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
+                bool tLoose = RoomLoose.Is(t.name); double tMps = t.kmh / 3.6;
+                try { var (rx, ry) = geo.Graph.Proj(la, lo); ends.Add((rx, ry, tMps, tLoose)); } catch { }
                 var body = new List<PointF>();
                 void At(double a, double o)
                 {
@@ -705,6 +712,7 @@ namespace SelectOR
                     if (p.TrainTrack.TryGetValue(t.name, out var k0))
                     {
                         var pcs = geo.Graph.PathPieces(k0.node, la, lo, k0.dir, k0.mu, 0, Math.Max(k0.len, 5), PosNode);
+                        if (pcs != null && pcs.Any()) { var lp = pcs.Last(); var (hx, hy) = geo.Graph.PointAt(lp.Item1, lp.Item3); ends.Add((hx, hy, tMps, tLoose)); }
                         if (pcs != null)
                             foreach (var (e, f, t2) in pcs)
                             {
@@ -741,6 +749,7 @@ namespace SelectOR
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
                 live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
             }
+            try { live.LevelClosed = PasosNivel.Closed(geo.LevelCrossings, geo.Graph, ends); } catch { }   // (1.2.84)
             // itinerarios: de cada señal abierta a la siguiente, por las agujas como están (los de plena vía, no)
             if (sigOk && _sbe != null)
                 foreach (var sg in s.Signals)

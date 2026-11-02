@@ -49,6 +49,7 @@ namespace SelectOR
         public sealed class Scissor { public RouteGraph.SwitchGeo[] S = new RouteGraph.SwitchGeo[4]; public int[] StraightK = new int[4]; public int[] Edges = { -1, -1, -1, -1 }; }   // Edges: paralela a0-a1, paralela b0-b1, diagonal a0-b1, diagonal b0-a1
         public readonly List<Scissor> ScissorList = new();
         public readonly HashSet<int> ScissorNodes = new();
+        public List<PasosNivel.Cr> LevelCrossings = new();   // (1.2.84) los pasos a nivel (PasosNivel.cs)
 
         public static RoomMapGeo Build(RouteGraph g, string routeDir)
         {
@@ -104,6 +105,7 @@ namespace SelectOR
             var tdbPath = Directory.GetFiles(routeDir, "*.tdb").FirstOrDefault();
             if (tdbPath == null) { geo.SignalNote = "sin .tdb"; return; }
             var tdb = new TrackDatabaseFile(tdbPath);
+            try { geo.LevelCrossings = PasosNivel.Load(g, routeDir, tdb); } catch { }   // (1.2.84)
             var tsec = TrackGeometry.Sections(routeDir);
             var items = tdb.TrackDB.TrItemTable; var nodes = tdb.TrackDB.TrackNodes;
             if (items == null || nodes == null) return;

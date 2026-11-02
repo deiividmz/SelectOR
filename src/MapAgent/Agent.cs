@@ -71,14 +71,15 @@ namespace SelectOR.MapAgent
             int esc = Pausa.Install(h);          // Esc en multijugador: menú con «Salir» y «Continuar» (Pausa.cs)
             int events = SelectOR.Comun.Eventos.Install(h, Log);   // bocina, puertas, luces… de otras versiones de Open Rails (Eventos.cs)
             int clock = SelectOR.Comun.Hora.Install(h, Log);       // la hora de la sala, también a los que ya están dentro (Hora.cs)
-            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(roomSw > 0 ? " + agujas de la sala" : "")}{(gotSw > 0 ? " + agujas recibidas" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(couples > 0 ? " + acoples" : "")}{(vehicles > 0 ? " + vehículos que faltan" : "")}{(subs > 0 ? " + sustitutos parecidos" : "")}{(own > 0 ? " + tu tren protegido" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(esc > 0 ? " + Esc" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
-            if (sun == 0 || keys == 0 || esc == 0) Later(h, sun == 0, keys == 0, esc == 0);
+            int people = Viajeros3D.Install(h);  // (prueba) gente en los andenes que sube y baja de tu tren (Viajeros3D.cs)
+            Log($"instalado ({n} de 4{(local > 0 ? " + conducción libre" : "")}{(spawn > 0 ? " + salida de la sala" : "")}{(roomSw > 0 ? " + agujas de la sala" : "")}{(gotSw > 0 ? " + agujas recibidas" : "")}{(remote > 0 ? " + trenes de los demás" : "")}{(couples > 0 ? " + acoples" : "")}{(vehicles > 0 ? " + vehículos que faltan" : "")}{(subs > 0 ? " + sustitutos parecidos" : "")}{(own > 0 ? " + tu tren protegido" : "")}{(release > 0 ? " + Ctrl+Tab" : "")}{(sun > 0 ? " + sol" : "")}{(threads > 0 ? " + hilos de red" : "")}{(keys > 0 ? " + teclado" : "")}{(esc > 0 ? " + Esc" : "")}{(events > 0 ? " + eventos de otras versiones" : "")}{(clock > 0 ? " + hora de la sala" : "")}{(people > 0 ? " + viajeros en los andenes" : "")}) en {ProcessPath()} · Open Rails {typeof(MPManager).Assembly.GetName().Version}");
+            if (sun == 0 || keys == 0 || esc == 0 || people == 0) Later(h, sun == 0, keys == 0, esc == 0, people == 0);
         }
 
         // En los Open Rails de .NET Framework el agente entra antes de que se cargue RunActivity.exe, que es donde están el
         // teclado (UserInput) y el sol (SunMoonPos): no se encontraban y no se ponían nunca (1.2.69). Se ponen en cuanto
         // Open Rails carga ese ensamblado.
-        static void Later(Harmony h, bool sun, bool keys, bool esc)
+        static void Later(Harmony h, bool sun, bool keys, bool esc, bool people = false)
         {
             AssemblyLoadEventHandler onLoad = null;
             bool busy = false;
@@ -93,8 +94,9 @@ namespace SelectOR.MapAgent
                     if (sun && Has("Orts.Viewer3D.Common.SunMoonPos")) { sun = false; if (Sol.Install(h) > 0) got += " + sol"; }
                     if (keys && Has("Orts.Viewer3D.UserInput")) { keys = false; if (Teclado.Install(h) > 0) got += " + teclado"; }
                     if (esc && Has("Orts.Viewer3D.Popups.QuitWindow")) { esc = false; if (Pausa.Install(h) > 0) got += " + Esc"; }
+                    if (people && Has("Orts.Viewer3D.World")) { people = false; if (Viajeros3D.Install(h) > 0) got += " + viajeros en los andenes"; }
                     if (got != "") Log("instalado al cargar el 3D:" + got);
-                    if (!sun && !keys && !esc) AppDomain.CurrentDomain.AssemblyLoad -= onLoad;
+                    if (!sun && !keys && !esc && !people) AppDomain.CurrentDomain.AssemblyLoad -= onLoad;
                 }
                 catch (Exception ex) { Log("al cargar el 3D: " + ex.GetType().Name + " " + ex.Message); }
                 finally { busy = false; }

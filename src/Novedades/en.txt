@@ -1,3 +1,9 @@
-﻿1.2.83
-Market trains in 2D|In Companies → Board → Train market, each train on sale is drawn in 2D on its card, whole and on a single line, as in Fleet; no need to press «View composition» any more.
-Ads with their image in view|In Board → Ads, each ad's image shows on its card without pressing «View image»; double-click opens it large.
+﻿1.2.84
+Sound and train in the shared room|If you closed the pause menu at the start with Esc when entering the room, Open Rails stayed paused without saying so: there was no sound and the train did not respond. Now Esc closes it and the game carries on normally.
+Clearer signals in the control centre|Each signal is always on the same side of its track, with a short post and the head pointing the way it faces. When several are together they are staggered along the track, instead of switching sides or turning round.
+Level crossings in the control centre|They appear in the diagram and in the real layout: red with the barriers down and dark when open. They close as in Open Rails, when a train approaches.
+Players online in the HUD|Next to «Online» you can see how many players are in the shared room.
+Switches follow your route in Free driving|The route you mark in «Your trip» also sets the switches: as you approach, each one is set the way your route goes. Only in Free driving; if you change one by hand, it is respected, and it can be turned off in «Your trip» → Itinerary.
+Clearer Board|The Showcase, Ads, Jobs and Train market cards are shown in full, with no cut-off text, the details in chips and the ad picture at its size.
+Destination signs with more letters|If the text does not fit, it adjusts itself: letters move closer or get narrower and, on two-line signs, the phrase is split in two.
+People on the platforms (test)|On routes that include the CGL people figures, passengers wait on the platforms. When you open the doors, people get off from inside the train and those waiting get on, only on the side that opens and at platform height. It is on by default; to turn it off, go to Settings → Graphics, «People on the platforms».

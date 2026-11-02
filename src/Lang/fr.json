@@ -3801,5 +3801,10 @@
 "¿Quitar el anuncio «{0}»?": "Retirer l'annonce « {0} » ?",
 "¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios.": "Retirer « {0} » du marché ? Il revient dans la flotte et peut faire des services.",
 "🔎  Buscar…": "🔎  Rechercher…",
-"Cedido por el administrador: desguazarlo no paga nada.": "Cédé par l’administrateur : le mettre à la casse ne rapporte rien."
+"Cedido por el administrador: desguazarlo no paga nada.": "Cédé par l’administrateur : le mettre à la casse ne rapporte rien.",
+"PN": "PN",
+"Las agujas de tu itinerario se ponen solas al acercarte (Conducción libre).": "Les aiguillages de ton itinéraire se placent tout seuls à ton approche (Conduite libre).",
+"Poner las agujas según el itinerario al conducir": "Placer les aiguillages selon l'itinéraire en conduisant",
+"Solo en Conducción libre: al acercarte, cada aguja de tu itinerario se coloca sola por donde va tu recorrido. Si cambias una a mano, se respeta.": "Seulement en Conduite libre : à ton approche, chaque aiguillage de ton itinéraire se place tout seul dans le sens de ton trajet. Si tu en changes un à la main, c'est respecté.",
+"Gente en los andenes que sube y baja del tren (prueba; rutas con las figuras de la CGL)": "Des gens sur les quais qui montent et descendent du train (essai ; lignes avec les figurines de CGL)"
 }

@@ -1,7 +1,7 @@
 // Esc en multijugador (1.2.75). Open Rails, en multijugador, no abre su menú de pausa: solo dice «In MP, use Alt-F4 to
 // quit directly». Aquí, en multijugador, Esc abre ese mismo menú en su versión de multijugador (Open Rails ya la tiene:
 // «Salir» y «Continuar», sin «Guardar») y sin pausar la simulación (en la sala no se puede):
-//  · «Continuar» (o Esc otra vez): se cierra el menú;
+//  · «Continuar» (o Esc otra vez): se cierra el menú y, si estaba en pausa (Open Rails empieza así), se quita (1.2.84);
 //  · «Salir»: lo mismo que Alt+F4 (se le pide a la ventana de Open Rails que se cierre) y, si a los 10 s sigue abierto, se
 //    cierra a la fuerza.
 // El aviso de Alt+F4 ya no sale. Fuera del multijugador, todo como siempre.
@@ -62,14 +62,30 @@ namespace SelectOR.MapAgent
         {
             try
             {
-                if (!MPManager.IsMultiPlayer() || !(bool)_isPressed.Invoke(null, new[] { _cmd })) return;
+                if (!MPManager.IsMultiPlayer()) return;
                 var w = _quitWin.GetValue(__instance);
                 if (w == null) return;
-                bool show = !(bool)_visible.GetValue(w);
-                _visible.SetValue(w, show);
-                if (!_said) { _said = true; Agent.Log("Esc en multijugador: menú con «Salir» y «Continuar»"); }
+                if ((bool)_isPressed.Invoke(null, new[] { _cmd }))
+                {
+                    bool show = !(bool)_visible.GetValue(w);
+                    _visible.SetValue(w, show);
+                    if (!_said) { _said = true; Agent.Log("Esc en multijugador: menú con «Salir» y «Continuar»"); }
+                }
+                // 1.2.84: Open Rails empieza en pausa, con este menú abierto, y en multijugador solo «Continuar» quitaba la
+                // pausa (su tecla de pausa no va en la sala). Si el menú se cerraba con Esc, la pausa se quedaba puesta: sin
+                // sonido y con el tren quieto. En la sala no hay pausa: con el menú cerrado, la simulación sigue.
+                if (!(bool)_visible.GetValue(w)) Unpause();
             }
             catch { }
+        }
+
+        static bool _unpausedSaid;
+        static void Unpause()
+        {
+            var sim = MPManager.Simulator;
+            if (sim == null || !sim.Paused) return;
+            sim.Paused = false;
+            if (!_unpausedSaid) { _unpausedSaid = true; Agent.Log("Esc en multijugador: el menú se ha cerrado con la pausa puesta; se quita (sonido y tren otra vez en marcha)"); }
         }
 
         // «Salir» en multijugador: como Alt+F4; si no se cierra en 10 s, a la fuerza

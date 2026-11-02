@@ -31,6 +31,7 @@ namespace SelectOR
         public readonly Dictionary<int, List<(double a, double b)>> Cancelling = new();         // (1.2.75) itinerarios anulándose (temporizados)
         public readonly Dictionary<int, List<(double a, double b)>> Queued = new();             // (1.2.75) itinerarios en cola (discontinuo)
         public readonly HashSet<int> Discord = new();             // (1.2.81) agujas (orden) de un itinerario que no están como él dice: en rojo
+        public HashSet<int> LevelClosed;                          // (1.2.84) pasos a nivel (elemento del .tdb) con las barreras bajadas; null: no se sabe
     }
 
     // (puesto de mando) la dependencia elegida, sus zonas y su jefe de circulación
@@ -326,6 +327,42 @@ namespace SelectOR
             // toperas
             using (var bp = new Pen(TrackCol, lw))
                 foreach (var b in s.Buffers) { var q = P(b); g.DrawLine(bp, q.X, q.Y - 5, q.X, q.Y + 5); }
+            // (1.2.84) pasos a nivel: la carretera cruzando la vía (un rectángulo; las vías de un mismo paso, en uno solo): rojo
+            // con las barreras bajadas, oscuro con el paso abierto, solo el borde si no se sabe. «PN» encima al acercar.
+            var pnBoxes = new List<RectangleF>();
+            if (s.LevelXs.Count > 0)
+            {
+                float hw = Math.Max(3.5f, 2.6f * Math.Min(2.2f, zoom)), hh = Math.Max(6f, lw / 2 + 4f * Math.Min(2.2f, zoom));
+                var used = new HashSet<Schematic.LevelX>();
+                foreach (var lx in s.LevelXs)
+                {
+                    if (!used.Add(lx)) continue;
+                    var grp = new List<Schematic.LevelX> { lx };
+                    var q0 = P(lx.At);
+                    foreach (var o in s.LevelXs)
+                        if (!used.Contains(o) && o.Cr.Cluster == lx.Cr.Cluster && Math.Abs(P(o.At).X - q0.X) < 14) { grp.Add(o); used.Add(o); }
+                    var pts = grp.Select(o => P(o.At)).ToList();
+                    float cx = pts.Average(q => q.X), y0 = pts.Min(q => q.Y) - hh, y1 = pts.Max(q => q.Y) + hh;
+                    var rect = RectangleF.FromLTRB(cx - hw, y0, cx + hw, y1);
+                    bool? closed = live?.LevelClosed == null ? null : grp.Any(o => live.LevelClosed.Contains(o.Cr.Item));
+                    using (var fb = new SolidBrush(closed == true ? Color.FromArgb(214, 58, 46) : Bg)) g.FillRectangle(fb, rect);
+                    using (var op = new Pen(closed == true ? Color.FromArgb(255, 205, 200) : Color.FromArgb(190, 198, 206), 1.3f) { DashStyle = closed == null ? DashStyle.Dash : DashStyle.Solid })
+                        g.DrawRectangle(op, rect.X, rect.Y, rect.Width, rect.Height);
+                    // la vía, por dentro (sigue viéndose que la cruza)
+                    using (var tp = new Pen(closed == true ? Color.FromArgb(255, 225, 220) : TrackCol, Math.Max(1f, lw * 0.6f)))
+                        foreach (var q in pts) g.DrawLine(tp, rect.Left + 1, q.Y, rect.Right - 1, q.Y);
+                    var box = RectangleF.Inflate(rect, 1.5f, 1.5f);
+                    if (zoom >= 1.0f)
+                    {
+                        using var pf = Theme.Font(6.4f * Math.Min(1.8f, zoom / 1.2f), FontStyle.Bold);
+                        var sz = g.MeasureString(I18n.T("PN"), pf);
+                        var tr = new RectangleF(cx - sz.Width / 2, y0 - sz.Height, sz.Width, sz.Height);
+                        using (var tb = new SolidBrush(closed == true ? Color.FromArgb(255, 120, 105) : Color.FromArgb(170, 178, 186))) g.DrawString(I18n.T("PN"), pf, tb, tr.X, tr.Y);
+                        box = RectangleF.Union(box, tr);
+                    }
+                    numBoxes.Add(box); pnBoxes.Add(box);
+                }
+            }
 
             // señales: mástil y luz del lado al que miran. (1.2.75) Al acercar, crecen con el esquema (sk: hasta 3,5 veces)
             // (1.2.81) cada una colocada donde no pise a otra señal, un número de aguja, otra vía ni el rótulo de una salida
@@ -344,6 +381,9 @@ namespace SelectOR
                     var q = P(sg.At);
                     var pl = places.TryGetValue(sg, out var pp) ? pp : new SigPlace { Side = sg.Face < 0 ? -1 : 1, Mast = 8f * sk, Dir = sg.Face, Arm = 4.5f * sk };
                     int dir = pl.Dir; float dy = pl.Side * pl.Mast, arm = pl.Arm;
+                    // (1.2.84) el pie del mástil, un poco hacia donde mira la señal: las dos de un mismo punto (una en cada
+                    // sentido, entre dos vías) ya no salen del mismo sitio y no parecen un mástil con dos brazos
+                    q = new PointF(q.X + dir * FootOff(sk), q.Y);
                     g.DrawLine(mp, q.X, q.Y + pl.Side * lw / 2, q.X, q.Y + dy);
                     g.DrawLine(mp, q.X, q.Y + dy, q.X + arm * dir, q.Y + dy);
                     int asp = live?.Aspect?.Invoke(sg.Sig) ?? -1;
@@ -397,7 +437,7 @@ namespace SelectOR
 
             // (1.2.81) los números de las agujas, sin pisar otro número ni una señal (dos agujas a la misma altura en vías vecinas,
             // como en Dos Hermanos): en su sitio; si no, corrido hacia el tronco (las ramas salen hacia el otro lado) o al otro lado
-            numBoxes.Clear();
+            numBoxes.Clear(); numBoxes.AddRange(pnBoxes);   // (1.2.84: sin pisar un paso a nivel)
             var drawnNums = new List<(string t, RectangleF box)>(); _numDrawn.AddOrUpdate(s, drawnNums);
             foreach (var tg in s.ScissorGroups) numBoxes.Add(RectangleF.Inflate(ScissorBox(tg, origin, zoom), 2, 14));   // (1.2.81: sin pisar el símbolo de una tijera ni su número)
             if (numItems.Count > 0)
@@ -567,6 +607,7 @@ namespace SelectOR
         // del brazo. Primero la de siempre (del lado al que mira, figura hacia delante); si pisa algo, la alternativa que menos
         // pise y menos se aparte de lo normal. Se recuerda para el mismo zoom (al mover el esquema no cambia nada).
         public struct SigPlace { public int Side, Dir; public float Mast, Arm; }
+        static float FootOff(float sk) => Math.Max(2.5f, 1.8f * sk);   // (1.2.84) el pie del mástil, apartado hacia donde mira la señal
         sealed class PlaceCache { public float Zoom; public string Key; public Dictionary<Schematic.Signal, SigPlace> Map; }
         static readonly ConditionalWeakTable<Schematic, PlaceCache> _places = new();
         static readonly ConditionalWeakTable<Schematic, float[]> _exitCols = new();   // columnas de las salidas (izquierda, derecha), en metros del esquema
@@ -656,6 +697,7 @@ namespace SelectOR
             (RectangleF fig, RectangleF mast, RectangleF arm) Shape(Schematic.Signal sg, SigPlace p)
             {
                 var q = Rel(P(sg.At)); var (along, across, extra) = size[sg];
+                q = new PointF(q.X + p.Dir * FootOff(sk), q.Y);   // (1.2.84: el pie, un poco hacia donde mira)
                 float ly = q.Y + p.Side * p.Mast, x0 = q.X + p.Dir * p.Arm, x1 = x0 + p.Dir * (along + extra);
                 var fig = RectangleF.FromLTRB(Math.Min(x0, x1), ly - across / 2, Math.Max(x0, x1), ly + across / 2);
                 float m1 = q.Y + p.Side * (lw / 2 + 1.5f);
@@ -689,28 +731,31 @@ namespace SelectOR
                     else if (near < 2 && SegHits(fn, a, b) && !Own(a, b)) near++;   // (pegada a otra vía, no a la suya: parece de esa vía)
                     if (mhit < 3 && (SegHits(mast, a, b) || SegHits(arm, a, b) && !Own(a, b))) mhit++;
                 }
-                return c + 200 * hit + 150 * mhit + 60 * near + (closer ? 120 : 0);
+                // (1.2.84) «pegada a otra vía» y «más cerca de otra vía que de la suya» ya no cuentan: con el lado y el mástil fijos
+                // no se pueden evitar (vías juntas), y lo único que conseguían era mandar la figura lejos, donde la otra vía acaba
+                return c + 200 * hit + 150 * mhit;
             }
             // las opciones: (lado, mástil, figura, brazo) y lo que cuesta apartarse de lo normal
             List<(SigPlace p, float pen)> Options(Schematic.Signal sg)
             {
+                // (1.2.84, elegido por el usuario: «figura en escalera») siempre de su lado de la vía, con el mástil de siempre y
+                // la figura hacia donde mira: si pisa a otra, solo se adelanta a lo largo de la vía (las de vías vecinas quedan
+                // escalonadas). Antes cambiaba de lado, alargaba el mástil o le daba la vuelta, y con varias juntas no se sabía
+                // de qué vía era cada una ni hacia dónde miraba.
+                // El mástil, corto: la figura pegada a su vía (con el de antes, la señal → de una vía y la ← de la de al lado se
+                // encontraban a media altura en el mismo punto y parecían un solo mástil con dos brazos).
                 int side0 = sg.Face < 0 ? -1 : 1, dir0 = sg.Face; var (along, across, extra) = size[sg];
-                float mMin = Math.Max(lw / 2 + across / 2 + 2f, 4f);
-                var masts = new List<(float m, float pen)> { (m0, 0) };
-                if (mMin < m0 - 1) masts.Add((mMin, 6));
-                masts.Add((m0 + step2, 14)); masts.Add((m0 + 2 * step2, 32));
+                float mast = Math.Min(m0, Math.Max(lw / 2 + across / 2 + 2f, 4f));
+                float stepA = Math.Max(4f, (along + extra + 4 * sk) / 2);
                 var l = new List<(SigPlace, float)>();
-                foreach (int side in new[] { side0, -side0 })
-                    foreach (int dir in new[] { dir0, -dir0 })
-                        foreach (var (m, mp) in masts)
-                            foreach (var (arm, ap) in new[] { (arm0, 0f), (arm0 + along + extra + 4 * sk, 18f) })
-                                l.Add((new SigPlace { Side = side, Dir = dir, Mast = m, Arm = arm }, mp + ap + (side != side0 ? 40 : 0) + (dir != dir0 ? 50 : 0)));
+                for (int k = 0; k < 6; k++)
+                    l.Add((new SigPlace { Side = side0, Dir = dir0, Mast = mast, Arm = arm0 + k * stepA }, k * (8 + k)));
                 return l;
             }
             var map = new Dictionary<Schematic.Signal, SigPlace>();
             var pens = new Dictionary<Schematic.Signal, float>(); var idx = new Dictionary<Schematic.Signal, int>();
             // primero las que no tienen problema en su sitio de siempre; luego las demás, de la más apretada a la menos
-            var def = s.Signals.ToDictionary(sg => sg, sg => new SigPlace { Side = sg.Face < 0 ? -1 : 1, Dir = sg.Face, Mast = m0, Arm = arm0 });
+            var def = s.Signals.ToDictionary(sg => sg, sg => Options(sg)[0].p);   // (1.2.84: su sitio de siempre, el primero de las opciones)
             var shapes = s.Signals.Select(sg => (sg, sh: Shape(sg, def[sg]))).ToList();
             var order = s.Signals.Select(sg =>
             {
