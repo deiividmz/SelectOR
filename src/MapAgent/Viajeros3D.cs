@@ -6,7 +6,8 @@
 //  · La estación se ve venir: el andén siguiente del camino del tren (a menos de 650 m) se MIDE en el escenario (suelos de los
 //    modelos cercanos entre 0,2 y 1,4 m sobre el carril, a los dos lados de la vía) y se llena con la gente que dice la RUTA:
 //    los viajeros esperando de cada andén (PlatformDetails.NumPassengersWaiting; la actividad puede cambiarlos), de su lado
-//    (PlatformSide: [0] a la derecha del sentido de la sección, [1] a la izquierda). Si la ruta no da cifra, uno cada ~8 m.
+//    (PlatformSide, con la regla de Open Rails para sus trenes: SideOf). Como mínimo, uno cada ~8 m de andén (las rutas suelen
+//    poner muy pocos).
 //  · El tren llega: lo miran; parado, se acercan a las puertas. Puertas abiertas: por cada puerta bajan primero (desde dentro
 //    del coche) y suben después los que esperan cerca, uno detrás de otro. Cuántos, según el TREN: sus plazas (PassengerCapacity
 //    de cada .wag; si no las dice, por su largo) y los que van a bordo (al empezar, entre un 30 y un 60 %; en cada parada baja
@@ -14,7 +15,7 @@
 //  · Con el contador de viajeros de SelectOR (en servicio y en Conducción libre; «PAX …» por el enlace local, LocalLink): bajan
 //    y suben exactamente los que cuenta, al mismo compás (cada paso del contador, una persona por la puerta); si esperaban
 //    menos de los que suben, llegan andando los que faltan. Sin sus cifras en 6 s, las propias.
-//  · Al irse el tren: la gente sigue en el andén hasta que está a más de 400 m.
+//  · Al irse el tren: la gente sigue en el andén hasta que está a más de 1 km.
 // Dibujo: los modelos se piden al gestor de Open Rails en el hilo de carga (World.Load / Viewer.Mark), se marcan como en uso
 // para que no se descarguen y en cada fotograma se dibuja cada persona (World.PrepareFrame → SharedShape.PrepareFrame). Por
 // reflexión: vale para los Open Rails de .NET 6 y de .NET Framework.
@@ -28,6 +29,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using HarmonyLib;
@@ -108,9 +110,11 @@ namespace SelectOR.MapAgent
             public int RouteSide;             // el lado de la ruta: +1 izquierda · −1 derecha · 0 los dos o sin dato
             public volatile bool Measured;
             public List<(Vector3 p, int side, Vector3 fwd)> Spots = new List<(Vector3, int, Vector3)>();   // (side: +1 a la izquierda de la vía en la marcha)
+            public float TypicalH = DefaultH;  // la altura del andén sobre el carril (mediana de lo medido)
             public bool Spawned, DoorsSeen, Stopped, Gathered; public int Side;
             // puertas abiertas: sus puertas, hacia el andén, cuándo queda libre cada una; con el contador, sus cifras
             public Vector3 SideV; public List<(Vector3 at, Vector3 inside, Vector3 fwd, float rail)> DoorList; public double[] Busy;
+            public int[] QA, QB;              // (por puerta: los que han bajado y los que van a subir por ella)
             public double OpenedAt; public bool Own, WasOpen; public Count Cnt;
         }
         static Station _st;
@@ -159,6 +163,12 @@ namespace SelectOR.MapAgent
                         _sceneryObjects == null ? "WorldFile.sceneryObjects" : null, _location == null ? "StaticShape.Location" : null, _sharedShape == null ? "StaticShape.SharedShape" : null,
                         _filePath == null ? "SharedShape.FilePath" : null }.Where(x => x != null)) + "): el andén no se mide");
                 h.Patch(load, postfix: new HarmonyMethod(typeof(Viajeros3D), nameof(AfterLoad)));
+                // los modelos que Open Rails agrupa (SharedStaticShapeInstance: el grupo está en el centro de todos): se apunta dónde
+                // está cada uno, para medir el andén donde de verdad está
+                var groupT = AccessTools.TypeByName("Orts.Viewer3D.SharedStaticShapeInstance");
+                var gctor = groupT?.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault(c => c.GetParameters().Length == 3);
+                if (gctor != null) h.Patch(gctor, postfix: new HarmonyMethod(typeof(Viajeros3D), nameof(AfterGroup)));
+                else Agent.Log("viajeros en los andenes: sin acceso a los modelos agrupados (el andén puede medirse mal)");
                 h.Patch(vmark, postfix: new HarmonyMethod(typeof(Viajeros3D), nameof(AfterMark)));
                 h.Patch(draw, postfix: new HarmonyMethod(typeof(Viajeros3D), nameof(AfterDraw)));
                 _on = true;
@@ -223,6 +233,19 @@ namespace SelectOR.MapAgent
             return frames[Math.Min(m - 1, (int)(k * (m - 1) + 0.5))];
         }
         static float SpeedOf(Person p) => _avatars.Count > 0 ? _avatars[p.Shape % _avatars.Count].Speed * p.Pace : WalkMps;
+
+        static readonly ConditionalWeakTable<object, List<WorldPosition>> _groups = new ConditionalWeakTable<object, List<WorldPosition>>();
+        static void AfterGroup(object __instance, object __2)
+        {
+            try
+            {
+                if (_location == null || !(__2 is IEnumerable list)) return;
+                var locs = new List<WorldPosition>();
+                foreach (var o in list) if (_location(o) is WorldPosition w) locs.Add(w);
+                _groups.Remove(__instance); _groups.Add(__instance, locs);
+            }
+            catch { }
+        }
 
         // ¿esta ruta trae las figuras de la CGL? (las que haya)
         static List<string> PathsFor(Simulator sim)
@@ -314,7 +337,7 @@ namespace SelectOR.MapAgent
             if (_st != null)
             {
                 float prog = travelled - _st.Base;
-                bool passed = _st.Platform >= 0 ? prog > _st.End + 15 || prog < _st.Start - 200 : _st.Stopped && speed > 1f && prog > 80;
+                bool passed = _st.Platform >= 0 ? prog > _st.End + 15 || prog < -200 : _st.Stopped && speed > 1f && prog > 80;
                 if (passed)
                 {
                     foreach (var p in _people.Where(p => p.Phase == 1 && p.Boards && !p.HideAtEnd)) { p.Phase = 0; p.Target = p.Pos; p.Then = new Vector3(0, -1e6f, 0); }
@@ -337,7 +360,7 @@ namespace SelectOR.MapAgent
                             var pd = sim.Signals.PlatformDetailsList[idx];
                             int side = SideOf(pd, dir); sides.Add(side);
                             s0.Want[side + 1] += Math.Max(0, pd.NumPassengersWaiting);
-                            names.Add($"{pd.Name} [{(pd.PlatformSide[0] ? 1 : 0)},{(pd.PlatformSide[1] ? 1 : 0)}] {pd.NumPassengersWaiting} esperando");
+                            names.Add($"{pd.Name} [{(pd.PlatformSide[0] ? 1 : 0)},{(pd.PlatformSide[1] ? 1 : 0)}] sentido {dir} {(pd.PlatformReference[0] == pd.PlatformFrontUiD ? "desde la cabeza" : "desde la cola")} → {(side > 0 ? "izquierda" : side < 0 ? "derecha" : "los dos")} · {pd.NumPassengersWaiting} esperando");
                         }
                         catch { }
                     }
@@ -369,7 +392,8 @@ namespace SelectOR.MapAgent
                 {
                     int spots = s.Spots.Count(q => q.side == side);
                     if (spots == 0) continue;
-                    int w = fromRoute ? s.Want[side + 1] + (s.Want[1] > 0 ? s.Want[1] / (s.Spots.Any(q => q.side == -side) ? 2 : 1) : 0) : spots / 8;
+                    int w = fromRoute ? s.Want[side + 1] + (s.Want[1] > 0 ? s.Want[1] / (s.Spots.Any(q => q.side == -side) ? 2 : 1) : 0) : 0;
+                    w = Math.Max(w, spots / 8);   // (como mínimo, uno cada ~8 m de andén: las rutas suelen poner muy pocos, 3 o 6)
                     want[side + 1] = (int)Math.Round(w * U(0.85f, 1.15f));
                 }
                 int sum = want.Sum(); float scale = sum > MaxPeople - _people.Count ? (float)Math.Max(0, MaxPeople - _people.Count) / Math.Max(1, sum) : 1;
@@ -381,7 +405,7 @@ namespace SelectOR.MapAgent
                 }
                 s.Side = s.RouteSide != 0 ? s.RouteSide : (want[2] >= want[0] ? (want[2] > 0 ? 1 : 0) : -1);
                 Agent.Log($"viajeros en los andenes: {s.Why} · andén medido: {s.Spots.Count(q => q.side == 1)} puntos a la izquierda, {s.Spots.Count(q => q.side == -1)} a la derecha"
-                          + $" · esperando {(fromRoute ? "(según la ruta)" : "(la ruta no lo dice: uno cada ~8 m)")}: " + (said.Count > 0 ? string.Join(", ", said) : "nadie"));
+                          + $" · esperando {(fromRoute ? $"(la ruta dice {s.Want.Sum()}; como mínimo, uno cada ~8 m)" : "(la ruta no lo dice: uno cada ~8 m)")}: " + (said.Count > 0 ? string.Join(", ", said) : "nadie"));
             }
 
             // el tren llega: los que esperan lo miran (con algo de retraso cada uno); parado y aún con las puertas cerradas, se
@@ -412,6 +436,7 @@ namespace SelectOR.MapAgent
                 }
                 s.Side = side;
                 s.SideV = Left(fwd) * side; s.DoorList = Doors(cars, s.SideV, s); s.Busy = new double[s.DoorList.Count]; s.OpenedAt = now;
+                s.QA = new int[s.DoorList.Count]; s.QB = new int[s.DoorList.Count];
                 if (!_counter || s.DoorList.Count == 0) { s.Own = true; Board(cars, s.SideV, s, train); }
             }
 
@@ -520,19 +545,24 @@ namespace SelectOR.MapAgent
             int ta = (int)Math.Round(c.LastA * c.FA), tb = (int)Math.Round(c.LastB * c.FB);
             while (c.DoneA < ta && _people.Count < MaxPeople)
             {
-                int di = _rnd.Next(doors.Count);
+                int di = NextDown(s.QA); s.QA[di]++;   // (repartidos entre todas las puertas)
                 float w = (float)Math.Max(0.2, s.Busy[di] - now); s.Busy[di] = now + w + 1.7;
                 SpawnAlighter(s, di, w);
                 c.DoneA++;
             }
             while (c.DoneB < tb)
             {
-                Person best = null; int bd = 0; float bl = float.MaxValue;
+                // el siguiente: el que antes puede subir, cada uno por su puerta (lo que anda + los que ya van a ella)
+                Person best = null; int bd = 0; float bc = float.MaxValue, bl = 0;
                 foreach (var p in Waiters(s))
-                    for (int i = 0; i < doors.Count; i++) { float l = (doors[i].at - p.Pos).LengthSquared(); if (l < bl) { bl = l; best = p; bd = i; } }
+                {
+                    int i = PickDoor(doors, p.Pos, s.QB, out float d); float cost = d + s.QB[i] * 6f;
+                    if (cost < bc) { bc = cost; best = p; bd = i; bl = d; }
+                }
                 if (best == null) break;
+                s.QB[bd]++;
                 var door = doors[bd];
-                double travel = Math.Sqrt(bl) / Math.Max(0.5f, SpeedOf(best));
+                double travel = bl / Math.Max(0.5f, SpeedOf(best));
                 best.Wait = (float)Math.Max(0, s.Busy[bd] - now - travel); s.Busy[bd] = Math.Max(s.Busy[bd], now + travel) + 1.6;
                 best.Target = door.at; best.Then = door.inside; best.HideAtEnd = true; best.Phase = 1;
                 c.DoneB++;
@@ -597,7 +627,7 @@ namespace SelectOR.MapAgent
                 }
             }
             var c = lead.WorldPosition;
-            _people.RemoveAll(p => p.Phase == 2 || Dist(p, c) > 400);
+            _people.RemoveAll(p => p.Phase == 2 || Dist(p, c) > 1000);
         }
 
         static float Dist(Person p, WorldPosition c) => new Vector3((p.TileX - c.TileX) * 2048 + p.Pos.X - c.XNAMatrix.Translation.X, 0, (p.TileZ - c.TileZ) * 2048 + p.Pos.Z - c.XNAMatrix.Translation.Z).Length();
@@ -647,14 +677,16 @@ namespace SelectOR.MapAgent
             return null;
         }
 
-        // el lado de un andén en la marcha del tren: +1 izquierda · −1 derecha · 0 los dos o sin dato.
-        // (2026-11-01, primera prueba en Ingeniero Pizias: [0] es la DERECHA del sentido de la sección y [1] la izquierda)
+        // el lado de un andén en la marcha del tren: +1 izquierda · −1 derecha · 0 los dos o sin dato. Como abre Open Rails las
+        // puertas de sus trenes (TTTrain): «derecha» = (sentido de la sección 1) XOR (la referencia [0] del andén es su cabeza,
+        // PlatformFrontUiD); con eso, PlatformSide[0] es la derecha y [1] la izquierda; si no, al revés.
         static int SideOf(Orts.Simulation.Signalling.PlatformDetails pd, int dir)
         {
             bool p0 = pd.PlatformSide[0], p1 = pd.PlatformSide[1];
             if (p0 == p1) return 0;
-            int inSection = p0 ? -1 : 1;
-            return dir == 0 ? inSection : -inSection;
+            bool right0 = (dir == 1) ^ (pd.PlatformReference[0] == pd.PlatformFrontUiD);
+            int side0 = right0 ? -1 : 1;
+            return p0 ? side0 : -side0;
         }
 
         // los coches con viajeros: todo lo que no es de mercancías ni ténder, menos las locomotoras de verdad (70 t o más); si el
@@ -752,16 +784,37 @@ namespace SelectOR.MapAgent
             return doors;
         }
 
-        // el tren parado, puertas aún cerradas: los que esperan cerca de su lado van junto a la puerta más cercana (sin taparla)
+        // la puerta para alguien en pos: la que antes le deja subir (lo que anda hasta ella + 6 m por cada uno que ya va a esa puerta)
+        static int PickDoor(List<(Vector3 at, Vector3 inside, Vector3 fwd, float rail)> doors, Vector3 pos, int[] load, out float dist)
+        {
+            int best = 0; float bc = float.MaxValue; dist = 0;
+            for (int i = 0; i < doors.Count; i++)
+            {
+                float d = (doors[i].at - pos).Length(), c = d + load[i] * 6f;
+                if (c < bc) { bc = c; best = i; dist = d; }
+            }
+            return best;
+        }
+        // la puerta por la que baja el siguiente: la que menos lleva (si empatan, una al azar)
+        static int NextDown(int[] qa)
+        {
+            int min = qa.Min(); var ix = Enumerable.Range(0, qa.Length).Where(i => qa[i] == min).ToList();
+            return ix[_rnd.Next(ix.Count)];
+        }
+
+        // el tren parado, puertas aún cerradas: los que esperan cerca de su lado se reparten junto a las puertas (sin taparlas)
         static void Gather(List<TrainCar> cars, Station s, Vector3 fwd)
         {
             var sideV = Left(fwd) * s.Side;
             var doors = Doors(cars, sideV, s); if (doors.Count == 0) return;
-            int n = 0;
-            foreach (var p in _people.Where(p => p.Boards && p.Phase == 0 && p.Side == s.Side && p.TileX == s.TileX && p.TileZ == s.TileZ))
+            int n = 0; var load = new int[doors.Count];
+            foreach (var p in _people.Where(p => p.Boards && p.Phase == 0 && p.Side == s.Side && p.TileX == s.TileX && p.TileZ == s.TileZ)
+                                     .OrderBy(p => doors.Min(d => (d.at - p.Pos).LengthSquared())))
             {
-                var best = doors.OrderBy(d => (d.at - p.Pos).LengthSquared()).First();
-                if ((best.at - p.Pos).Length() > 30) continue;
+                int di = PickDoor(doors, p.Pos, load, out float dist);
+                if (dist > 40) continue;
+                load[di]++;
+                var best = doors[di];
                 float lr = _rnd.NextDouble() < 0.5 ? -1 : 1;
                 var to = best.at + sideV * U(0.9f, 2.6f) + best.fwd * lr * U(0.8f, 2.4f);
                 to.Y = best.rail + HeightNear(s, to, best.rail);
@@ -785,20 +838,21 @@ namespace SelectOR.MapAgent
             int free = Math.Max(0, seats - (_onboard - alight));
             // los que suben: los de ese lado a menos de 40 m de una puerta, los más cercanos primero, hasta llenar
             var cands = _people.Where(p => p.Boards && !p.HideAtEnd && p.Phase != 2 && p.Side == (Vector3.Dot(sideV, Left(TrainFwd(train))) >= 0 ? 1 : -1) && p.TileX == s.TileX && p.TileZ == s.TileZ)
-                               .Select(p => (p, di: Enumerable.Range(0, doors.Count).OrderBy(i => (doors[i].at - p.Pos).LengthSquared()).First()))
-                               .Where(x => (doors[x.di].at - x.p.Pos).Length() <= 40)
-                               .OrderBy(x => (doors[x.di].at - x.p.Pos).LengthSquared()).ToList();
+                               .Where(p => doors.Min(d => (d.at - p.Pos).Length()) <= 40)
+                               .OrderBy(p => doors.Min(d => (d.at - p.Pos).LengthSquared())).ToList();
             int waiting = cands.Count, boardN = Math.Min(waiting, free);
             // los que bajan, repartidos entre las puertas (los que se ven: como mucho, los que caben)
             int showAlight = Math.Min(alight, Math.Max(0, MaxPeople - _people.Count));
             var down = new int[doors.Count];
-            for (int k = 0; k < showAlight; k++) down[_rnd.Next(doors.Count)]++;
+            for (int k = 0; k < showAlight; k++) down[NextDown(down)]++;   // (repartidos entre todas las puertas)
             var queue = new int[doors.Count];
-            foreach (var (p, di) in cands.Take(boardN))
+            foreach (var p in cands.Take(boardN))
             {
+                int di = PickDoor(doors, p.Pos, queue, out _);
                 var best = doors[di];
                 p.Target = best.at; p.Then = best.inside; p.HideAtEnd = true; p.Phase = 1;
-                p.Wait = 1.2f + down[di] * 1.9f + queue[di]++ * 1.6f + U(0, 0.6f);   // (cuando han bajado los de esa puerta)
+                p.Wait = 1.2f + down[di] * 1.9f + queue[di] * 1.6f + U(0, 0.6f);   // (cuando han bajado los de esa puerta)
+                queue[di]++;
             }
             for (int di = 0; di < doors.Count; di++)
             {
@@ -917,6 +971,10 @@ namespace SelectOR.MapAgent
                             Vector3 a = V(t.a), b = V(t.b), c = V(t.c);
                             var n = Vector3.Cross(b - a, c - a); if (n.LengthSquared() < 1e-8f) continue; n.Normalize();
                             if (Math.Abs(n.Y) < 0.8f) continue;   // (solo lo casi horizontal: suelos)
+                            // y hacia arriba (las normales del modelo): fuera techos por debajo y bajos de los andenes
+                            Vector3 N(int vi) { try { var q = sh.normals[so.vertices[vi].inormal]; return Vector3.TransformNormal(new Vector3(q.X, q.Y, -q.Z), M); } catch { return Vector3.Zero; } }
+                            var vn = N(t.a) + N(t.b) + N(t.c);
+                            if (vn.LengthSquared() > 1e-6f && Vector3.Normalize(vn).Y < 0.7f) continue;
                             pts.Add(a); pts.Add(b); pts.Add(c);
                         }
                     }
@@ -941,7 +999,7 @@ namespace SelectOR.MapAgent
             return r;
         });
 
-        // el suelo más alto en (x, z) del modelo, entre lo y hi; NaN si no hay
+        // el suelo más bajo en (x, z) del modelo, entre lo y hi (el del andén, no un banco encima); NaN si no hay
         static float FloorAt(Floors t, float x, float z, float lo, float hi)
         {
             if (!t.Grid.TryGetValue(Cell(Cl(x), Cl(z)), out var l)) return float.NaN;
@@ -953,7 +1011,7 @@ namespace SelectOR.MapAgent
                 float w1 = ((b.Z - c.Z) * (x - c.X) + (c.X - b.X) * (z - c.Z)) / d, w2 = ((c.Z - a.Z) * (x - c.X) + (a.X - c.X) * (z - c.Z)) / d, w3 = 1 - w1 - w2;
                 if (w1 < -1e-4f || w2 < -1e-4f || w3 < -1e-4f) continue;
                 float y = w1 * a.Y + w2 * b.Y + w3 * c.Y;
-                if (y >= lo && y <= hi && (float.IsNaN(best) || y > best)) best = y;
+                if (y >= lo && y <= hi && (float.IsNaN(best) || y < best)) best = y;
             }
             return best;
         }
@@ -971,11 +1029,20 @@ namespace SelectOR.MapAgent
                     var objs = (_sceneryObjects(wf) as IEnumerable)?.Cast<object>().ToArray(); if (objs == null) continue;
                     foreach (var o in objs)
                     {
-                        if (!(_location(o) is WorldPosition loc)) continue;
-                        var m = loc.XNAMatrix; m.Translation = Rel(loc, tx, tz);
-                        var dd = m.Translation - at; dd.Y = 0; if (dd.LengthSquared() > r * r) continue;
-                        var ss = _sharedShape(o); if (ss == null) continue;
-                        if (_filePath(ss) is string p && p.Length > 0) res.Add((p, m));
+                        try
+                        {
+                            var ss = _sharedShape(o); if (ss == null) continue;
+                            if (!(_filePath(ss) is string p) || p.Length == 0) continue;
+                            var locs = _groups.TryGetValue(o, out var g) ? g : (_location(o) is WorldPosition loc ? new List<WorldPosition> { loc } : null);
+                            if (locs == null) continue;
+                            foreach (var l in locs)
+                            {
+                                var m = l.XNAMatrix; m.Translation = Rel(l, tx, tz);
+                                var dd = m.Translation - at; dd.Y = 0; if (dd.LengthSquared() > r * r) continue;
+                                res.Add((p, m));
+                            }
+                        }
+                        catch { }
                     }
                 }
             }
@@ -1024,7 +1091,7 @@ namespace SelectOR.MapAgent
                         var fl = LoadFloors(path); if (fl.Grid.Count == 0) continue;
                         insts.Add((fl, m, Matrix.Invert(m)));
                     }
-                    var spots = new List<(Vector3, int, Vector3)>();
+                    var spots = new List<(Vector3, int, Vector3)>(); var hs = new List<float>();
                     foreach (var (p, f) in track)
                     {
                         var left = Left(f);
@@ -1041,23 +1108,37 @@ namespace SelectOR.MapAgent
                                     float y = FloorAt(fl, top.X, top.Z, Math.Min(bot.Y, top.Y), Math.Max(bot.Y, top.Y));
                                     if (float.IsNaN(y)) continue;
                                     float wy = Vector3.Transform(new Vector3(top.X, y, top.Z), m).Y;
-                                    if (float.IsNaN(best) || wy > best) best = wy;
+                                    if (float.IsNaN(best) || wy < best) best = wy;
                                 }
-                                if (!float.IsNaN(best)) spots.Add((new Vector3(w.X, best, w.Z), side, f));
+                                if (!float.IsNaN(best)) { spots.Add((new Vector3(w.X, best, w.Z), side, f)); hs.Add(best - p.Y); }
                             }
                     }
-                    s.Spots = spots;
-                    Agent.Log($"viajeros en los andenes: medido el andén en {sw.ElapsedMilliseconds} ms ({objs.Count} objetos cerca, {insts.Count} con suelo, {track.Count} puntos de vía)");
+                    // a cada lado, solo los puntos a la altura del andén (fuera lo que se aparta más de 30 cm de su mediana)
+                    float Med(IEnumerable<float> v) { var a = v.OrderBy(x => x).ToList(); return a.Count == 0 ? float.NaN : a[a.Count / 2]; }
+                    var keep = new List<(Vector3, int, Vector3)>(); var keptH = new List<float>(); int dropped = 0; var meds = new List<string>();
+                    foreach (int side in new[] { 1, -1 })
+                    {
+                        var ix = Enumerable.Range(0, spots.Count).Where(i => spots[i].Item2 == side).ToList();
+                        if (ix.Count == 0) continue;
+                        float med = Med(ix.Select(i => hs[i]));
+                        meds.Add($"{(side > 0 ? "izquierda" : "derecha")} a {med:0.00} m");
+                        foreach (int i in ix) { if (Math.Abs(hs[i] - med) <= 0.3f) { keep.Add(spots[i]); keptH.Add(hs[i]); } else dropped++; }
+                    }
+                    if (keptH.Count > 0) s.TypicalH = Med(keptH);
+                    s.Spots = keep;
+                    Agent.Log($"viajeros en los andenes: medido el andén en {sw.ElapsedMilliseconds} ms ({objs.Count} objetos cerca, {insts.Count} con suelo, {track.Count} puntos de vía)"
+                              + (meds.Count > 0 ? " · andén " + string.Join(", ", meds) : "") + (dropped > 0 ? $" · {dropped} puntos fuera (bancos, otros niveles)" : ""));
                 }
                 catch (Exception ex) { Agent.Log("viajeros en los andenes (medir el andén): " + ex.GetType().Name + " " + ex.Message); }
                 finally { s.Measured = true; }
             });
         }
 
-        // la altura del andén sobre el carril junto a un punto: la del punto medido más cercano (a menos de 6 m); si no, la fija
+        // la altura del andén sobre el carril junto a un punto: la del punto medido más cercano (a menos de 6 m); si no, la típica
+        // de ese andén (y si no se midió nada, la fija)
         static float HeightNear(Station s, Vector3 at, float railY)
         {
-            float best = 36, h = DefaultH;
+            float best = 36, h = s.TypicalH;
             foreach (var (p, _, _) in s.Spots)
             {
                 float d = (p.X - at.X) * (p.X - at.X) + (p.Z - at.Z) * (p.Z - at.Z);

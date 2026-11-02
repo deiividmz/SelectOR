@@ -1,2 +1,3 @@
-﻿1.2.86
-Gente en los andenes, revisada|Ahora son 38 personas y la descarga de la primera vez baja a unos 24 MB. Si ya las tenías, SelectOR las vuelve a preparar solo, en segundo plano, la próxima vez que lo abras.
+﻿1.2.87
+Gente en los andenes, más y en su sitio|Al llegar a las estaciones los andenes ya no se ven vacíos: hay al menos una persona cada unos 8 m (o las que ponga la ruta, si son más). La gente sale siempre encima del andén, a su altura, y del lado por el que se abren las puertas.
+Por todas las puertas|Los viajeros se reparten entre todas las puertas del tren para subir y bajar, en vez de amontonarse en unas pocas.
