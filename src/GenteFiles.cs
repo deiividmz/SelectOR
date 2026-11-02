@@ -1,5 +1,5 @@
 // (1.2.85) Gente en los andenes: las personas animadas (Microsoft Rocketbox, licencia MIT) se preparan en cada ordenador a
-// partir del paquete «Gente.pack» que va junto a SelectOR (27 MB en vez de los 566 MB de las posturas hechas). En él, por
+// partir del paquete «Gente.pack» que va junto a SelectOR (24 MB en vez de los ~500 MB de las posturas hechas). En él, por
 // persona: su malla (puntos, normales, coordenadas de textura, pesos de los huesos y triángulos), sus texturas (512 px) y,
 // por cada postura, la matriz de cada hueso. Aquí se deforma la malla de cada postura con sus huesos y se escribe un .s de
 // Open Rails (texto ASCII comprimido «SIMISA@F»: lo leen NY, CYZY, Testing y Estable) y las texturas en .ace, igual que el
@@ -29,7 +29,7 @@ namespace SelectOR
         static readonly CultureInfo CI = CultureInfo.InvariantCulture;
         const float Scale = 0.01f;   // (el paquete va en cm)
         // la huella del paquete que va con esta versión (rocketbox/Gente.pack del conversor; si se rehace, se cambia aquí)
-        public const string PackSha = "fe782131f6e7998b77883573b91096c94514bebddb7e42890d36c0b541fee834";
+        public const string PackSha = "99ed46ba957f673413789781cadb55a18cebade99e3571e16da821bb9aae410f";   // (38 personas: sin f06, f10, f16, m15, m19 y m21, a petición 2026-11-02)
         public static string PackName => "Gente_" + PackSha.Substring(0, 12) + ".pack";
         public static string PackUrl => Supa.BuiltInUrl.TrimEnd('/') + "/storage/v1/object/public/updates/" + PackName;
         public static string LocalPack => Path.Combine(AppContext.BaseDirectory, "Gente.pack");   // (junto a SelectOR: el del administrador)
@@ -68,7 +68,7 @@ namespace SelectOR
             }
         }
 
-        // el paquete: el de junto a SelectOR o el ya descargado, si su huella es la buena; si no, se descarga (27 MB)
+        // el paquete: el de junto a SelectOR o el ya descargado, si su huella es la buena; si no, se descarga (24 MB)
         static async Task<bool> GetPack(Action<string> log)
         {
             if (File.Exists(LocalPack) && ShaOk(LocalPack)) { PackPath = LocalPack; return true; }
@@ -77,7 +77,7 @@ namespace SelectOR
             {
                 Directory.CreateDirectory(Root);
                 string tmp = CachedPack + ".tmp";
-                log?.Invoke("gente en los andenes: descargando las personas (27 MB, la primera vez)…");
+                log?.Invoke("gente en los andenes: descargando las personas (24 MB, la primera vez)…");
                 using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(15) })
                 using (var resp = await http.GetAsync(PackUrl, System.Net.Http.HttpCompletionOption.ResponseHeadersRead))
                 {

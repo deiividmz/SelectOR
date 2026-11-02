@@ -1,4 +1,2 @@
-﻿1.2.85
-Real people on the platforms|Realistic people (men, women and children) who walk, wait, watch the arriving train and move to the doors when it stops. It works on any route, not just CGL. The first time, SelectOR prepares the people in the background (about 27 MB download); until then, the platforms are empty. It can be turned off in Settings → Graphics.
-The right number of passengers|Each platform has the people waiting that the route sets, and passengers get off and on according to the train's seats. In service and in Free driving, exactly as many as the passenger counter shows get off and on, at the same pace: first off, then on, taking turns at each door.
-When the doors close|Nobody else gets on: those who had not reached the door stay on the platform, and those who were about to get off and had not come out stay inside.
+﻿1.2.86
+People on the platforms, revised|There are now 38 people and the first-time download drops to about 24 MB. If you already had them, SelectOR prepares them again by itself, in the background, the next time you open it.

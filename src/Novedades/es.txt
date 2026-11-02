@@ -1,4 +1,2 @@
-﻿1.2.85
-Gente de verdad en los andenes|Personas realistas (hombres, mujeres y niños) que andan, esperan, miran al tren que llega y se acercan a las puertas cuando para. Sirve para cualquier ruta, ya no solo la CGL. La primera vez, SelectOR prepara las personas en segundo plano (descarga unos 27 MB); hasta entonces, los andenes van vacíos. Se quita en Ajustes → Gráficos.
-Los viajeros que tocan|En cada andén espera la gente que tiene puesta la ruta, y bajan y suben según las plazas del tren. En servicio y en Conducción libre, bajan y suben exactamente los que marca el contador de viajeros, al mismo ritmo: primero bajan y después suben, por turnos en cada puerta.
-Al cerrar las puertas|Ya no entra nadie más: los que no han llegado a la puerta se quedan en el andén, y los que iban a bajar y no habían salido se quedan dentro.
+﻿1.2.86
+Gente en los andenes, revisada|Ahora son 38 personas y la descarga de la primera vez baja a unos 24 MB. Si ya las tenías, SelectOR las vuelve a preparar solo, en segundo plano, la próxima vez que lo abras.
