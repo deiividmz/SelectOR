@@ -1,3 +1,2 @@
-﻿1.2.87
-Gente en los andenes, más y en su sitio|Al llegar a las estaciones los andenes ya no se ven vacíos: hay al menos una persona cada unos 8 m (o las que ponga la ruta, si son más). La gente sale siempre encima del andén, a su altura, y del lado por el que se abren las puertas.
-Por todas las puertas|Los viajeros se reparten entre todas las puertas del tren para subir y bajar, en vez de amontonarse en unas pocas.
+﻿1.2.88
+Gente en todas las estaciones|Ya sale gente también en las estaciones cuyo andén Open Rails tarda en cargar (por ejemplo, Ingeniero Pizias o Urb. Pere Comas en la CGL), y en los ordenadores más lentos los andenes se preparan antes.

@@ -112,6 +112,7 @@ namespace SelectOR.MapAgent
             public List<(Vector3 p, int side, Vector3 fwd)> Spots = new List<(Vector3, int, Vector3)>();   // (side: +1 a la izquierda de la vía en la marcha)
             public float TypicalH = DefaultH;  // la altura del andén sobre el carril (mediana de lo medido)
             public bool Spawned, DoorsSeen, Stopped, Gathered; public int Side;
+            public int Tries = 1; public float MeasuredAt;   // (veces medido y lo andado entonces: sin andén, se vuelve a medir al acercarse)
             // puertas abiertas: sus puertas, hacia el andén, cuándo queda libre cada una; con el contador, sus cifras
             public Vector3 SideV; public List<(Vector3 at, Vector3 inside, Vector3 fwd, float rail)> DoorList; public double[] Busy;
             public int[] QA, QB;              // (por puerta: los que han bajado y los que van a subir por ella)
@@ -379,8 +380,19 @@ namespace SelectOR.MapAgent
             var s = _st;
             if (stopped) s.Stopped = true;
 
+            // medido sin andén (Open Rails aún no había cargado esa parte del escenario): se vuelve a medir al acercarse
+            if (s.Measured && !s.Spawned && s.Spots.Count == 0 && s.Platform >= 0 && s.Tries < 5)
+            {
+                float pr = travelled - s.Base;
+                if (pr - s.MeasuredAt >= 150 || (stopped && pr - s.MeasuredAt >= 1) || (stopped && s.Tries == 1))
+                {
+                    s.Tries++; s.MeasuredAt = pr; s.Measured = false;
+                    Agent.Log($"viajeros en los andenes: sin andén medido (el escenario aún no estaba cargado): se vuelve a medir ({s.Tries}.ª vez, a {s.Start - pr:0} m)");
+                    Measure(s, train, Math.Max(s.Start - pr - 25, -train.Length - 40), Math.Min(s.End - pr + 25, s.Start - pr + 600));
+                }
+            }
             // medido: la gente que espera, en cada lado con andén
-            if (s.Measured && !s.Spawned)
+            if (s.Measured && !s.Spawned && (s.Spots.Count > 0 || s.Platform < 0 || s.Tries >= 5))
             {
                 s.Spawned = true;
                 float prog = travelled - s.Base;
@@ -450,7 +462,7 @@ namespace SelectOR.MapAgent
             // con el contador de SelectOR: sus cifras (si no llegan en 6 s, las propias)
             if (s.DoorsSeen && !s.Own && s.DoorList != null)
             {
-                if (s.Cnt == null && _lastCnt != null && now - _lastCnt.At < 20) { s.Cnt = _lastCnt; _lastCnt = null; }
+                if (s.Cnt == null && _lastCnt != null && now - _lastCnt.At < 90) { s.Cnt = _lastCnt; _lastCnt = null; }
                 if (s.Cnt == null && now - s.OpenedAt > 6)
                 {
                     s.Own = true;
@@ -1080,6 +1092,8 @@ namespace SelectOR.MapAgent
             if (track.Count == 0) { s.Measured = true; return; }
             var mid = track[track.Count / 2].p; float reach = (track[0].p - track[track.Count - 1].p).Length() / 2 + 150;
             var objs = NearObjects(s.TileX, s.TileZ, mid, reach);
+            // solo los que están a menos de 80 m de la vía (los andenes; fuera edificios y demás lejos: se mide mucho antes)
+            objs = objs.Where(o => track.Any(t => { var d = o.m.Translation - t.p; d.Y = 0; return d.LengthSquared() < 80 * 80; })).ToList();
             Task.Run(() =>
             {
                 var sw = Stopwatch.StartNew();

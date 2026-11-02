@@ -1,3 +1,2 @@
-﻿1.2.87
-People on the platforms, more and in place|Platforms no longer look empty when you arrive at stations: there is at least one person every 8 m or so (or as many as the route sets, if more). People always stand on top of the platform, at its height, and on the side where the doors open.
-Through every door|Passengers spread out across all the train's doors to get on and off, instead of crowding at just a few.
+﻿1.2.88
+People at every station|People now also appear at stations whose platform Open Rails takes a while to load (for example, Ingeniero Pizias or Urb. Pere Comas on CGL), and on slower computers the platforms are prepared sooner.
