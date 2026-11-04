@@ -102,6 +102,7 @@ namespace SelectOR
             side.Controls.Add(_list); side.Controls.Add(cap);
             BuildJefeBar(top);   // jefes de circulación (DispatchForm.Jefe.cs; necesita la lista)
             BuildItinBar(top);   // mando manual / automático (DispatchForm.Itinerarios.cs)
+            BuildObjectsBtn(top);   // (2026-11-04) 🚧 objetos de la sala, solo el administrador (DispatchForm.Objetos.cs)
 
             _canvas = new Canvas { Dock = DockStyle.Fill, BackColor = SchematicDraw.Bg, Cursor = Cursors.Hand };
             _canvas.Paint += (s, e) => Paint_(e.Graphics);

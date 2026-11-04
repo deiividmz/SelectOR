@@ -1,2 +1,4 @@
-﻿1.2.88
-Gente en todas las estaciones|Ya sale gente también en las estaciones cuyo andén Open Rails tarda en cargar (por ejemplo, Ingeniero Pizias o Urb. Pere Comas en la CGL), y en los ordenadores más lentos los andenes se preparan antes.
+﻿1.2.89
+Gente en su andén|La gente espera solo en los andenes de la ruta y del lado en que están, sin salirse de sus extremos ni aparecer al otro lado de la vía; y por fin también en Ingeniero Pizias y Urb. Pere Comas en la CGL.
+Más ligera|La gente de los andenes ocupa menos memoria y carga menos el ordenador, para que Open Rails vaya más fino en las estaciones grandes.
+La sala compartida cobra vida|En la sala compartida de la CGL pueden aparecer operarios de vía trabajando junto a la vía, derrumbes de tierras y rocas caídas, y fuegos e incendios con humo que de noche iluminan el suelo. Los ven todos los que conducen en la sala.

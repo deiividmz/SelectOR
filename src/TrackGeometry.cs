@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using Orts.Formats.Msts;
 
 namespace SelectOR
@@ -59,6 +60,62 @@ namespace SelectOR
                 return !(double.IsNaN(lat) || double.IsNaN(lon)) && Math.Abs(lat) <= 90 && Math.Abs(lon) <= 180;
             }
             catch { return false; }
+        }
+
+        // (objetos de la sala, 2026-11-04) al revés: lat/lon → mundo (casilla·2048 + metros, como TryLatLon). Open Rails no
+        // trae esa conversión: se busca con Newton desde el nudo de vía de la ruta más cercano (sus posiciones, del .tdb).
+        static readonly Dictionary<string, List<(double x, double z, double lat, double lon)>> _anchors = new(StringComparer.OrdinalIgnoreCase);
+        public static bool TryWorld(string routeDir, double lat, double lon, out double worldX, out double worldZ)
+        {
+            worldX = worldZ = 0;
+            if (!Available) return false;
+            List<(double x, double z, double lat, double lon)> an;
+            lock (_anchors)
+                if (!_anchors.TryGetValue(routeDir ?? "", out an))
+                {
+                    an = new();
+                    try
+                    {
+                        var tdb = Directory.GetFiles(routeDir, "*.tdb");
+                        var nodes = new TrackDatabaseFile(tdb[0]).TrackDB?.TrackNodes;
+                        if (nodes != null)
+                            foreach (var n in nodes)
+                            {
+                                if (n?.UiD == null || (n.TrJunctionNode == null && !n.TrEndNode)) continue;
+                                double x = n.UiD.TileX * 2048.0 + n.UiD.X, z = n.UiD.TileZ * 2048.0 + n.UiD.Z;
+                                if (TryLatLon(x, z, out double la, out double lo)) an.Add((x, z, la, lo));
+                            }
+                    }
+                    catch { }
+                    _anchors[routeDir ?? ""] = an;
+                }
+            if (an.Count == 0) return false;
+            var best = an.OrderBy(a => (a.lat - lat) * (a.lat - lat) + (a.lon - lon) * (a.lon - lon) * Math.Cos(lat * Math.PI / 180) * Math.Cos(lat * Math.PI / 180)).First();
+            // (la lat/lon de Open Rails va a saltos de ~1 m: el jacobiano, con puntos a ±50 m; y se da por buena a menos de 3 m)
+            double cos = Math.Cos(lat * Math.PI / 180), wx = best.x, wz = best.z, bestErr = double.MaxValue, bx = wx, bz = wz;
+            for (int it = 0; it < 12; it++)
+            {
+                if (!TryLatLon(wx, wz, out double la0, out double lo0)) return false;
+                double err = Math.Sqrt(Math.Pow((lat - la0) * 111320, 2) + Math.Pow((lon - lo0) * 111320 * cos, 2));
+                if (err < bestErr) { bestErr = err; bx = wx; bz = wz; }
+                if (err < 0.05) break;
+                if (!TryLatLon(wx + 50, wz, out double lxp, out double oxp) || !TryLatLon(wx - 50, wz, out double lxm, out double oxm)
+                    || !TryLatLon(wx, wz + 50, out double lzp, out double ozp) || !TryLatLon(wx, wz - 50, out double lzm, out double ozm)) return false;
+                // jacobiano (grados por metro) y el paso que falta
+                double a = (lxp - lxm) / 100, b = (lzp - lzm) / 100, c = (oxp - oxm) / 100, d = (ozp - ozm) / 100, det = a * d - b * c;
+                if (Math.Abs(det) < 1e-24) return false;
+                double dla = lat - la0, dlo = lon - lo0;
+                double dx = (d * dla - b * dlo) / det, dz = (-c * dla + a * dlo) / det;
+                wx += dx; wz += dz;
+                if (Math.Abs(dx) < 0.02 && Math.Abs(dz) < 0.02) break;
+            }
+            if (TryLatLon(wx, wz, out double la1, out double lo1))
+            {
+                double err = Math.Sqrt(Math.Pow((lat - la1) * 111320, 2) + Math.Pow((lon - lo1) * 111320 * cos, 2));
+                if (err < bestErr) { bestErr = err; bx = wx; bz = wz; }
+            }
+            worldX = bx; worldZ = bz;
+            return bestErr < 3;
         }
     }
 

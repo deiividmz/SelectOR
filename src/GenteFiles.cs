@@ -29,7 +29,7 @@ namespace SelectOR
         static readonly CultureInfo CI = CultureInfo.InvariantCulture;
         const float Scale = 0.01f;   // (el paquete va en cm)
         // la huella del paquete que va con esta versión (rocketbox/Gente.pack del conversor; si se rehace, se cambia aquí)
-        public const string PackSha = "99ed46ba957f673413789781cadb55a18cebade99e3571e16da821bb9aae410f";   // (38 personas: sin f06, f10, f16, m15, m19 y m21, a petición 2026-11-02)
+        public const string PackSha = "9bb7239b7a890a8d7abfdbfbcbcc77aa93f3ba68ef301b1d0133fbcb7f0c9a88";   // (38 personas, sin f06, f10, f16, m15, m19 y m21; y desde 2026-11-04, para los objetos de la sala, 9 operarios de vía «obra_…», 4 derrumbes y el fuego «obj_…»)
         public static string PackName => "Gente_" + PackSha.Substring(0, 12) + ".pack";
         public static string PackUrl => Supa.BuiltInUrl.TrimEnd('/') + "/storage/v1/object/public/updates/" + PackName;
         public static string LocalPack => Path.Combine(AppContext.BaseDirectory, "Gente.pack");   // (junto a SelectOR: el del administrador)
@@ -127,6 +127,7 @@ namespace SelectOR
                         for (int t = 0; t < nt; t++)
                         {
                             string name = r.ReadString(); bool alpha = r.ReadBoolean(); var data = r.ReadBytes(r.ReadInt32());
+                            if (data.Length == 0) { images.Add(name); alphas.Add(alpha); continue; }   // (2026-11-04: la misma que en otra entrada, ya escrita)
                             using (var ms = new MemoryStream(data)) using (var img = new Bitmap(ms)) using (var bmp = new Bitmap(img.Width, img.Height, PixelFormat.Format32bppArgb))
                             {
                                 using (var g = Graphics.FromImage(bmp)) { g.CompositingMode = CompositingMode.SourceCopy; g.DrawImage(img, 0, 0, img.Width, img.Height); }
@@ -225,9 +226,15 @@ namespace SelectOR
             float ymin = float.MaxValue, ymax = float.MinValue;
             foreach (var q in parts) for (int i = 0; i < q.m.Nv; i++) { float y = q.pos[i * 3 + 1]; if (y < ymin) ymin = y; if (y > ymax) ymax = y; }
             float cy = (ymin + ymax) / 2 * Scale;
+            // (2026-11-04) el radio de verdad (los derrumbes miden hasta 20 m) y, si es grande, se ve desde más lejos
+            double r2 = 0;
+            foreach (var q in parts) for (int i = 0; i < q.m.Nv; i++) { double x = q.pos[i * 3] * Scale, y = q.pos[i * 3 + 1] * Scale - cy, z = q.pos[i * 3 + 2] * Scale; r2 = Math.Max(r2, x * x + y * y + z * z); }
+            float radius = (float)Math.Max(1.2, Math.Sqrt(r2)); int sight = radius > 3 ? 1500 : 400;
             sb.Append("SIMISA@@@@@@@@@@JINX0s1t______\r\n\r\nshape (\r\n\tshape_header ( 00000000 00000000 )\r\n");
-            sb.Append($"\tvolumes ( 1\r\n\t\tvol_sphere (\r\n\t\t\tvector ( 0 {F(cy)} 0 ) 1.2\r\n\t\t)\r\n\t)\r\n");
-            sb.Append("\tshader_names ( 1\r\n\t\tnamed_shader ( TexDiff )\r\n\t)\r\n");
+            sb.Append($"\tvolumes ( 1\r\n\t\tvol_sphere (\r\n\t\t\tvector ( 0 {F(cy)} 0 ) {F(radius)}\r\n\t\t)\r\n\t)\r\n");
+            // (2026-11-04) las texturas «…_add» (llamas y luz del fuego): BlendATex, con su transparencia y sin que la noche las oscurezca
+            // (AddATex se sumaba también a la niebla de Open Rails y se veía el rectángulo de cada llama)
+            sb.Append("\tshader_names ( 2\r\n\t\tnamed_shader ( TexDiff )\r\n\t\tnamed_shader ( BlendATex )\r\n\t)\r\n");
             sb.Append("\ttexture_filter_names ( 1\r\n\t\tnamed_filter_mode ( MipLinear )\r\n\t)\r\n");
             sb.Append($"\tpoints ( {nv}\r\n");
             foreach (var q in parts) for (int i = 0; i < q.m.Nv; i++) sb.Append($"\t\tpoint ( {F(-q.pos[i * 3] * Scale)} {F(q.pos[i * 3 + 1] * Scale)} {F(q.pos[i * 3 + 2] * Scale)} )\r\n");   // (girada 180°: mira hacia −Z de XNA)
@@ -244,10 +251,10 @@ namespace SelectOR
             sb.Append("\tlight_materials ( 0 )\r\n\tlight_model_cfgs ( 1\r\n\t\tlight_model_cfg ( 00000000\r\n\t\t\tuv_ops ( 1\r\n\t\t\t\tuv_op_copy ( 1 0 )\r\n\t\t\t)\r\n\t\t)\r\n\t)\r\n");
             sb.Append("\tvtx_states ( 1\r\n\t\tvtx_state ( 00000000 0 -5 0 00000002 )\r\n\t)\r\n");
             sb.Append($"\tprim_states ( {parts.Count}\r\n");
-            foreach (var q in parts) sb.Append($"\t\tprim_state ( 00000000 0\r\n\t\t\ttex_idxs ( 1 {q.m.Tex} ) 0 0 {(alphas[q.m.Tex] ? 1 : 0)} 0 1\r\n\t\t)\r\n");
+            foreach (var q in parts) sb.Append($"\t\tprim_state ( 00000000 {(images[q.m.Tex].Contains("_add") ? 1 : 0)}\r\n\t\t\ttex_idxs ( 1 {q.m.Tex} ) 0 0 {(alphas[q.m.Tex] ? 1 : 0)} 0 1\r\n\t\t)\r\n");
             sb.Append("\t)\r\n");
             sb.Append("\tlod_controls ( 1\r\n\t\tlod_control (\r\n\t\t\tdistance_levels_header ( 0 )\r\n\t\t\tdistance_levels ( 1\r\n\t\t\t\tdistance_level (\r\n");
-            sb.Append("\t\t\t\t\tdistance_level_header (\r\n\t\t\t\t\t\tdlevel_selection ( 400 )\r\n\t\t\t\t\t\thierarchy ( 1 -1 )\r\n\t\t\t\t\t)\r\n");
+            sb.Append("\t\t\t\t\tdistance_level_header (\r\n\t\t\t\t\t\tdlevel_selection ( " + sight + " )\r\n\t\t\t\t\t\thierarchy ( 1 -1 )\r\n\t\t\t\t\t)\r\n");
             sb.Append("\t\t\t\t\tsub_objects ( 1\r\n\t\t\t\t\t\tsub_object (\r\n");
             sb.Append($"\t\t\t\t\t\t\tsub_object_header ( 00000400 -1 -1 000001d2 000001c4\r\n\t\t\t\t\t\t\t\tgeometry_info ( {nf} {parts.Count} 0 {nf * 3} 0 0 {parts.Count} 0 0 0\r\n");
             sb.Append($"\t\t\t\t\t\t\t\t\tgeometry_nodes ( 1\r\n\t\t\t\t\t\t\t\t\t\tgeometry_node ( 2 0 0 0 0\r\n\t\t\t\t\t\t\t\t\t\t\tcullable_prims ( {parts.Count} {nf} {nf * 3} )\r\n\t\t\t\t\t\t\t\t\t\t)\r\n\t\t\t\t\t\t\t\t\t)\r\n");
@@ -284,7 +291,15 @@ namespace SelectOR
         static Bitmap Resize(Bitmap src, int size)
         {
             var dst = new Bitmap(size, size, PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(dst)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.CompositingMode = CompositingMode.SourceCopy; g.DrawImage(src, 0, 0, size, size); }
+            // (2026-11-04) en mosaico: si no, GDI+ mezcla los bordes con el vacío y las texturas que se repiten (la tierra de los
+            // derrumbes) salen con rayas claras en las juntas al verlas de lejos
+            using (var g = Graphics.FromImage(dst))
+            using (var ia = new ImageAttributes())
+            {
+                ia.SetWrapMode(WrapMode.Tile);
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.CompositingMode = CompositingMode.SourceCopy;
+                g.DrawImage(src, new Rectangle(0, 0, size, size), 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, ia);
+            }
             return dst;
         }
         static void WriteAce(string path, Bitmap bmp, bool withAlpha)

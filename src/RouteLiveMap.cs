@@ -441,6 +441,12 @@ namespace SelectOR
             Invalidate();
         }
 
+        // (objetos de la sala, 2026-11-04) un clic sin arrastrar en el mapa (izquierdo, si no es en un tren; o derecho): su lat/lon
+        public event Action<double, double, MouseButtons, Point> MapClick;
+        public (double lat, double lon) LatLonAt(Point p) => _d == null ? (0, 0) : _d.Unproj(_cx + (p.X - Width / 2.0) / _s, _cy + (p.Y - Height / 2.0) / _s);
+        public PointF ScreenOf(double lat, double lon) => _d == null ? PointF.Empty : ScrLL(lat, lon);
+        public double PxPerM => _s;
+
         PointF Scr(double x, double y) => new PointF((float)((x - _cx) * _s + Width / 2.0), (float)((y - _cy) * _s + Height / 2.0));
         PointF ScrLL(double lat, double lon) { var (x, y) = _d.Proj(lat, lon); return Scr(x, y); }
 
@@ -775,6 +781,7 @@ namespace SelectOR
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (e.Button == MouseButtons.Right && _d != null && _fitted) { var (rla, rlo) = LatLonAt(e.Location); MapClick?.Invoke(rla, rlo, MouseButtons.Right, e.Location); return; }
             if (!_drag) return;
             _drag = false; Cursor = Cursors.Default;
             if (_moved > 4 || _d == null) return;
@@ -791,7 +798,7 @@ namespace SelectOR
                     if (d2 < best) { best = d2; id = m.Id; }
                 }
             }
-            if (id == null) return;
+            if (id == null) { if (_fitted && !_legendBox.Contains(e.Location)) { var (cla, clo) = LatLonAt(e.Location); MapClick?.Invoke(cla, clo, MouseButtons.Left, e.Location); } return; }
             _follow = id;
             if (_s < 0.12) _s = Math.Min(4.0, Math.Max(_s, 0.12));
             Invalidate();

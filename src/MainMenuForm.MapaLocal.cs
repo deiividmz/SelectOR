@@ -35,7 +35,9 @@ namespace SelectOR
                 bool wantJoy = JoyWanted();
                 // (1.2.85) gente en los andenes: el contador de viajeros le pasa sus cifras al agente (PaxTell), en cualquier modo
                 bool wantPeople = _prefs?.GenteAndenes == true && args.StartsWith("-start", StringComparison.OrdinalIgnoreCase);
-                if (!wantMap && !wantJoy && !wantPeople) return;
+                // (2026-11-04) en la sala compartida: los objetos que pone el administrador (MainMenuForm.ObjetosSala.cs)
+                bool wantObjects = _roomPending != null && args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (!wantMap && !wantJoy && !wantPeople && !wantObjects) return;
                 var link = LocalMapLink.Start();
                 if (link == null) { RoomLog("conducción libre: no se puede escuchar en 127.0.0.1 (sin mapa de agujas)"); return; }
                 if (!MapAgentFiles.Apply(psi)) { link.Dispose(); RoomLog("conducción libre: no se ha podido poner el agente (sin mapa de agujas)"); return; }
@@ -75,8 +77,10 @@ namespace SelectOR
                 _localSeen = _localMap.Connected;
                 RoomLog(_localSeen ? "conducción libre: Open Rails conectado" : "conducción libre: Open Rails desconectado");
                 if (_localSeen && (_paxActive || _paxWanted)) PaxTell("ON");   // (el agente espera las cifras del contador)
+                if (_localSeen) ObjectsTick(true);
             }
             if (!_localSeen) return;
+            ObjectsTick(false);   // (la sala: sus objetos, si han cambiado)
             MapGeoEnsure();
             var l = _localMap;
             if (_roomGeo != null && l.SigStates != null && _roomSigsSeen == DateTime.MinValue)

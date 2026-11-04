@@ -1,2 +1,4 @@
-﻿1.2.88
-People at every station|People now also appear at stations whose platform Open Rails takes a while to load (for example, Ingeniero Pizias or Urb. Pere Comas on CGL), and on slower computers the platforms are prepared sooner.
+﻿1.2.89
+People on their platform|People wait only on the route's platforms and on the side where they are, without going past their ends or appearing on the other side of the track; and at last also at Ingeniero Pizias and Urb. Pere Comas on CGL.
+Lighter|The people on the platforms use less memory and put less load on your computer, so Open Rails runs smoother at big stations.
+The shared room comes alive|In the shared CGL room you may now see track workers working by the line, landslides and fallen rocks, and fires with smoke that light up the ground at night. Everyone driving in the room sees them.

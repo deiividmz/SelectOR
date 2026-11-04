@@ -3445,6 +3445,17 @@ namespace SelectOR
                     if (gente != null) psi.Environment["SELECTOR_GENTE_DIR"] = gente;
                     else { GenteFiles.EnsureAsync(m => { try { BeginInvoke((Action)(() => RoomLog(m))); } catch { } }); RoomLog("gente en los andenes: preparando las personas (la primera vez); esta vez, sin ellas"); }
                 }
+                // (2026-11-04) la sala compartida: los objetos que pone el administrador (operarios de vía: MainMenuForm.ObjetosSala.cs)
+                if (_roomPending != null)
+                {
+                    psi.Environment["SELECTOR_OBJETOS"] = "1";
+                    if (!psi.Environment.ContainsKey("SELECTOR_GENTE_DIR"))
+                    {
+                        string gente = GenteFiles.ReadyDir();
+                        if (gente != null) psi.Environment["SELECTOR_GENTE_DIR"] = gente;
+                        else GenteFiles.EnsureAsync(m => { try { BeginInvoke((Action)(() => RoomLog(m))); } catch { } });
+                    }
+                }
                 // Gráficos: ReShade junto a Open Rails mientras se conduce (ReShadeFiles.cs; se quita al volver)
                 { string why = ReShadeFiles.Install(_prefs); if (why != null) RoomLog("gráficos: sin ReShade: " + why); }
                 // Clima: las imágenes de clima de SelectOR en Content mientras se conduce (ClimaFiles.cs; se quitan al volver)

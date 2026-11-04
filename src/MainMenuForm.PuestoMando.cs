@@ -51,6 +51,7 @@ namespace SelectOR
                 _dispatch.ChiefMe = DispatchForm.SupaChiefMe; _dispatch.IssueTicket = DispatchForm.SupaTicket;
                 _dispatch.ChiefsList = DispatchForm.SupaChiefs; _dispatch.ChiefSet = DispatchForm.SupaChiefSet;
             }
+            if (Supa.IsSuperadmin && Supa.IsLoggedIn) _dispatch.OpenObjects = OpenObjetosSala;   // (2026-11-04) 🚧 objetos de la sala
             _dispatch.Show(this);
         }
     }
