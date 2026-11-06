@@ -62,7 +62,7 @@ namespace SelectOR
             if (_salaWxBtn.Visible == admin && (_salaAiBtn == null || _salaAiBtn.Visible == ai)) return;
             _salaWxBtn.Visible = admin;
             if (_salaAiBtn != null) _salaAiBtn.Visible = ai;   // (1.2.77) 🚆 el horario de los trenes IA
-            _salaHost.Width = 326 + (admin ? 34 : 0) + (ai ? 34 : 0);   // (con el 🖥 del puesto de mando)
+            _salaHost.Width = SalaHostBase + (admin ? 34 : 0) + (ai ? 34 : 0);   // (SalaHostBase ya lleva el 🖥 del puesto de mando)
         }
 
         async Task EditSalaWeather()

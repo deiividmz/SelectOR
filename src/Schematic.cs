@@ -33,7 +33,13 @@ namespace SelectOR
             internal double LenPx;
         }
         public sealed class Switch { public int Node, Order = -1; public PointF At; public PointF[][] Legs = new PointF[2][]; public bool Hidden; public int Straight = -1; public int[] LegEdge = { -1, -1 }; public bool[] LegFromA = new bool[2]; public double[] LegLen = new double[2]; }   // LegEdge…: (1.2.81) el tramo de cada rama, para pintarla con el itinerario   // Straight: (1.2.81) la rama directa (0/1, como THROWNODE)
-        public sealed class Signal { public RoomMapGeo.Sig Sig; public PointF At; public int Face; public int RowIdx; public int Stack; }   // Stack: varias en el mismo sitio, una encima de otra
+        public sealed class Signal
+        {
+            public RoomMapGeo.Sig Sig; public PointF At; public int Face; public int RowIdx; public int Stack;   // Stack: varias en el mismo sitio, una encima de otra
+            // (2026-11-06) el lado en que está de verdad (−1 encima, +1 debajo; 0 no se sabe): por su poste en el mundo, en cuanto se ha leído
+            internal Func<int> SideCalc; int? _side;
+            public int Side { get { if (_side.HasValue) return _side.Value; if (SideCalc == null || double.IsNaN(Sig?.PostLat ?? double.NaN)) return 0; _side = SideCalc(); return _side.Value; } }
+        }   // Stack: varias en el mismo sitio, una encima de otra
         public sealed class Platform { public RectangleF Bar; public string Label; public bool Above; }   // Above: (1.2.81) la barra encima de la vía
         public sealed class Exit { public PointF At; public bool Right; public string Station; public int Edge = -1, Side; }   // Edge/Side: el tramo y su extremo por donde sale
 
@@ -1815,7 +1821,22 @@ namespace SelectOR
                     }
                     // todas (el jefe de circulación las necesita todas); si coinciden con otra, una por encima de la otra
                     int stack = Signals.Count(o => o.Face == face && Math.Abs(o.At.X - p.X) < 8 && Math.Abs(o.At.Y - p.Y) < 2);
-                    Signals.Add(new Signal { Sig = sg, At = p, Face = face, RowIdx = tr.RowIdx, Stack = stack });
+                    // (2026-11-06, pedido) de su lado de verdad (vía izquierda / lado izquierdo, vía derecha / lado derecho), como en
+                    // el trazado real y como los andenes: el sitio real de la señal frente a su vía, en el sentido del esquema. Antes,
+                    // siempre a la derecha de la marcha, y las que están a la izquierda salían del lado contrario.
+                    int se = e; double soff = off; int sface = face;
+                    int SideCalc()
+                    {
+                        // a la derecha o a la izquierda de la marcha (su rumbo), y eso en el esquema: mirando a la derecha (Face +1),
+                        // su derecha es debajo (+1); mirando a la izquierda, encima (−1)
+                        if (double.IsNaN(sg.Hdg)) return 0;
+                        var (tpx, tpy) = g.PointAt(se, soff); var (sx, sy) = g.Proj(sg.PostLat, sg.PostLon);
+                        double lat = Math.Sqrt((sx - tpx) * (sx - tpx) + (sy - tpy) * (sy - tpy));
+                        double cr = Math.Cos(sg.Hdg) * (sy - tpy) - Math.Sin(sg.Hdg) * (sx - tpx);
+                        if (lat <= 0.4 || lat >= 25 || Math.Abs(cr) <= 0.3) return 0;
+                        return cr > 0 ? sface : -sface;
+                    }
+                    Signals.Add(new Signal { Sig = sg, At = p, Face = face, RowIdx = tr.RowIdx, Stack = stack, SideCalc = SideCalc });
                 }
             // (1.2.84) pasos a nivel: los de la ruta en una vía del esquema (en lo dibujado de su tramo)
             if (geo?.LevelCrossings != null)

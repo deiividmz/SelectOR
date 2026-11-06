@@ -21,7 +21,7 @@ namespace SelectOR
     public partial class MainMenuForm
     {
         const int TablonSubtab = 17;
-        static readonly string[] FleetTabNames = { "Todos", "Disponibles", "En servicio", "En venta" };
+        static readonly string[] FleetTabNames = { "Todos", "Disponibles", "En servicio", "En el mercado" };
         static readonly int[] FleetTabStates = { -1, 0, 1, 4 };
 
         static bool MissingRpc(string err) => err != null && (err.Contains("PGRST202") || err.Contains("Could not find") || err.Contains("does not exist"));
@@ -34,7 +34,7 @@ namespace SelectOR
             if (_fleetRemoveBtn == null) return;
             var sel = FleetSelection();
             bool listed = sel.Count == 1 && sel[0].row < _fleetStatus.Count && _fleetStatus[sel[0].row] == "for_sale";
-            string t = Tr(listed ? "Retirar del mercado" : "Vender o desguazar…");
+            string t = Tr(listed ? "Retirar del mercado" : "Vender, alquilar o desguazar…");
             if (_fleetRemoveBtn.Text == t) return;
             _fleetRemoveBtn.Text = t;
             using var fb = Theme.Font(9.5f, FontStyle.Bold);
@@ -43,7 +43,7 @@ namespace SelectOR
             _fleetRemoveBtn.Invalidate();
         }
 
-        sealed class SaleQuote { public string Id, Name, Cannot; public double PriceNew, Price, Fee, Gets, Scrap, Km; public int Cond, Days; public double FeePct, ScrapPct; }
+        sealed class SaleQuote { public string Id, Name, Cannot; public double PriceNew, Price, Fee, Gets, Scrap, Km, Rent, RentGeneral; public int Cond, Days, RentPct; public double FeePct, ScrapPct; }
 
         async void SellOrScrapUi()
         {
@@ -69,7 +69,8 @@ namespace SelectOR
                     {
                         Id = id, Name = name, Cannot = r.TryGetProperty("cannot", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null,
                         PriceNew = Num(r, "price_new"), Price = Num(r, "price"), Fee = Num(r, "fee"), Gets = Num(r, "gets"), Scrap = Num(r, "scrap"),
-                        Km = Num(r, "km"), Cond = (int)Num(r, "cond"), Days = (int)Num(r, "days"), FeePct = Num(r, "fee_pct"), ScrapPct = Num(r, "scrap_pct")
+                        Km = Num(r, "km"), Cond = (int)Num(r, "cond"), Days = (int)Num(r, "days"), FeePct = Num(r, "fee_pct"), ScrapPct = Num(r, "scrap_pct"),
+                        Rent = Num(r, "rent"), RentGeneral = Num(r, "rent_general"), RentPct = (int)Num(r, "rent_pct")   // (1.2.90; 0 sin el SQL nuevo)
                     });
                 }
                 catch { }
@@ -80,6 +81,34 @@ namespace SelectOR
             int choice = SaleDialog(quotes);
             if (choice == 1) await ListVehicles(quotes.Where(q => q.Cannot == null).ToList());
             else if (choice == 2) await ScrapVehicles(quotes.Where(q => q.Cannot is null or "granted").ToList(), quotes.Any(q => q.Cannot == "rented"));
+            else if (choice == 3) await RentOutVehicles(quotes.Where(q => q.Cannot == null && q.Rent > 0).ToList());
+        }
+
+        // (1.2.90) ofrecer en alquiler a otras empresas: el plazo lo elige la empresa; el precio, SelectOR
+        async Task RentOutVehicles(List<SaleQuote> qs)
+        {
+            if (qs.Count == 0) return;
+            int[] opts = { 7, 14, 30 };
+            int days;
+            using (var dlg = new FormDialog(Tr("Ofrecer en alquiler"), Tr("Ofrecer"), 560, "🔑", Tr("El precio por servicio lo fija SelectOR")))
+            {
+                dlg.AddCombo("days", Tr("Plazo del alquiler"), opts.Select(d => string.Format(Tr("{0} días"), d)), 1);
+                dlg.AddInfo(Tr("Sale en Tablón → Mercado de trenes. Cuando otra empresa lo alquila, pasa a su flota durante ese plazo y te paga el alquiler en cada servicio que haga. Luego vuelve a tu flota."));
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                days = opts[Math.Max(0, Math.Min(opts.Length - 1, dlg.Index("days")))];
+            }
+            Msg(_fleetMsg, Tr("Poniendo en alquiler…"), false);
+            int done = 0; string err = null;
+            foreach (var q in qs)
+            {
+                var (_, e) = await Supa.RpcAsync("market_list_rent", new { p_vehicle = q.Id, p_days = days });
+                if (e != null) err ??= e; else done++;
+            }
+            if (done == 0) { Msg(_fleetMsg, Tr("Error: ") + err, true); return; }
+            Msg(_fleetMsg, (done == 1 ? string.Format(Tr("En alquiler por {0} por servicio durante {1} días: ya lo ven las demás empresas en Tablón → Mercado de trenes."), EurT(qs[0].Rent), days)
+                                      : string.Format(Tr("{0} trenes en alquiler durante {1} días."), done, days)) + (err != null ? "  " + Tr("Error: ") + err : ""), err != null);
+            _fleetCards?.ClearMarks();
+            LoadFleet();
         }
 
         static string CannotText(string why) => why switch
@@ -91,7 +120,7 @@ namespace SelectOR
             _ => "",
         };
 
-        // 0 nada · 1 poner a la venta · 2 desguazar (o devolver los alquilados)
+        // 0 nada · 1 poner a la venta · 2 desguazar (o devolver los alquilados) · 3 ofrecer en alquiler (1.2.90)
         int SaleDialog(List<SaleQuote> qs)
         {
             int result = 0;
@@ -100,14 +129,16 @@ namespace SelectOR
             var scrappable = qs.Where(q => q.Cannot is null or "granted" or "rented").ToList();
             double gets = sellable.Sum(q => q.Gets), price = sellable.Sum(q => q.Price), fee = sellable.Sum(q => q.Fee), scrap = scrappable.Sum(q => q.Scrap);
             var q0 = qs[0];
-            using var f = new Form { Text = Tr("Vender o desguazar"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, KeyPreview = true };
+            bool rentable = qs.Any(q => q.Rent > 0) || qs.All(q => q.Cannot != null);   // (sin el SQL nuevo: sin alquiler)
+            int nCards = rentable ? 3 : 2;
+            using var f = new Form { Text = Tr("Vender, alquilar o desguazar"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, KeyPreview = true };
             DialogKit.Dress(f);
             var wa = Screen.FromControl(this).WorkingArea;
-            int W = Math.Min(Theme.Px(780), wa.Width - 40);
-            bool stack = W < Theme.Px(640);   // pantalla estrecha: una tarjeta debajo de otra
-            int cardW = stack ? W - Theme.Px(48) : (W - Theme.Px(48) - Theme.Px(16)) / 2;
+            int W = Math.Min(Theme.Px(nCards == 3 ? 1100 : 780), wa.Width - 40);
+            bool stack = W < Theme.Px(nCards == 3 ? 900 : 640);   // pantalla estrecha: una tarjeta debajo de otra
+            int cardW = stack ? W - Theme.Px(48) : (W - Theme.Px(48) - Theme.Px(16) * (nCards - 1)) / nCards;
 
-            var body = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = stack ? 1 : 2, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(24), Theme.Px(16), Theme.Px(24), Theme.Px(12)) };
+            var body = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = stack ? 1 : nCards, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(24), Theme.Px(16), Theme.Px(24), Theme.Px(12)) };
             for (int i = 0; i < body.ColumnCount; i++) body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / body.ColumnCount));
             var intro = new Label
             {
@@ -120,7 +151,8 @@ namespace SelectOR
             var cols = new List<(Card card, FlowLayoutPanel col)>();
             Panel Card(string title, Color accent, string big, string bigSub, string[] lines, string button, bool primary, bool enabled, string why, int code)
             {
-                var card = new Card { Fill = Theme.Surface, BorderColor = Color.FromArgb(90, accent), Radius = 12, Padding = new Padding(Theme.Px(16)), Width = cardW, Margin = new Padding(0, 0, stack ? 0 : Theme.Px(16), Theme.Px(12)) };
+                bool last = cols.Count == nCards - 1;
+                var card = new Card { Fill = Theme.Surface, BorderColor = Color.FromArgb(90, accent), Radius = 12, Padding = new Padding(Theme.Px(16)), Width = cardW, Margin = new Padding(0, 0, stack || last ? 0 : Theme.Px(16), Theme.Px(12)) };
                 var col = new FlowLayoutPanel { Location = new Point(card.Padding.Left, card.Padding.Top), FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.Surface, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0) };
                 Label L(string t, Color c, float size, FontStyle st = FontStyle.Regular, int top = 0) => new Label { Text = t, AutoSize = true, MaximumSize = new Size(cardW - Theme.Px(34), 0), ForeColor = c, BackColor = Theme.Surface, Font = Theme.Font(size, st), Margin = new Padding(0, top, 0, 0) };
                 col.Controls.Add(L(title, accent, 10f, FontStyle.Bold));
@@ -158,7 +190,25 @@ namespace SelectOR
                     string.Format(Tr("El {0} % del precio nuevo: mucho menos que venderlo."), (q0.ScrapPct * 100).ToString("0.#", I18n.Culture)),
                     Tr("El tren desaparece de la flota para siempre."),
                 }, onlyRented ? Tr("Devolver") : (many ? Tr("Desguazar todos") : Tr("Desguazar")), false, scrappable.Count > 0, whyScrap, 2);
-            body.Controls.Add(sell); body.Controls.Add(scr);
+            body.Controls.Add(sell);
+            if (rentable)
+            {
+                var rentable2 = sellable.Where(q => q.Rent > 0).ToList();
+                double rent = rentable2.Sum(q => q.Rent), general = rentable2.Sum(q => q.RentGeneral);
+                int off = general > 0 ? (int)Math.Round(100 - 100 * rent / general) : 0;
+                string whyRent = sellable.Count == 0 ? CannotText(qs.Select(q => q.Cannot).FirstOrDefault(c => c != null))
+                               : rentable2.Count == 0 ? Tr("Ese tren no tiene precio: no se puede alquilar.") : null;
+                var rnt = Card(Tr("ALQUILAR A OTRA EMPRESA"), TabTeal, EurT(rent), Tr("lo que te paga cada servicio que haga"),
+                    new[]
+                    {
+                        string.Format(Tr("SelectOR lo alquila por {0} por servicio: en el mercado sale un {1} % más barato (el precio lo fija SelectOR por el uso y el estado)."), EurT(general), off),
+                        Tr("Tú eliges el plazo: 7, 14 o 30 días. Al acabar vuelve a tu flota."),
+                        Tr("Mientras está alquilado lo usa la otra empresa y paga ella su mantenimiento."),
+                        Tr("Mientras esté en el mercado no puede salir en servicios."),
+                    }, many ? Tr("Alquilar todos") : Tr("Ofrecer en alquiler"), true, rentable2.Count > 0, whyRent, 3);
+                body.Controls.Add(rnt);
+            }
+            body.Controls.Add(scr);
             // las dos tarjetas con el alto de la más alta (con todo su contenido ya maquetado)
             int ch = 0;
             foreach (var (cd, cl) in cols) { cl.PerformLayout(); ch = Math.Max(ch, cl.GetPreferredSize(new Size(cardW - cd.Padding.Horizontal, 0)).Height); }
@@ -168,7 +218,7 @@ namespace SelectOR
             var cancel = DialogKit.Secondary(Tr("Cancelar")); cancel.Click += (s, e) => f.Close();
             foot.AddRight(cancel);
             f.Controls.Add(body); f.Controls.Add(foot);
-            var head = DialogKit.Crown(f, Tr("Vender o desguazar"), Tr("El precio lo fija SelectOR: no lo decide la empresa"), "💶");
+            var head = DialogKit.Crown(f, Tr(rentable ? "Vender, alquilar o desguazar" : "Vender o desguazar"), Tr("El precio lo fija SelectOR: no lo decide la empresa"), "💶");
             body.PerformLayout();
             int bh = body.PreferredSize.Height;
             f.ClientSize = new Size(W, Math.Min(wa.Height - 60, head.Height + Theme.Px(6) + bh + foot.Height));
@@ -215,7 +265,8 @@ namespace SelectOR
 
         async Task WithdrawVehicle(string vehicleId)
         {
-            var (json, err) = await Supa.RpcAsync("market_browse", new { });
+            var (json, err) = await Supa.RpcAsync("market_browse2", new { });   // (1.2.90: también los de alquiler)
+            if (MissingRpc(err)) (json, err) = await Supa.RpcAsync("market_browse", new { });
             if (err != null) { Msg(_fleetMsg, Tr("Error: ") + err, true); return; }
             string listing = null; string name = "";
             try
@@ -225,7 +276,7 @@ namespace SelectOR
                     if (Str(e, "vehicle_id") == vehicleId) { listing = Str(e, "id"); name = Str(e, "name"); break; }
             }
             catch { }
-            if (listing == null) { Msg(_fleetMsg, Tr("Ese tren ya no está a la venta."), true); LoadFleet(); return; }
+            if (listing == null) { Msg(_fleetMsg, Tr("Ese tren ya no está en el mercado."), true); LoadFleet(); return; }
             if (ThemedBox.Show(this, string.Format(Tr("¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios."), name), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             var (_, e2) = await Supa.RpcAsync("market_withdraw", new { p_listing = listing });
             if (e2 != null) { Msg(_fleetMsg, Tr("Error: ") + e2, true); return; }
@@ -248,26 +299,55 @@ namespace SelectOR
         Panel[] _tabPages;
         int _tabPage;
         CardTable _showList, _adsList, _jobsList, _mktList;
-        Label _tabMsg, _tabIntro;
-        RoundButton _showJoinBtn, _showEditBtn, _adNewBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktImgBtn, _mktWithdrawBtn;
+        Label _tabMsg;
+        TablonBanner _tabBanner;   // (1.2.90) la cabecera: un teleindicador de estación (TablonBanner.cs)
+        RoundButton _showJoinBtn, _showEditBtn, _adNewBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktRentBtn, _mktWithdrawBtn, _mktReturnBtn;
         FlowLayoutPanel _tabBtns;
         int _tabSeq;
         sealed class ShowRow { public string Id, Name, Code, Slogan, About, Kinds; public bool Seeking, Mine; public int Members, Trains, Services, LeaguePos; public double Km; public Image Logo; }
         sealed class AdRow { public string Id, CompanyId, Company, Title, Body; public bool HasImage, Featured, Mine; public DateTime Expires; public Image Logo; }
         sealed class JobRow { public string Id, CompanyId, Company, Role, Title, Body, MyStatus; public int MinPoints, MinServices, Seats, Hired, Applicants, MyPoints, MyServices; public bool Member, Mine; public Image Logo; }
-        sealed class MktRow { public string Id, VehicleId, SellerId, Seller, Name, Kind, Engine; public int Seats, Cond; public double Kw, Kmh, Km, Price, PriceNew; public DateTime Expires; public bool HasImage, Mine; public Image Logo; }
+        // (1.2.90) Listing: «sale» (a la venta), «rent» (en alquiler) o «rental» (un alquiler de tu empresa, en curso o reciente)
+        sealed class MktRow
+        {
+            public string Id, VehicleId, SellerId, Seller, Name, Kind, Engine, Listing = "sale", Role, ConFile, EndReason; public int Seats, Cond, RentDays, Services;
+            public double Kw, Kmh, Km, Price, PriceNew, Earned; public DateTime Expires, Ends, Ended; public bool HasImage, Mine, Active, InUse; public Image Logo;
+            public List<TrainVeh> Vehicles = new();
+            public int Have = -1; public string HaveText = "";   // el material: 2 tienes su .con · 1 tienes sus vehículos · 0 te falta · −1 no se sabe
+            public string Key => Listing == "rental" ? "R:" + Id : Id;
+        }
         readonly List<ShowRow> _showRows = new();
         readonly List<AdRow> _adRows = new();
         readonly List<JobRow> _jobRows = new();
         readonly List<MktRow> _mktRows = new();
 
+        static readonly string[] TablonTabNames = { "Escaparate", "Anuncios", "Empleo", "Mercado de trenes", "Transparencia" };
+        static readonly string[] TabIcons = { "🏢", "📌", "🧑‍✈️", "🚆", "📊" };
+        static readonly string[] TabKickers = { "Las empresas de SelectOR", "Avisos de las empresas", "Bolsa de trabajo", "Compra, venta y alquiler", "Portal de transparencia" };
+        static readonly Color TabTeal = Color.FromArgb(77, 182, 172), TabOrange = Color.FromArgb(255, 152, 67), TabBlue = Color.FromArgb(120, 144, 226);
+        static readonly Color[] TabColors = { Theme.Gold, TabOrange, TabBlue, Theme.AccentHi, TabTeal };
         static readonly string[] TabIntros =
         {
             "Las empresas que quieren darse a conocer, con sus datos del mes. Si una busca socios, puedes pedir unirte desde aquí.",
             "Anuncios de las empresas: novedades, servicios nuevos, quedadas en la sala… Duran 3 o 7 días; los destacados salen primero.",
             "Ofertas de empleo de las empresas. Si cumples los requisitos, apúntate con un mensaje: la empresa acepta o rechaza tu solicitud.",
-            "Trenes que venden otras empresas, al precio que fija SelectOR según su uso y estado. El comprador paga ese precio y el tren pasa a su flota con sus km.",
+            "Trenes que venden o alquilan otras empresas, al precio que fija SelectOR según su uso y estado. En cada uno ves si tienes su material en tu carpeta.",
+            "Cómo va cada empresa en el mes: lo que cuenta en la Liga y lo que no, y unos indicadores iguales para todas. Sin nombres de maquinistas.",
         };
+        readonly Dictionary<int, List<string>> _tabNews = new();   // lo último de cada página, para el letrero de la cabecera
+
+        void TablonNews(int page, IEnumerable<string> items)
+        {
+            _tabNews[page] = items.Take(6).ToList();
+            var all = new List<string>();
+            for (int i = 0; i < 6 && all.Count < 18; i++)
+                foreach (var p in _tabNews.Keys.OrderBy(k => k))
+                    if (i < _tabNews[p].Count) all.Add(_tabNews[p][i]);
+            _tabBanner?.SetTicker(all);
+        }
+
+        void TablonBannerPage(int i)
+            => _tabBanner?.SetPage(TabIcons[i], Tr(TabKickers[i]), Tr(TablonTabNames[i]), Tr(TabIntros[i]), TabColors[i]);
 
         Panel BuildTablonSubpanel()
         {
@@ -279,18 +359,47 @@ namespace SelectOR
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
+            // (1.2.90) arriba, el teleindicador con la página, su explicación, la hora y lo último del tablón
+            _tabBanner = new TablonBanner { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 0, 0, Theme.Px(6)) };
+            TablonBannerPage(0);
+            t.Controls.Add(_tabBanner);
+
             var top = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 42, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var tabs = MakeSubTabs(new[] { "Escaparate", "Anuncios", "Empleo", "Mercado de trenes" }, ShowTablonPage);
+            var tabs = MakeSubTabs(TablonTabNames, ShowTablonPage);
+            // cada pestaña con su icono; si no caben (ventana estrecha), más juntas y, si aún no, sin los iconos
+            int fitLevel = -1;
+            void FitTabs()
+            {
+                int avail = top.ClientSize.Width - top.GetColumnWidths().Skip(1).Sum() - 4;
+                if (avail <= 0) return;
+                using var tf = Theme.Font(9.75f, FontStyle.Bold);
+                for (int level = 0; level < 3; level++)
+                {
+                    int total = 0;
+                    var texts = new List<(RoundButton b, string t, int w)>();
+                    for (int i = 0; i < tabs.Controls.Count && i < TabIcons.Length; i++)
+                        if (tabs.Controls[i] is RoundButton tb)
+                        {
+                            string name = Tr(TablonTabNames[i]);
+                            string tx = level == 0 ? TabIcons[i] + "  " + name : level == 1 ? TabIcons[i] + " " + name : name;
+                            int w = TextRenderer.MeasureText(tx, tf).Width + (level == 0 ? 34 : 20);
+                            texts.Add((tb, tx, w)); total += w + tb.Margin.Horizontal;
+                        }
+                    if (total <= avail || level == 2)
+                    {
+                        if (level != fitLevel) { foreach (var (b, tx, w) in texts) { b.Text = tx; b.Width = w; } fitLevel = level; }
+                        return;
+                    }
+                }
+            }
+            top.SizeChanged += (s, e) => FitTabs();
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             var search = new RoundedInput(I18n.T("🔎  Buscar…")) { Width = 240, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
-            search.Box.TextChanged += (s, e) => { foreach (var l in new[] { _showList, _adsList, _jobsList, _mktList }) l?.Filter(search.Box.Text); };
+            search.Box.TextChanged += (s, e) => { foreach (var l in new[] { _showList, _adsList, _jobsList, _mktList, _trnList }) l?.Filter(search.Box.Text); };
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
-
-            _tabIntro = EmpIntro(TabIntros[0]); _tabIntro.MaximumSize = new Size(1000, 0);
-            t.Controls.Add(_tabIntro);
 
             CardTable Cards(int cols, int h, int minW)
             {
@@ -302,21 +411,27 @@ namespace SelectOR
                 return c;
             }
             _showList = Cards(2, 80, 460); _showList.AvatarSize = 46; _showList.ItemActivated += _ => ShowCompanyCard();
+            _showList.Accent = row => _showRows.FirstOrDefault(x => x.Id == row.Key) is ShowRow sr && sr.Seeking ? Theme.Gold : Color.FromArgb(150, Theme.Gold);
             _adsList = Cards(1, 80, 520); _adsList.Icon = null; _adsList.ThumbWidth = 220; _adsList.QuoteMarks = false; _adsList.ItemActivated += _ => ShowAdImage();
+            _adsList.Accent = row => _adRows.FirstOrDefault(x => x.Id == row.Key) is AdRow ar && ar.Featured ? Theme.Gold : TabOrange;
             // la imagen del anuncio a la vista, a la izquierda de su tarjeta (doble clic: en grande)
             _adsList.ThumbSlot = row => _adRows.FirstOrDefault(a => a.Id == row.Key)?.HasImage == true;
             _adsList.Thumb = row => row.Key != null && _adImgs.TryGetValue(row.Key, out var im) ? im : null;
-            _jobsList = Cards(1, 72, 520); _jobsList.ItemActivated += _ => ApplyJob();
-            _mktList = Cards(2, 96, 460); _mktList.ItemActivated += _ => ShowMarketImage();
-            _mktList.SubCols = new[] { 2 }; _mktList.QuoteCol = 3; _mktList.QuoteMarks = false;   // el uso (km, estado, de quién, plazo) en su propia línea
+            _jobsList = Cards(1, 72, 520); _jobsList.ItemActivated += _ => ApplyJob(); _jobsList.Accent = _ => TabBlue;
+            // (1.2.90) el mercado, en «billetes»: sin «Ver composición» (la composición ya se ve en la tarjeta); debajo del
+            // uso, si tienes el material del tren en tu carpeta
+            _mktList = Cards(2, 96, 460); _mktList.Ticket = true;
+            _mktList.SubCols = new[] { 2, 3 }; _mktList.QuoteCol = 4; _mktList.QuoteMarks = false; _mktList.RightSubCols = new[] { 6, 7 };
+            _mktList.Accent = row => _mktRows.FirstOrDefault(m => m.Key == row.Key) is MktRow m ? (m.Listing == "sale" ? Theme.AccentHi : m.Listing == "rent" ? TabTeal : m.Active ? TabBlue : Theme.SurfaceHi) : null;
             // la composición 2D de cada tren abajo de su tarjeta, como en Flota (la imagen guardada con el tren)
             _mktList.StripHeight = 56; _mktList.StripRows = 1;   // el tren entero en un renglón (AutoHeight: debajo del texto)
             _mktList.Strip = row => row.Key != null && _mktStrips.TryGetValue(row.Key, out var b) ? b : null;
-            _mktList.StripNote = row => _mktRows.FirstOrDefault(m => m.Id == row.Key) is MktRow m && !m.HasImage ? Tr("Sin composición guardada") : null;
+            _mktList.StripNote = row => _mktRows.FirstOrDefault(m => m.Key == row.Key) is MktRow m && !m.HasImage ? Tr("Sin composición guardada") : null;
+            _trnList = BuildTransparencyList(Cards);   // (1.2.90) MainMenuForm.Transparencia.cs
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
-            _tabPages = new Panel[4];
-            var lists = new[] { _showList, _adsList, _jobsList, _mktList };
-            for (int i = 0; i < 4; i++)
+            _tabPages = new Panel[5];
+            var lists = new[] { _showList, _adsList, _jobsList, _mktList, _trnList };
+            for (int i = 0; i < lists.Length; i++)
             {
                 var pg = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Visible = i == 0 };
                 lists[i].Dock = DockStyle.Fill; pg.Controls.Add(lists[i]);
@@ -343,13 +458,17 @@ namespace SelectOR
             _jobNewBtn = B("Publicar oferta…", false, NewJob);
             _jobCloseBtn = B("Cerrar oferta", false, CloseJob);
             _mktBuyBtn = B("Comprar…", true, BuyFromMarket);
-            _mktImgBtn = B("Ver composición", false, ShowMarketImage);
+            _mktRentBtn = B("Alquilar…", true, RentFromMarket);
             _mktWithdrawBtn = B("Retirar del mercado", false, WithdrawFromMarket);
-            _tabBtns.Controls.AddRange(new Control[] { _showJoinBtn, _showEditBtn, _adNewBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktImgBtn, _mktWithdrawBtn });
+            _mktReturnBtn = B("Devolver el tren", false, ReturnRental);
+            _trnMonthBtn = B("Ver el mes anterior", false, ToggleTransparencyMonth);
+            _trnHowBtn = B("¿Cómo se calcula?", false, ShowLeagueRules);
+            _tabBtns.Controls.AddRange(new Control[] { _showJoinBtn, _showEditBtn, _adNewBtn, _adDelBtn, _jobApplyBtn, _jobNewBtn, _jobCloseBtn, _mktBuyBtn, _mktRentBtn, _mktWithdrawBtn, _mktReturnBtn, _trnMonthBtn, _trnHowBtn });
             t.Controls.Add(_tabBtns);
             _tabMsg = EmpMsg(); _tabMsg.MaximumSize = new Size(900, 0); _tabMsg.Margin = new Padding(2, 4, 2, 2);
             t.Controls.Add(_tabMsg);
             t.SizeChanged += (s, e) => _tabBtns.MaximumSize = new Size(Math.Max(200, t.ClientSize.Width - 4), 0);
+            t.SizeChanged += (s, e) => { if (_tabBanner != null) _tabBanner.Compact = t.ClientSize.Height < Theme.Px(560); };   // (ventana baja: cabecera baja)
             _tabPanel = t;
             UpdateTablonButtons();
             return t;
@@ -359,7 +478,7 @@ namespace SelectOR
         {
             _tabPage = i;
             for (int k = 0; k < _tabPages.Length; k++) _tabPages[k].Visible = k == i;
-            if (_tabIntro != null) _tabIntro.Text = Tr(TabIntros[i]);
+            TablonBannerPage(i);
             Msg(_tabMsg, "", false);
             UpdateTablonButtons();
             LoadTablon();
@@ -378,23 +497,51 @@ namespace SelectOR
             V(_jobApplyBtn, _tabPage == 2); if (_jobApplyBtn != null) _jobApplyBtn.Enabled = jb != null && !jb.Member && string.IsNullOrEmpty(jb.MyStatus) && jb.MyPoints >= jb.MinPoints && jb.MyServices >= jb.MinServices;
             V(_jobNewBtn, _tabPage == 2 && manage);
             V(_jobCloseBtn, _tabPage == 2 && (manage || Supa.IsSuperadmin)); if (_jobCloseBtn != null) _jobCloseBtn.Enabled = jb != null && (jb.Mine || Supa.IsSuperadmin);
-            V(_mktBuyBtn, _tabPage == 3 && manage); if (_mktBuyBtn != null) _mktBuyBtn.Enabled = mk != null && mk.SellerId != _empSel?.Id;
-            V(_mktImgBtn, _tabPage == 3); if (_mktImgBtn != null) _mktImgBtn.Enabled = mk?.HasImage == true;
-            V(_mktWithdrawBtn, _tabPage == 3 && manage); if (_mktWithdrawBtn != null) _mktWithdrawBtn.Enabled = mk != null && (mk.Mine || Supa.IsSuperadmin);
+            // (1.2.90) comprar o alquilar según el anuncio elegido; «Devolver» para los que tu empresa tiene alquilados
+            bool listing = mk != null && mk.Listing != "rental";
+            V(_mktBuyBtn, _tabPage == 3 && manage && (mk == null || mk.Listing == "sale")); if (_mktBuyBtn != null) _mktBuyBtn.Enabled = mk != null && mk.Listing == "sale" && mk.SellerId != _empSel?.Id;
+            V(_mktRentBtn, _tabPage == 3 && manage && mk != null && mk.Listing == "rent"); if (_mktRentBtn != null) _mktRentBtn.Enabled = mk != null && mk.Listing == "rent" && mk.SellerId != _empSel?.Id;
+            V(_mktWithdrawBtn, _tabPage == 3 && manage && (mk == null || listing)); if (_mktWithdrawBtn != null) _mktWithdrawBtn.Enabled = listing && (mk.Mine || Supa.IsSuperadmin);
+            V(_mktReturnBtn, _tabPage == 3 && manage && mk != null && mk.Listing == "rental" && mk.Role == "renter" && mk.Active);
+            if (_mktReturnBtn != null) _mktReturnBtn.Enabled = mk != null && mk.Listing == "rental" && mk.Active && !mk.InUse;
+            V(_trnMonthBtn, _tabPage == 4); V(_trnHowBtn, _tabPage == 4);
+            if (_trnMonthBtn != null) { string mt = Tr(_trnPrev ? "Ver este mes" : "Ver el mes anterior"); if (_trnMonthBtn.Text != mt) { _trnMonthBtn.Text = mt; using var fb = Theme.Font(10.5f, FontStyle.Bold); _trnMonthBtn.Width = TextRenderer.MeasureText(mt, fb).Width + 40; } }
             foreach (Control c in _tabBtns.Controls) c.Invalidate();
         }
 
         static T Sel<T>(CardTable l, List<T> rows) where T : class { int i = l?.SelectedRow ?? -1; return i >= 0 && i < rows.Count ? rows[i] : null; }
 
+        bool _tabNewsAsked;
+        async void TablonPrefetchNews()
+        {
+            if (_tabNewsAsked) return;
+            _tabNewsAsked = true;
+            try
+            {
+                var (aj, ae) = await Supa.RpcAsync("ads_list", new { });
+                if (ae == null && !_tabNews.ContainsKey(1)) { using var d = JsonDocument.Parse(aj); TablonNews(1, d.RootElement.EnumerateArray().Select(e => "📌 " + Str(e, "company") + ": " + Str(e, "title")).ToList()); }
+                var (jj, je) = await Supa.RpcAsync("jobs_list", new { });
+                if (je == null && !_tabNews.ContainsKey(2)) { using var d = JsonDocument.Parse(jj); TablonNews(2, d.RootElement.EnumerateArray().Select(e => "🧑‍✈️ " + string.Format(Tr("{0} busca: {1}"), Str(e, "company"), Str(e, "title"))).ToList()); }
+                var (mj, me) = await Supa.RpcAsync("market_browse2", new { });
+                if (me == null && !_tabNews.ContainsKey(3)) { using var d = JsonDocument.Parse(mj); TablonNews(3, d.RootElement.EnumerateArray().Select(e => MarketNews(Str(e, "listing_kind"), Str(e, "name"), Num(e, "price"))).ToList()); }
+            }
+            catch { }
+        }
+
+        static string MarketNews(string kind, string name, double price)
+            => "🚆 " + (kind == "rent" ? string.Format(Tr("En alquiler: {0} · {1} por servicio"), name, EurT(price)) : string.Format(Tr("En venta: {0} · {1}"), name, EurT(price)));
+
         void LoadTablon()
         {
             if (_tabPanel == null || !Supa.IsLoggedIn) return;
+            TablonPrefetchNews();
             switch (_tabPage)
             {
                 case 0: LoadShowcase(); break;
                 case 1: LoadAds(); break;
                 case 2: LoadJobs(); break;
-                default: LoadMarket(); break;
+                case 3: LoadMarket(); break;
+                default: LoadTransparency(); break;
             }
         }
 
@@ -444,6 +591,7 @@ namespace SelectOR
                     new Color?[] { null, r.Mine ? Theme.AccentHi : Color.FromArgb(240, 196, 90), Theme.Subtle, Theme.Subtle, null, Theme.AccentHi, Theme.Subtle }, r.Logo, r.Id);
             }
             if (_showRows.Count == 0) _showList.SetEmpty(Tr("Todavía no hay empresas en el escaparate. El gerente o un gestor la añade con «Ficha de mi empresa…»."));
+            TablonNews(0, _showRows.Where(r => r.Seeking).Select(r => "🏢 " + string.Format(Tr("{0} busca socios"), r.Name)));
             UpdateTablonButtons();
         }
 
@@ -529,6 +677,7 @@ namespace SelectOR
                 k++;
             }
             if (_adRows.Count == 0) _adsList.SetEmpty(Tr("No hay anuncios ahora mismo."));
+            TablonNews(1, _adRows.Select(r => "📌 " + r.Company + ": " + r.Title));
             UpdateTablonButtons();
             FetchAdImages(seq);
         }
@@ -697,6 +846,7 @@ namespace SelectOR
                     new Color?[] { null, Color.FromArgb(120, 144, 226), Theme.AccentHi, Theme.Subtle, null, stc, null }, r.Logo, r.Id);
             }
             if (_jobRows.Count == 0) _jobsList.SetEmpty(Tr("No hay ofertas de empleo abiertas ahora mismo."));
+            TablonNews(2, _jobRows.Select(r => "🧑‍✈️ " + string.Format(Tr("{0} busca: {1}"), r.Company, r.Title)));
             UpdateTablonButtons();
         }
 
@@ -759,49 +909,169 @@ namespace SelectOR
         }
 
         // ---------- Mercado de trenes ----------
+        // (1.2.90) venta y alquiler (market_browse2: con el .con y los vehículos de cada tren) y, arriba, los alquileres de
+        // tu empresa (my_rentals). Sin el SQL nuevo: market_browse, como antes (solo venta).
+        bool _mktOld;
         async void LoadMarket()
         {
             int seq = ++_tabSeq;
             if (_mktRows.Count == 0) _mktList.ShowLoading(Tr("Cargando…"));
-            var (json, err) = await Supa.RpcAsync("market_browse", new { });
+            var (json, err) = await Supa.RpcAsync("market_browse2", new { });
+            _mktOld = MissingRpc(err);
+            if (_mktOld) (json, err) = await Supa.RpcAsync("market_browse", new { });
+            string rj = null;
+            var co = _empSel;
+            if (!_mktOld && err == null && co != null)
+            {
+                var (j2, e2) = await Supa.RpcAsync("my_rentals", new { p_company = co.Id });
+                if (e2 == null) rj = j2;
+            }
             if (seq != _tabSeq) return;
             _mktRows.Clear();
             if (err != null) { _mktList.SetEmpty(TabErr(err)); UpdateTablonButtons(); return; }
             try
             {
-                using var d = JsonDocument.Parse(json);
-                foreach (var e in d.RootElement.EnumerateArray())
-                    _mktRows.Add(new MktRow
-                    {
-                        Id = Str(e, "id"), VehicleId = Str(e, "vehicle_id"), SellerId = Str(e, "seller_company"), Seller = Str(e, "seller"), Name = Str(e, "name"),
-                        Kind = Str(e, "kind"), Engine = Str(e, "engine_type"), Seats = (int)Num(e, "seats"), Cond = (int)Num(e, "cond"), Kw = Num(e, "power_kw"),
-                        Kmh = Num(e, "max_speed_kmh"), Km = Num(e, "km_total"), Price = Num(e, "price"), PriceNew = Num(e, "price_new"), Expires = Utc(e, "expires_at"),
-                        HasImage = Bool(e, "has_image"), Mine = Bool(e, "mine"), Logo = LogoFor(Str(e, "seller_company"), Str(e, "logo"))
-                    });
+                if (rj != null)
+                {
+                    using var d = JsonDocument.Parse(rj);
+                    foreach (var e in d.RootElement.EnumerateArray())
+                        _mktRows.Add(new MktRow
+                        {
+                            Listing = "rental", Id = Str(e, "id"), VehicleId = Str(e, "vehicle_id"), Name = Str(e, "name"), Role = Str(e, "role"),
+                            SellerId = Str(e, "other_company"), Seller = Str(e, "other"), Price = Num(e, "price"), RentDays = (int)Num(e, "days"),
+                            Ends = Utc(e, "ends_at"), Ended = Utc(e, "ended_at"), Active = Str(e, "status") == "active", Services = (int)Num(e, "services"),
+                            Earned = Num(e, "earned"), InUse = Bool(e, "in_use"), HasImage = Bool(e, "has_image"), ConFile = Str(e, "con_file"),
+                            EndReason = Str(e, "end_reason"), Vehicles = VehList(e), Logo = LogoFor(Str(e, "other_company"), Str(e, "logo"))
+                        });
+                }
+                using (var d = JsonDocument.Parse(json))
+                    foreach (var e in d.RootElement.EnumerateArray())
+                        _mktRows.Add(new MktRow
+                        {
+                            Listing = Str(e, "listing_kind") == "rent" ? "rent" : "sale", RentDays = (int)Num(e, "rent_days"),
+                            Id = Str(e, "id"), VehicleId = Str(e, "vehicle_id"), SellerId = Str(e, "seller_company"), Seller = Str(e, "seller"), Name = Str(e, "name"),
+                            Kind = Str(e, "kind"), Engine = Str(e, "engine_type"), Seats = (int)Num(e, "seats"), Cond = (int)Num(e, "cond"), Kw = Num(e, "power_kw"),
+                            Kmh = Num(e, "max_speed_kmh"), Km = Num(e, "km_total"), Price = Num(e, "price"), PriceNew = Num(e, "price_new"), Expires = Utc(e, "expires_at"),
+                            HasImage = Bool(e, "has_image"), Mine = Bool(e, "mine"), ConFile = Str(e, "con_file"), Vehicles = VehList(e),
+                            Logo = LogoFor(Str(e, "seller_company"), Str(e, "logo"))
+                        });
             }
             catch { }
-            _mktList.ClearRows();
-            foreach (var r in _mktRows)
-            {
-                string kind = r.Kind == "freight" ? Tr("Mercancías") : r.Kind == "pax" || r.Seats > 0 ? Tr("Viajeros") : "";
-                var spec = new List<string>();
-                if (kind.Length > 0) spec.Add(kind);
-                if (r.Seats > 0 && r.Kind != "freight") spec.Add(string.Format(Tr("{0} plazas"), r.Seats.ToString("N0", I18n.Culture)));
-                string tr = TractionName(r.Engine); if (tr != "—") spec.Add(tr);
-                if (r.Kw > 0) spec.Add(r.Kw.ToString("N0", I18n.Culture) + " kW");
-                if (r.Kmh > 0) spec.Add(r.Kmh.ToString("N0", I18n.Culture) + " km/h");
-                string use = string.Format(Tr("{0} km · estado {1} % · de {2}"), r.Km.ToString("N0", I18n.Culture), r.Cond, r.Seller) + "  ·  " + DaysLeft(r.Expires);
-                string pct = r.PriceNew > 0 ? string.Format(Tr("{0} % del precio nuevo"), Math.Round(100 * r.Price / r.PriceNew)) : "";
-                _mktList.AddRow(new[] { r.Name, r.Mine ? Tr("Tu empresa") : "", string.Join("  ·  ", spec), use, "", EurT(r.Price), pct },
-                    new Color?[] { null, Theme.AccentHi, Theme.Subtle, Theme.Subtle, null, Theme.AccentHi, Theme.Subtle }, r.Logo, r.Id);
-            }
-            if (_mktRows.Count == 0) _mktList.SetEmpty(Tr("No hay trenes a la venta ahora mismo. Una empresa pone uno a la venta desde Flota → «Vender o desguazar…»."));
-            UpdateTablonButtons();
+            FillMarketCards();
+            TablonNews(3, _mktRows.Where(r => r.Listing != "rental").Select(r => MarketNews(r.Listing, r.Name, r.Price)));
             FetchMarketStrips(seq);
+            CheckMarketMaterial(seq);
         }
 
-        // La composición 2D de cada tren a la venta: se pide una vez (market_image), se guarda en la caché de disco y se
-        // queda en memoria para pintarla en su tarjeta.
+        static List<TrainVeh> VehList(JsonElement e)
+        {
+            var l = new List<TrainVeh>();
+            try { if (e.TryGetProperty("vehicles", out var v) && v.ValueKind == JsonValueKind.Array) foreach (var x in v.EnumerateArray()) l.Add(TrainVeh.FromJson(x)); } catch { }
+            return l;
+        }
+
+        void FillMarketCards()
+        {
+            int sel = _mktList.SelectedRow; string selKey = sel >= 0 && sel < _mktRows.Count ? _mktRows[sel].Key : null;
+            _mktList.ClearRows();
+            Color red = Color.FromArgb(229, 115, 115), gray = Theme.Subtle;
+            int k = 0;
+            foreach (var r in _mktRows)
+            {
+                // la línea del material: si lo tienes en tu carpeta (o al menos sus vehículos) o qué te falta
+                string have = r.Have switch
+                {
+                    2 => "✓  " + string.Format(Tr("Lo tienes en tu carpeta: «{0}»"), r.HaveText),
+                    1 => "✓  " + Tr("Tienes todo su material en tu carpeta: su .con se añade desde Flota"),
+                    0 => "✗  " + string.Format(Tr("No lo tienes en tu carpeta: te falta {0}"), r.HaveText),
+                    _ => r.Vehicles.Count > 0 && r.HaveText == "…" ? Tr("Mirando si lo tienes en tu carpeta…") : "",
+                };
+                Color hc = r.Have >= 1 ? Theme.AccentHi : r.Have == 0 ? red : gray;
+                if (r.Listing == "rental")
+                {
+                    if (r.Role == "owner") have = "";   // (es tuyo: no hace falta)
+                    string pill = !r.Active ? Tr("Alquiler terminado") : r.Role == "owner" ? Tr("Alquilado a otra empresa") : Tr("Alquilado por tu empresa");
+                    string who = r.Role == "owner" ? string.Format(Tr("Lo tiene {0}"), r.Seller) : string.Format(Tr("De {0}"), r.Seller);
+                    string srv = string.Format(r.Services == 1 ? Tr("{0} servicio") : Tr("{0} servicios"), r.Services);
+                    string paid = string.Format(Tr(r.Role == "owner" ? "has cobrado {0}" : "has pagado {0}"), EurT(r.Earned));
+                    string when = r.Active ? (r.InUse ? Tr("en un servicio ahora") : r.Ends <= DateTime.UtcNow ? Tr("vuelve al terminar el servicio") : string.Format(Tr("vuelve a su empresa: {0}"), DaysLeft(r.Ends)))
+                                           : string.Format(Tr("terminó el {0}"), r.Ended.ToLocalTime().ToString("d", I18n.Culture));
+                    _mktList.AddRow(new[] { r.Name, pill, string.Join("  ·  ", who, srv, paid), when, have, EurT(r.Price), Tr("por servicio"), string.Format(Tr("{0} días"), r.RentDays) },
+                        new Color?[] { null, r.Active ? TabBlue : gray, Theme.Subtle, r.Active ? TabBlue : gray, hc, r.Active ? TabBlue : gray, Theme.Subtle, Theme.Subtle }, r.Logo, r.Key);
+                }
+                else
+                {
+                    string kind = r.Kind == "freight" ? Tr("Mercancías") : r.Kind == "pax" || r.Seats > 0 ? Tr("Viajeros") : "";
+                    var spec = new List<string>();
+                    if (kind.Length > 0) spec.Add(kind);
+                    if (r.Seats > 0 && r.Kind != "freight") spec.Add(string.Format(Tr("{0} plazas"), r.Seats.ToString("N0", I18n.Culture)));
+                    string tr = TractionName(r.Engine); if (tr != "—") spec.Add(tr);
+                    if (r.Kw > 0) spec.Add(r.Kw.ToString("N0", I18n.Culture) + " kW");
+                    if (r.Kmh > 0) spec.Add(r.Kmh.ToString("N0", I18n.Culture) + " km/h");
+                    string use = string.Join("  ·  ", r.Km.ToString("N0", I18n.Culture) + " km", string.Format(Tr("estado {0} %"), r.Cond), string.Format(Tr("de {0}"), r.Seller), DaysLeft(r.Expires));
+                    if (r.Mine) _mktList.Badges[k] = Tr("Tu anuncio");
+                    if (r.Listing == "rent")
+                        _mktList.AddRow(new[] { r.Name, Tr("En alquiler"), string.Join("  ·  ", spec), use, have, EurT(r.Price), Tr("por servicio"), string.Format(Tr("durante {0} días"), r.RentDays) },
+                            new Color?[] { null, TabTeal, Theme.Subtle, Theme.Subtle, hc, TabTeal, Theme.Subtle, Theme.Subtle }, r.Logo, r.Key);
+                    else
+                    {
+                        string pct = r.PriceNew > 0 ? string.Format(Tr("{0} % del precio nuevo"), Math.Round(100 * r.Price / r.PriceNew)) : "";
+                        _mktList.AddRow(new[] { r.Name, Tr("En venta"), string.Join("  ·  ", spec), use, have, EurT(r.Price), pct, "" },
+                            new Color?[] { null, Theme.AccentHi, Theme.Subtle, Theme.Subtle, hc, Theme.AccentHi, Theme.Subtle, Theme.Subtle }, r.Logo, r.Key);
+                    }
+                }
+                k++;
+            }
+            if (_mktRows.Count == 0) _mktList.SetEmpty(Tr(_mktOld ? "No hay trenes a la venta ahora mismo. Una empresa pone uno a la venta desde Flota → «Vender o desguazar…»."
+                                                               : "No hay trenes a la venta ni en alquiler ahora mismo. Una empresa ofrece uno desde Flota → «Vender, alquilar o desguazar…»."));
+            if (selKey != null) { int i = _mktRows.FindIndex(m => m.Key == selKey); if (i >= 0) _mktList.SelectRow(i); }
+            UpdateTablonButtons();
+        }
+
+        // ¿Tienes el tren en tu carpeta? Un .con de tu contenido con los mismos vehículos (como reconoce Flota los trenes de
+        // la empresa) o, si no, si están todos sus .eng/.wag. Se mira aparte, sin parar la lista.
+        int _mktHaveSeq;
+        async void CheckMarketMaterial(int seq)
+        {
+            int my = ++_mktHaveSeq;
+            var rows = _mktRows.Where(r => r.Vehicles.Count > 0).ToList();
+            if (rows.Count == 0) return;
+            if (_curFolder?.Path == null) { foreach (var r in rows) { r.Have = -1; r.HaveText = ""; } FillMarketCards(); return; }
+            foreach (var r in rows) { r.Have = -1; r.HaveText = "…"; }
+            FillMarketCards();
+            var all = _consistsAll.Where(c => c?.FilePath != null).ToList();
+            var res = await Task.Run(() =>
+            {
+                var leads = new HashSet<string>(rows.Select(r => r.Vehicles.FirstOrDefault(v => !v.Wagon)?.Name ?? "").Where(x => x.Length > 0), StringComparer.OrdinalIgnoreCase);
+                var byKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var c in all)
+                {
+                    try
+                    {
+                        string lead = LeadEngineName(c);
+                        if (lead == null || !leads.Contains(lead)) continue;
+                        string key = TrainKey(TrainVehiclesOfCached(c));
+                        if (!byKey.ContainsKey(key)) byKey[key] = c.FilePath;
+                    }
+                    catch { }
+                }
+                var outp = new Dictionary<string, (int have, string text)>();
+                foreach (var r in rows)
+                {
+                    if (byKey.TryGetValue(TrainKey(r.Vehicles), out var f)) { outp[r.Key] = (2, System.IO.Path.GetFileName(f)); continue; }
+                    var missing = r.Vehicles.Where(v => ResolveCarFile(v.Name, v.Folder) == null)
+                                            .Select(v => string.IsNullOrEmpty(v.Folder) ? v.Name : v.Folder).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    outp[r.Key] = missing.Count == 0 ? (1, "") : (0, string.Join(", ", missing.Take(3)) + (missing.Count > 3 ? "…" : ""));
+                }
+                return outp;
+            });
+            if (my != _mktHaveSeq || seq != _tabSeq || IsDisposed) return;
+            foreach (var r in _mktRows) if (res.TryGetValue(r.Key, out var h)) { r.Have = h.have; r.HaveText = h.text; }
+            FillMarketCards();
+        }
+
+        // La composición 2D de cada tren: se pide una vez (market_image o, de un alquiler, rental_image), se guarda en la
+        // caché de disco y se queda en memoria para pintarla en su tarjeta.
         readonly Dictionary<string, Bitmap> _mktStrips = new(StringComparer.OrdinalIgnoreCase);
 
         async void FetchMarketStrips(int seq)
@@ -809,11 +1079,12 @@ namespace SelectOR
             foreach (var r in _mktRows.ToList())
             {
                 if (seq != _tabSeq || IsDisposed) return;
-                if (!r.HasImage || _mktStrips.ContainsKey(r.Id)) continue;
-                string file = SavedImageFile("mercado", r.Id);
+                if (!r.HasImage || _mktStrips.ContainsKey(r.Key)) continue;
+                bool rental = r.Listing == "rental";
+                string file = SavedImageFile(rental ? "alquiler" : "mercado", r.Id);
                 if (!System.IO.File.Exists(file))
                 {
-                    var (json, err) = await Supa.RpcAsync("market_image", new { p_listing = r.Id });
+                    var (json, err) = rental ? await Supa.RpcAsync("rental_image", new { p_rental = r.Id }) : await Supa.RpcAsync("market_image", new { p_listing = r.Id });
                     if (err != null) return;
                     string b64 = JsonText(json);
                     int comma = b64?.IndexOf(',') ?? -1;
@@ -822,27 +1093,24 @@ namespace SelectOR
                 }
                 var bmp = await Task.Run(() => LoadStripFile(file));
                 if (bmp == null || IsDisposed) continue;
-                if (_mktStrips.TryGetValue(r.Id, out var old)) old.Dispose();
-                _mktStrips[r.Id] = bmp;
+                if (_mktStrips.TryGetValue(r.Key, out var old)) old.Dispose();
+                _mktStrips[r.Key] = bmp;
                 _mktList?.Invalidate();
             }
         }
 
-        async void ShowMarketImage()
-        {
-            var r = Sel(_mktList, _mktRows); if (r == null || !r.HasImage) return;
-            var (json, err) = await Supa.RpcAsync("market_image", new { p_listing = r.Id });
-            if (err != null) { Msg(_tabMsg, Tr("Error: ") + err, true); return; }
-            ShowImageWindow(r.Name, JsonText(json), string.Format(Tr("{0} · {1} km · estado {2} %"), EurT(r.Price), r.Km.ToString("N0", I18n.Culture), r.Cond));
-        }
+        // el aviso del material antes de comprar o alquilar
+        string MaterialWarning(MktRow r)
+            => r.Have == 0 ? "\n\n⚠ " + string.Format(Tr("No lo tienes en tu carpeta: te falta {0}. Podrás tenerlo en la flota, pero no conducirlo hasta que instales ese material."), r.HaveText) : "";
 
         async void BuyFromMarket()
         {
             var r = Sel(_mktList, _mktRows); var c = _empSel;
-            if (r == null || c == null || !(CanManage() || Supa.IsSuperadmin)) return;
+            if (r == null || r.Listing != "sale" || c == null || !(CanManage() || Supa.IsSuperadmin)) return;
             if (r.SellerId == c.Id) { Msg(_tabMsg, Tr("No puedes comprar un tren de tu propia empresa."), true); return; }
             string q = string.Format(Tr("¿Comprar «{0}» a {1} por {2}?"), r.Name, r.Seller, EurT(r.Price)) + "\n\n"
-                     + string.Format(Tr("Pasa a la flota de {0} con sus {1} km. Saldo de la empresa: {2}."), c.Name, r.Km.ToString("N0", I18n.Culture), EurT(c.Balance));
+                     + string.Format(Tr("Pasa a la flota de {0} con sus {1} km. Saldo de la empresa: {2}."), c.Name, r.Km.ToString("N0", I18n.Culture), EurT(c.Balance))
+                     + MaterialWarning(r);
             if (c.Balance < r.Price) { ThemedBox.Show(this, q + "\n\n" + Tr("No hay saldo suficiente."), "SelectOR", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             Msg(_tabMsg, Tr("Comprando…"), false);
@@ -853,9 +1121,38 @@ namespace SelectOR
             LoadMarket();
         }
 
+        async void RentFromMarket()
+        {
+            var r = Sel(_mktList, _mktRows); var c = _empSel;
+            if (r == null || r.Listing != "rent" || c == null || !(CanManage() || Supa.IsSuperadmin)) return;
+            if (r.SellerId == c.Id) { Msg(_tabMsg, Tr("No puedes alquilar un tren de tu propia empresa."), true); return; }
+            string q = string.Format(Tr("¿Alquilar «{0}» a {1} durante {2} días por {3} por servicio?"), r.Name, r.Seller, r.RentDays, EurT(r.Price)) + "\n\n"
+                     + string.Format(Tr("Pasa a la flota de {0} como alquilado: cada servicio que haga paga {1} a {2} (no hay que pagar nada al alquilarlo). Al acabar el plazo vuelve a {2}; si está en un servicio, al terminarlo. Puedes devolverlo antes."), c.Name, EurT(r.Price), r.Seller)
+                     + MaterialWarning(r);
+            if (ThemedBox.Show(this, q, "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            Msg(_tabMsg, Tr("Alquilando…"), false);
+            var (_, err) = await Supa.RpcAsync("market_rent", new { p_listing = r.Id, p_company = c.Id });
+            if (err != null) { Msg(_tabMsg, Tr("Error: ") + err, true); LoadMarket(); return; }
+            Msg(_tabMsg, string.Format(Tr("Alquilado: «{0}» ya está en la flota de {1} durante {2} días."), r.Name, c.Name, r.RentDays), false);
+            LoadCompanies();
+            LoadMarket();
+        }
+
+        async void ReturnRental()
+        {
+            var r = Sel(_mktList, _mktRows);
+            if (r == null || r.Listing != "rental" || r.Role != "renter" || !r.Active) return;
+            if (r.InUse) { Msg(_tabMsg, Tr("Ese tren está en un servicio: espera a que termine."), true); return; }
+            if (ThemedBox.Show(this, string.Format(Tr("¿Devolver «{0}» a {1} antes de tiempo? Sale de tu flota y deja de pagarse su alquiler."), r.Name, r.Seller), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            var (_, err) = await Supa.RpcAsync("rental_end", new { p_rental = r.Id });
+            Msg(_tabMsg, err != null ? Tr("Error: ") + err : string.Format(Tr("«{0}» devuelto a {1}."), r.Name, r.Seller), err != null);
+            LoadCompanies();
+            LoadMarket();
+        }
+
         async void WithdrawFromMarket()
         {
-            var r = Sel(_mktList, _mktRows); if (r == null || !(r.Mine || Supa.IsSuperadmin)) return;
+            var r = Sel(_mktList, _mktRows); if (r == null || r.Listing == "rental" || !(r.Mine || Supa.IsSuperadmin)) return;
             if (ThemedBox.Show(this, string.Format(Tr("¿Retirar «{0}» del mercado? Vuelve a la flota y puede salir en servicios."), r.Name), "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             var (_, err) = await Supa.RpcAsync("market_withdraw", new { p_listing = r.Id });
             Msg(_tabMsg, err != null ? Tr("Error: ") + err : string.Format(Tr("«{0}» retirado del mercado: vuelve a estar disponible."), r.Name), err != null);

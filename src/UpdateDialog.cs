@@ -78,23 +78,23 @@ namespace SelectOR
 
             int tx = ir.Right + Theme.Px(16), tw = W - tx - Pad;
             using (var fT = Theme.Font(15f, FontStyle.Bold))
-                TextRenderer.DrawText(g, I18n.T("Nueva versión de SelectOR"), fT, new Rectangle(tx, y0, tw, Theme.Px(30)), Theme.Text, flL);
+                ColorText.Text(g, I18n.T("Nueva versión de SelectOR"), fT, new Rectangle(tx, y0, tw, Theme.Px(30)), Theme.Text, flL);
 
             // Versiones: actual → nueva
             using var fChip = Theme.Font(10f, FontStyle.Bold);
             int cy = y0 + Theme.Px(36), ch = Theme.Px(26);
             int x = Chip(g, tx, cy, ch, Updater.CurrentVersionText, fChip, Theme.Surface2, Theme.Subtle);
             using (var fA = Theme.Font(11f, FontStyle.Bold))
-                TextRenderer.DrawText(g, "→", fA, new Rectangle(x + 6, cy, Theme.Px(22), ch), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, "→", fA, new Rectangle(x + 6, cy, Theme.Px(22), ch), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             x = Chip(g, x + Theme.Px(32), cy, ch, _r.Version ?? "", fChip, Theme.Accent, Color.White);
             if (_r.PublishedAt > DateTime.MinValue)
                 using (var fD = Theme.Font(9f))
-                    TextRenderer.DrawText(g, string.Format(I18n.T("Publicada el {0}"), _r.PublishedAt.ToLocalTime().ToString("dd-MM-yyyy")), fD,
+                    ColorText.Text(g, string.Format(I18n.T("Publicada el {0}"), _r.PublishedAt.ToLocalTime().ToString("dd-MM-yyyy")), fD,
                         new Rectangle(x + Theme.Px(12), cy, W - x - Pad, ch), Theme.Subtle, flL);
 
             // «Novedades»
             using (var fN = Theme.Font(9f, FontStyle.Bold))
-                TextRenderer.DrawText(g, I18n.T("NOVEDADES"), fN, new Rectangle(Pad + 2, _notes.Top - Theme.Px(22), W - Pad * 2, Theme.Px(20)), Theme.Subtle, flL);
+                ColorText.Text(g, I18n.T("NOVEDADES"), fN, new Rectangle(Pad + 2, _notes.Top - Theme.Px(22), W - Pad * 2, Theme.Px(20)), Theme.Subtle, flL);
 
             // Estado de la instalación (fase + detalle)
             if (!string.IsNullOrEmpty(_phase))
@@ -105,9 +105,9 @@ namespace SelectOR
                 using var fDt = Theme.Font(9f);
                 var wrap = TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding;
                 int dw = TextRenderer.MeasureText(_detail ?? "", fDt, Size.Empty, TextFormatFlags.NoPadding).Width;
-                TextRenderer.DrawText(g, _phase, fP, new Rectangle(Pad + 2, sy, W - Pad * 2 - dw - 10, _bar.Visible ? Theme.Px(24) : StatusH), col, wrap);
+                ColorText.Text(g, _phase, fP, new Rectangle(Pad + 2, sy, W - Pad * 2 - dw - 10, _bar.Visible ? Theme.Px(24) : StatusH), col, wrap);
                 if (!string.IsNullOrEmpty(_detail))
-                    TextRenderer.DrawText(g, _detail, fDt, new Rectangle(Pad, sy, W - Pad * 2, Theme.Px(22)), Theme.Subtle,
+                    ColorText.Text(g, _detail, fDt, new Rectangle(Pad, sy, W - Pad * 2, Theme.Px(22)), Theme.Subtle,
                         TextFormatFlags.Right | TextFormatFlags.Top | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
             }
         }
@@ -117,7 +117,7 @@ namespace SelectOR
             int w = TextRenderer.MeasureText(text, f, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.Px(22);
             var r = new Rectangle(x, y, w, h);
             Theme.FillRound(g, r, h / 2, bg);
-            TextRenderer.DrawText(g, text, f, r, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            ColorText.Text(g, text, f, r, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
             return r.Right;
         }
 
@@ -279,7 +279,7 @@ namespace SelectOR
                         using var b = new SolidBrush(Theme.Accent);
                         g.FillEllipse(b, r.X - Theme.Px(14), r.Y + Theme.Px(7), d, d);
                     }
-                    TextRenderer.DrawText(g, text, kind == 2 ? fH : fB, r, kind == 2 ? Theme.AccentHi : Theme.Text, fl);
+                    ColorText.Text(g, text, kind == 2 ? fH : fB, r, kind == 2 ? Theme.AccentHi : Theme.Text, fl);
                 }
             }
         }

@@ -151,7 +151,7 @@ namespace SelectOR
             g.Clear(BackColor);
             PaintHead(g);
             if (!string.IsNullOrEmpty(EmptyText))
-                TextRenderer.DrawText(g, EmptyText, FMsg, new Rectangle(Theme.Px(20), HeadH + Theme.Px(30), ClientSize.Width - Theme.Px(40), Theme.Px(60)), Grey, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
+                ColorText.Text(g, EmptyText, FMsg, new Rectangle(Theme.Px(20), HeadH + Theme.Px(30), ClientSize.Width - Theme.Px(40), Theme.Px(60)), Grey, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
         }
 
         protected override void PaintCard(Graphics g, int i, Rectangle rc, bool sel, bool hov)
@@ -180,32 +180,32 @@ namespace SelectOR
                 }
 
             // SALIDA: A la hora · B1 «hasta» con su hora (y «+1») · B2 el día
-            TextRenderer.DrawText(g, r.Time, _fTime, A(0), dim(Amber), L1);
+            ColorText.Text(g, r.Time, _fTime, A(0), dim(Amber), L1);
             {
                 var u = B1(0);
                 int lw = TW(r.UntilLabel, _fUntil);
-                TextRenderer.DrawText(g, r.UntilLabel, _fUntil, new Rectangle(u.X, u.Y, lw + Theme.Px(2), u.Height), dim(Grey), L1);
+                ColorText.Text(g, r.UntilLabel, _fUntil, new Rectangle(u.X, u.Y, lw + Theme.Px(2), u.Height), dim(Grey), L1);
                 int ux = u.X + lw + Theme.Px(5), tw = TW(r.UntilTime, _fSmallMono);
-                TextRenderer.DrawText(g, r.UntilTime, _fSmallMono, new Rectangle(ux, u.Y, tw + Theme.Px(2), u.Height), dim(Color.FromArgb(232, 178, 64)), L1);
+                ColorText.Text(g, r.UntilTime, _fSmallMono, new Rectangle(ux, u.Y, tw + Theme.Px(2), u.Height), dim(Color.FromArgb(232, 178, 64)), L1);
                 ux += tw + Theme.Px(5);
                 if (r.NextDay)
                 {
                     int ph = Theme.Px(14);
                     var pr1 = new Rectangle(ux, u.Y + (u.Height - ph) / 2, TW("+1", _fH) + Theme.Px(8), ph);
                     g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, pr1, Theme.Px(3), Color.FromArgb(r.Past ? 30 : 46, 255, 196, 64)); g.SmoothingMode = SmoothingMode.None;
-                    TextRenderer.DrawText(g, "+1", _fH, pr1, dim(Amber), C1);
+                    ColorText.Text(g, "+1", _fH, pr1, dim(Amber), C1);
                 }
             }
-            TextRenderer.DrawText(g, (r.Now ? "● " : "") + r.Day.ToUpperInvariant(), _fH, B2(0), r.Now ? Color.FromArgb(120, 220, 120) : dim(Grey), L1);
+            ColorText.Text(g, (r.Now ? "● " : "") + r.Day.ToUpperInvariant(), _fH, B2(0), r.Now ? Color.FromArgb(120, 220, 120) : dim(Grey), L1);
 
             // DESTINO · RECORRIDO: A la ruta · B1 el recorrido · B2 la nota
-            TextRenderer.DrawText(g, r.Route.ToUpperInvariant(), _fRoute, A(1), dim(Color.White), L1);
-            TextRenderer.DrawText(g, "→ " + r.Path, _fPath, B1(1), dim(Color.FromArgb(207, 211, 214)), L1);
-            if (r.Note.Length > 0) TextRenderer.DrawText(g, "«" + r.Note + "»", _fNote, B2(1), dim(AmberDim), L1);
+            ColorText.Text(g, r.Route.ToUpperInvariant(), _fRoute, A(1), dim(Color.White), L1);
+            ColorText.Text(g, "→ " + r.Path, _fPath, B1(1), dim(Color.FromArgb(207, 211, 214)), L1);
+            if (r.Note.Length > 0) ColorText.Text(g, "«" + r.Note + "»", _fNote, B2(1), dim(AmberDim), L1);
 
             // TREN: A el nombre · B entera la composición 2D en la franja de Servicios (sin tren concreto, el aviso)
             string anyKind = r.Kind == "pax" ? LblAnyPax : r.Kind == "freight" ? LblAnyFreight : LblAny;
-            TextRenderer.DrawText(g, r.HasTrain ? r.Train : anyKind, _fTrain, A(2), dim(r.HasTrain ? Color.White : Grey), L1);
+            ColorText.Text(g, r.HasTrain ? r.Train : anyKind, _fTrain, A(2), dim(r.HasTrain ? Color.White : Grey), L1);
             var track = new Rectangle(cx[2], yB, cw[2], BandB);
             Bitmap bmp = null;
             if (r.HasTrain && !_img.TryGetValue(r.Id, out bmp) && !_asked.Contains(r.Id)) RequestImage(r);
@@ -218,11 +218,11 @@ namespace SelectOR
 
             // ESTADO: A la paleta tipo teleindicador · B1 quién
             Flap(g, A(3), r.StateText.ToUpperInvariant(), r.StateColor, r.Past);
-            if (r.Who.Length > 0) TextRenderer.DrawText(g, r.Who, _fWho, B1(3), Grey, C1);
+            if (r.Who.Length > 0) ColorText.Text(g, r.Who, _fWho, B1(3), Grey, C1);
 
             // PRIMA: A la cifra · B1 de dónde sale (a la derecha, con el mismo margen que la izquierda)
-            TextRenderer.DrawText(g, r.Right, _fRight, A(4), r.State == "done" ? Color.FromArgb(245, 197, 66) : dim(Color.White), R1);
-            TextRenderer.DrawText(g, r.RightSub, _fRightS, B1(4), Grey, R1);
+            ColorText.Text(g, r.Right, _fRight, A(4), r.State == "done" ? Color.FromArgb(245, 197, 66) : dim(Color.White), R1);
+            ColorText.Text(g, r.RightSub, _fRightS, B1(4), Grey, R1);
         }
 
         // La franja de la composición como en Servicios (ServiceCards): fondo oscuro redondeado y el tren a la izquierda,
@@ -243,7 +243,7 @@ namespace SelectOR
                 g.PixelOffsetMode = PixelOffsetMode.Default;
             }
             else if (!string.IsNullOrEmpty(emptyText))
-                TextRenderer.DrawText(g, emptyText, f, new Rectangle(sr.X + Theme.Px(10), sr.Y, sr.Width - Theme.Px(20), sr.Height), Theme.Subtle,
+                ColorText.Text(g, emptyText, f, new Rectangle(sr.X + Theme.Px(10), sr.Y, sr.Width - Theme.Px(20), sr.Height), Theme.Subtle,
                                       TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
 
@@ -259,7 +259,7 @@ namespace SelectOR
             g.SmoothingMode = SmoothingMode.None;
             // la rendija entre las dos lamas, detrás del rótulo (si no, parece tachado)
             using (var p = new Pen(Color.FromArgb(14, 15, 16), Math.Max(1, Theme.Px(1)))) g.DrawLine(p, r.X + 1, bot.Y, r.Right - 2, bot.Y);
-            TextRenderer.DrawText(g, text, _fFlap, r, past ? Color.FromArgb(c.R * 60 / 100, c.G * 60 / 100, c.B * 60 / 100) : c, C1);
+            ColorText.Text(g, text, _fFlap, r, past ? Color.FromArgb(c.R * 60 / 100, c.G * 60 / 100, c.B * 60 / 100) : c, C1);
             // bisagras
             using (var b = new SolidBrush(Color.FromArgb(60, 64, 68)))
             {
@@ -295,17 +295,17 @@ namespace SelectOR
             using (var b = new SolidBrush(BoardBg)) g.FillRectangle(b, hr);
             int x = Theme.Px(2 + PadPx);
             // rótulo con el pictograma del tren y reloj de andén
-            TextRenderer.DrawText(g, "🚆  " + Title, _fTitle, new Rectangle(x, Theme.Px(8), hr.Width / 2, Theme.Px(22)), Amber, L1);
+            ColorText.Text(g, "🚆  " + Title, _fTitle, new Rectangle(x, Theme.Px(8), hr.Width / 2, Theme.Px(22)), Amber, L1);
             string clock = DateTime.Now.ToString("HH:mm:ss");
             int cwid = TextRenderer.MeasureText(clock, _fClock, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.Px(16);
             var cr = new Rectangle(hr.Right - Theme.Px(2 + PadPx) - cwid, Theme.Px(6), cwid, Theme.Px(26));
             g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, cr, Theme.Px(4), Color.FromArgb(24, 22, 14)); g.SmoothingMode = SmoothingMode.None;
-            TextRenderer.DrawText(g, clock, _fClock, cr, Amber, C1);
-            if (Hint.Length > 0) TextRenderer.DrawText(g, Hint, _fH, new Rectangle(hr.Width / 2, Theme.Px(8), cr.X - hr.Width / 2 - Theme.Px(12), Theme.Px(22)), Grey, R1);
+            ColorText.Text(g, clock, _fClock, cr, Amber, C1);
+            if (Hint.Length > 0) ColorText.Text(g, Hint, _fH, new Rectangle(hr.Width / 2, Theme.Px(8), cr.X - hr.Width / 2 - Theme.Px(12), Theme.Px(22)), Grey, R1);
             // los rótulos, en las mismas columnas que las filas (mismo ancho y márgenes) y alineados como su contenido
             var (cx, cw) = Columns(Theme.Px(2), ClientSize.Width - Theme.Px(4));
             for (int i = 0; i < Heads.Length && i < 5; i++)
-                TextRenderer.DrawText(g, Heads[i], _fH, new Rectangle(cx[i], Theme.Px(40), cw[i], Theme.Px(18)), Grey, i == 3 ? C1 : i == 4 ? R1 : L1);
+                ColorText.Text(g, Heads[i], _fH, new Rectangle(cx[i], Theme.Px(40), cw[i], Theme.Px(18)), Grey, i == 3 ? C1 : i == 4 ? R1 : L1);
             using (var p = new Pen(Color.FromArgb(36, 39, 42))) g.DrawLine(p, 0, HeadH - 1, hr.Width, HeadH - 1);
         }
     }

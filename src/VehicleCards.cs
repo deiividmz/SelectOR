@@ -240,7 +240,7 @@ namespace SelectOR
                 g.PixelOffsetMode = PixelOffsetMode.Default;
             }
             else if (!string.IsNullOrEmpty(emptyText))
-                TextRenderer.DrawText(g, emptyText, f, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, emptyText, f, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
     }
 
@@ -408,14 +408,14 @@ namespace SelectOR
             if (_cards.Count == 0)
             {
                 string msg = EmptyText ?? (_models.Count == 0 ? I18n.T("Sin vehículos todavía.") : I18n.T("Nada coincide con el filtro."));
-                TextRenderer.DrawText(g, msg, _fMsg, new Rectangle(0, Theme.Px(30), ClientSize.Width, Theme.Px(30)), Theme.Subtle, TextFormatFlags.HorizontalCenter);
+                ColorText.Text(g, msg, _fMsg, new Rectangle(0, Theme.Px(30), ClientSize.Width, Theme.Px(30)), Theme.Subtle, TextFormatFlags.HorizontalCenter);
                 return;
             }
             int top = ScrollY, bottom = top + ClientSize.Height;
             var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (text, gy) in _groups)
                 if (gy + Theme.Px(24) >= top && gy <= bottom)
-                    TextRenderer.DrawText(g, text, _fCnt, new Rectangle(Theme.Px(6), gy - top, ClientSize.Width - Theme.Px(12), Theme.Px(22)), Theme.Subtle, CardPaint.Line);
+                    ColorText.Text(g, text, _fCnt, new Rectangle(Theme.Px(6), gy - top, ClientSize.Width - Theme.Px(12), Theme.Px(22)), Theme.Subtle, CardPaint.Line);
             List<FleetModel> need = null;
             foreach (var c in _cards)
             {
@@ -439,8 +439,8 @@ namespace SelectOR
             if (sel) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.DrawRoundBorder(g, rc, Theme.Px(10), Theme.Accent, 1.5f); g.SmoothingMode = SmoothingMode.None; }
             int pad = Theme.Px(12), x = rc.X + pad, tw = TextW(_layoutW), mid = rc.Y + rc.Height / 2;
             // nombre y, debajo, sus datos
-            TextRenderer.DrawText(g, c.M.Title, _fTitle, new Rectangle(x, mid - Theme.Px(22), tw, Theme.Px(22)), Theme.Text, CardPaint.Line);
-            TextRenderer.DrawText(g, c.M.Sub, _fSub, new Rectangle(x, mid + Theme.Px(2), tw, Theme.Px(18)), Theme.Subtle, CardPaint.Line);
+            ColorText.Text(g, c.M.Title, _fTitle, new Rectangle(x, mid - Theme.Px(22), tw, Theme.Px(22)), Theme.Text, CardPaint.Line);
+            ColorText.Text(g, c.M.Sub, _fSub, new Rectangle(x, mid + Theme.Px(2), tw, Theme.Px(18)), Theme.Subtle, CardPaint.Line);
             // la composición (o la máquina), ajustada a la línea
             int chipsLeft = c.Chips.Count > 0 ? c.Chips[0].X + rc.X : rc.Right - pad;
             foreach (var r0 in c.Chips) chipsLeft = Math.Min(chipsLeft, r0.X + rc.X);
@@ -459,7 +459,7 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var b = new SolidBrush(StateColors[Math.Max(0, Math.Min(StateColors.Length - 1, u.State))])) g.FillEllipse(b, r.X + Theme.Px(9), r.Y + (r.Height - d) / 2, d, d);
                 g.SmoothingMode = SmoothingMode.None;
-                TextRenderer.DrawText(g, u.Label, _fChip, new Rectangle(r.X + Theme.Px(22), r.Y, r.Width - Theme.Px(24), r.Height), Theme.Text, CardPaint.Line);
+                ColorText.Text(g, u.Label, _fChip, new Rectangle(r.X + Theme.Px(22), r.Y, r.Width - Theme.Px(24), r.Height), Theme.Text, CardPaint.Line);
             }
             if (c.M.Info) StripPaint.InfoButton(g, InfoRect(c, top), c.M == _infoHover);
         }
@@ -694,7 +694,7 @@ namespace SelectOR
             g.Clear(BackColor);
             if (Items.Count == 0)
             {
-                TextRenderer.DrawText(g, EmptyText ?? I18n.T("Nada coincide con el filtro."), _fMsg, new Rectangle(0, Theme.Px(30), ClientSize.Width, Theme.Px(30)), Theme.Subtle, TextFormatFlags.HorizontalCenter);
+                ColorText.Text(g, EmptyText ?? I18n.T("Nada coincide con el filtro."), _fMsg, new Rectangle(0, Theme.Px(30), ClientSize.Width, Theme.Px(30)), Theme.Subtle, TextFormatFlags.HorizontalCenter);
                 return;
             }
             int first = Math.Max(0, (ScrollY / RowH) * Cols), last = Math.Min(Items.Count - 1, ((ScrollY + ClientSize.Height) / RowH + 1) * Cols - 1);
@@ -737,9 +737,9 @@ namespace SelectOR
             var rail = new Rectangle(x, rc.Y + pad, w, Theme.Px(74));
             CardPaint.Rail_(g, rail, _mem.Get(path), _mem.Failed(path) ? "🚆" : null, _fSub);
             int y = rail.Bottom + Theme.Px(7);
-            TextRenderer.DrawText(g, TitleOf?.Invoke(it) ?? "", _fTitle, new Rectangle(x, y, w, Theme.Px(20)), Theme.Text, CardPaint.Line);
+            ColorText.Text(g, TitleOf?.Invoke(it) ?? "", _fTitle, new Rectangle(x, y, w, Theme.Px(20)), Theme.Text, CardPaint.Line);
             y += Theme.Px(19);
-            TextRenderer.DrawText(g, FolderOf?.Invoke(it) ?? "", _fSub, new Rectangle(x, y, w, Theme.Px(16)), Color.FromArgb(128, 136, 142), CardPaint.Line);
+            ColorText.Text(g, FolderOf?.Invoke(it) ?? "", _fSub, new Rectangle(x, y, w, Theme.Px(16)), Color.FromArgb(128, 136, 142), CardPaint.Line);
             y += Theme.Px(19);
             // etiquetas: tipo de servicio · automotor · en tu flota
             _info.TryGetValue(path, out var mi);
@@ -756,13 +756,13 @@ namespace SelectOR
                 if (tx + tw > x + w) break;
                 var r = new Rectangle(tx, y, tw, Theme.Px(18));
                 CardPaint.FillRound(g, r, Theme.Px(5), bg);
-                TextRenderer.DrawText(g, t, _fTag, r, c, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, t, _fTag, r, c, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 tx += tw + Theme.Px(5);
             }
             y += Theme.Px(24);
             // datos y precio
             if (mi == null)
-                TextRenderer.DrawText(g, I18n.T("Calculando…"), _fSpec, new Rectangle(x, y, w, Theme.Px(18)), Theme.Subtle, CardPaint.Line);
+                ColorText.Text(g, I18n.T("Calculando…"), _fSpec, new Rectangle(x, y, w, Theme.Px(18)), Theme.Subtle, CardPaint.Line);
             else
             {
                 var segs = new List<(string, bool)>();
@@ -776,7 +776,7 @@ namespace SelectOR
                     var f = b ? _fSpecB : _fSpec;
                     int sw = TextRenderer.MeasureText(t, f, Size.Empty, CardPaint.Measure).Width;
                     if (sx >= x + w) break;
-                    TextRenderer.DrawText(g, t, f, new Rectangle(sx, y, Math.Min(sw, x + w - sx), Theme.Px(18)), b ? Theme.Text : Theme.Subtle, CardPaint.Line);
+                    ColorText.Text(g, t, f, new Rectangle(sx, y, Math.Min(sw, x + w - sx), Theme.Px(18)), b ? Theme.Text : Theme.Subtle, CardPaint.Line);
                     sx += sw;
                 }
             }
@@ -787,8 +787,8 @@ namespace SelectOR
             {
                 string rent = mi.Rent.ToString("N0", Es) + " €/" + I18n.T("serv.");
                 int rw = TextRenderer.MeasureText(rent, _fRent, Size.Empty, CardPaint.Measure).Width;
-                TextRenderer.DrawText(g, mi.Price.ToString("N0", Es) + " €", _fPrice, new Rectangle(x, y, w - rw - Theme.Px(6), Theme.Px(24)), Theme.AccentHi, CardPaint.Line);
-                TextRenderer.DrawText(g, rent, _fRent, new Rectangle(x + w - rw, y, rw, Theme.Px(24)), Color.FromArgb(96, 165, 250), CardPaint.Line);
+                ColorText.Text(g, mi.Price.ToString("N0", Es) + " €", _fPrice, new Rectangle(x, y, w - rw - Theme.Px(6), Theme.Px(24)), Theme.AccentHi, CardPaint.Line);
+                ColorText.Text(g, rent, _fRent, new Rectangle(x + w - rw, y, rw, Theme.Px(24)), Color.FromArgb(96, 165, 250), CardPaint.Line);
             }
         }
 
@@ -859,7 +859,7 @@ namespace SelectOR
                 var area = new Rectangle(Theme.Px(10), Theme.Px(10), Width - Theme.Px(20), Height - Theme.Px(44));
                 var img = Img?.Invoke();
                 string empty = Empty?.Invoke();
-                if (img == null && empty != null) { TextRenderer.DrawText(g, empty, _fe, ClientRectangle, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter); return; }
+                if (img == null && empty != null) { ColorText.Text(g, empty, _fe, ClientRectangle, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter); return; }
                 if (img != null)
                 {
                     int w = img.Width, h = img.Height;
@@ -871,7 +871,7 @@ namespace SelectOR
                     g.PixelOffsetMode = PixelOffsetMode.Half;
                     g.DrawImage(img, new Rectangle(area.X + (area.Width - w) / 2, area.Y + (area.Height - h) / 2, w, h));
                 }
-                TextRenderer.DrawText(g, Caption?.Invoke() ?? "", _f, new Rectangle(0, Height - Theme.Px(32), Width, Theme.Px(24)), Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                ColorText.Text(g, Caption?.Invoke() ?? "", _f, new Rectangle(0, Height - Theme.Px(32), Width, Theme.Px(24)), Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             }
         }
 

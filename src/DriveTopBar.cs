@@ -189,7 +189,7 @@ namespace SelectOR
             // Estado (izquierda)
             var dotCol = _st.InService ? Rec : Teal;
             using (var b = new SolidBrush(dotCol)) g.FillEllipse(b, 14, BarH / 2 - 4, 9, 9);
-            TextRenderer.DrawText(g, _st.Status ?? "", Theme.Font(9f, FontStyle.Bold),
+            ColorText.Text(g, _st.Status ?? "", Theme.Font(9f, FontStyle.Bold),
                 new Rectangle(30, 5, 186, BarH - 8), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
 
@@ -225,7 +225,7 @@ namespace SelectOR
             if (HasMsg)
             {
                 var mr = new Rectangle(14, BarH, Width - 28, MsgH - 4);
-                TextRenderer.DrawText(g, _msg, Theme.Font(8.8f, FontStyle.Bold), mr,
+                ColorText.Text(g, _msg, Theme.Font(8.8f, FontStyle.Bold), mr,
                     _msgErr ? Color.FromArgb(235, 130, 130) : Teal,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             }
@@ -279,7 +279,7 @@ namespace SelectOR
                     g.DrawLine(pen, ico.Left + 2 * ico.Width / 3, ico.Top + 1, ico.Left + 2 * ico.Width / 3, ico.Bottom - 1);
                 }
             }
-            TextRenderer.DrawText(g, text, Theme.Font(9.5f, FontStyle.Bold),
+            ColorText.Text(g, text, Theme.Font(9.5f, FontStyle.Bold),
                 new Rectangle(ico.Right + 6, r.Top, r.Right - ico.Right - 8, r.Height), fg,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }
@@ -293,7 +293,7 @@ namespace SelectOR
             else fill = hover ? Theme.SurfaceHi : Theme.Surface2;
             using (var b = new SolidBrush(fill)) FillRound(g, r, 9, b);
             var fg = !enabled ? Theme.Subtle : ((primary || danger) ? Color.White : Theme.Text);
-            TextRenderer.DrawText(g, text, Theme.Font(enabled ? 9.5f : 8.6f, FontStyle.Bold),
+            ColorText.Text(g, text, Theme.Font(enabled ? 9.5f : 8.6f, FontStyle.Bold),
                 new Rectangle(r.Left + 8, r.Top, r.Width - 16, r.Height), fg,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }
@@ -305,7 +305,7 @@ namespace SelectOR
             using (var b = new SolidBrush(fill)) FillRound(g, r, 9, b);
             if (!confirm) using (var p = new Pen(Color.FromArgb(150, 224, 86, 86), 1.2f)) DrawRound(g, r, 9, p);
             var fg = !enabled ? Theme.Subtle : confirm ? Color.White : Color.FromArgb(235, 130, 130);
-            TextRenderer.DrawText(g, text, Theme.Font(9f, FontStyle.Bold),
+            ColorText.Text(g, text, Theme.Font(9f, FontStyle.Bold),
                 new Rectangle(r.Left + 6, r.Top, r.Width - 12, r.Height), fg,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }

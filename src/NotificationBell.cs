@@ -60,7 +60,7 @@ namespace SelectOR
                 int h = Theme.Px(15), w = Math.Max(h, sz.Width + Theme.Px(7));
                 var br = new Rectangle((int)(c.Right - w + Theme.Px(2)), (int)c.Y, w, h);
                 using (var p = Theme.Round(br, h / 2)) using (var b = new SolidBrush(Color.FromArgb(220, 60, 60))) g.FillPath(b, p);
-                TextRenderer.DrawText(g, t, f, br, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, t, f, br, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
         }
 
@@ -131,8 +131,8 @@ namespace SelectOR
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var b = new SolidBrush(Theme.Surface)) g.FillRectangle(b, ClientRectangle);
             using var fT = Theme.Font(11f, FontStyle.Bold); using var fS = Theme.Font(8.5f);
-            TextRenderer.DrawText(g, Title, fT, new Rectangle(Theme.Px(16), 0, Width - Theme.Px(32), Theme.Px(48)), Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            TextRenderer.DrawText(g, _sub, fS, new Rectangle(Theme.Px(16), 0, Width - Theme.Px(32), Theme.Px(48)), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            ColorText.Text(g, Title, fT, new Rectangle(Theme.Px(16), 0, Width - Theme.Px(32), Theme.Px(48)), Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            ColorText.Text(g, _sub, fS, new Rectangle(Theme.Px(16), 0, Width - Theme.Px(32), Theme.Px(48)), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             using (var pen = new Pen(Color.FromArgb(50, 255, 255, 255))) g.DrawLine(pen, Theme.Px(12), Theme.Px(48), Width - Theme.Px(12), Theme.Px(48));
             using (var p = Theme.Round(new Rectangle(0, 0, Width - 1, Height - 1), 12)) using (var pen = new Pen(Color.FromArgb(70, 255, 255, 255), 1.2f)) g.DrawPath(pen, p);
         }
@@ -180,24 +180,24 @@ namespace SelectOR
                 var ico = new Rectangle(Theme.Px(18), Theme.Px(12), Theme.Px(34), Theme.Px(34));
                 using (var p = Theme.Round(ico, Theme.Px(10))) using (var b = new SolidBrush(Color.FromArgb(dim ? 30 : 55, _n.Accent))) g.FillPath(b, p);
                 using (var fI = new Font("Segoe UI Emoji", 13f * Theme.DpiComp))
-                    TextRenderer.DrawText(g, _n.Icon, fI, ico, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    ColorText.Text(g, _n.Icon, fI, ico, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
                 using var fT = Theme.Font(9.75f, FontStyle.Bold); using var fB = Theme.Font(9f); using var fF = Theme.Font(8f);
                 int w = Width - PadL - PadR, y = Theme.Px(12);
                 int hT = TextRenderer.MeasureText(_n.Title, fT, new Size(w, 999), Wrap).Height;
-                TextRenderer.DrawText(g, _n.Title, fT, new Rectangle(PadL, y, w, hT), dim ? Theme.Subtle : Theme.Text, Wrap); y += hT + Theme.Px(3);
+                ColorText.Text(g, _n.Title, fT, new Rectangle(PadL, y, w, hT), dim ? Theme.Subtle : Theme.Text, Wrap); y += hT + Theme.Px(3);
                 int hB = Math.Min(TextRenderer.MeasureText(_n.Body, fB, new Size(w, 999), Wrap).Height, fB.Height * 3);
-                TextRenderer.DrawText(g, _n.Body, fB, new Rectangle(PadL, y, w, hB), dim ? Theme.Subtle : Color.FromArgb(205, 210, 214), Wrap); y += hB + Theme.Px(6);
+                ColorText.Text(g, _n.Body, fB, new Rectangle(PadL, y, w, hB), dim ? Theme.Subtle : Color.FromArgb(205, 210, 214), Wrap); y += hB + Theme.Px(6);
                 int x = PadL;
                 if (_n.Resolved)
                 {
                     var sz = TextRenderer.MeasureText(_resolved, fF, Size.Empty, TextFormatFlags.NoPadding);
                     var tag = new Rectangle(x, y - 1, sz.Width + Theme.Px(10), fF.Height + 2);
                     using (var p = Theme.Round(tag, Theme.Px(6))) using (var b = new SolidBrush(Color.FromArgb(40, 76, 175, 80))) g.FillPath(b, p);
-                    TextRenderer.DrawText(g, _resolved, fF, tag, Color.FromArgb(129, 199, 132), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    ColorText.Text(g, _resolved, fF, tag, Color.FromArgb(129, 199, 132), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     x = tag.Right + Theme.Px(8);
                 }
-                TextRenderer.DrawText(g, _n.Foot, fF, new Rectangle(x, y, Width - x - PadR, fF.Height + 2), Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                ColorText.Text(g, _n.Foot, fF, new Rectangle(x, y, Width - x - PadR, fF.Height + 2), Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
                 if (_line) using (var pen = new Pen(Color.FromArgb(28, 255, 255, 255))) g.DrawLine(pen, PadL, Height - 1, Width - PadR, Height - 1);
             }
         }

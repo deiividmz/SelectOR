@@ -1,4 +1,4 @@
-﻿// Pestaña "Empresas": empresas ferroviarias multi-maquinista sobre Supabase.
+﻿﻿// Pestaña "Empresas": empresas ferroviarias multi-maquinista sobre Supabase.
 // Tres vistas conmutables: configuración del servidor, acceso (login/registro) y panel.
 // La economía vive en el servidor (funciones SQL); aquí solo se muestra y se llama por REST.
 
@@ -318,7 +318,7 @@ namespace SelectOR
             public int Cars;
         }
         // Borrado por el superadmin (servicios y movimientos de banca)
-        RoundButton _svcDelBtn, _ledgerDelBtn, _svcAnnulBtn, _svcUnannulBtn;
+        RoundButton _svcDelBtn, _ledgerDelBtn, _svcAnnulBtn, _svcUnannulBtn, _svcSanctionBtn;
         ServiceCalendar _svcCal;
         (long total, long open, long done, long annulled, double km)? _svcStats;   // totales del servidor (sin límite)
         readonly List<string> _ledgerIds = new();
@@ -444,7 +444,7 @@ namespace SelectOR
             var (outer, form) = CenteredForm(560);
 
             form.Controls.Add(EmpTitle(Tr("Empresas ferroviarias")));
-            form.Controls.Add(EmpIntro(Tr("Crea una empresa con otros maquinistas: banca, cánon al AI (administrador de infraestructuras), mantenimiento y el registro de todos los viajes. Necesitas un proyecto gratuito de Supabase (ver la guía «Empresas (backend Supabase)»).")));
+            form.Controls.Add(EmpIntro(Tr("Crea una empresa con otros maquinistas: banca, canon al AI (administrador de infraestructuras), mantenimiento y el registro de todos los viajes. Necesitas un proyecto gratuito de Supabase (ver la guía «Empresas (backend Supabase)»).")));
 
             form.Controls.Add(EmpHeader("CONEXIÓN CON EL SERVIDOR (SUPABASE)"));
             form.Controls.Add(EmpFieldLabel(Tr("URL del proyecto (Project URL)")));
@@ -909,6 +909,21 @@ namespace SelectOR
                 btns[i] = b; bar.Controls.Add(b);
             }
             if (btns.Length > 0) btns[0].Active = true;
+            // (1.2.90) si no caben, más juntas (sin cambiar el texto; las que tienen icono lo ajustan aparte)
+            bar.SizeChanged += (s, e) =>
+            {
+                if (bar.Width <= 0) return;
+                using var ff = Theme.Font(9.75f, FontStyle.Bold);
+                foreach (int pad in new[] { 34, 22, 14, 8 })
+                {
+                    int total = System.Linq.Enumerable.Sum(btns, b => TextRenderer.MeasureText(b.Text, ff).Width + pad + b.Margin.Horizontal);
+                    if (total <= bar.Width || pad == 8)
+                    {
+                        foreach (var b in btns) { int w = TextRenderer.MeasureText(b.Text, ff).Width + pad; if (b.Width != w) b.Width = w; }
+                        break;
+                    }
+                }
+            };
             return bar;
         }
 
@@ -938,7 +953,7 @@ namespace SelectOR
             frow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             frow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             _bankChips = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
-            string[] chips = { "Todo", "Ingresos", "Cánon AI", "Energía", "Salarios", "Flota", "Otros", "Préstamos" };
+            string[] chips = { "Todo", "Ingresos", "Canon AI", "Energía", "Salarios", "Flota", "Otros", "Préstamos" };
             for (int k = 0; k < chips.Length; k++)
             {
                 int idx = k;
@@ -1078,6 +1093,11 @@ namespace SelectOR
             _svcAnnulBtn.Width = 200; _svcAnnulBtn.Margin = new Padding(8, 10, 2, 2); _svcAnnulBtn.BaseColor = Theme.Surface2; _svcAnnulBtn.HoverColor = Color.FromArgb(150, 60, 60); _svcAnnulBtn.TextColor = RedC; _svcAnnulBtn.Visible = false;
             _svcAnnulBtn.Click += (s, e) => AnnulServiceRow();
             svcBtns.Controls.Add(_svcAnnulBtn);
+            // (1.2.90) sancionar: puntos, multa y, si se quiere, anular (MainMenuForm.Sanciones.cs)
+            _svcSanctionBtn = EmpButton(Tr("Sancionar…"));
+            _svcSanctionBtn.Width = 170; _svcSanctionBtn.Margin = new Padding(8, 10, 2, 2); _svcSanctionBtn.BaseColor = Theme.Surface2; _svcSanctionBtn.TextColor = Carne.Gold; _svcSanctionBtn.Visible = false;
+            _svcSanctionBtn.Click += (s, e) => SanctionServiceRow();
+            svcBtns.Controls.Add(_svcSanctionBtn);
             // y quitar la anulación: vuelve a estar normal (MainMenuForm.Alegaciones.cs)
             _svcUnannulBtn = EmpButton(Tr("Quitar la anulación…"));
             _svcUnannulBtn.Width = 220; _svcUnannulBtn.Margin = new Padding(8, 10, 2, 2); _svcUnannulBtn.BaseColor = Theme.Surface2; _svcUnannulBtn.Visible = false;
@@ -1257,7 +1277,7 @@ namespace SelectOR
             pTar.Controls.Add(EmpHeader("TARIFAS GLOBALES DE LOS SERVICIOS (€) — SOLO ADMINISTRADOR"));
             pTar.Controls.Add(EmpFieldLabel(Tr("Ingreso por km (mercancías de 500 t)")));
             _tarIncome = EmpInput("8"); _tarIncome.Width = 240; pTar.Controls.Add(_tarIncome);
-            pTar.Controls.Add(EmpFieldLabel(Tr("Cánon AI (administrador de infraestructuras) por km")));
+            pTar.Controls.Add(EmpFieldLabel(Tr("Canon AI (administrador de infraestructuras) por km")));
             _tarCanon = EmpInput("3"); _tarCanon.Width = 240; pTar.Controls.Add(_tarCanon);
             pTar.Controls.Add(EmpFieldLabel(Tr("Energía / combustible por km (tren de 500 t; escala con la masa)")));
             _tarEnergy = EmpInput("1.5"); _tarEnergy.Width = 240; pTar.Controls.Add(_tarEnergy);
@@ -1559,7 +1579,7 @@ namespace SelectOR
                 using (var p = Theme.Round(new Rectangle(0, 0, size, size), size / 3))
                 using (var b = new SolidBrush(color)) g.FillPath(b, p);
                 using var f = new Font("Segoe UI Emoji", size * 0.46f * Theme.DpiComp);
-                TextRenderer.DrawText(g, icon, f, new Rectangle(0, 0, size, size), Color.White,
+                ColorText.Text(g, icon, f, new Rectangle(0, 0, size, size), Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             };
             return pan;
@@ -2408,7 +2428,7 @@ namespace SelectOR
             RefreshBank();
         }
 
-        // Grupo de cada concepto para los filtros del extracto (1 ingresos · 2 cánon · 3 energía · 4 salarios · 5 flota · 6 otros).
+        // Grupo de cada concepto para los filtros del extracto (1 ingresos · 2 canon · 3 energía · 4 salarios · 5 flota · 6 otros).
         static int BankGroup(BankStatement.Move m) => m.Concept switch
         {
             "income" or "prize" or "sched_bonus" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
@@ -2531,7 +2551,7 @@ namespace SelectOR
         static string TrConcept(string c) => c switch
         {
             "income" => Tr("Ingreso"),
-            "canon" => Tr("Cánon AI"),
+            "canon" => Tr("Canon AI"),
             "maintenance" => Tr("Mantenimiento"),
             "energy" => Tr("Energía"),
             "salary" => Tr("Salario"),
@@ -2978,7 +2998,7 @@ namespace SelectOR
                 using var path = RoundRect(new Rectangle(2, 2, 60, 60), 14);
                 using (var b = new SolidBrush(Blend(Theme.Surface2, Theme.Accent, 0.30f))) g.FillPath(b, path);
                 using var f = Theme.Font(24f, FontStyle.Bold);
-                TextRenderer.DrawText(g, key, f, new Rectangle(0, 0, 64, 64), Theme.Accent,
+                ColorText.Text(g, key, f, new Rectangle(0, 0, 64, 64), Theme.Accent,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
             _phCache[key] = bmp;
@@ -5215,10 +5235,10 @@ namespace SelectOR
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 var dr = new Rectangle(PadL, (H - Dot) / 2, Dot, Dot);
                 using (var path = Theme.Round(dr, Dot / 3)) using (var b = new SolidBrush(_dot)) g.FillPath(b, path);
-                TextRenderer.DrawText(g, _icon, Emoji, dr, Color.White,
+                ColorText.Text(g, _icon, Emoji, dr, Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 int tx = PadL + DotCol + Gap;
-                TextRenderer.DrawText(g, _text, _earned ? FBold : FReg, new Rectangle(tx, 0, Math.Max(1, Width - tx - 4), H), _fore,
+                ColorText.Text(g, _text, _earned ? FBold : FReg, new Rectangle(tx, 0, Math.Max(1, Width - tx - 4), H), _fore,
                     TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
             }
         }
@@ -5950,7 +5970,7 @@ namespace SelectOR
                     bool soon = !due && !inUse && !sale && interval > 0 && remaining <= interval * 0.1;   // revisión pronto
                     int state = sale ? 4 : due ? 2 : inUse ? 1 : soon ? 3 : 0;
                     // Los mismos nombres cortos que las pestañas: caben en la celda ESTADO sin encogerse ni cortarse.
-                    string estado = sale ? Tr("En venta") : due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
+                    string estado = sale ? Tr("En el mercado") : due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
                     Color estadoColor = FleetCardList.StateColors[state];   // el mismo color que su chip
                     // Vista de disponibilidad para el maquinista: gris si NO tiene el modelo en local (no la puede conducir).
                     // El MODELO es la carpeta con la que se compró la unidad; si no la guardó (backend
@@ -6028,7 +6048,7 @@ namespace SelectOR
             string real = RealUnitStatus(status, Str(e, "id"), openUnits, since, interval);
             bool inUse = real == "in_use", due = real == "maintenance_due", sale = real == "for_sale", soon = !due && !inUse && !sale && interval > 0 && remaining <= interval * 0.1;
             int state = sale ? 4 : due ? 2 : inUse ? 1 : soon ? 3 : 0;
-            string estado = sale ? Tr("En venta") : due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
+            string estado = sale ? Tr("En el mercado") : due ? Tr("En taller") : inUse ? Tr("En servicio") : soon ? Tr("Revisión pronto") : Tr("Disponible");
             string prop = ownership == "rented" ? Tr("Alquilado") + " · " + rent.ToString("N0", EsEs) + " €/serv." : Tr("Comprado");
             string leadPath = lead.Length > 0 && engPath.TryGetValue(lead, out var lp) ? lp : "";
             bool local = trainId.Length > 0 && _trainCon.TryGetValue(trainId, out _);
@@ -6553,7 +6573,7 @@ namespace SelectOR
             bool selected = (e.State & DrawItemState.Selected) != 0;
             DrawRowBackground(g, e.Bounds, _fleetConsistList.BackColor, selected);
             var textRect = new Rectangle(e.Bounds.X + 14, e.Bounds.Y, Math.Max(20, e.Bounds.Width - 24), e.Bounds.Height);
-            TextRenderer.DrawText(g, consist.Name, Font, textRect, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            ColorText.Text(g, consist.Name, Font, textRect, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
         }
 
         // ======================= Compra POR MÁQUINA (.eng) =======================
@@ -9424,6 +9444,7 @@ namespace SelectOR
             if (_fleetSettingsRow != null) _fleetSettingsRow.Visible = Supa.IsSuperadmin; // economía de flota: solo superadmin
             if (_svcDelBtn != null) _svcDelBtn.Visible = Supa.IsSuperadmin;           // borrar servicio: solo superadmin
             if (_svcAnnulBtn != null) _svcAnnulBtn.Visible = Supa.IsSuperadmin;       // anular servicio: solo superadmin
+            if (_svcSanctionBtn != null) _svcSanctionBtn.Visible = Supa.IsSuperadmin;  // sancionar: solo el administrador (1.2.90)
             if (_svcUnannulBtn != null) _svcUnannulBtn.Visible = Supa.IsSuperadmin;   // y quitar la anulación
             if (_ledgerDelBtn != null) _ledgerDelBtn.Visible = Supa.IsSuperadmin;     // borrar movimiento: solo superadmin
             bool fleetManage = CanManage() || Supa.IsSuperadmin;                      // flota: dueño/gestor/superadmin

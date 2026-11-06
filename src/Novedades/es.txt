@@ -1,4 +1,10 @@
-﻿1.2.89
-Gente en su andén|La gente espera solo en los andenes de la ruta y del lado en que están, sin salirse de sus extremos ni aparecer al otro lado de la vía; y por fin también en Ingeniero Pizias y Urb. Pere Comas en la CGL.
-Más ligera|La gente de los andenes ocupa menos memoria y carga menos el ordenador, para que Open Rails vaya más fino en las estaciones grandes.
-La sala compartida cobra vida|En la sala compartida de la CGL pueden aparecer operarios de vía trabajando junto a la vía, derrumbes de tierras y rocas caídas, y fuegos e incendios con humo que de noche iluminan el suelo. Los ven todos los que conducen en la sala.
+﻿1.2.90
+Alquila trenes a otras empresas|En Flota → «Vender, alquilar o desguazar…» ofreces un tren 7, 14 o 30 días; la otra empresa te paga el alquiler en cada servicio y al acabar vuelve a tu flota.
+El mercado mira tu carpeta|Cada tren del mercado dice si ya tienes todo su material o qué te falta.
+Portal de transparencia|Tablón → Transparencia enseña cómo va cada empresa en el mes y qué cuenta en la Liga, con «¿Cómo se calcula?».
+Tarifas nuevas|Los viajeros dependen de la demanda y no del tamaño del tren, el billete y los costes suben, y comprar trenes es mucho más barato (un 59 %).
+Radio de la sala|En la sala compartida mantienes pulsada una tecla (Control derecho, de serie) o un botón de tu mando para hablar, y se oye como por una radio.
+Jefe de circulación a la vista|La tarjeta de la sala y el mapa grande dicen quién lleva cada estación.
+Señales en su lado|En el puesto de mando las señales salen del lado de la vía en que están de verdad.
+Tablón renovado|Cabecera de teleindicador, pestañas con icono y emojis a color.
+Túneles con luz|Con CYZYRails, los túneles de vía doble de la CGL tienen luces en las paredes, como el resto de túneles de la ruta.

@@ -79,7 +79,7 @@ namespace SelectOR
             g.Clear(BackColor);
             if (EmptyText != null)
             {
-                TextRenderer.DrawText(g, EmptyText, Font, new Rectangle(0, Theme.Px(24), ClientSize.Width, Theme.Px(30)), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
+                ColorText.Text(g, EmptyText, Font, new Rectangle(0, Theme.Px(24), ClientSize.Width, Theme.Px(30)), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
                 return;
             }
             DoPaint(g, ScrollY);
@@ -88,7 +88,7 @@ namespace SelectOR
         // --- ayudas de dibujo ---
         protected static void Round(Graphics g, Rectangle r, int radius, Color c) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, r, radius, c); g.SmoothingMode = SmoothingMode.None; }
         protected static void Border(Graphics g, Rectangle r, int radius, Color c, float w = 1f) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.DrawRoundBorder(g, r, radius, c, w); g.SmoothingMode = SmoothingMode.None; }
-        protected static void Text(Graphics g, string s, Font f, Rectangle r, Color c, TextFormatFlags fl) { if (!string.IsNullOrEmpty(s) && r.Width > 0) TextRenderer.DrawText(g, s, f, r, c, fl); }
+        protected static void Text(Graphics g, string s, Font f, Rectangle r, Color c, TextFormatFlags fl) { if (!string.IsNullOrEmpty(s) && r.Width > 0) ColorText.Text(g, s, f, r, c, fl); }
         protected static int TW(string s, Font f) => string.IsNullOrEmpty(s) ? 0 : TextRenderer.MeasureText(s, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
         protected static string Initials(string name)
         {
@@ -124,7 +124,7 @@ namespace SelectOR
             else
             {
                 using (var b = new SolidBrush(NameColor(name))) g.FillEllipse(b, r);
-                TextRenderer.DrawText(g, Initials(name), f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, Initials(name), f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
             g.SmoothingMode = SmoothingMode.None;
         }
@@ -421,7 +421,7 @@ namespace SelectOR
                 Round(g, r, Theme.Px(12), CardC);
                 ColorText.DrawCells(g, new[] { ("🏅", new Rectangle(r.X, r.Y + Theme.Px(10), r.Width, Theme.Px(40))) }, _fBig, Theme.Text, r);
                 Text(g, SummaryTitle, _fT, new Rectangle(r.X + 8, r.Y + Theme.Px(54), r.Width - 16, Theme.Px(22)), Theme.Text, C1);
-                TextRenderer.DrawText(g, SummaryText, _fS, new Rectangle(r.X + Theme.Px(16), r.Y + Theme.Px(78), r.Width - Theme.Px(32), Theme.Px(44)), Theme.Subtle, Wrap | TextFormatFlags.HorizontalCenter);
+                ColorText.Text(g, SummaryText, _fS, new Rectangle(r.X + Theme.Px(16), r.Y + Theme.Px(78), r.Width - Theme.Px(32), Theme.Px(44)), Theme.Subtle, Wrap | TextFormatFlags.HorizontalCenter);
             }
         }
     }
@@ -610,7 +610,7 @@ namespace SelectOR
             }
             g.SmoothingMode = SmoothingMode.None;
             // marca de agua
-            TextRenderer.DrawText(g, "🚆", _fTrain, new Rectangle(r.Right - Theme.Px(150), r.Bottom - Theme.Px(120), Theme.Px(160), Theme.Px(130)), Color.FromArgb(52, 78, 60), TextFormatFlags.NoPadding);
+            ColorText.Text(g, "🚆", _fTrain, new Rectangle(r.Right - Theme.Px(150), r.Bottom - Theme.Px(120), Theme.Px(160), Theme.Px(130)), Color.FromArgb(52, 78, 60), TextFormatFlags.NoPadding);
             int x = Theme.Px(16), y = Theme.Px(12);
             Text(g, Caption, _fCap, new Rectangle(x, y, r.Width - 2 * x, Theme.Px(16)), Theme.AccentHi, L1);
             y += Theme.Px(24);
@@ -677,8 +677,8 @@ namespace SelectOR
                 using (var b = new SolidBrush(earned ? Color.FromArgb(70, color) : Color.FromArgb(56, 60, 64))) g.FillEllipse(b, dr);
                 g.SmoothingMode = SmoothingMode.None;
                 if (earned) icons.Add((ic, dr));
-                else TextRenderer.DrawText(g, ic, _fIc, dr, Color.FromArgb(110, 116, 122), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, text, earned ? _fTB : _fT, new Rectangle(r.X + 4, dr.Bottom + Theme.Px(4), r.Width - 8, Theme.Px(30)), earned ? Theme.Text : Theme.Subtle,
+                else ColorText.Text(g, ic, _fIc, dr, Color.FromArgb(110, 116, 122), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, text, earned ? _fTB : _fT, new Rectangle(r.X + 4, dr.Bottom + Theme.Px(4), r.Width - 8, Theme.Px(30)), earned ? Theme.Text : Theme.Subtle,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
                 if (!earned && prog > 0)
                 {

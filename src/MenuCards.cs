@@ -163,7 +163,7 @@ namespace SelectOR
             if (Items.Count == 0)
             {
                 if (!string.IsNullOrEmpty(EmptyText))
-                    TextRenderer.DrawText(g, EmptyText, FMsg, new Rectangle(Theme.Px(10), Theme.Px(28), ClientSize.Width - Theme.Px(20), Theme.Px(60)), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
+                    ColorText.Text(g, EmptyText, FMsg, new Rectangle(Theme.Px(10), Theme.Px(28), ClientSize.Width - Theme.Px(20), Theme.Px(60)), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
                 return;
             }
             int first = Math.Max(0, RowAtY(ScrollY) * Cols), last = Math.Min(Items.Count - 1, (RowAtY(ScrollY + ClientSize.Height) + 2) * Cols - 1);
@@ -333,7 +333,7 @@ namespace SelectOR
             if (x + w > maxX) { x = maxX + 1; return; }
             var r = new Rectangle(x, y, w, h);
             Fill(g, r, h / 2, bg);
-            TextRenderer.DrawText(g, t, f, r, fg, C1);
+            ColorText.Text(g, t, f, r, fg, C1);
             x += w + Theme.Px(5);
         }
     }
@@ -371,7 +371,7 @@ namespace SelectOR
             {
                 var sr = new Rectangle(rc.Right - Theme.Px(30), rc.Y + Theme.Px(6), Theme.Px(24), Theme.Px(22));
                 Fill(g, sr, Theme.Px(11), Color.FromArgb(150, 0, 0, 0));
-                TextRenderer.DrawText(g, "★", _fStar, sr, Theme.Gold, C1);
+                ColorText.Text(g, "★", _fStar, sr, Theme.Gold, C1);
             }
             var badge = BadgeOf?.Invoke(it);
             if (badge != null)
@@ -379,7 +379,7 @@ namespace SelectOR
                 var bs = TextRenderer.MeasureText(badge.Value.text, _fB, Size.Empty, TextFormatFlags.NoPadding);
                 var br = new Rectangle(rc.X + Theme.Px(7), rc.Y + Theme.Px(7), bs.Width + Theme.Px(14), bs.Height + Theme.Px(6));
                 Fill(g, br, br.Height / 2, Color.FromArgb(215, 22, 25, 28));
-                TextRenderer.DrawText(g, badge.Value.text, _fB, br, badge.Value.color, C1);
+                ColorText.Text(g, badge.Value.text, _fB, br, badge.Value.color, C1);
             }
             var badge2 = Badge2Of?.Invoke(it);
             if (badge2 != null)
@@ -387,11 +387,11 @@ namespace SelectOR
                 var bs = TextRenderer.MeasureText(badge2.Value.text, _fB, Size.Empty, TextFormatFlags.NoPadding);
                 var br = new Rectangle(rc.X + Theme.Px(7), ir.Bottom - bs.Height - Theme.Px(13), bs.Width + Theme.Px(14), bs.Height + Theme.Px(6));
                 Fill(g, br, br.Height / 2, Color.FromArgb(215, 22, 25, 28));
-                TextRenderer.DrawText(g, badge2.Value.text, _fB, br, badge2.Value.color, C1);
+                ColorText.Text(g, badge2.Value.text, _fB, br, badge2.Value.color, C1);
             }
             int x = rc.X + Theme.Px(12), w = rc.Width - Theme.Px(24);
-            TextRenderer.DrawText(g, TitleOf?.Invoke(it) ?? it.ToString(), _fT, new Rectangle(x, ir.Bottom + Theme.Px(7), w, Theme.Px(20)), Theme.Text, L1);
-            TextRenderer.DrawText(g, SubOf?.Invoke(it) ?? "", _fS, new Rectangle(x, ir.Bottom + Theme.Px(28), w, Theme.Px(16)), Theme.Subtle, L1);
+            ColorText.Text(g, TitleOf?.Invoke(it) ?? it.ToString(), _fT, new Rectangle(x, ir.Bottom + Theme.Px(7), w, Theme.Px(20)), Theme.Text, L1);
+            ColorText.Text(g, SubOf?.Invoke(it) ?? "", _fS, new Rectangle(x, ir.Bottom + Theme.Px(28), w, Theme.Px(16)), Theme.Subtle, L1);
             if (sel) Stroke(g, rc, rad, Theme.Accent);
             else if (i == SelectedIndex && ShowFocus) Stroke(g, rc, rad, Theme.AccentHi, 1f);
         }
@@ -420,7 +420,7 @@ namespace SelectOR
             foreach (var p in parts) if (KeyVal.IsMatch(p.Trim())) { anyKv = true; break; }
             if (!anyKv)
             {
-                TextRenderer.DrawText(g, text, _fT, new Rectangle(x, 0, maxX - x, ClientSize.Height), ForeColor, F);
+                ColorText.Text(g, text, _fT, new Rectangle(x, 0, maxX - x, ClientSize.Height), ForeColor, F);
                 return;
             }
             foreach (var raw in parts)
@@ -438,8 +438,8 @@ namespace SelectOR
                 Theme.FillRound(g, r, h / 2, Theme.Surface2);
                 g.SmoothingMode = SmoothingMode.None;
                 int tx = r.X + Theme.Px(11);
-                if (k != null) { TextRenderer.DrawText(g, k, _fK, new Rectangle(tx, r.Y, kw, h), Theme.Subtle, F); tx += kw; }
-                TextRenderer.DrawText(g, v, _fV, new Rectangle(tx, r.Y, r.Right - tx - Theme.Px(10), h), Theme.Text, F);
+                if (k != null) { ColorText.Text(g, k, _fK, new Rectangle(tx, r.Y, kw, h), Theme.Subtle, F); tx += kw; }
+                ColorText.Text(g, v, _fV, new Rectangle(tx, r.Y, r.Right - tx - Theme.Px(10), h), Theme.Text, F);
                 x += w + Theme.Px(8);
             }
         }

@@ -58,14 +58,14 @@ namespace SelectOR
 
             // Cabecera: nombre · rol · actividad · carné
             int nw = Math.Min(TW(d.Name, _fName), Theme.Px(220));
-            TextRenderer.DrawText(g, d.Name, _fName, new Rectangle(x, y, nw + 2, Theme.Px(24)), Theme.Text, L1);
+            ColorText.Text(g, d.Name, _fName, new Rectangle(x, y, nw + 2, Theme.Px(24)), Theme.Text, L1);
             int px = x + nw + Theme.Px(10);
             void Pill(string t, Color c)
             {
                 int w = TW(t, _fPill) + Theme.Px(16), h = Theme.Px(20);
                 var r = new Rectangle(px, y + Theme.Px(2), w, h);
                 Fill(g, r, h / 2, Color.FromArgb(40, c));
-                TextRenderer.DrawText(g, t, _fPill, r, c, C1);
+                ColorText.Text(g, t, _fPill, r, c, C1);
                 px += w + Theme.Px(6);
             }
             Pill(RoleText(d.Role), RoleColor(d.Role));
@@ -75,7 +75,7 @@ namespace SelectOR
             string last = d.LastEver == DateTime.MinValue ? I18n.T("nunca ha conducido en la empresa")
                         : string.Format(I18n.T("último servicio: {0} ({1})"), d.LastEver.ToString("dd/MM/yyyy", Es), Ago(d.LastEver));
             int chartW = Theme.Px(230), chartX = rc.Right - pad - chartW;
-            TextRenderer.DrawText(g, last, _fText, new Rectangle(px + Theme.Px(4), y, chartX - px - Theme.Px(12), Theme.Px(24)),
+            ColorText.Text(g, last, _fText, new Rectangle(px + Theme.Px(4), y, chartX - px - Theme.Px(12), Theme.Px(24)),
                 d.LastEver == DateTime.MinValue || (DateTime.Now - d.LastEver).TotalDays > 30 ? Amber : Theme.Subtle, L1);
 
             // Cifras del periodo
@@ -94,16 +94,16 @@ namespace SelectOR
             for (int k = 0; k < cells.Length; k++)
             {
                 int cx = x + k * cw;
-                TextRenderer.DrawText(g, cells[k].cap, _fCap, new Rectangle(cx, gy, cw - 4, Theme.Px(16)), Theme.Subtle, L1);
-                TextRenderer.DrawText(g, cells[k].val, _fVal, new Rectangle(cx, gy + Theme.Px(16), cw - 4, Theme.Px(24)), cells[k].col, L1);
+                ColorText.Text(g, cells[k].cap, _fCap, new Rectangle(cx, gy, cw - 4, Theme.Px(16)), Theme.Subtle, L1);
+                ColorText.Text(g, cells[k].val, _fVal, new Rectangle(cx, gy + Theme.Px(16), cw - 4, Theme.Px(24)), cells[k].col, L1);
             }
             string since = d.Joined == DateTime.MinValue ? "" : string.Format(I18n.T("socio desde {0}"), d.Joined.ToString("dd/MM/yyyy", Es));
             if (d.First != DateTime.MinValue) since += (since.Length > 0 ? "  ·  " : "") + string.Format(I18n.T("en el periodo: del {0} al {1}"), d.First.ToString("dd/MM", Es), d.Last.ToString("dd/MM", Es));
-            TextRenderer.DrawText(g, since, _fText, new Rectangle(x, gy + Theme.Px(44), chartX - x - Theme.Px(10), Theme.Px(18)), Theme.Subtle, L1);
+            ColorText.Text(g, since, _fText, new Rectangle(x, gy + Theme.Px(44), chartX - x - Theme.Px(10), Theme.Px(18)), Theme.Subtle, L1);
 
             // Actividad de los últimos 12 meses (servicios por mes)
             using (var sep = new Pen(Theme.Surface2)) g.DrawLine(sep, chartX - Theme.Px(10), rc.Y + Theme.Px(12), chartX - Theme.Px(10), rc.Bottom - Theme.Px(12));
-            TextRenderer.DrawText(g, I18n.T("SERVICIOS POR MES"), _fCap, new Rectangle(chartX, y + Theme.Px(2), chartW, Theme.Px(16)), Theme.Subtle, L1);
+            ColorText.Text(g, I18n.T("SERVICIOS POR MES"), _fCap, new Rectangle(chartX, y + Theme.Px(2), chartW, Theme.Px(16)), Theme.Subtle, L1);
             int max = Math.Max(1, d.Months.Max()), bw = chartW / 12, baseY = rc.Bottom - Theme.Px(24), hMax = Theme.Px(52);
             for (int m = 0; m < 12; m++)
             {
@@ -111,7 +111,7 @@ namespace SelectOR
                 var bar = new Rectangle(chartX + m * bw + 2, baseY - h, bw - 4, h);
                 using (var b = new SolidBrush(v == 0 ? Theme.Surface2 : m == 11 ? Theme.AccentHi : Theme.Accent)) g.FillRectangle(b, bar);
                 string ml = d.MonthZero.AddMonths(m).ToString(I18n.English ? "MMM" : "MMM", I18n.Culture);
-                TextRenderer.DrawText(g, ml.Substring(0, 1).ToUpperInvariant(), _fTiny, new Rectangle(chartX + m * bw, baseY + 2, bw, Theme.Px(14)), Theme.Subtle, C1);
+                ColorText.Text(g, ml.Substring(0, 1).ToUpperInvariant(), _fTiny, new Rectangle(chartX + m * bw, baseY + 2, bw, Theme.Px(14)), Theme.Subtle, C1);
             }
         }
 

@@ -91,13 +91,13 @@ namespace SelectOR
                 var tf = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
                 int lw = string.IsNullOrEmpty(Link) ? 0 : TextRenderer.MeasureText(g, Link, fb, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width + Theme.Px(14);
                 var tr = new Rectangle(x, box.Y, Math.Max(10, box.Right - x - lw - Theme.Px(10)), box.Height);
-                TextRenderer.DrawText(g, Text, f, tr, Color.FromArgb(255, 213, 140), tf);
+                ColorText.Text(g, Text, f, tr, Color.FromArgb(255, 213, 140), tf);
                 _linkRect = Rectangle.Empty;
                 if (lw > 0)
                 {
                     int tw = Math.Min(tr.Width, TextRenderer.MeasureText(g, Text, f, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width);   // (sin EndEllipsis: con él mide 0)
                     _linkRect = new Rectangle(x + tw + Theme.Px(12), box.Y, lw, box.Height);
-                    TextRenderer.DrawText(g, Link, fb, _linkRect, Color.FromArgb(255, 183, 77), tf);
+                    ColorText.Text(g, Link, fb, _linkRect, Color.FromArgb(255, 183, 77), tf);
                 }
             }
             protected override void OnMouseMove(MouseEventArgs e) { Cursor = _linkRect.Contains(e.Location) || (!string.IsNullOrEmpty(Link)) ? Cursors.Hand : Cursors.Default; base.OnMouseMove(e); }

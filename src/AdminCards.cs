@@ -54,23 +54,23 @@ namespace SelectOR
 
             // 1) nº de cuota · estado
             string n = string.Format(I18n.T("Cuota {0}/{1}"), it.N, it.Months);
-            TextRenderer.DrawText(g, n, _fN, new Rectangle(x, y, r - x, Theme.Px(20)), Theme.Subtle, L1);
+            ColorText.Text(g, n, _fN, new Rectangle(x, y, r - x, Theme.Px(20)), Theme.Subtle, L1);
             int pw = TW(st, _fPill) + Theme.Px(14), ph = Theme.Px(18);
             var pill = new Rectangle(r - pw, y + 1, pw, ph);
             Fill(g, pill, ph / 2, Color.FromArgb(40, sc));
-            TextRenderer.DrawText(g, st, _fPill, pill, sc, C1);
+            ColorText.Text(g, st, _fPill, pill, sc, C1);
             y += Theme.Px(22);
             // 2) importe · fecha
-            TextRenderer.DrawText(g, Eur(it.Payment), _fPay, new Rectangle(x, y, r - x, Theme.Px(24)), it.Status == "cancelled" ? Theme.Subtle : Theme.Text, L1);
+            ColorText.Text(g, Eur(it.Payment), _fPay, new Rectangle(x, y, r - x, Theme.Px(24)), it.Status == "cancelled" ? Theme.Subtle : Theme.Text, L1);
             string when = it.Status == "paid" && it.PaidAt != DateTime.MinValue
                 ? string.Format(I18n.T("pagada el {0}"), it.PaidAt.ToString("dd/MM/yyyy", Es))
                 : string.Format(I18n.T("vence el {0}"), it.Due == DateTime.MinValue ? "—" : it.Due.ToString("dd/MM/yyyy", Es));
-            TextRenderer.DrawText(g, when, _fText, new Rectangle(x, y, r - x, Theme.Px(24)), it.Status == "late" ? Red : Theme.Subtle, R1);
+            ColorText.Text(g, when, _fText, new Rectangle(x, y, r - x, Theme.Px(24)), it.Status == "late" ? Red : Theme.Subtle, R1);
             y += Theme.Px(28);
             // 3) capital · intereses · recargo
             string d = string.Format(I18n.T("capital {0} · intereses {1}"), Eur(it.Principal), Eur(it.Interest));
             if (it.LateFee > 0) d = string.Format(I18n.T("recargo {0}"), Eur(it.LateFee)) + " · " + d;   // lo primero, para que se vea siempre
-            TextRenderer.DrawText(g, d, _fText, new Rectangle(x, y, r - x, Theme.Px(18)), it.LateFee > 0 ? Red : Theme.Subtle, L1);
+            ColorText.Text(g, d, _fText, new Rectangle(x, y, r - x, Theme.Px(18)), it.LateFee > 0 ? Red : Theme.Subtle, L1);
         }
     }
 
@@ -122,7 +122,7 @@ namespace SelectOR
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var b = new SolidBrush(u.Self ? Color.FromArgb(60, Theme.Accent) : Theme.Surface2)) g.FillEllipse(b, ar);
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-            TextRenderer.DrawText(g, Initials(u.Name), _fAv, ar, Theme.AccentHi, C1);
+            ColorText.Text(g, Initials(u.Name), _fAv, ar, Theme.AccentHi, C1);
             int tx = ar.Right + Theme.Px(12);
 
             // derecha: empresas, carné y alta
@@ -130,7 +130,7 @@ namespace SelectOR
             int pw = TW(co, _fPill) + Theme.Px(16), ph = Theme.Px(20);
             var pill = new Rectangle(r - pw, y, pw, ph);
             Fill(g, pill, ph / 2, Color.FromArgb(40, u.Companies > 0 ? Theme.Accent : Theme.Subtle));
-            TextRenderer.DrawText(g, co, _fPill, pill, u.Companies > 0 ? Theme.AccentHi : Theme.Subtle, C1);
+            ColorText.Text(g, co, _fPill, pill, u.Companies > 0 ? Theme.AccentHi : Theme.Subtle, C1);
             if (u.Points >= 0)
             {
                 // carné: sus puntos con el color del carné (suspendido, en rojo)
@@ -140,20 +140,20 @@ namespace SelectOR
                 int cw = TW(ct, _fPill) + Theme.Px(16);
                 var cp = new Rectangle(pill.Left - Theme.Px(6) - cw, y, cw, ph);
                 Fill(g, cp, ph / 2, Color.FromArgb(40, cc));
-                TextRenderer.DrawText(g, ct, _fPill, cp, cc, C1);
+                ColorText.Text(g, ct, _fPill, cp, cc, C1);
                 pill = Rectangle.Union(pill, cp);   // el nombre se corta antes de las dos pastillas
             }
             if (u.Created != DateTime.MinValue)
-                TextRenderer.DrawText(g, string.Format(I18n.T("alta {0}"), u.Created.ToString("dd/MM/yyyy", Es)), _fText,
+                ColorText.Text(g, string.Format(I18n.T("alta {0}"), u.Created.ToString("dd/MM/yyyy", Es)), _fText,
                     new Rectangle(r - Theme.Px(150), y + Theme.Px(24), Theme.Px(150), Theme.Px(18)), Theme.Subtle, R1);
 
             int tw = pill.Left - tx - Theme.Px(10);
-            TextRenderer.DrawText(g, u.Name + (u.Self ? "  ★" : ""), _fName, new Rectangle(tx, y, tw, Theme.Px(22)), u.Self ? Theme.Accent : Theme.Text, L1);
-            TextRenderer.DrawText(g, "ID " + u.Id, _fText, new Rectangle(tx, y + Theme.Px(24), r - Theme.Px(156) - tx, Theme.Px(18)), Theme.Subtle, L1);
-            TextRenderer.DrawText(g, "🗝 " + (u.Key.Length > 0 ? u.Key : "—"), _fKey, new Rectangle(tx, y + Theme.Px(44), r - tx, Theme.Px(22)), Theme.AccentHi, L1);
+            ColorText.Text(g, u.Name + (u.Self ? "  ★" : ""), _fName, new Rectangle(tx, y, tw, Theme.Px(22)), u.Self ? Theme.Accent : Theme.Text, L1);
+            ColorText.Text(g, "ID " + u.Id, _fText, new Rectangle(tx, y + Theme.Px(24), r - Theme.Px(156) - tx, Theme.Px(18)), Theme.Subtle, L1);
+            ColorText.Text(g, "🗝 " + (u.Key.Length > 0 ? u.Key : "—"), _fKey, new Rectangle(tx, y + Theme.Px(44), r - tx, Theme.Px(22)), Theme.AccentHi, L1);
             // sus empresas, por nombre
             if (u.Points >= 0)
-                TextRenderer.DrawText(g, u.CompanyNames.Count > 0 ? "🏢 " + string.Join("  ·  ", u.CompanyNames) : I18n.T("Sin empresa"), _fText,
+                ColorText.Text(g, u.CompanyNames.Count > 0 ? "🏢 " + string.Join("  ·  ", u.CompanyNames) : I18n.T("Sin empresa"), _fText,
                     new Rectangle(tx, y + Theme.Px(70), r - tx, Theme.Px(18)), u.CompanyNames.Count > 0 ? Theme.Text : Theme.Subtle, L1 | TextFormatFlags.EndEllipsis);
         }
     }

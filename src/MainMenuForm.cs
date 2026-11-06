@@ -130,6 +130,7 @@ namespace SelectOR
         {
             _kiosk = kiosk;
             _prefs = AppPrefs.Load();
+            RoomRadio.Prefs = _prefs;   // (1.2.90) la radio de la sala: tecla, volumen y silenciados
             HudScale.Set(int.TryParse(Environment.GetEnvironmentVariable("SELECTOR_HUDSCALE"), out int hsEnv) ? hsEnv : _prefs.HudScalePct);   // (1.2.82) tamaño del HUD (SELECTOR_HUDSCALE: pruebas)
             NotifySound.Enabled = () => _prefs?.NotifySound != false;
             VehicleThumbs.ConsistFile = ConsistStripFileAsync;   // vistas 2D de un tren entero (Compra y Flota)
@@ -1913,7 +1914,7 @@ namespace SelectOR
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             // (desde la 1.2.65 sin «Servidores SelectOR»: la sala de SelectOR es la de CGL, desde Conducción libre)
-            _lblServers = new Label { Text = "🌐  " + Tr("Servidores públicos"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Text, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 0, 18, 0) };
+            _lblServers = new EmojiLabel { Text = "🌐  " + Tr("Servidores públicos"), AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Theme.Text, Font = Theme.Font(11f, FontStyle.Bold), Margin = new Padding(0, 0, 18, 0) };
             _srvTabs = MakeSubTabs(new[] { "Todos", "Con jugadores", "Rutas que tengo" }, i => { _srvFilter = i; FillServerCards(); });
             _srvTabs.Dock = DockStyle.Fill; _srvTabs.Margin = new Padding(0);
             _srvAge = new Label { AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = Theme.Subtle, Font = Theme.Font(8.5f), Text = "", Margin = new Padding(10, 0, 10, 0) };
@@ -2280,7 +2281,7 @@ namespace SelectOR
                 var txt = cb.GetItemText(cb.Items[e.Index]);
                 var r = new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 8, e.Bounds.Height);
                 // NoPrefix: si no, un «&» en el texto (p. ej. «Cercanias & GL») se pinta como subrayado.
-                TextRenderer.DrawText(e.Graphics, txt, cb.Font, r, sel ? Color.White : Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                ColorText.Text(e.Graphics, txt, cb.Font, r, sel ? Color.White : Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             }
         }
 
@@ -2327,7 +2328,7 @@ namespace SelectOR
             var item = list.Items[e.Index];
             int left = e.Bounds.X + 14;
             var textRect = new Rectangle(left, e.Bounds.Y, e.Bounds.Right - left - 8, e.Bounds.Height);
-            TextRenderer.DrawText(e.Graphics, item.ToString(), Font, textRect, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            ColorText.Text(e.Graphics, item.ToString(), Font, textRect, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
         }
 
         static readonly Font BadgeFont = Theme.Font(7.5f, FontStyle.Bold);
@@ -2771,7 +2772,10 @@ namespace SelectOR
         // Nombre de un conjunto o un horario: su descripción o, si no la trae, el nombre del archivo (no la ruta completa).
         static string TtLabel(string desc, string fallback)
         {
-            if (!string.IsNullOrWhiteSpace(desc)) return desc.Trim();
+            // (1.2.90) un horario sin descripción trae como «descripción» la ruta entera del archivo (con el usuario de Windows)
+            bool IsPath(string s) => s.Length > 2 && (s[1] == ':' || s.StartsWith("\\\\")) && (s.IndexOf('\\') >= 0 || s.IndexOf('/') >= 0);
+            if (!string.IsNullOrWhiteSpace(desc) && !IsPath(desc.Trim())) return desc.Trim();
+            if (!string.IsNullOrWhiteSpace(desc)) fallback = desc.Trim();
             fallback ??= "";
             return fallback.IndexOf('\\') >= 0 || fallback.IndexOf('/') >= 0 ? SysPath.GetFileNameWithoutExtension(fallback) : fallback;
         }

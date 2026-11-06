@@ -26,7 +26,7 @@ namespace SelectOR
         {
             _chatPanel = new Panel { Dock = DockStyle.Right, Width = Theme.Px(300), BackColor = Theme.BgSidebar, Padding = new Padding(Theme.Px(8), Theme.Px(4), Theme.Px(8), Theme.Px(8)) };
             var head = new Panel { Dock = DockStyle.Top, Height = Theme.Px(26), BackColor = _chatPanel.BackColor };
-            _chatHead = new Label { Text = Tr("CHAT DE LA SALA"), Dock = DockStyle.Fill, Font = Theme.Font(8.5f, FontStyle.Bold), ForeColor = Theme.Subtle, BackColor = head.BackColor, TextAlign = ContentAlignment.MiddleLeft };
+            _chatHead = new EmojiLabel { Text = Tr("CHAT DE LA SALA"), Dock = DockStyle.Fill, Font = Theme.Font(8.5f, FontStyle.Bold), ForeColor = Theme.Subtle, BackColor = head.BackColor, TextAlign = ContentAlignment.MiddleLeft };
             _chatToggle = new Label { Text = "›", Dock = DockStyle.Right, Width = Theme.Px(24), Font = Theme.Font(12f, FontStyle.Bold), ForeColor = Theme.Subtle, BackColor = head.BackColor, TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
             _chatToggle.Click += (s, e) => ChatCollapse(!_chatCollapsed);
             _chatHead.Click += (s, e) => { if (_chatCollapsed) ChatCollapse(false); };
@@ -50,13 +50,20 @@ namespace SelectOR
             };
             inBox.Controls.Add(_chatInput);
             _chatBody.Controls.Add(_chatLog); _chatBody.Controls.Add(inBox); _chatBody.Controls.Add(_chatNote);
+            // (1.2.90) la radio de la sala, encima del chat: mantener pulsado para hablar (botón derecho: silenciar y volumen)
+            _radioPanel = new RadioPanel { Dock = DockStyle.Top, Height = Theme.Px(46), BackColor = _chatPanel.BackColor, Margin = new Padding(0, 0, 0, Theme.Px(6)) };
+            var radioGap = new Panel { Dock = DockStyle.Top, Height = Theme.Px(6), BackColor = _chatPanel.BackColor };
+            _chatBody.Controls.Add(radioGap); _chatBody.Controls.Add(_radioPanel);
             _chatPanel.Controls.Add(_chatBody); _chatPanel.Controls.Add(head);
             return _chatPanel;
         }
 
+        RadioPanel _radioPanel; RoomRadio _radio;
+
         // (Prepare, con la conexión creada)
         void PrepareChat()
         {
+            try { _radio = new RoomRadio(_pilot, this, _me); if (_radioPanel != null) _radioPanel.Radio = _radio; FormClosed += (s, e) => { try { _radio?.Dispose(); } catch { } _radio = null; }; } catch { }
             _pilot.Chat += (at, kind, from, text) => { try { if (!IsDisposed) BeginInvoke(new Action(() => ChatAdd(at, kind, from, text))); } catch { } };
             _pilot.ChatReset += () => { try { if (!IsDisposed) BeginInvoke(new Action(ChatReady)); } catch { } };
             _pilot.ChatError += err => { try { if (!IsDisposed) BeginInvoke(new Action(() => ChatErr(err))); } catch { } };

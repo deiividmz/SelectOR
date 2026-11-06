@@ -86,9 +86,9 @@ namespace SelectOR
                 int x = ic.Right + Theme.Px(14), w = r.Right - Theme.Px(12) - x;
                 int blockH = _fCap.Height + Theme.Px(2) + _fVal.Height + Theme.Px(2) + Math.Max(_fSub.Height, k.Chips != null ? Theme.Px(20) : 0);
                 int y = r.Y + (r.Height - blockH) / 2;
-                TextRenderer.DrawText(g, k.Caption, _fCap, new Rectangle(x, y, w, _fCap.Height), Theme.Subtle, L1);
+                ColorText.Text(g, k.Caption, _fCap, new Rectangle(x, y, w, _fCap.Height), Theme.Subtle, L1);
                 y += _fCap.Height + Theme.Px(2);
-                TextRenderer.DrawText(g, k.Value, _fVal, new Rectangle(x, y, w, _fVal.Height), k.ValueColor, L1);
+                ColorText.Text(g, k.Value, _fVal, new Rectangle(x, y, w, _fVal.Height), k.ValueColor, L1);
                 y += _fVal.Height + Theme.Px(2);
                 if (k.Chips != null)
                 {
@@ -100,11 +100,11 @@ namespace SelectOR
                         g.SmoothingMode = SmoothingMode.AntiAlias;
                         using (var path = Theme.Round(cr, ch / 2)) using (var b = new SolidBrush(Color.FromArgb(40, col))) g.FillPath(b, path);
                         g.SmoothingMode = SmoothingMode.None;
-                        TextRenderer.DrawText(g, t, _fChip, cr, col, L1 | TextFormatFlags.HorizontalCenter);
+                        ColorText.Text(g, t, _fChip, cr, col, L1 | TextFormatFlags.HorizontalCenter);
                         cx += cw + Theme.Px(6);
                     }
                 }
-                else TextRenderer.DrawText(g, k.Sub, _fSub, new Rectangle(x, y, w, _fSub.Height), Theme.Subtle, L1);
+                else ColorText.Text(g, k.Sub, _fSub, new Rectangle(x, y, w, _fSub.Height), Theme.Subtle, L1);
             }
             ColorText.DrawCells(g, icons, _fIc, Theme.Text, ClientRectangle);
         }

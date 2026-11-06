@@ -106,7 +106,7 @@ namespace SelectOR
             using (var p = Theme.Round(r, 12)) using (var b = new SolidBrush(Color.FromArgb(60, c))) g.FillPath(b, p);
             using (var p = Theme.Round(r, 12)) using (var pen = new Pen(Color.FromArgb(150, c), 1.2f)) g.DrawPath(pen, p);
             using var f = new Font("Segoe UI Emoji", r.Height * 0.42f, GraphicsUnit.Pixel);
-            TextRenderer.DrawText(g, icon, f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ColorText.Text(g, icon, f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         // Aviso sencillo (en lugar de MessageBox): icono, título, texto y «Aceptar».
@@ -147,8 +147,8 @@ namespace SelectOR
                 using var fT = Theme.Font(12f, FontStyle.Bold);
                 using var fB = Theme.Font(9.75f);
                 int hT = TextRenderer.MeasureText(_title, fT, new Size(tw, 999), fl).Height;
-                TextRenderer.DrawText(g, _title, fT, new Rectangle(x, y, tw, hT), Theme.Text, fl);
-                TextRenderer.DrawText(g, _text, fB, new Rectangle(x, y + hT + 6, tw, 999), Theme.Subtle, fl);
+                ColorText.Text(g, _title, fT, new Rectangle(x, y, tw, hT), Theme.Text, fl);
+                ColorText.Text(g, _text, fB, new Rectangle(x, y + hT + 6, tw, 999), Theme.Subtle, fl);
             }
         }
     }

@@ -112,6 +112,51 @@ namespace SelectOR
             TextRenderer.DrawText(g, text, font, r, color, Flags | (right ? TextFormatFlags.Right : 0));
         }
 
+        // (1.2.90) Como TextRenderer.DrawText, pero con los emojis EN COLOR: los textos sin emojis van por TextRenderer como
+        // siempre. Con WordBreak, el texto partido en líneas desde arriba; si no, en una línea con su alineación.
+        public static void Text(Graphics g, string text, Font font, Rectangle r, Color color, TextFormatFlags flags)
+        {
+            if (r.Width <= 0 || r.Height <= 0) return;
+            if (string.IsNullOrEmpty(text) || !HasEmoji(text) || !Available) { TextRenderer.DrawText(g, text, font, r, color, flags); return; }
+            bool right = (flags & TextFormatFlags.Right) != 0;
+            var st = g.Save();
+            try
+            {
+                g.SetClip(r, System.Drawing.Drawing2D.CombineMode.Intersect);
+                if ((flags & TextFormatFlags.WordBreak) != 0)
+                {
+                    // (1.2.90) también con varias líneas: centrado o abajo como pide (antes, siempre arriba a la izquierda:
+                    // «🚧 Objetos» del puesto salía pegado a la esquina)
+                    var wsz = Measure(g, text, font, r.Width);
+                    int ww = Math.Min(wsz.Width + 2, r.Width), wh = Math.Min(wsz.Height, r.Height);
+                    int wx = (flags & TextFormatFlags.HorizontalCenter) != 0 ? r.X + (r.Width - ww) / 2 : right ? r.Right - ww : r.X;
+                    int wy = (flags & TextFormatFlags.VerticalCenter) != 0 ? r.Y + (r.Height - wh) / 2 : (flags & TextFormatFlags.Bottom) != 0 ? r.Bottom - wh : r.Y;
+                    Draw(g, text, font, new Rectangle(wx, wy, Math.Max(1, ww), Math.Max(1, r.Bottom - wy)), color, right);
+                    return;
+                }
+                var sz = Measure(g, text, font, 100000);
+                int w = Math.Min(sz.Width + 2, r.Width), h = sz.Height;
+                int x = (flags & TextFormatFlags.HorizontalCenter) != 0 ? r.X + (r.Width - w) / 2 : right ? r.Right - w : r.X;
+                int y = (flags & TextFormatFlags.VerticalCenter) != 0 ? r.Y + (r.Height - h) / 2 : (flags & TextFormatFlags.Bottom) != 0 ? r.Bottom - h : r.Y;
+                Draw(g, text, font, new Rectangle(x, y, Math.Max(1, w), Math.Max(1, h)), color, right);
+            }
+            finally { g.Restore(st); }
+        }
+
+        // las mismas formas que TextRenderer.DrawText (en un punto, o sin opciones: centrado, como él)
+        public static void Text(Graphics g, string text, Font font, Rectangle r, Color color)
+        {
+            if (string.IsNullOrEmpty(text) || !HasEmoji(text) || !Available) { TextRenderer.DrawText(g, text, font, r, color); return; }
+            Text(g, text, font, r, color, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+        public static void Text(Graphics g, string text, Font font, Point p, Color color) => Text(g, text, font, p, color, TextFormatFlags.Default);
+        public static void Text(Graphics g, string text, Font font, Point p, Color color, TextFormatFlags flags)
+        {
+            if (string.IsNullOrEmpty(text) || !HasEmoji(text) || !Available) { TextRenderer.DrawText(g, text, font, p, color, flags); return; }
+            var sz = Measure(g, text, font, 100000);
+            Draw(g, text, font, new Rectangle(p.X, p.Y, sz.Width + 2, sz.Height), color);
+        }
+
         // Varios textos cortos centrados en sus celdas (el selector de emojis) con un solo enlace al HDC.
         public static void DrawCells(Graphics g, IReadOnlyList<(string text, Rectangle cell)> cells, Font font, Color color, Rectangle bounds)
         {

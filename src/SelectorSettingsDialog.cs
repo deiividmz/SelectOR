@@ -109,7 +109,16 @@ namespace SelectOR
             right.Controls.Add(_buttons); right.Controls.Add(gap); right.Controls.Add(_btnAddButton); right.Controls.Add(lblBt);
             cols.Controls.Add(left, 0, 0); cols.Controls.Add(right, 1, 0);
 
-            body.Controls.Add(cols); body.Controls.Add(_devView); body.Controls.Add(top);
+            // (1.2.90) la radio de la sala: la tecla de hablar (un botón del mando se asigna abajo, «Radio de la sala»)
+            var radioRow = new Panel { Dock = DockStyle.Top, Height = Theme.Px(40), BackColor = Theme.Bg };
+            var radioLbl = new EmojiLabel { Text = "📻  " + I18n.T("Radio de la sala · tecla para hablar (mantener):"), AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Bg, Font = Theme.Font(9.5f), Location = new Point(0, Theme.Px(10)) };
+            var radioKey = DialogKit.Combo(); radioKey.Width = Theme.Px(300);   // el desplegable oscuro de los demás Ajustes
+            foreach (var k in RoomRadio.Keys) radioKey.Items.Add(I18n.T(k.label));
+            radioKey.SelectedIndex = Math.Max(0, Array.FindIndex(RoomRadio.Keys, k => k.id == (_prefs.RadioKey ?? "RControl")));
+            radioKey.SelectedIndexChanged += (s, e) => { if (radioKey.SelectedIndex >= 0) { _prefs.RadioKey = RoomRadio.Keys[radioKey.SelectedIndex].id; Save(); } };
+            radioRow.Controls.Add(radioLbl); radioRow.Controls.Add(radioKey);
+            radioRow.Layout += (s, e) => radioKey.Location = new Point(radioLbl.Right + Theme.Px(10), Theme.Px(6));
+            body.Controls.Add(cols); body.Controls.Add(_devView); body.Controls.Add(radioRow); body.Controls.Add(top);
 
             var footer = new DialogKit.Footer();
             var close = DialogKit.Primary(I18n.T("Cerrar"), 140);
@@ -337,7 +346,7 @@ namespace SelectOR
                 {
                     var r0 = new Rectangle(0, 4, Width - 1, Height - 10);
                     using (var p = Theme.Round(r0, 10)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, p);
-                    TextRenderer.DrawText(g, I18n.T("No hay ningún mando conectado. Enchúfalo y pulsa «Buscar mandos»."), fS, r0, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, I18n.T("No hay ningún mando conectado. Enchúfalo y pulsa «Buscar mandos»."), fS, r0, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                     return;
                 }
                 int y = 4, h = Theme.Px(56);
@@ -345,20 +354,20 @@ namespace SelectOR
                 {
                     var box = new Rectangle(0, y, Width - 1, h);
                     using (var p = Theme.Round(box, 10)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, p);
-                    TextRenderer.DrawText(g, d.Name, fN, new Rectangle(box.X + 12, box.Y + 6, box.Width / 3, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    TextRenderer.DrawText(g, string.Format(I18n.T("{0} palancas · {1} botones"), d.Axes, d.Buttons) + (d.Pov ? " · " + I18n.T("cruceta") : ""), fS, new Rectangle(box.X + 12, box.Y + 28, box.Width / 3, 18), Theme.Subtle, TextFormatFlags.NoPrefix);
+                    ColorText.Text(g, d.Name, fN, new Rectangle(box.X + 12, box.Y + 6, box.Width / 3, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    ColorText.Text(g, string.Format(I18n.T("{0} palancas · {1} botones"), d.Axes, d.Buttons) + (d.Pov ? " · " + I18n.T("cruceta") : ""), fS, new Rectangle(box.X + 12, box.Y + 28, box.Width / 3, 18), Theme.Subtle, TextFormatFlags.NoPrefix);
                     var s = Owner2?.StateOf(d.Key);
                     int ax = box.X + box.Width / 3 + 10, aw = Math.Max(40, (box.Width / 3 - 20) / Math.Max(1, d.Axes) - 8);
                     for (int i = 0; i < d.Axes; i++)
                     {
                         int x = ax + i * (aw + 8);
-                        TextRenderer.DrawText(g, d.XInput ? new[] { "LX", "LY", "RX", "RY", "LT", "RT" }[i] : Joy.AxisName(i), fS, new Point(x, box.Y + 6), Theme.Subtle);
+                        ColorText.Text(g, d.XInput ? new[] { "LX", "LY", "RX", "RY", "LT", "RT" }[i] : Joy.AxisName(i), fS, new Point(x, box.Y + 6), Theme.Subtle);
                         var bar = new Rectangle(x, box.Y + 26, aw, 10);
                         using (var bp = Theme.Round(bar, 5)) using (var bb = new SolidBrush(Theme.Surface2)) g.FillPath(bb, bp);
                         float v = s == null ? 0 : s.Axes[i];
                         var fill = new Rectangle(bar.X, bar.Y, Math.Max(4, (int)(bar.Width * v)), bar.Height);
                         using (var fp = Theme.Round(fill, 5)) using (var fb = new SolidBrush(Theme.Accent)) g.FillPath(fb, fp);
-                        TextRenderer.DrawText(g, ((int)Math.Round(v * 100)) + "%", fS, new Point(x, box.Y + 38), Theme.Subtle);
+                        ColorText.Text(g, ((int)Math.Round(v * 100)) + "%", fS, new Point(x, box.Y + 38), Theme.Subtle);
                     }
                     int bx = box.X + 2 * box.Width / 3 + 10, r = 8;
                     // los botones y, si la tiene, la cruceta (↑ → ↓ ←); en los de Xbox, con su letra
@@ -373,7 +382,7 @@ namespace SelectOR
                         using var f7 = Theme.Font(6.5f);
                         string lbl = i >= Joy.PovFirst ? new[] { "↑", "→", "↓", "←" }[i - Joy.PovFirst]
                                    : d.XInput ? new[] { "A", "B", "X", "Y", "LB", "RB", "⧉", "≡", "LS", "RS", "↑", "↓", "←", "→" }[Math.Min(13, i)] : (i + 1).ToString();
-                        TextRenderer.DrawText(g, lbl, f7, c, on ? Color.Black : Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                        ColorText.Text(g, lbl, f7, c, on ? Color.Black : Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     }
                     y += h + 6;
                 }
@@ -399,7 +408,7 @@ namespace SelectOR
                 using var fT = Theme.Font(9.5f, FontStyle.Bold); using var fS = Theme.Font(8.25f); using var fC = Theme.Font(8.5f, FontStyle.Bold);
                 if (Rows.Count == 0 && Empty != null)
                 {
-                    TextRenderer.DrawText(g, Empty, fS, new Rectangle(4, 6, Width - 8, 60), Theme.Subtle, TextFormatFlags.WordBreak);
+                    ColorText.Text(g, Empty, fS, new Rectangle(4, 6, Width - 8, 60), Theme.Subtle, TextFormatFlags.WordBreak);
                     return;
                 }
                 _scroll = Math.Max(0, Math.Min(_scroll, Rows.Count * (RowH + 6) - Height));
@@ -421,7 +430,7 @@ namespace SelectOR
                         var c = new Rectangle(cx - w, box.Y + (RowH - 28) / 2, w, 28);
                         bool hov = _hits.Count == _hover;
                         using (var cp = Theme.Round(c, 7)) using (var cb = new SolidBrush(hov ? Theme.SurfaceHi : Theme.Surface2)) g.FillPath(cb, cp);
-                        TextRenderer.DrawText(g, row.Chips[i], fC, c, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                        ColorText.Text(g, row.Chips[i], fC, c, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                         _hits.Add((c, row, i));
                         cx = c.Left - 6;
                     }
@@ -434,8 +443,8 @@ namespace SelectOR
                     }
                     int barRight = Width - 1 - 10 - chipsMax;
                     int textW = Math.Max(60, (row.HasBar ? barRight - 108 : cx) - tx - 6);
-                    TextRenderer.DrawText(g, row.Title, fT, new Rectangle(tx, box.Y + 5, textW, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    TextRenderer.DrawText(g, row.Sub ?? "", fS, new Rectangle(tx, box.Y + 25, textW, 18), row.Live || !row.HasBar ? Theme.Subtle : Color.FromArgb(200, 150, 120), TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    ColorText.Text(g, row.Title, fT, new Rectangle(tx, box.Y + 5, textW, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    ColorText.Text(g, row.Sub ?? "", fS, new Rectangle(tx, box.Y + 25, textW, 18), row.Live || !row.HasBar ? Theme.Subtle : Color.FromArgb(200, 150, 120), TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                     if (row.HasBar)
                     {
                         var bar = new Rectangle(barRight - 102, box.Y + (RowH - 12) / 2 - 3, 94, 12);
@@ -454,7 +463,7 @@ namespace SelectOR
                                 ? (row.Value > 0 ? I18n.T("regulador") + " " + (int)Math.Round(row.Value * 100) + "%" : row.Value < 0 ? I18n.T("freno dinámico") + " " + (int)Math.Round(-row.Value * 100) + "%" : I18n.T("en reposo"))
                                 : row.Centered ? (row.Value > 0.5f ? I18n.T("adelante") : row.Value < -0.5f ? I18n.T("atrás") : I18n.T("neutro")) : ((int)Math.Round(row.Value * 100)) + "%";
                             using var f8 = Theme.Font(7.5f, FontStyle.Bold);
-                            TextRenderer.DrawText(g, txt, f8, new Rectangle(bar.X, bar.Bottom + 1, bar.Width, 14), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+                            ColorText.Text(g, txt, f8, new Rectangle(bar.X, bar.Bottom + 1, bar.Width, 14), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
                         }
                     }
                 }

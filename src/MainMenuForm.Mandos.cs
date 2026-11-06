@@ -90,6 +90,7 @@ namespace SelectOR
                 if (known && was == down) continue;
                 if (!known && !down) { _joyBtnSent[g.Key] = false; continue; }   // (al empezar, los sueltos no se mandan)
                 _joyBtnSent[g.Key] = down;
+                if (g.Key == "SelectorRadio") { RoomRadio.Joy(down); continue; }   // (1.2.90) la radio de la sala
                 OrControl.Calm(OrControl.CalmFor(g.Key, !down));   // (como el pupitre: sin consultas a OR mientras cambia)
                 l.Send("BTN " + g.Key + " " + (down ? "1" : "0"));
             }

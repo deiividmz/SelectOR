@@ -22,7 +22,7 @@ namespace SelectOR
         Label _revIntro; FlowLayoutPanel _revTabBar; RoundedInput _revSearch;
         static readonly string RevIntroInfr = "Todas las infracciones del carné de todos los usuarios. En cualquier momento puedes aprobarlas (los puntos quedan restados), anularlas (se devuelven los puntos) o eliminarlas (se devuelven los puntos y se borran). Los excesos de velocidad (B6 y B7) llegan pendientes de revisión.";
         static readonly string RevIntroAp = "Alegaciones de los maquinistas a una sanción de su servicio o a la anulación de un servicio. Acéptala (se anula la sanción y se devuelven los puntos, o el servicio vuelve a estar normal) o recházala; en los dos casos, con una respuesta que le llega al maquinista.";
-        const int RevTabAppeals = 4;
+        const int RevTabAppeals = 5;   // (1.2.90: 4 es «C1 · C2 · C3» y 6 «Sospechosos», MainMenuForm.Sanciones.cs)
 
         sealed class AppealRow
         {
@@ -67,12 +67,14 @@ namespace SelectOR
         // Al cambiar de pestaña en Revisión: las infracciones o las alegaciones.
         void RevTabChanged(int i)
         {
-            bool ap = i == RevTabAppeals;
+            bool ap = i == RevTabAppeals, sus = i == RevTabSuspects;
             if (_algPanel != null) _algPanel.Visible = ap;
-            if (_revList != null) _revList.Visible = !ap;
-            if (_revBtns != null) _revBtns.Visible = !ap;
-            if (_revIntro != null) _revIntro.Text = Tr(ap ? RevIntroAp : RevIntroInfr);
+            if (_susPanel != null) _susPanel.Visible = sus;
+            if (_revList != null) _revList.Visible = !ap && !sus;
+            if (_revBtns != null) _revBtns.Visible = !ap && !sus;
+            if (_revIntro != null) _revIntro.Text = Tr(ap ? RevIntroAp : sus ? RevIntroSus : RevIntroInfr);
             if (ap) LoadAppeals();
+            if (sus) LoadSuspects();
         }
 
         async void LoadAppeals()

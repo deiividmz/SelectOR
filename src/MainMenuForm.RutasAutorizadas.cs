@@ -914,18 +914,18 @@ namespace SelectOR
             var nameSz = TextRenderer.MeasureText(_d.Name, _fName, Size.Empty, TextFormatFlags.NoPadding);
             if (g != null)
             {
-                TextRenderer.DrawText(g, _d.Name, _fName, new Point(0, y), Theme.Text, TextFormatFlags.NoPadding);
+                ColorText.Text(g, _d.Name, _fName, new Point(0, y), Theme.Text, TextFormatFlags.NoPadding);
                 var ps = TextRenderer.MeasureText(_d.StateText, _fPill, Size.Empty, TextFormatFlags.NoPadding);
                 var pr = new Rectangle(Math.Min(nameSz.Width + 12, w - ps.Width - 20), y + (nameSz.Height - ps.Height - 6) / 2, ps.Width + 16, ps.Height + 6);
                 using (var path = Theme.Round(pr, pr.Height / 2)) using (var b = new SolidBrush(Color.FromArgb(46, _d.StateColor))) g.FillPath(b, path);
-                TextRenderer.DrawText(g, _d.StateText, _fPill, pr, _d.StateColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, _d.StateText, _fPill, pr, _d.StateColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
             y += nameSz.Height + 6;
             foreach (var line in new[] { _d.Sub, _d.Who, _d.Decision })
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 var sz = TextRenderer.MeasureText(line, _fSub, new Size(w, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
-                if (g != null) TextRenderer.DrawText(g, line, _fSub, new Rectangle(0, y, w, sz.Height), Theme.Subtle, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+                if (g != null) ColorText.Text(g, line, _fSub, new Rectangle(0, y, w, sz.Height), Theme.Subtle, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
                 y += sz.Height + 4;
             }
             if (!string.IsNullOrWhiteSpace(_d.Note))
@@ -936,14 +936,14 @@ namespace SelectOR
                 if (g != null)
                 {
                     using (var path = Theme.Round(r, 8)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, path);
-                    TextRenderer.DrawText(g, t, _fNote, new Rectangle(10, r.Y + 7, w - 20, sz.Height), Color.FromArgb(205, 210, 214), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+                    ColorText.Text(g, t, _fNote, new Rectangle(10, r.Y + 7, w - 20, sz.Height), Color.FromArgb(205, 210, 214), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
                 }
                 y = r.Bottom + 4;
             }
             if (_d.Alerts.Count > 0)
             {
                 y += 8;
-                if (g != null) TextRenderer.DrawText(g, I18n.T("ALERTAS AUTOMÁTICAS"), _fCap, new Point(0, y), Theme.Subtle, TextFormatFlags.NoPadding);
+                if (g != null) ColorText.Text(g, I18n.T("ALERTAS AUTOMÁTICAS"), _fCap, new Point(0, y), Theme.Subtle, TextFormatFlags.NoPadding);
                 y += _fCap.Height + 6;
                 foreach (var (severe, text) in _d.Alerts)
                 {
@@ -954,7 +954,7 @@ namespace SelectOR
                     {
                         Color bg = severe ? Color.FromArgb(58, 29, 29) : Color.FromArgb(58, 47, 18), fg = severe ? Color.FromArgb(243, 161, 161) : Color.FromArgb(243, 204, 107);
                         using (var path = Theme.Round(r, 7)) using (var b = new SolidBrush(bg)) g.FillPath(b, path);
-                        TextRenderer.DrawText(g, t, _fAl, new Rectangle(10, r.Y + 6, w - 20, sz.Height), fg, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+                        ColorText.Text(g, t, _fAl, new Rectangle(10, r.Y + 6, w - 20, sz.Height), fg, TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
                     }
                     y = r.Bottom + 5;
                 }
@@ -962,7 +962,7 @@ namespace SelectOR
             if (_d.Tiles.Count > 0)
             {
                 y += 8;
-                if (g != null) TextRenderer.DrawText(g, I18n.T("FICHA DE LA RUTA"), _fCap, new Point(0, y), Theme.Subtle, TextFormatFlags.NoPadding);
+                if (g != null) ColorText.Text(g, I18n.T("FICHA DE LA RUTA"), _fCap, new Point(0, y), Theme.Subtle, TextFormatFlags.NoPadding);
                 y += _fCap.Height + 6;
                 int cols = w >= 760 ? _d.Tiles.Count : 3, gap = 8;
                 int tw = (w - gap * (cols - 1)) / cols, th = _fCap.Height + _fVal.Height + 18;
@@ -973,8 +973,8 @@ namespace SelectOR
                     var r = new Rectangle(cx, cy, tw, th);
                     using (var path = Theme.Round(r, 8)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, path);
                     var (label, value, warn) = _d.Tiles[i];
-                    TextRenderer.DrawText(g, label, _fCap, new Point(cx + 10, cy + 7), Theme.Subtle, TextFormatFlags.NoPadding);
-                    TextRenderer.DrawText(g, value, _fVal, new Point(cx + 10, cy + 9 + _fCap.Height), warn ? Color.FromArgb(240, 128, 128) : Theme.Text, TextFormatFlags.NoPadding);
+                    ColorText.Text(g, label, _fCap, new Point(cx + 10, cy + 7), Theme.Subtle, TextFormatFlags.NoPadding);
+                    ColorText.Text(g, value, _fVal, new Point(cx + 10, cy + 9 + _fCap.Height), warn ? Color.FromArgb(240, 128, 128) : Theme.Text, TextFormatFlags.NoPadding);
                 }
                 y += ((_d.Tiles.Count + cols - 1) / cols) * (th + gap) - gap;
             }
@@ -1008,11 +1008,11 @@ namespace SelectOR
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics; g.Clear(BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
-            TextRenderer.DrawText(g, string.Format(I18n.T("EMPRESAS A LAS QUE AFECTA ({0})"), _rows.Count), _fCap, new Point(0, 0), Theme.Subtle, TextFormatFlags.NoPadding);
+            ColorText.Text(g, string.Format(I18n.T("EMPRESAS A LAS QUE AFECTA ({0})"), _rows.Count), _fCap, new Point(0, 0), Theme.Subtle, TextFormatFlags.NoPadding);
             int y = _fCap.Height + 10, w = Width;
             if (_rows.Count == 0)
             {
-                TextRenderer.DrawText(g, I18n.T("Ninguna."), _fS, new Point(0, y + 4), Theme.Subtle, TextFormatFlags.NoPadding);
+                ColorText.Text(g, I18n.T("Ninguna."), _fS, new Point(0, y + 4), Theme.Subtle, TextFormatFlags.NoPadding);
                 return;
             }
             foreach (var r in _rows)
@@ -1021,19 +1021,19 @@ namespace SelectOR
                 using (var path = Theme.Round(rc, 8)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, path);
                 string kind = r.Requested ? I18n.T("La solicitó") : r.Proposed ? I18n.T("Se la propone un maquinista") : I18n.T("La usa");
                 Color kc = r.Requested ? Color.FromArgb(240, 180, 41) : r.Proposed ? Color.FromArgb(96, 165, 250) : Theme.Subtle;
-                TextRenderer.DrawText(g, r.Company, _fT, new Point(12, y + 8), Theme.Text, TextFormatFlags.NoPadding);
+                ColorText.Text(g, r.Company, _fT, new Point(12, y + 8), Theme.Text, TextFormatFlags.NoPadding);
                 int kx = 12 + TextRenderer.MeasureText(r.Company, _fT, Size.Empty, TextFormatFlags.NoPadding).Width + 10;
-                TextRenderer.DrawText(g, kind, _fS, new Point(kx, y + 10), kc, TextFormatFlags.NoPadding);
+                ColorText.Text(g, kind, _fS, new Point(kx, y + 10), kc, TextFormatFlags.NoPadding);
                 string svc = string.Format(r.Services == 1 ? I18n.T("{0} servicio") : I18n.T("{0} servicios"), r.Services.ToString("N0"));
-                TextRenderer.DrawText(g, svc, _fS, new Rectangle(0, y + 9, w - 14, 18), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.NoPadding);
+                ColorText.Text(g, svc, _fS, new Rectangle(0, y + 9, w - 14, 18), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.NoPadding);
                 int vi = _versions.IndexOf(r.Hash);
                 string sub = (r.User.Length > 0 ? r.User + " · " : "") + r.At
                            + (_versions.Count > 1 && vi >= 0 ? " · " + string.Format(I18n.T("versión {0}"), r.Hash.Substring(0, 4) + "…" + r.Hash.Substring(r.Hash.Length - 4)) : "");
-                TextRenderer.DrawText(g, sub, _fS, new Point(12, y + 32), Theme.Subtle, TextFormatFlags.NoPadding);
+                ColorText.Text(g, sub, _fS, new Point(12, y + 32), Theme.Subtle, TextFormatFlags.NoPadding);
                 if (r.Note.Length > 0)
                 {
                     int sx = 12 + TextRenderer.MeasureText(sub, _fS, Size.Empty, TextFormatFlags.NoPadding).Width + 14;
-                    TextRenderer.DrawText(g, "«" + r.Note + "»", _fN, new Rectangle(sx, y + 32, Math.Max(10, w - sx - 14), 18), Color.FromArgb(205, 210, 214), TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                    ColorText.Text(g, "«" + r.Note + "»", _fN, new Rectangle(sx, y + 32, Math.Max(10, w - sx - 14), 18), Color.FromArgb(205, 210, 214), TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
                 }
                 y += RowH + 6;
             }

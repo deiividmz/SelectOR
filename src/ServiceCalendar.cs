@@ -75,12 +75,12 @@ namespace SelectOR
             _next = new Rectangle(Width - pad - Theme.Px(26), y, Theme.Px(26), hh);
             string title = _month.ToString("MMMM yyyy", Ci);
             title = Ci.TextInfo.ToUpper(title[0]) + title.Substring(1);
-            TextRenderer.DrawText(g, title, _fTitle, new Rectangle(_prev.Right, y, _next.Left - _prev.Right, hh), Theme.Text,
+            ColorText.Text(g, title, _fTitle, new Rectangle(_prev.Right, y, _next.Left - _prev.Right, hh), Theme.Text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             foreach (var (r, t, z) in new[] { (_prev, "‹", -2), (_next, "›", -3) })
             {
                 if (_hover == z) using (var hb = new SolidBrush(Theme.SurfaceHi)) using (var hp = Theme.Round(r, Theme.Px(5))) g.FillPath(hb, hp);
-                TextRenderer.DrawText(g, t, _fTitle, r, _hover == z ? Theme.Text : Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, t, _fTitle, r, _hover == z ? Theme.Text : Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
             y += hh + Theme.Px(6);
 
@@ -89,7 +89,7 @@ namespace SelectOR
             int gx = pad + (w - _cell * 7) / 2;
             string[] dow = I18n.English ? new[] { "M", "T", "W", "T", "F", "S", "S" } : new[] { "L", "M", "X", "J", "V", "S", "D" };
             for (int c = 0; c < 7; c++)
-                TextRenderer.DrawText(g, dow[c], _fDow, new Rectangle(gx + c * _cell, y, _cell, Theme.Px(18)), Theme.Subtle,
+                ColorText.Text(g, dow[c], _fDow, new Rectangle(gx + c * _cell, y, _cell, Theme.Px(18)), Theme.Subtle,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             y += Theme.Px(20);
             int ch = Math.Min(_cell, Theme.Px(32));
@@ -124,7 +124,7 @@ namespace SelectOR
                     using (var pen = new Pen(day == _current ? Theme.Text : Theme.Subtle, 1.5f)) using (var p = Theme.Round(rc, Theme.Px(5))) g.DrawPath(pen, p);
                 else if (day == today)
                     using (var pen = new Pen(Theme.AccentHi, 1f) { DashStyle = DashStyle.Dot }) using (var p = Theme.Round(rc, Theme.Px(5))) g.DrawPath(pen, p);
-                TextRenderer.DrawText(g, d.ToString(), has ? _fDayB : _fDay, rc, has ? Color.White : Theme.Subtle,
+                ColorText.Text(g, d.ToString(), has ? _fDayB : _fDay, rc, has ? Color.White : Theme.Subtle,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
             g.SmoothingMode = SmoothingMode.None;
@@ -133,20 +133,20 @@ namespace SelectOR
             // Totales del mes y leyenda
             string tot = mN == 0 ? I18n.T("Sin servicios este mes")
                 : string.Format(I18n.T(mN == 1 ? "{0} servicio" : "{0} servicios"), mN.ToString("N0", Es)) + "  ·  " + mNet.ToString("+#,##0;−#,##0", Es) + " €";
-            TextRenderer.DrawText(g, tot, _fSmall, new Rectangle(pad, y, w, Theme.Px(18)), mN == 0 ? Theme.Subtle : Theme.Text,
+            ColorText.Text(g, tot, _fSmall, new Rectangle(pad, y, w, Theme.Px(18)), mN == 0 ? Theme.Subtle : Theme.Text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
             y += Theme.Px(22);
             string lo = I18n.T("Menos"), hi = I18n.T("Más");
             int sw = Theme.Px(12), lw = TextRenderer.MeasureText(g, lo, _fSmall).Width, hw = TextRenderer.MeasureText(g, hi, _fSmall).Width;
             int total = lw + hw + 4 * (sw + 3) + Theme.Px(10), lx = pad + (w - total) / 2;
-            TextRenderer.DrawText(g, lo, _fSmall, new Point(lx, y), Theme.Subtle, TextFormatFlags.NoPadding);
+            ColorText.Text(g, lo, _fSmall, new Point(lx, y), Theme.Subtle, TextFormatFlags.NoPadding);
             lx += lw + Theme.Px(5);
             for (int k = 0; k < 4; k++)
             {
                 using var b = new SolidBrush(Color.FromArgb(70 + 50 * k, Theme.Accent));
                 g.FillRectangle(b, lx, y + Theme.Px(2), sw, sw); lx += sw + 3;
             }
-            TextRenderer.DrawText(g, hi, _fSmall, new Point(lx + Theme.Px(5), y), Theme.Subtle, TextFormatFlags.NoPadding);
+            ColorText.Text(g, hi, _fSmall, new Point(lx + Theme.Px(5), y), Theme.Subtle, TextFormatFlags.NoPadding);
         }
 
         // Alto que necesita para su ancho.

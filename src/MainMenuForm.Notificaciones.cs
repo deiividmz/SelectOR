@@ -216,6 +216,22 @@ namespace SelectOR
                                DataOr(r, "buyer", Tr("Otra empresa")), DataStr(r, "name"), co,
                                double.TryParse(DataStr(r, "gets"), NumberStyles.Float, CultureInfo.InvariantCulture, out var gets) ? gets.ToString("N0", I18n.Culture) : "—");
                     sub = 9; break;   // Flota (cuando exista la sección Tablón, llevar allí)
+                case "market_rented":   // (1.2.90) alquiler entre empresas (tablon-alquiler-transparencia.sql)
+                    icon = "🔑"; c = ok; title = Tr("Tren alquilado a otra empresa");
+                    body = string.Format(Tr("{0} ha alquilado «{1}» a {2} durante {3} días: cada servicio que haga paga {4} € a {2}."),
+                               DataOr(r, "renter", Tr("Otra empresa")), DataStr(r, "name"), co, DataStr(r, "days"),
+                               double.TryParse(DataStr(r, "price"), NumberStyles.Float, CultureInfo.InvariantCulture, out var rp) ? rp.ToString("N0", I18n.Culture) : "—");
+                    sub = 17; break;   // Tablón
+                case "rental_returned":
+                    icon = "🔑"; c = ok; title = Tr("Tren alquilado devuelto");
+                    body = string.Format(Tr("«{0}» ha vuelto a la flota de {1} después de {2} servicios con {3}: ha cobrado {4} €."),
+                               DataStr(r, "name"), co, DataStr(r, "services"), DataOr(r, "renter", Tr("otra empresa")),
+                               double.TryParse(DataStr(r, "earned"), NumberStyles.Float, CultureInfo.InvariantCulture, out var er) ? er.ToString("N0", I18n.Culture) : "—");
+                    sub = 9; break;
+                case "rental_ended":
+                    icon = "🔑"; c = buy; title = Tr("Alquiler terminado");
+                    body = string.Format(Tr("El alquiler de «{0}» ha terminado: el tren ha vuelto a {1}."), DataStr(r, "name"), DataOr(r, "owner", Tr("su empresa")));
+                    sub = 9; break;
                 case "service_validated":
                     icon = "✅"; c = ok; title = Tr("Servicio validado");
                     body = string.Format(Tr("Tu servicio {0} en {1} ya es válido y se ha pagado."), routeTxt, co); sub = 0; break;
@@ -329,6 +345,25 @@ namespace SelectOR
                 case "infraction_annulled":
                     icon = "✅"; c = ok; title = Tr("Infracción anulada");
                     body = string.Format(Tr("{0} en {1} no te resta puntos."), Carne.Label(DataStr(r, "code")), DataOr(r, "route", co)); sub = 5; break;
+                case "sanction":   // (1.2.90) sanción del administrador (sanciones.sql)
+                {
+                    icon = "⚖"; c = bad; title = Tr("Sanción del administrador");
+                    var parts = new List<string>();
+                    int sp = int.TryParse(DataStr(r, "points"), out var spv) ? spv : 0;
+                    if (sp != 0) parts.Add(Carne.PointsText(sp));
+                    if (double.TryParse(DataStr(r, "fine"), NumberStyles.Float, CultureInfo.InvariantCulture, out var sf) && sf > 0) parts.Add(string.Format(Tr("multa de {0} € a la empresa"), sf.ToString("N0", I18n.Culture)));
+                    if (DataStr(r, "annulled") == "true" || DataStr(r, "annulled") == "True") parts.Add(Tr("servicio anulado"));
+                    body = string.Format(Tr("{0} en {1}: {2}."), Carne.Label(DataStr(r, "code")), DataOr(r, "route", co), string.Join(", ", parts))
+                         + (DataStr(r, "reason").Length > 0 ? "\n" + Tr("Motivo: ") + DataStr(r, "reason") : "") + "\n" + Tr("Puedes alegarla desde el informe del servicio.");
+                    sub = 5; break;
+                }
+                case "company_fined":
+                    icon = "⚖"; c = bad; title = Tr("Multa del administrador");
+                    body = string.Format(Tr("{0} ha recibido una multa de {1} € por un servicio de {2} en {3}."), co,
+                               double.TryParse(DataStr(r, "fine"), NumberStyles.Float, CultureInfo.InvariantCulture, out var cf) ? cf.ToString("N0", I18n.Culture) : "—",
+                               DataOr(r, "driver", Tr("un maquinista")), DataOr(r, "route", "—"))
+                         + (DataStr(r, "reason").Length > 0 ? "\n" + Tr("Motivo: ") + DataStr(r, "reason") : "");
+                    sub = 1; break;
                 case "license_suspended":
                     icon = "⛔"; c = bad; title = Tr("Carné suspendido");
                     body = DateTime.TryParse(DataStr(r, "until"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var until)

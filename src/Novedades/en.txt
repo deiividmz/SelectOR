@@ -1,4 +1,10 @@
-﻿1.2.89
-People on their platform|People wait only on the route's platforms and on the side where they are, without going past their ends or appearing on the other side of the track; and at last also at Ingeniero Pizias and Urb. Pere Comas on CGL.
-Lighter|The people on the platforms use less memory and put less load on your computer, so Open Rails runs smoother at big stations.
-The shared room comes alive|In the shared CGL room you may now see track workers working by the line, landslides and fallen rocks, and fires with smoke that light up the ground at night. Everyone driving in the room sees them.
+﻿1.2.90
+Rent trains to other companies|In Fleet → «Sell, rent out or scrap…» you offer a train for 7, 14 or 30 days; the other company pays you rent for every service and it comes back to your fleet at the end.
+The market checks your folder|Every train on the market says whether you already have all its rolling stock or what is missing.
+Transparency portal|Board → Transparency shows how each company is doing this month and what counts in the League, with «How is it calculated?».
+New rates|Passengers depend on demand, not train size; fares and costs go up; and buying trains is much cheaper (59 % less).
+Room radio|In the shared room you hold a key (Right Ctrl by default) or a controller button to talk, and it sounds like a real radio.
+Dispatcher in view|The room card and the big map show who is running each station.
+Signals on their side|In the control centre signals appear on the side of the track where they really are.
+Board refreshed|Departure-board header, tabs with icons and colour emojis.
+Lit tunnels|With CYZYRails, the double-track tunnels on CGL have lights on their walls, like the route's other tunnels.

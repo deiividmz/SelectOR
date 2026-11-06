@@ -43,7 +43,7 @@ namespace SelectOR
             var lines = new List<Line>();
             hasDetail = calc.HasValue && calc.Value.ValueKind == JsonValueKind.Object;
             var inc = new Line { Label = T("Ingreso"), Amount = income };
-            var can = new Line { Label = T("Cánon AI"), Amount = canon, Cost = true };
+            var can = new Line { Label = T("Canon AI"), Amount = canon, Cost = true };
             var ene = new Line { Label = T("Energía"), Amount = energy, Cost = true };
             var sal = new Line { Label = T("Salario"), Amount = salary, Cost = true };
             var ren = new Line { Label = T("Alquiler de la unidad"), Amount = rental, Cost = true };
@@ -73,6 +73,14 @@ namespace SelectOR
                     {
                         double pax = D(c, "pax"), fare = D(c, "fare"), fareRaw = D(c, "fare_raw", fare);
                         double board = pax * fare;
+                        // (1.2.90, tarifas-1290.sql) viajeros según la demanda: los que cobran pueden ser menos que los del tren
+                        double paxModel = D(c, "pax_model", pax);
+                        if (paxModel > pax + 0.5)
+                        {
+                            double refC = D(c, "pax_cap_ref"), turn = D(c, "pax_turnover_max");
+                            inc.Steps.Add(string.Format(T("Viajeros que cobran: {0} de {1}: por encima de {2} plazas los viajeros crecen menos que el tren, y como mucho {3} veces sus plazas."),
+                                N(pax), N(paxModel), N(refC), F(turn)));
+                        }
                         inc.Steps.Add(string.Format(T("Billete al subir: {0} viajeros × {1} = {2}"), N(pax), Rate(fare), Eur(board)));
                         double avg = D(c, "avg_kmh");
                         inc.Steps.Add("   " + string.Format(T("Billete: {0} de base + confort {1} × {2} + {3} km/h de media × {4}"),
@@ -117,7 +125,16 @@ namespace SelectOR
                         inc.Steps.Add(string.Format(T("Tarifa por km (tren sin plazas ni masa conocidas): {0} × {1}/km = {2}"), kmT, Rate(D(c, "income_per_km")), Eur(income)));
                         break;
                 }
-                can.Steps.Add(string.Format(T("Uso de la vía: {0} × {1}/km = {2}"), kmT, Rate(D(c, "canon_per_km")), Eur(canon)));
+                double cpt = D(c, "canon_per_t_km"), ek = D(c, "empty_cost_pct", 1);
+                if (cpt > 0)   // (1.2.90) canon por km y por tonelada
+                    can.Steps.Add(string.Format(T("Uso de la vía: {0} × ({1}/km + {2} t × {3} por t·km) = {4}"), kmT, Rate(D(c, "canon_per_km")), N(D(c, "mass")), Rate(cpt), Eur(canon)));
+                else
+                    can.Steps.Add(string.Format(T("Uso de la vía: {0} × {1}/km = {2}"), kmT, Rate(D(c, "canon_per_km")), Eur(canon)));
+                if (ek < 0.9999)
+                {
+                    string half = "   " + string.Format(T("Traslado en vacío: paga el {0} % del canon y de la energía."), N(ek * 100));
+                    can.Steps.Add(half); ene.Steps.Add(half);
+                }
                 double emf = D(c, "energy_mass_factor", 1);
                 if (Math.Abs(emf - 1) > 0.00005)
                 {

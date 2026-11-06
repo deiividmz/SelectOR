@@ -186,11 +186,11 @@ namespace SelectOR
                 var g = e.Graphics; g.Clear(Theme.Bg); g.SmoothingMode = SmoothingMode.AntiAlias;
                 using var f = Theme.Font(9.5f, FontStyle.Bold); using var fv = Theme.Font(9f);
                 var col = Enabled ? Theme.Text : Theme.Subtle;
-                TextRenderer.DrawText(g, Label, f, new Point(0, Theme.Px(2)), col);
+                ColorText.Text(g, Label, f, new Point(0, Theme.Px(2)), col);
                 int pct = (int)Math.Round(Signed ? _v * 200 : _v * 100);
                 string vt = Signed && pct > 0 ? "+" + pct : pct.ToString();
                 var sz = TextRenderer.MeasureText(vt, fv);
-                TextRenderer.DrawText(g, vt, fv, new Point(Width - sz.Width, Theme.Px(3)), Theme.Subtle);
+                ColorText.Text(g, vt, fv, new Point(Width - sz.Width, Theme.Px(3)), Theme.Subtle);
                 var t = Track;
                 using (var p = Theme.Round(t, t.Height / 2)) using (var b = new SolidBrush(Theme.Surface2)) g.FillPath(b, p);
                 double k = (Max - Min) > 0 ? (_v - Min) / (Max - Min) : 0;
@@ -222,7 +222,7 @@ namespace SelectOR
                 using var f = Theme.Font(9f); using var fb = Theme.Font(8.5f, FontStyle.Bold);
                 if (Original == null)
                 {
-                    TextRenderer.DrawText(g, Hint ?? "", f, Rectangle.Inflate(box, -24, -24), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+                    ColorText.Text(g, Hint ?? "", f, Rectangle.Inflate(box, -24, -24), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
                     return;
                 }
                 // la imagen, encajada
@@ -237,8 +237,8 @@ namespace SelectOR
                     g.DrawImage(After, half, new Rectangle(After.Width / 2, 0, After.Width - After.Width / 2, After.Height), GraphicsUnit.Pixel);
                     using var pen = new Pen(Color.White, 2); g.DrawLine(pen, x + w / 2, y, x + w / 2, y + h);
                 }
-                TextRenderer.DrawText(g, I18n.T("Antes"), fb, new Rectangle(x, y + h + 6, w / 2, 20), Theme.Subtle, TextFormatFlags.HorizontalCenter);
-                TextRenderer.DrawText(g, Dim ? I18n.T("(ReShade desactivado)") : I18n.T("Después"), fb, new Rectangle(x + w / 2, y + h + 6, w - w / 2, 20), Dim ? Theme.Subtle : Theme.AccentHi, TextFormatFlags.HorizontalCenter);
+                ColorText.Text(g, I18n.T("Antes"), fb, new Rectangle(x, y + h + 6, w / 2, 20), Theme.Subtle, TextFormatFlags.HorizontalCenter);
+                ColorText.Text(g, Dim ? I18n.T("(ReShade desactivado)") : I18n.T("Después"), fb, new Rectangle(x + w / 2, y + h + 6, w - w / 2, 20), Dim ? Theme.Subtle : Theme.AccentHi, TextFormatFlags.HorizontalCenter);
             }
         }
     }

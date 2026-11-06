@@ -629,7 +629,7 @@ namespace SelectOR
             string title = e.Header.Text;
             if (e.ColumnIndex == _sortCol) title += _sortAsc ? "  ▲" : "  ▼";
             var r = Rectangle.Inflate(e.Bounds, -10, 0);
-            TextRenderer.DrawText(e.Graphics, title, HeaderFont, r, e.ColumnIndex == _sortCol ? Theme.AccentHi : Theme.Subtle, flags);
+            ColorText.Text(e.Graphics, title, HeaderFont, r, e.ColumnIndex == _sortCol ? Theme.AccentHi : Theme.Subtle, flags);
             // línea fina bajo la cabecera (el verde queda para la columna por la que se ordena)
             using (var pen = new Pen(Theme.Border))
                 e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
@@ -652,7 +652,7 @@ namespace SelectOR
                 var full = new Rectangle(0, e.Bounds.Top, Math.Max(e.Bounds.Right, ClientSize.Width), e.Bounds.Height);
                 var state = e.Graphics.Save();
                 e.Graphics.SetClip(e.Bounds);
-                TextRenderer.DrawText(e.Graphics, e.Item.Text ?? "", Font, Rectangle.Inflate(full, -9, 0), Theme.Subtle, mflags);
+                ColorText.Text(e.Graphics, e.Item.Text ?? "", Font, Rectangle.Inflate(full, -9, 0), Theme.Subtle, mflags);
                 e.Graphics.Restore(state);
                 return;
             }
@@ -695,7 +695,7 @@ namespace SelectOR
                         | (col != null && col.Align == HorizontalAlignment.Right ? TextFormatFlags.Right
                            : col != null && col.Align == HorizontalAlignment.Center ? TextFormatFlags.HorizontalCenter
                            : TextFormatFlags.Left);
-            TextRenderer.DrawText(e.Graphics, e.SubItem?.Text ?? "", Font, textRect, txt, flags);
+            ColorText.Text(e.Graphics, e.SubItem?.Text ?? "", Font, textRect, txt, flags);
           } catch { }
         }
 

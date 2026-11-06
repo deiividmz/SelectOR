@@ -14,7 +14,7 @@ namespace SelectOR
 
         void BuildObjectsBtn(Panel top)
         {
-            _objBtn = new Label
+            _objBtn = new EmojiLabel
             {
                 Text = "🚧  " + Tr("Objetos"), AutoSize = false, TextAlign = ContentAlignment.MiddleCenter, Font = Theme.Font(9f, FontStyle.Bold), Cursor = Cursors.Hand,
                 Dock = DockStyle.Right, Visible = false, Width = Theme.Px(120), Margin = Padding.Empty, ForeColor = Theme.Text, BackColor = Theme.Surface2

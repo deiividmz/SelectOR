@@ -93,7 +93,7 @@ namespace SelectOR
             CardPaint.FillRound(g, r, Theme.Px(6), CardPaint.Rail);
             if (img == null)
             {
-                if (!string.IsNullOrEmpty(empty)) TextRenderer.DrawText(g, empty, f, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                if (!string.IsNullOrEmpty(empty)) ColorText.Text(g, empty, f, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 return;
             }
             var area = Rectangle.Inflate(r, -Theme.Px(maxRows == 1 ? 8 : 10), -Theme.Px(maxRows == 1 ? 3 : 6));
@@ -126,7 +126,7 @@ namespace SelectOR
             using (var b = new SolidBrush(hover ? Theme.Accent : Color.FromArgb(70, 76, 82))) g.FillEllipse(b, r);
             g.SmoothingMode = SmoothingMode.None;
             using var f = Theme.Font(10f, FontStyle.Bold);
-            TextRenderer.DrawText(g, "i", f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ColorText.Text(g, "i", f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
     }
 
@@ -150,7 +150,7 @@ namespace SelectOR
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(BackColor);
-            TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, ForeColor,
+            ColorText.Text(e.Graphics, Text, Font, ClientRectangle, ForeColor,
                 TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         }
     }
@@ -197,26 +197,26 @@ namespace SelectOR
             if (rw > 0)
             {
                 int ry = rc.Y + Theme.Px(string.IsNullOrEmpty(badge) ? 19 : 8);
-                if (!string.IsNullOrEmpty(price)) TextRenderer.DrawText(g, price, _fR, new Rectangle(right - rw, ry, rw, Theme.Px(22)), Theme.Accent, L1 | TextFormatFlags.Right);
+                if (!string.IsNullOrEmpty(price)) ColorText.Text(g, price, _fR, new Rectangle(right - rw, ry, rw, Theme.Px(22)), Theme.Accent, L1 | TextFormatFlags.Right);
                 if (!string.IsNullOrEmpty(badge))
                 {
                     int bw = TW(badge, _fP) + Theme.Px(16);
                     var br = new Rectangle(right - bw, rc.Y + Theme.Px(34), bw, Theme.Px(18));
                     Fill(g, br, Theme.Px(9), Color.FromArgb(40, 76, 175, 80));
-                    TextRenderer.DrawText(g, badge, _fP, br, Theme.AccentHi, C1);
+                    ColorText.Text(g, badge, _fP, br, Theme.AccentHi, C1);
                 }
                 right -= rw + Theme.Px(12);
             }
             // nombre y, debajo, distintivos y datos
             int tw = TextW(rc);
             string title = TitleOf?.Invoke(it) ?? it?.ToString() ?? "";
-            TextRenderer.DrawText(g, title, _fT, new Rectangle(x, rc.Y + Theme.Px(8), tw, Theme.Px(22)), Theme.Text, L1);
+            ColorText.Text(g, title, _fT, new Rectangle(x, rc.Y + Theme.Px(8), tw, Theme.Px(22)), Theme.Text, L1);
             int cx = x, cy = rc.Y + Theme.Px(33);
             var pills = PillsOf?.Invoke(it);
             if (pills != null) foreach (var p in pills) Pill(g, ref cx, cy, x + tw, p.text, _fP, p.fg, p.bg, Theme.Px(18));
             string sub = SubOf?.Invoke(it);
             if (!string.IsNullOrEmpty(sub) && cx < x + tw - Theme.Px(30))
-                TextRenderer.DrawText(g, sub, _fS, new Rectangle(cx + (cx > x ? Theme.Px(2) : 0), cy, x + tw - cx, Theme.Px(18)), Theme.Subtle, L1);
+                ColorText.Text(g, sub, _fS, new Rectangle(cx + (cx > x ? Theme.Px(2) : 0), cy, x + tw - cx, Theme.Px(18)), Theme.Subtle, L1);
             // la composición, ajustada a la línea
             string path = PathOf?.Invoke(it) ?? "";
             var strip = new Rectangle(x + tw + Theme.Px(12), rc.Y + Theme.Px(6), Math.Max(Theme.Px(40), right - (x + tw + Theme.Px(12))), rc.Height - Theme.Px(12));

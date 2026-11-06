@@ -38,7 +38,8 @@ namespace SelectOR
             public bool Pap; public int PapSpeed;   // pantalla de preanuncio; su velocidad si va en el tipo (pap50 → 50)
         }
         public readonly List<Head> Heads = new();          // en el orden en que el despachador manda su estado
-        public sealed class Sig { public int Obj = -1; public double Lat, Lon, Hdg; public int[] Heads; public int Edge = -1; public double Off; public int[] Paps = Array.Empty<int>(); internal double Wx, Wz; internal int Node = -1, Dir; }   // (Edge/Off: su sitio en su propia vía; Paps: las cabezas de sus pantallas de preanuncio)
+        public sealed class Sig { public int Obj = -1; public double Lat, Lon, Hdg; public int[] Heads; public int Edge = -1; public double Off; public int[] Paps = Array.Empty<int>(); internal double Wx, Wz; internal int Node = -1, Dir;
+            public double PostLat = double.NaN, PostLon = double.NaN; }   // (2026-11-06) dónde está su poste en el mundo (NaN mientras no se ha leído): de qué lado de la vía está   // (Edge/Off: su sitio en su propia vía; Paps: las cabezas de sus pantallas de preanuncio)
         public readonly List<Sig> Signals = new();         // las que tienen alguna cabeza principal (NORMAL)
         public bool CanControl;                            // numeración de Open Rails: se pueden pedir cambios
         public RouteGraph Graph;                           // (para el camino por delante de cada tren)
@@ -100,12 +101,29 @@ namespace SelectOR
             }
         }
 
+        // (2026-11-06) el poste de cada señal (lo lee PasosNivel del mundo, en segundo plano): con él se sabe de qué lado de la vía está
+        internal Dictionary<int, (double x, double z)> _posts; internal bool _sigsBuilt;
+        static void ApplyPosts(RoomMapGeo geo)
+        {
+            lock (geo)
+            {
+                var posts = geo._posts; if (posts == null || !geo._sigsBuilt) return;
+                foreach (var sg in geo.Signals)
+                {
+                    if (!double.IsNaN(sg.PostLat) || sg.Heads == null) continue;
+                    foreach (int k in sg.Heads)
+                        if (k >= 0 && k < geo.Heads.Count && posts.TryGetValue(geo.Heads[k].Item, out var p) && OrGeo.TryLatLon(p.x, p.z, out double la, out double lo))
+                        { sg.PostLon = lo; sg.PostLat = la; break; }
+                }
+            }
+        }
+
         static void BuildSignals(RoomMapGeo geo, RouteGraph g, string routeDir)
         {
             var tdbPath = Directory.GetFiles(routeDir, "*.tdb").FirstOrDefault();
             if (tdbPath == null) { geo.SignalNote = "sin .tdb"; return; }
             var tdb = new TrackDatabaseFile(tdbPath);
-            try { geo.LevelCrossings = PasosNivel.Load(g, routeDir, tdb); } catch { }   // (1.2.84)
+            try { geo.LevelCrossings = PasosNivel.Load(g, routeDir, tdb, posts => { geo._posts = posts; ApplyPosts(geo); }); } catch { }   // (1.2.84; los postes, 2026-11-06)
             var tsec = TrackGeometry.Sections(routeDir);
             var items = tdb.TrackDB.TrItemTable; var nodes = tdb.TrackDB.TrackNodes;
             if (items == null || nodes == null) return;
@@ -191,6 +209,8 @@ namespace SelectOR
                 }
                 if (best != null) best.Paps = best.Paps.Append(k).ToArray();   // (a veces dos: una con anuncio de parada y otra con el de precaución)
             }
+            lock (geo) geo._sigsBuilt = true;
+            ApplyPosts(geo);   // (si el mundo ya se ha leído)
         }
 
         // sigcfg.dat (el de OpenRails\ si lo hay): tipo de señal → función (NORMAL, DISTANCE, SPEED…) y su figura. null si no se lee.

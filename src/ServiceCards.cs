@@ -352,7 +352,7 @@ namespace SelectOR
             if (_rows.Count == 0)
             {
                 string msg = _message ?? (_items.Count == 0 ? I18n.T("Sin servicios todavía.") : I18n.T("Nada coincide con el filtro."));
-                TextRenderer.DrawText(g, msg, _fMsg, new Rectangle(0, Theme.Px(30), ClientSize.Width, Theme.Px(30)), Theme.Subtle,
+                ColorText.Text(g, msg, _fMsg, new Rectangle(0, Theme.Px(30), ClientSize.Width, Theme.Px(30)), Theme.Subtle,
                                       TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return;
             }
@@ -386,16 +386,16 @@ namespace SelectOR
                 r.TotalsNetW = r.TotalsNet.Length > 0 ? TextRenderer.MeasureText(g, r.TotalsNet, _fHead, Size.Empty, Measure).Width : 0;
             }
             int x0 = rc.X + Theme.Px(2);
-            TextRenderer.DrawText(g, r.Title, _fHead, new Rectangle(x0, rc.Y, r.TitleW + 4, h), Theme.Text, flags);
+            ColorText.Text(g, r.Title, _fHead, new Rectangle(x0, rc.Y, r.TitleW + 4, h), Theme.Text, flags);
             if (r.Sub.Length > 0)
-                TextRenderer.DrawText(g, r.Sub, _fHeadSub, new Rectangle(x0 + r.TitleW + Theme.Px(10), rc.Y, rc.Width / 2, h), Theme.Subtle, flags);
+                ColorText.Text(g, r.Sub, _fHeadSub, new Rectangle(x0 + r.TitleW + Theme.Px(10), rc.Y, rc.Width / 2, h), Theme.Subtle, flags);
             int right = rc.Right - Theme.Px(4);
             if (r.TotalsNetW > 0)
             {
-                TextRenderer.DrawText(g, r.TotalsNet, _fHead, new Rectangle(right - r.TotalsNetW, rc.Y, r.TotalsNetW + 2, h), r.TotalsNeg ? Red : Theme.AccentHi, flags);
+                ColorText.Text(g, r.TotalsNet, _fHead, new Rectangle(right - r.TotalsNetW, rc.Y, r.TotalsNetW + 2, h), r.TotalsNeg ? Red : Theme.AccentHi, flags);
                 right -= r.TotalsNetW;
             }
-            TextRenderer.DrawText(g, r.Totals, _fHeadSub, new Rectangle(right - r.TotalsW, rc.Y, r.TotalsW + 2, h), Theme.Subtle, flags);
+            ColorText.Text(g, r.Totals, _fHeadSub, new Rectangle(right - r.TotalsW, rc.Y, r.TotalsW + 2, h), Theme.Subtle, flags);
         }
 
         static GraphicsPath RoundPath(Size s, int radius) => Theme.Round(new Rectangle(Point.Empty, s), radius);
@@ -428,14 +428,14 @@ namespace SelectOR
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.FillEllipse(_bAvatar, avr);
             g.SmoothingMode = SmoothingMode.None;
-            TextRenderer.DrawText(g, it.Initials, _fAvatar, avr, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ColorText.Text(g, it.Initials, _fAvatar, avr, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             int x = avr.Right + Theme.Px(9);
             if (it.DriverW < 0) it.DriverW = TextRenderer.MeasureText(g, it.Driver, _fName, Size.Empty, Measure).Width;
             int nw = Math.Min(it.DriverW, Math.Max(0, right - x - Theme.Px(20)));
-            TextRenderer.DrawText(g, it.Driver, _fName, new Rectangle(x, y, nw, lineH), Theme.Text, Line);
+            ColorText.Text(g, it.Driver, _fName, new Rectangle(x, y, nw, lineH), Theme.Text, Line);
             x += nw + Theme.Px(10);
             if (x < right - Theme.Px(30))
-                TextRenderer.DrawText(g, it.Meta, _fMeta, new Rectangle(x, y, right - x - Theme.Px(12), lineH), Theme.Subtle, Line);
+                ColorText.Text(g, it.Meta, _fMeta, new Rectangle(x, y, right - x - Theme.Px(12), lineH), Theme.Subtle, Line);
             y += lineH + Theme.Px(6);
 
             // 2) composición 2D
@@ -452,7 +452,7 @@ namespace SelectOR
                 g.PixelOffsetMode = PixelOffsetMode.Default;
             }
             else if (!it.HasImage || _imgFailed.Contains(it.Id))
-                TextRenderer.DrawText(g, "🚆  " + I18n.T("Sin composición guardada"), _fSmall,
+                ColorText.Text(g, "🚆  " + I18n.T("Sin composición guardada"), _fSmall,
                                       new Rectangle(sr.X + Theme.Px(10), sr.Y, sr.Width - Theme.Px(20), sr.Height), Theme.Subtle, Line);
             y = sr.Bottom + Theme.Px(6);
 
@@ -468,7 +468,7 @@ namespace SelectOR
             {
                 var (text, bold) = it.Facts[k];
                 int avail = right - Theme.Px(12) - fx;
-                TextRenderer.DrawText(g, text, bold ? _fFactB : _fFact, new Rectangle(fx, y, Math.Min(it.FactW[k], avail), fh), bold ? Theme.Text : Theme.Subtle, Line);
+                ColorText.Text(g, text, bold ? _fFactB : _fFact, new Rectangle(fx, y, Math.Min(it.FactW[k], avail), fh), bold ? Theme.Text : Theme.Subtle, Line);
                 fx += it.FactW[k];
             }
 
@@ -478,22 +478,22 @@ namespace SelectOR
             int my = mr.Y + (mr.Height - Theme.Px(70)) / 2;
             if (it.Open)
             {
-                TextRenderer.DrawText(g, I18n.T("En conducción"), _fFactB, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), Blue, LineR);
+                ColorText.Text(g, I18n.T("En conducción"), _fFactB, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), Blue, LineR);
                 if (it.Start != DateTime.MinValue)
-                    TextRenderer.DrawText(g, Ago(DateTime.Now - it.Start), _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
-                TextRenderer.DrawText(g, "●  " + I18n.T("en directo"), _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), Blue, LineR);
+                    ColorText.Text(g, Ago(DateTime.Now - it.Start), _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
+                ColorText.Text(g, "●  " + I18n.T("en directo"), _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), Blue, LineR);
             }
             else if (it.Annulled)
             {
-                TextRenderer.DrawText(g, it.NetText, _fNet, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), Theme.Subtle, LineR);
-                TextRenderer.DrawText(g, it.IncomeText, _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
+                ColorText.Text(g, it.NetText, _fNet, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), Theme.Subtle, LineR);
+                ColorText.Text(g, it.IncomeText, _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
                 Stamp(g, LblAnnulled, mr.X + mr.Width / 2 - Theme.Px(6), my + Theme.Px(42));
             }
             else
             {
-                TextRenderer.DrawText(g, it.NetText, _fNet, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), it.Net < 0 ? Red : Theme.AccentHi, LineR);
-                TextRenderer.DrawText(g, it.IncomeText, _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
-                TextRenderer.DrawText(g, it.StatusText, _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), it.Valid ? Theme.AccentHi : Red, LineR);
+                ColorText.Text(g, it.NetText, _fNet, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), it.Net < 0 ? Red : Theme.AccentHi, LineR);
+                ColorText.Text(g, it.IncomeText, _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
+                ColorText.Text(g, it.StatusText, _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), it.Valid ? Theme.AccentHi : Red, LineR);
             }
         }
 
@@ -523,9 +523,9 @@ namespace SelectOR
                 r.TotalsW = TextRenderer.MeasureText(g, r.Totals, _fSmall, Size.Empty, Measure).Width;
             }
             int x = rc.X + Theme.Px(2);
-            TextRenderer.DrawText(g, r.Title, _fSmall, new Rectangle(x, y - Theme.Px(10), r.TitleW + 2, Theme.Px(20)), Theme.AccentHi, Line);
+            ColorText.Text(g, r.Title, _fSmall, new Rectangle(x, y - Theme.Px(10), r.TitleW + 2, Theme.Px(20)), Theme.AccentHi, Line);
             x += r.TitleW + Theme.Px(8);
-            TextRenderer.DrawText(g, "·  " + r.Totals, _fSmall, new Rectangle(x, y - Theme.Px(10), r.TotalsW + Theme.Px(30), Theme.Px(20)), Theme.Subtle, Line);
+            ColorText.Text(g, "·  " + r.Totals, _fSmall, new Rectangle(x, y - Theme.Px(10), r.TotalsW + Theme.Px(30), Theme.Px(20)), Theme.Subtle, Line);
             x += r.TotalsW + Theme.Px(36);
             using var pen = new Pen(Theme.Surface2) { DashStyle = DashStyle.Dash };
             if (x < rc.Right) g.DrawLine(pen, x, y, rc.Right - Theme.Px(4), y);
@@ -548,24 +548,24 @@ namespace SelectOR
             int right = rc.Right - Theme.Px(10);
             // derecha: neto (o estado)
             var nr = new Rectangle(right - netW, y, netW, h);
-            if (it.Open) TextRenderer.DrawText(g, I18n.T("En conducción"), _fFactB, nr, Blue, LineR);
-            else if (it.Annulled) TextRenderer.DrawText(g, LblAnnulled, _fRowNet, nr, Red, LineR);
-            else TextRenderer.DrawText(g, it.NetText, _fRowNet, nr, it.Net < 0 ? Red : Theme.AccentHi, LineR);
+            if (it.Open) ColorText.Text(g, I18n.T("En conducción"), _fFactB, nr, Blue, LineR);
+            else if (it.Annulled) ColorText.Text(g, LblAnnulled, _fRowNet, nr, Red, LineR);
+            else ColorText.Text(g, it.NetText, _fRowNet, nr, it.Net < 0 ? Red : Theme.AccentHi, LineR);
             right -= netW + Theme.Px(8);
             if (right - x > Theme.Px(420))
             {
-                TextRenderer.DrawText(g, it.DurText, _fFact, new Rectangle(right - durW, y, durW, h), Theme.Subtle, LineR);
+                ColorText.Text(g, it.DurText, _fFact, new Rectangle(right - durW, y, durW, h), Theme.Subtle, LineR);
                 right -= durW + Theme.Px(6);
-                TextRenderer.DrawText(g, it.KmText, _fFactB, new Rectangle(right - kmW, y, kmW, h), it.Annulled ? Theme.Subtle : Theme.Text, LineR);
+                ColorText.Text(g, it.KmText, _fFactB, new Rectangle(right - kmW, y, kmW, h), it.Annulled ? Theme.Subtle : Theme.Text, LineR);
                 right -= kmW + Theme.Px(12);
             }
-            TextRenderer.DrawText(g, it.TimeText, _fFact, new Rectangle(x, y, Theme.Px(44), h), Theme.Subtle, Line);
+            ColorText.Text(g, it.TimeText, _fFact, new Rectangle(x, y, Theme.Px(44), h), Theme.Subtle, Line);
             x += Theme.Px(48);
             int dw = Math.Min(Theme.Px(150), Math.Max(0, right - x));
-            TextRenderer.DrawText(g, it.Driver, _fFactB, new Rectangle(x, y, dw, h), it.Annulled ? Theme.Subtle : Theme.Text, Line);
+            ColorText.Text(g, it.Driver, _fFactB, new Rectangle(x, y, dw, h), it.Annulled ? Theme.Subtle : Theme.Text, Line);
             x += dw + Theme.Px(10);
             if (x < right - Theme.Px(20))
-                TextRenderer.DrawText(g, it.Line2, _fFact, new Rectangle(x, y, right - x, h), Theme.Subtle, Line);
+                ColorText.Text(g, it.Line2, _fFact, new Rectangle(x, y, right - x, h), Theme.Subtle, Line);
         }
 
         static string Initials(string name)

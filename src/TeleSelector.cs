@@ -134,7 +134,7 @@ namespace SelectOR
                 g.DrawImage(th, new Rectangle(img.X, img.Y + (LedH - h) / 2, w, h));
             }
             else if (o != null)
-                TextRenderer.DrawText(g, Nice(o), _f, new Rectangle(img.X + 6, img.Y, img.Width - 6, img.Height), Theme.Text,
+                ColorText.Text(g, Nice(o), _f, new Rectangle(img.X + 6, img.Y, img.Width - 6, img.Height), Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             using (var p = new Pen(Theme.Subtle, 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
             {
@@ -251,7 +251,7 @@ namespace SelectOR
                 var g = e.Graphics; g.Clear(BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
                 if (_shown.Count == 0)
                 {
-                    TextRenderer.DrawText(g, I18n.T("Ningún destino coincide con la búsqueda."), _fs, new Rectangle(0, Gap, Width, Theme.Px(40)), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, I18n.T("Ningún destino coincide con la búsqueda."), _fs, new Rectangle(0, Gap, Width, Theme.Px(40)), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                     return;
                 }
                 for (int k = 0; k < _shown.Count; k++)
@@ -273,7 +273,7 @@ namespace SelectOR
                         g.DrawImage(th, new Rectangle(r.X + 8, r.Y + (r.Height - h) / 2, w, h));
                     }
                     else
-                        TextRenderer.DrawText(g, Nice(it), _f, new Rectangle(r.X + 10, r.Y, r.Width - 10 - right, r.Height), Theme.Text,
+                        ColorText.Text(g, Nice(it), _f, new Rectangle(r.X + 10, r.Y, r.Width - 10 - right, r.Height), Theme.Text,
                             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                     if (sel)
                         using (var p = new Pen(Color.FromArgb(143, 224, 147), 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })

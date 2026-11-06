@@ -40,7 +40,8 @@ namespace SelectOR
         public static string Code(string code) => code switch
         {
             "jump" => "A1", "speed_avg" => "A2", "time_accel" => "A3", "autopilot" => "A4",
-            "overspeed" => "B6", "overspeed_grave" => "B7", "recovery" => "+1", "train_kind" => "T", _ => "—"
+            "overspeed" => "B6", "overspeed_grave" => "B7", "recovery" => "+1", "train_kind" => "T",
+            "pax_excess" => "C1", "load_impossible" => "C2", "admin_other" => "C3", _ => "—"
         };
 
         public static string Name(string code) => I18n.T(code switch
@@ -53,6 +54,9 @@ namespace SelectOR
             "overspeed_grave" => "Exceso de velocidad grave",
             "recovery" => "Recuperación de un punto",
             "train_kind" => "Tren de viajeros como mercancías",
+            "pax_excess" => "Exceso de viajeros",          // (1.2.90) sanciones del administrador (sanciones.sql)
+            "load_impossible" => "Carga imposible",
+            "admin_other" => "Otra falta",
             _ => "Infracción"
         });
 
@@ -97,6 +101,18 @@ namespace SelectOR
                 case "overspeed":
                 case "overspeed_grave":
                     return double.IsNaN(N("max_kmh")) ? "" : string.Format(I18n.T("{0} km/h con límite {1} · {2} s"), F(N("max_kmh")), F(N("limit_kmh")), F(N("seconds")));
+                case "pax_excess":
+                case "load_impossible":
+                case "admin_other":
+                {
+                    // (1.2.90) la sanción del administrador: el motivo, la multa y si se anuló el servicio
+                    string reason = d.TryGetProperty("reason", out var rv) && rv.ValueKind == JsonValueKind.String ? rv.GetString() : "";
+                    var parts = new System.Collections.Generic.List<string>();
+                    if (reason.Length > 0) parts.Add(reason);
+                    if (N("fine") > 0) parts.Add(string.Format(I18n.T("multa de {0} €"), F(N("fine"))));
+                    if (d.TryGetProperty("annulled", out var an) && an.ValueKind == JsonValueKind.True) parts.Add(I18n.T("servicio anulado"));
+                    return string.Join(" · ", parts);
+                }
             }
             return "";
         }
@@ -594,12 +610,12 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7 · Alegaciones (MainMenuForm.Alegaciones.cs)
-            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "Alegaciones" },
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "C1 · C2 · C3", "Alegaciones", "Sospechosos" },
                                    i => { _revTab = i; RevTabChanged(i); FillReviewCards(); });
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             _revTabBar = tabs;
             var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 220, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
-            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); FillAppeals(); };
+            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); FillAppeals(); FillSuspects(); };
             _revSearch = search;
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
@@ -607,6 +623,7 @@ namespace SelectOR
             _revList.Dock = DockStyle.Fill;
             revHost.Controls.Add(_revList);
             revHost.Controls.Add(BuildAppealsPanel());
+            revHost.Controls.Add(BuildSuspectsPanel());   // (1.2.90) MainMenuForm.Sanciones.cs
             t.Controls.Add(revHost);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -683,14 +700,15 @@ namespace SelectOR
             _revList.BeginUpdate();
             _revList.Items.Clear();
             _revList.EmptyText = Tr("No hay infracciones.");
-            if (_revBtns != null) _revBtns.Visible = _revTab != RevTabAppeals;   // (Alegaciones lleva sus botones)
+            if (_revBtns != null) _revBtns.Visible = _revTab != RevTabAppeals && _revTab != RevTabSuspects;   // (Alegaciones y Sospechosos llevan sus botones)
             foreach (var r in _revAll)
             {
                 bool tabOk = _revTab switch
                 {
                     1 => r.Status == "pending",
                     2 => IsCodeA(r.Code),
-                    3 => !IsCodeA(r.Code),
+                    3 => !IsCodeA(r.Code) && !IsCodeC(r.Code),
+                    RevTabSanctions => IsCodeC(r.Code),
                     _ => true   // 0 (todas)
                 };
                 if (!tabOk) continue;

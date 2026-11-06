@@ -92,10 +92,10 @@ namespace SelectOR
                 string own = nm == General ? null : OwnerOf(nm);
                 int ownW = own != null ? Theme.Px(70) : 0;
                 using var f = line ? Theme.Font(8.6f) : nm == General ? Theme.Font(9.5f, FontStyle.Bold) : null;
-                TextRenderer.DrawText(e.Graphics, nm, f ?? _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y, e.Bounds.Width - (bell ? 34 : 12) - ownW, e.Bounds.Height),
+                ColorText.Text(e.Graphics, nm, f ?? _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y, e.Bounds.Width - (bell ? 34 : 12) - ownW, e.Bounds.Height),
                                       sel || nm == General ? Theme.Text : line ? Color.FromArgb(130, 140, 150) : Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                 if (own != null) DrawOwnerTag(e.Graphics, e.Bounds, own, Mine(nm), bell ? 26 : 4);
-                if (bell) TextRenderer.DrawText(e.Graphics, "🔔", _list.Font, new Rectangle(e.Bounds.Right - 26, e.Bounds.Y, 24, e.Bounds.Height), Color.FromArgb(255, 213, 79), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                if (bell) ColorText.Text(e.Graphics, "🔔", _list.Font, new Rectangle(e.Bounds.Right - 26, e.Bounds.Y, 24, e.Bounds.Height), Color.FromArgb(255, 213, 79), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             };
             _list.SelectedIndexChanged += (s, e) => { if (_list.SelectedItem is string st) { if (st == General) ShowOverview(); else ShowZone(st); } };
             try { Native.UseDarkScrollBars(_list); } catch { }
@@ -796,7 +796,7 @@ namespace SelectOR
             if (_cur == null)
             {
                 using (var bg = new SolidBrush(SchematicDraw.Bg)) g.FillRectangle(bg, area);
-                TextRenderer.DrawText(g, Tr("Esta dependencia no tiene esquema."), Theme.Font(10f), area, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                ColorText.Text(g, Tr("Esta dependencia no tiene esquema."), Theme.Font(10f), area, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
             else { var lv = Live(); SchematicDraw.Draw(g, _cur, lv, _origin, _zoom, area); _blinking = lv?.Blinking == true; }
             // «← Plano general»

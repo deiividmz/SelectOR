@@ -170,9 +170,9 @@ namespace SelectOR
             var top = new Rectangle(e.Bounds.X + 14, e.Bounds.Y + 4, e.Bounds.Width - 24, e.Bounds.Height / 2 - 2);
             var bottom = new Rectangle(e.Bounds.X + 14, e.Bounds.Y + e.Bounds.Height / 2, e.Bounds.Width - 24, e.Bounds.Height / 2 - 4);
             using (var bold = new Font(Font, FontStyle.Bold))
-                TextRenderer.DrawText(e.Graphics, name, bold, top, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                ColorText.Text(e.Graphics, name, bold, top, Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             string sub = (string.IsNullOrEmpty(it.Path) ? "" : it.Path + "   ·   ") + it.RealTime.ToString("g", Cul);
-            TextRenderer.DrawText(e.Graphics, sub, Font, bottom, Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            ColorText.Text(e.Graphics, sub, Font, bottom, Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
         void ShowDetail()

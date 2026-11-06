@@ -73,7 +73,7 @@ namespace SelectOR
             Theme.FillRound(g, card, Theme.Px(12), Theme.Surface);
             g.SmoothingMode = SmoothingMode.None;
             int pad = Pad;
-            TextRenderer.DrawText(g, Caption, _fCap, new Rectangle(pad, pad, Width - pad * 2, _fCap.Height), Theme.Subtle, LineF);
+            ColorText.Text(g, Caption, _fCap, new Rectangle(pad, pad, Width - pad * 2, _fCap.Height), Theme.Subtle, LineF);
             var (opts, info) = Geo(Width);
             var icons = new List<(string, Rectangle)>();
             for (int i = 0; i < _opt.Length; i++)
@@ -96,11 +96,11 @@ namespace SelectOR
                 int tx = ic.Right + Theme.Px(12), tw = rr.X - tx - Theme.Px(6);
                 int th = _fT.Height + Theme.Px(4) + TextH(_opt[i].sub, _fS, r.Right - Theme.Px(14) - tx);
                 int ty = r.Y + Math.Max(Theme.Px(10), (r.Height - th) / 2);
-                TextRenderer.DrawText(g, _opt[i].title, _fT, new Rectangle(tx, ty, tw, _fT.Height), on ? Theme.AccentHi : Theme.Text, LineF);
-                TextRenderer.DrawText(g, _opt[i].sub, _fS, new Rectangle(tx, ty + _fT.Height + Theme.Px(4), r.Right - Theme.Px(14) - tx, r.Bottom - ty - _fT.Height), Theme.Subtle, WrapF);
+                ColorText.Text(g, _opt[i].title, _fT, new Rectangle(tx, ty, tw, _fT.Height), on ? Theme.AccentHi : Theme.Text, LineF);
+                ColorText.Text(g, _opt[i].sub, _fS, new Rectangle(tx, ty + _fT.Height + Theme.Px(4), r.Right - Theme.Px(14) - tx, r.Bottom - ty - _fT.Height), Theme.Subtle, WrapF);
             }
             ColorText.DrawCells(g, icons, _fIc, Theme.Text, ClientRectangle);
-            TextRenderer.DrawText(g, _info, _fI, info, Theme.Subtle, WrapF);
+            ColorText.Text(g, _info, _fI, info, Theme.Subtle, WrapF);
         }
         int HitOpt(Point p) { var (o, _) = Geo(Width); for (int i = 0; i < o.Length; i++) if (o[i].Contains(p)) return i; return -1; }
         protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); int h = HitOpt(e.Location); Cursor = h >= 0 ? Cursors.Hand : Cursors.Default; if (h != _hover) { _hover = h; Invalidate(); } }

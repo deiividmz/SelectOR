@@ -224,7 +224,7 @@ namespace SelectOR
             var rg = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, BackColor = Color.Transparent, AutoSize = true };
             rg.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             if (d.RankedUp)
-                rg.Controls.Add(new Label { AutoSize = false, Height = 30, Dock = DockStyle.Top, ForeColor = Gold, Font = Theme.Font(12f, FontStyle.Bold), Text = "🎉  " + string.Format(I18n.T("¡Has subido a rango {0}!"), d.RankName) });
+                rg.Controls.Add(new EmojiLabel { AutoSize = false, Height = 30, Dock = DockStyle.Top, ForeColor = Gold, Font = Theme.Font(12f, FontStyle.Bold), Text = "🎉  " + string.Format(I18n.T("¡Has subido a rango {0}!"), d.RankName) });
             else
             {
                 rg.Controls.Add(new Label { AutoSize = false, Height = 26, Dock = DockStyle.Top, ForeColor = Theme.Subtle, Font = Theme.Font(9.5f), Text = I18n.T("TU RANGO") });
@@ -409,19 +409,19 @@ namespace SelectOR
                 using (var p = new Pen(st, 2)) g.DrawLine(p, 0, 0, r.Width, 0);
                 int x = Theme.Px(20), w = r.Width - 2 * x, y = Theme.Px(14);
                 var fl = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
-                TextRenderer.DrawText(g, status, _fSt, new Rectangle(x, y, w, Theme.Px(16)), st, fl); y += Theme.Px(20);
-                TextRenderer.DrawText(g, _d.Company ?? "", _fT, new Rectangle(x, y, w, Theme.Px(28)), Theme.Text, fl); y += Theme.Px(29);
+                ColorText.Text(g, status, _fSt, new Rectangle(x, y, w, Theme.Px(16)), st, fl); y += Theme.Px(20);
+                ColorText.Text(g, _d.Company ?? "", _fT, new Rectangle(x, y, w, Theme.Px(28)), Theme.Text, fl); y += Theme.Px(29);
                 var sub = new List<string>();
                 if (!string.IsNullOrWhiteSpace(_d.Driver) && _d.Driver != "—") sub.Add(_d.Driver);
                 if (_d.InProgress && _d.StartLocal != DateTime.MinValue) sub.Add(string.Format(I18n.T("salió a las {0}"), _d.StartLocal.ToString("HH:mm", Es)));
                 else if (!string.IsNullOrWhiteSpace(_d.DateText)) sub.Add(_d.DateText);
                 if (!string.IsNullOrWhiteSpace(_d.StatusText) && !_d.InProgress && _d.History) sub.Add(_d.StatusText);
-                TextRenderer.DrawText(g, string.Join("  ·  ", sub), _fSub, new Rectangle(x, y, w, Theme.Px(18)), Color.FromArgb(200, 206, 210), fl); y += Theme.Px(24);
+                ColorText.Text(g, string.Join("  ·  ", sub), _fSub, new Rectangle(x, y, w, Theme.Px(18)), Color.FromArgb(200, 206, 210), fl); y += Theme.Px(24);
                 // trayecto: «Almargen_Bobadilla» → Almargen ··· 🚆 ··· Bobadilla (si no se puede partir, el nombre tal cual)
                 var (from, to) = SplitPath(_d.Path);
                 if (from == null)
                 {
-                    if (!string.IsNullOrWhiteSpace(_d.Path)) TextRenderer.DrawText(g, "🛤  " + _d.Path, _fPath, new Rectangle(x, y, w, Theme.Px(24)), Theme.Text, fl);
+                    if (!string.IsNullOrWhiteSpace(_d.Path)) ColorText.Text(g, "🛤  " + _d.Path, _fPath, new Rectangle(x, y, w, Theme.Px(24)), Theme.Text, fl);
                     return;
                 }
                 int fw = TextRenderer.MeasureText(from, _fPath, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.Px(16);
@@ -431,8 +431,8 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var bb = new SolidBrush(Color.FromArgb(80, 0, 0, 0))) { using (var p1 = Theme.Round(fr, 6)) g.FillPath(bb, p1); using (var p2 = Theme.Round(tr, 6)) g.FillPath(bb, p2); }
                 g.SmoothingMode = SmoothingMode.None;
-                TextRenderer.DrawText(g, from, _fPath, fr, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, to, _fPath, tr, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+                ColorText.Text(g, from, _fPath, fr, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+                ColorText.Text(g, to, _fPath, tr, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
                 int cy = y + Theme.Px(12), mid = (fr.Right + tr.X) / 2;
                 double prog = _d.InProgress ? 0.5 : 1;
                 using (var dash = new Pen(Color.FromArgb(150, 255, 255, 255), 2) { DashPattern = new float[] { 3, 3 } })
@@ -475,8 +475,8 @@ namespace SelectOR
                     var r = new Rectangle(i * (cw + gap), 0, cw, Height - 1);
                     g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, r, Theme.Px(10), Theme.Surface); g.SmoothingMode = SmoothingMode.None;
                     var (cap, val, col) = _t[i];
-                    TextRenderer.DrawText(g, cap, _fc, new Rectangle(r.X + Theme.Px(12), r.Y + Theme.Px(8), r.Width - Theme.Px(20), Theme.Px(14)), Theme.Subtle, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
-                    TextRenderer.DrawText(g, val, _small ? _fvs : _fv, new Rectangle(r.X + Theme.Px(12), r.Y + Theme.Px(22), r.Width - Theme.Px(20), r.Height - Theme.Px(26)), col,
+                    ColorText.Text(g, cap, _fc, new Rectangle(r.X + Theme.Px(12), r.Y + Theme.Px(8), r.Width - Theme.Px(20), Theme.Px(14)), Theme.Subtle, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                    ColorText.Text(g, val, _small ? _fvs : _fv, new Rectangle(r.X + Theme.Px(12), r.Y + Theme.Px(22), r.Width - Theme.Px(20), r.Height - Theme.Px(26)), col,
                         TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
                 }
             }
@@ -510,8 +510,8 @@ namespace SelectOR
                 string no = string.IsNullOrEmpty(_d.ServiceId) ? "" : "Nº " + _d.ServiceId.Substring(0, Math.Min(8, _d.ServiceId.Length)).ToUpperInvariant();
                 if (g != null)
                 {
-                    TextRenderer.DrawText(g, I18n.T("LIQUIDACIÓN DEL SERVICIO"), _fH, new Rectangle(x, y, iw, Theme.Px(14)), Faint, TextFormatFlags.NoPadding);
-                    TextRenderer.DrawText(g, no, _fH, new Rectangle(x, y, iw, Theme.Px(14)), Faint, TextFormatFlags.NoPadding | TextFormatFlags.Right);
+                    ColorText.Text(g, I18n.T("LIQUIDACIÓN DEL SERVICIO"), _fH, new Rectangle(x, y, iw, Theme.Px(14)), Faint, TextFormatFlags.NoPadding);
+                    ColorText.Text(g, no, _fH, new Rectangle(x, y, iw, Theme.Px(14)), Faint, TextFormatFlags.NoPadding | TextFormatFlags.Right);
                 }
                 y += Theme.Px(18); DashLine(g, x, y, iw); y += Theme.Px(8);
                 foreach (var l in _lines)
@@ -520,8 +520,8 @@ namespace SelectOR
                     int aw = TextRenderer.MeasureText(amt, _fL, Size.Empty, TextFormatFlags.NoPadding).Width;
                     if (g != null)
                     {
-                        TextRenderer.DrawText(g, l.Label, _fL, new Rectangle(x, y, iw - aw - 8, Theme.Px(18)), Ink, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
-                        TextRenderer.DrawText(g, amt, _fL, new Rectangle(x + iw - aw, y, aw, Theme.Px(18)), l.Cost ? NegC : PosC, TextFormatFlags.NoPadding);
+                        ColorText.Text(g, l.Label, _fL, new Rectangle(x, y, iw - aw - 8, Theme.Px(18)), Ink, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                        ColorText.Text(g, amt, _fL, new Rectangle(x + iw - aw, y, aw, Theme.Px(18)), l.Cost ? NegC : PosC, TextFormatFlags.NoPadding);
                     }
                     y += Theme.Px(19);
                     foreach (var st in l.Steps)
@@ -530,7 +530,7 @@ namespace SelectOR
                         int ind = sub ? Theme.Px(14) : 0;
                         string t = st.Trim();
                         int h = TextRenderer.MeasureText(t, _fS, new Size(iw - ind - aw / 2, 0), Wrap).Height;
-                        if (g != null) TextRenderer.DrawText(g, t, _fS, new Rectangle(x + ind, y, iw - ind - aw / 2, h), Faint, Wrap);
+                        if (g != null) ColorText.Text(g, t, _fS, new Rectangle(x + ind, y, iw - ind - aw / 2, h), Faint, Wrap);
                         y += h + Theme.Px(2);
                     }
                     y += Theme.Px(6);
@@ -539,12 +539,12 @@ namespace SelectOR
                 string net = (_d.Net >= 0 ? "+" : "−") + Math.Abs(_d.Net).ToString("N2", Es) + " €";
                 if (g != null)
                 {
-                    TextRenderer.DrawText(g, I18n.T("NETO DEL VIAJE"), _fT, new Rectangle(x, y, iw, Theme.Px(24)), Ink, TextFormatFlags.NoPadding);
-                    TextRenderer.DrawText(g, net, _fT, new Rectangle(x, y, iw, Theme.Px(24)), _d.Net < 0 ? NegC : PosC, TextFormatFlags.NoPadding | TextFormatFlags.Right);
+                    ColorText.Text(g, I18n.T("NETO DEL VIAJE"), _fT, new Rectangle(x, y, iw, Theme.Px(24)), Ink, TextFormatFlags.NoPadding);
+                    ColorText.Text(g, net, _fT, new Rectangle(x, y, iw, Theme.Px(24)), _d.Net < 0 ? NegC : PosC, TextFormatFlags.NoPadding | TextFormatFlags.Right);
                 }
                 y += Theme.Px(24);
                 string calc = string.Format(I18n.T("Neto = ingreso {0} − gastos {1}"), _d.Income.ToString("N2", Es) + " €", _costs.ToString("N2", Es) + " €");
-                if (g != null) TextRenderer.DrawText(g, calc, _fS, new Rectangle(x, y, iw, Theme.Px(16)), Faint, TextFormatFlags.NoPadding);
+                if (g != null) ColorText.Text(g, calc, _fS, new Rectangle(x, y, iw, Theme.Px(16)), Faint, TextFormatFlags.NoPadding);
                 y += Theme.Px(18);
                 if (_d.SchedDone)
                 {
@@ -555,22 +555,22 @@ namespace SelectOR
                     int aw = TextRenderer.MeasureText(amt, _fL, Size.Empty, TextFormatFlags.NoPadding).Width;
                     if (g != null)
                     {
-                        TextRenderer.DrawText(g, lbl, _fL, new Rectangle(x, y, iw - aw - 8, Theme.Px(18)), Ink, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
-                        TextRenderer.DrawText(g, amt, _fL, new Rectangle(x + iw - aw, y, aw, Theme.Px(18)), PosC, TextFormatFlags.NoPadding);
+                        ColorText.Text(g, lbl, _fL, new Rectangle(x, y, iw - aw - 8, Theme.Px(18)), Ink, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                        ColorText.Text(g, amt, _fL, new Rectangle(x + iw - aw, y, aw, Theme.Px(18)), PosC, TextFormatFlags.NoPadding);
                     }
                     y += Theme.Px(19);
                     string why = _d.SchedBonus > 0
                         ? I18n.T("Turno cumplido. La paga el servidor a la tesorería de la empresa: no cuenta en el neto del viaje ni en la liga.")
                         : I18n.T("Turno cumplido, sin prima: la empresa ya ha cobrado hoy todas las primas que se pagan al día.");
                     int h2 = TextRenderer.MeasureText(why, _fS, new Size(iw, 0), Wrap).Height;
-                    if (g != null) TextRenderer.DrawText(g, why, _fS, new Rectangle(x, y, iw, h2), Faint, Wrap);
+                    if (g != null) ColorText.Text(g, why, _fS, new Rectangle(x, y, iw, h2), Faint, Wrap);
                     y += h2 + Theme.Px(6);
                 }
                 if (!_hasDetail)
                 {
                     string old = I18n.T("Este servicio se registró antes de que se guardara el detalle del cálculo: solo se puede mostrar lo que equivale cada importe por km.");
                     int h = TextRenderer.MeasureText(old, _fN, new Size(iw, 0), Wrap).Height;
-                    if (g != null) TextRenderer.DrawText(g, old, _fN, new Rectangle(x, y, iw, h), Faint, Wrap);
+                    if (g != null) ColorText.Text(g, old, _fN, new Rectangle(x, y, iw, h), Faint, Wrap);
                     y += h + Theme.Px(4);
                 }
                 // código de barras decorativo
@@ -623,11 +623,11 @@ namespace SelectOR
                 var r = new Rectangle(0, 0, Width - 1, Height - 1);
                 g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, r, Theme.Px(12), Theme.Surface); g.SmoothingMode = SmoothingMode.None;
                 int x = Theme.Px(16), w = Width - 2 * x, y = Theme.Px(12);
-                TextRenderer.DrawText(g, I18n.T("PARADAS COMERCIALES") + "  ·  " + _s.Count, _fT, new Rectangle(x, y, w, Theme.Px(16)), Theme.Subtle, TextFormatFlags.NoPadding);
+                ColorText.Text(g, I18n.T("PARADAS COMERCIALES") + "  ·  " + _s.Count, _fT, new Rectangle(x, y, w, Theme.Px(16)), Theme.Subtle, TextFormatFlags.NoPadding);
                 y += Theme.Px(26);
                 if (_s.Count == 0)
                 {
-                    TextRenderer.DrawText(g, I18n.T("El tren no hizo ninguna parada con apertura de puertas en un andén."), _fR, new Rectangle(x, y, w, Theme.Px(26)), Theme.Subtle, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, I18n.T("El tren no hizo ninguna parada con apertura de puertas en un andén."), _fR, new Rectangle(x, y, w, Theme.Px(26)), Theme.Subtle, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter);
                     return;
                 }
                 int lineX = x + Theme.Px(58);
@@ -637,14 +637,14 @@ namespace SelectOR
                 {
                     var (st, t, b, a) = _s[i];
                     int ry = y + i * Theme.Px(28);
-                    TextRenderer.DrawText(g, string.IsNullOrEmpty(t) ? "—" : t, _fH, new Rectangle(x, ry, Theme.Px(46), Theme.Px(24)), Theme.Subtle, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, string.IsNullOrEmpty(t) ? "—" : t, _fH, new Rectangle(x, ry, Theme.Px(46), Theme.Px(24)), Theme.Subtle, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter);
                     int d = Theme.Px(10);
                     using (var br = new SolidBrush(i == 0 || i == _s.Count - 1 ? Theme.Accent : Theme.Surface)) g.FillEllipse(br, lineX - d / 2, ry + Theme.Px(12) - d / 2, d, d);
                     using (var pen = new Pen(Theme.Accent, 2)) g.DrawEllipse(pen, lineX - d / 2, ry + Theme.Px(12) - d / 2, d, d);
                     string pax = string.Join("    ", new[] { b > 0 ? "↑ " + b.ToString("N0", Es) : null, a > 0 ? "↓ " + a.ToString("N0", Es) : null }.Where(v => v != null));
                     int pw = TextRenderer.MeasureText(pax, _fR, Size.Empty, TextFormatFlags.NoPadding).Width;
-                    TextRenderer.DrawText(g, st, _fB, new Rectangle(lineX + Theme.Px(16), ry, w - (lineX - x) - Theme.Px(20) - pw, Theme.Px(24)), Theme.Text, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-                    TextRenderer.DrawText(g, pax, _fR, new Rectangle(x + w - pw, ry, pw, Theme.Px(24)), Green, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, st, _fB, new Rectangle(lineX + Theme.Px(16), ry, w - (lineX - x) - Theme.Px(20) - pw, Theme.Px(24)), Theme.Text, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    ColorText.Text(g, pax, _fR, new Rectangle(x + w - pw, ry, pw, Theme.Px(24)), Green, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter);
                 }
                 g.SmoothingMode = SmoothingMode.None;
             }

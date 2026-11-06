@@ -170,7 +170,7 @@ namespace SelectOR
                 int x = left - e.Item.Bounds.X + (e.ToolStrip != null && HasChecks(e.ToolStrip) ? CheckW : 0);
                 int right = (e.ToolStrip?.Width ?? e.Item.Width) - left - e.Item.Bounds.X;   // mismo margen a la derecha
                 var r = new Rectangle(x, 0, Math.Max(1, right - x), e.Item.Height);
-                TextRenderer.DrawText(e.Graphics, e.Item.Text, e.TextFont, r, color,
+                ColorText.Text(e.Graphics, e.Item.Text, e.TextFont, r, color,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
             }
 

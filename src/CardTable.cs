@@ -55,6 +55,10 @@ namespace SelectOR
         // separado por «  ·  »). ThumbWidth: el ancho de la imagen grande (sin escalar). AvatarSize: el del logotipo.
         public bool AutoHeight, SubChips;
         public int ThumbWidth = 200, AvatarSize = 40;
+        // (1.2.90, Tablón) Accent: franja de color a la izquierda de cada tarjeta (por categoría); null = sin franja.
+        // Ticket: tarjeta de «billete» (mercado): muescas arriba y abajo y una línea de puntos antes del valor grande.
+        public Func<Row, Color?> Accent;
+        public bool Ticket;
         protected override bool VariableHeights => AutoHeight;
         protected override int ItemHeight(int i, int cardW) => i >= 0 && i < Items.Count && Items[i] is Row r ? DrawAuto(null, r, new Rectangle(0, 0, cardW, Theme.Px(CardHeight)), false, false) : CardH;
 
@@ -218,7 +222,7 @@ namespace SelectOR
                 int s = Theme.Px(20);
                 var cb = new Rectangle(x, rc.Y + (rc.Height - s) / 2, s, s);
                 if (on) Fill(g, cb, Theme.Px(5), Theme.Accent); else Stroke(g, cb, Theme.Px(5), Theme.Subtle, 1.4f);
-                if (on) TextRenderer.DrawText(g, "✓", _fCheck, cb, Color.White, C1);
+                if (on) ColorText.Text(g, "✓", _fCheck, cb, Color.White, C1);
                 x = cb.Right + Theme.Px(12);
             }
             // imagen grande (anuncios)
@@ -238,7 +242,7 @@ namespace SelectOR
                     g.DrawImage(im, new Rectangle(tr.X + (tr.Width - w) / 2, tr.Y + (tr.Height - h) / 2, w, h));
                     g.PixelOffsetMode = PixelOffsetMode.Default;
                 }
-                else TextRenderer.DrawText(g, "🖼", _fIcon, tr, Theme.Subtle, C1);
+                else ColorText.Text(g, "🖼", _fIcon, tr, Theme.Subtle, C1);
                 x = tr.Right + Theme.Px(14);
             }
             // icono, logotipo o iniciales
@@ -256,8 +260,8 @@ namespace SelectOR
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     using (var b = new SolidBrush(Theme.Surface2)) g.FillEllipse(b, ar);
                     g.SmoothingMode = SmoothingMode.None;
-                    if (Icon != null) TextRenderer.DrawText(g, Icon, _fIcon, ar, Theme.Text, C1);
-                    else TextRenderer.DrawText(g, Initials(Cell(r, TitleCol)), _fAv, ar, Theme.AccentHi, C1);
+                    if (Icon != null) ColorText.Text(g, Icon, _fIcon, ar, Theme.Text, C1);
+                    else ColorText.Text(g, Initials(Cell(r, TitleCol)), _fAv, ar, Theme.AccentHi, C1);
                 }
                 x = ar.Right + Theme.Px(12);
             }
@@ -271,11 +275,11 @@ namespace SelectOR
                 foreach (int c in RightSubCols) rightW = Math.Max(rightW, TW(Cell(r, c), _fSub));
                 rightW = Math.Min(rightW + Theme.Px(4), (right - x) / 2);
                 int ry = rc.Y + (rc.Height - Theme.Px(24) - RightSubCols.Length * Theme.Px(18)) / 2;
-                TextRenderer.DrawText(g, big, _fRight, new Rectangle(right - rightW, ry, rightW, Theme.Px(24)), Col(r, RightCol) ?? Theme.Text, R1);
+                ColorText.Text(g, big, _fRight, new Rectangle(right - rightW, ry, rightW, Theme.Px(24)), Col(r, RightCol) ?? Theme.Text, R1);
                 ry += Theme.Px(24);
                 foreach (int c in RightSubCols)
                 {
-                    TextRenderer.DrawText(g, Cell(r, c), _fSub, new Rectangle(right - rightW, ry, rightW, Theme.Px(18)), Col(r, c) ?? Theme.Subtle, R1);
+                    ColorText.Text(g, Cell(r, c), _fSub, new Rectangle(right - rightW, ry, rightW, Theme.Px(18)), Col(r, c) ?? Theme.Subtle, R1);
                     ry += Theme.Px(18);
                 }
                 right -= rightW + Theme.Px(14);
@@ -296,22 +300,22 @@ namespace SelectOR
                 int pw = TW(text, _fPill) + Theme.Px(16), ph = Theme.Px(20);
                 var pr = new Rectangle(pillX - pw, y, pw, ph);
                 Fill(g, pr, ph / 2, Color.FromArgb(40, c));
-                TextRenderer.DrawText(g, text, _fPill, pr, c, C1);
+                ColorText.Text(g, text, _fPill, pr, c, C1);
                 pillX = pr.Left - Theme.Px(6);
             }
             if (PillCol >= 0) { string pv = Cell(r, PillCol); if (pv.Length > 0 && pv != "—") PillAt(pv, Col(r, PillCol) ?? Theme.AccentHi); }
             if (Badges.TryGetValue(r.Orig, out var badge)) PillAt(badge, Theme.Accent);
-            TextRenderer.DrawText(g, title, _fTitle, new Rectangle(x, y, Math.Max(10, pillX - x - Theme.Px(4)), lh), Col(r, TitleCol) ?? Theme.Text, L1);
+            ColorText.Text(g, title, _fTitle, new Rectangle(x, y, Math.Max(10, pillX - x - Theme.Px(4)), lh), Col(r, TitleCol) ?? Theme.Text, L1);
             y += lh + Theme.Px(2);
             if (sub.Length > 0)
             {
                 Color sc = Theme.Subtle;
                 if (SubCols.Length == 1 && Col(r, SubCols[0]) is Color c1) sc = c1;
-                TextRenderer.DrawText(g, sub, _fSub, new Rectangle(x, y, right - x, lh), sc, L1);
+                ColorText.Text(g, sub, _fSub, new Rectangle(x, y, right - x, lh), sc, L1);
                 y += lh + Theme.Px(2);
             }
             if (quote.Length > 0)
-                TextRenderer.DrawText(g, QuoteMarks ? "«" + quote + "»" : quote, _fQuote, new Rectangle(x, y, right - x, lh),
+                ColorText.Text(g, QuoteMarks ? "«" + quote + "»" : quote, _fQuote, new Rectangle(x, y, right - x, lh),
                     QuoteMarks ? Color.FromArgb(205, 210, 214) : Col(r, QuoteCol) ?? Color.FromArgb(205, 210, 214), L1);
         }
 
@@ -324,12 +328,24 @@ namespace SelectOR
         {
             bool paint = g != null;
             int pad = Theme.Px(14), gap = Theme.Px(5);
+            Color? accent = null; try { accent = Accent?.Invoke(r); } catch { }
             if (paint)
             {
                 Fill(g, rc, Theme.Px(10), selected || hover ? Color.FromArgb(50, 54, 57) : Theme.Surface);
+                if (accent is Color ac)
+                {
+                    // la franja de su color a la izquierda (recortada a la tarjeta) y un velo muy suave de ese color
+                    var st0 = g.Save();
+                    using (var clip = RoundPath(rc, Theme.Px(10))) g.SetClip(clip);
+                    using (var lg = new LinearGradientBrush(new Rectangle(rc.X, rc.Y, Math.Max(1, rc.Width / 2), rc.Height), Color.FromArgb(26, ac), Color.FromArgb(0, ac), LinearGradientMode.Horizontal))
+                        g.FillRectangle(lg, rc.X, rc.Y, rc.Width / 2, rc.Height);
+                    using (var b = new SolidBrush(ac)) g.FillRectangle(b, rc.X, rc.Y, Theme.Px(5), rc.Height);
+                    g.Restore(st0);
+                }
                 if (selected) Stroke(g, rc, Theme.Px(10), Theme.Accent);
             }
-            int x = rc.X + pad, right = rc.Right - pad, top = rc.Y + pad, bottom = top;
+            int x = rc.X + pad + (accent != null ? Theme.Px(4) : 0), right = rc.Right - pad, top = rc.Y + pad, bottom = top;
+            int perfX = -1, stripTop = -1;   // (Ticket) dónde va la línea de puntos y dónde empieza la franja (ahí acaba la línea)
 
             // a la izquierda: la imagen grande (anuncios) o el logotipo
             if (ThumbSlot != null && SafeSlot(r))
@@ -351,7 +367,7 @@ namespace SelectOR
                         g.DrawImage(im, new Rectangle(tr.X + (tr.Width - w) / 2, tr.Y + (tr.Height - h) / 2, w, h));
                         g.Restore(st);
                     }
-                    else TextRenderer.DrawText(g, "🖼", _fIcon, tr, Theme.Subtle, C1);
+                    else ColorText.Text(g, "🖼", _fIcon, tr, Theme.Subtle, C1);
                 }
                 x = tr.Right + Theme.Px(16); bottom = Math.Max(bottom, tr.Bottom);
             }
@@ -367,8 +383,8 @@ namespace SelectOR
                         g.SmoothingMode = SmoothingMode.AntiAlias;
                         using (var b = new SolidBrush(Theme.Surface2)) g.FillEllipse(b, ar);
                         g.SmoothingMode = SmoothingMode.None;
-                        if (Icon != null) TextRenderer.DrawText(g, Icon, _fIcon, ar, Theme.Text, C1);
-                        else TextRenderer.DrawText(g, Initials(Cell(r, TitleCol)), _fAv, ar, Theme.AccentHi, C1);
+                        if (Icon != null) ColorText.Text(g, Icon, _fIcon, ar, Theme.Text, C1);
+                        else ColorText.Text(g, Initials(Cell(r, TitleCol)), _fAv, ar, Theme.AccentHi, C1);
                     }
                 }
                 x = ar.Right + Theme.Px(14); bottom = Math.Max(bottom, ar.Bottom);
@@ -385,17 +401,18 @@ namespace SelectOR
                     rightW = Math.Min(rightW + Theme.Px(4), Math.Max(Theme.Px(60), (right - x) / 3));
                     int ry = top;
                     int bh = Math.Max(Theme.Px(24), TH(big, _fRight, rightW));
-                    if (paint) TextRenderer.DrawText(g, big, _fRight, new Rectangle(right - rightW, ry, rightW, bh), Col(r, RightCol) ?? Theme.Text, Wrap | TextFormatFlags.Right);
+                    if (paint) ColorText.Text(g, big, _fRight, new Rectangle(right - rightW, ry, rightW, bh), Col(r, RightCol) ?? Theme.Text, Wrap | TextFormatFlags.Right);
                     ry += bh;
                     foreach (int c in RightSubCols)
                     {
                         string v = Cell(r, c); if (v.Length == 0) continue;
                         int h = TH(v, _fSub, rightW);
-                        if (paint) TextRenderer.DrawText(g, v, _fSub, new Rectangle(right - rightW, ry, rightW, h), Col(r, c) ?? Theme.Subtle, Wrap | TextFormatFlags.Right);
+                        if (paint) ColorText.Text(g, v, _fSub, new Rectangle(right - rightW, ry, rightW, h), Col(r, c) ?? Theme.Subtle, Wrap | TextFormatFlags.Right);
                         ry += h + Theme.Px(2);
                     }
                     bottom = Math.Max(bottom, ry);
                     right -= rightW + Theme.Px(16);
+                    if (Ticket) { perfX = right + Theme.Px(4); right -= Theme.Px(10); }
                 }
             }
 
@@ -411,7 +428,7 @@ namespace SelectOR
                 {
                     int pw = TW(t, _fPill) + Theme.Px(16);
                     var pr = fromRight ? new Rectangle(px - pw, py, pw, ph) : new Rectangle(px, py, pw, ph);
-                    if (paint) { Fill(g, pr, ph / 2, Color.FromArgb(40, c)); TextRenderer.DrawText(g, t, _fPill, pr, c, C1); }
+                    if (paint) { Fill(g, pr, ph / 2, Color.FromArgb(40, c)); ColorText.Text(g, t, _fPill, pr, c, C1); }
                     px = fromRight ? pr.Left - Theme.Px(6) : pr.Right + Theme.Px(6);
                 }
             }
@@ -420,7 +437,7 @@ namespace SelectOR
             string title = Cell(r, TitleCol);
             int titleW = pillsInline ? right - x - pillsW : right - x;
             int tH = Math.Max(Theme.Px(20), TH(title, _fTitle, titleW));
-            if (paint) TextRenderer.DrawText(g, title, _fTitle, new Rectangle(x, y, titleW, tH), Col(r, TitleCol) ?? Theme.Text, Wrap);
+            if (paint) ColorText.Text(g, title, _fTitle, new Rectangle(x, y, titleW, tH), Col(r, TitleCol) ?? Theme.Text, Wrap);
             if (pills.Count > 0 && pillsInline) DrawPills(right, y, true);
             y += tH + gap;
             if (pills.Count > 0 && !pillsInline) { DrawPills(x, y, false); y += ph + gap; }
@@ -444,7 +461,7 @@ namespace SelectOR
                         int cw = Math.Min(right - x, TW(t, _fSub) + Theme.Px(18));
                         if (cx > x && cx + cw > right) { cx = x; rowY += ch + Theme.Px(5); }
                         var cr = new Rectangle(cx, rowY, cw, ch);
-                        if (paint) { Fill(g, cr, ch / 2, ChipBg); TextRenderer.DrawText(g, t, _fSub, cr, c == Theme.Subtle ? ChipText : c, C1); }
+                        if (paint) { Fill(g, cr, ch / 2, ChipBg); ColorText.Text(g, t, _fSub, cr, c == Theme.Subtle ? ChipText : c, C1); }
                         cx = cr.Right + Theme.Px(6);
                     }
                     y = rowY + ch + gap + Theme.Px(2);
@@ -454,7 +471,7 @@ namespace SelectOR
                     string sub = string.Join("   ·   ", subs.Select(q => q.t));
                     Color sc = subs.Count == 1 ? subs[0].c : Theme.Subtle;
                     int h = TH(sub, _fSub, right - x);
-                    if (paint) TextRenderer.DrawText(g, sub, _fSub, new Rectangle(x, y, right - x, h), sc, Wrap);
+                    if (paint) ColorText.Text(g, sub, _fSub, new Rectangle(x, y, right - x, h), sc, Wrap);
                     y += h + gap;
                 }
             }
@@ -465,7 +482,7 @@ namespace SelectOR
             {
                 string q = QuoteMarks ? "«" + quote + "»" : quote;
                 int h = TH(q, _fQuote, right - x);
-                if (paint) TextRenderer.DrawText(g, q, _fQuote, new Rectangle(x, y, right - x, h), QuoteMarks ? BodyText : Col(r, QuoteCol) ?? BodyText, Wrap);
+                if (paint) ColorText.Text(g, q, _fQuote, new Rectangle(x, y, right - x, h), QuoteMarks ? BodyText : Col(r, QuoteCol) ?? BodyText, Wrap);
                 y += h + gap;
             }
             bottom = Math.Max(bottom, y - gap);
@@ -475,6 +492,7 @@ namespace SelectOR
             {
                 int sh = Theme.Px(StripHeight);
                 var sr = new Rectangle(rc.X + pad, bottom + Theme.Px(10), rc.Width - 2 * pad, sh);
+                stripTop = sr.Top;
                 if (paint)
                 {
                     Bitmap img = null; try { img = Strip(r); } catch { }
@@ -483,7 +501,23 @@ namespace SelectOR
                 }
                 bottom = sr.Bottom;
             }
-            return Math.Max(Theme.Px(CardHeight), bottom + pad - rc.Y);
+            int hgt = Math.Max(Theme.Px(CardHeight), bottom + pad - rc.Y);
+            // (Ticket) las muescas del billete (del color del fondo) y la línea de puntos entre ellas
+            if (paint && perfX > 0)
+            {
+                int nr = Theme.Px(7), cardBottom = rc.Y + Math.Min(rc.Height, hgt);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var bg = new SolidBrush(BackColor))
+                {
+                    g.FillEllipse(bg, perfX - nr, rc.Y - nr, 2 * nr, 2 * nr);
+                    if (stripTop < 0) g.FillEllipse(bg, perfX - nr, cardBottom - nr, 2 * nr, 2 * nr);
+                }
+                g.SmoothingMode = SmoothingMode.None;
+                int lineEnd = stripTop > 0 ? stripTop - Theme.Px(6) : cardBottom - nr - Theme.Px(3);
+                using (var pen = new Pen(Color.FromArgb(70, 78, 86), Math.Max(1, Theme.Px(1))) { DashPattern = new[] { 2f, 3f } })
+                    g.DrawLine(pen, perfX, rc.Y + nr + Theme.Px(3), perfX, lineEnd);
+            }
+            return hgt;
         }
 
         static GraphicsPath RoundPath(Rectangle r, int rad)

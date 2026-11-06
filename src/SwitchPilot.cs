@@ -50,6 +50,15 @@ namespace SelectOR
         // Chat de la sala (servidor con «READY 3»): hora (UTC), tipo ('m' mensaje, 'i' entra, 'o' sale), quién y texto.
         public bool ChatOk { get; private set; }
         public event Action<DateTime, char, string, string> Chat;
+        // (1.2.90) la radio de la sala (servidor: Radio.cs). En el hilo de la conexión.
+        public event Action<string, bool> RadioStart;        // quién, jefe de circulación
+        public event Action<string, byte[]> RadioVoice;      // quién, un bloque de voz (IMA ADPCM)
+        public event Action<string> RadioEnd;                // quién
+        public event Action<string> RadioCut;                // quién me ha quitado el canal («-»: se ha acabado el tiempo)
+        public event Action RadioOk;                         // el canal es mío
+        public event Action<string, string> RadioError;      // busy (quién) · muted · notin · admin
+        public event Action<string[]> RadioWho;              // quién hay en la sala con SelectOR
+        public event Action<string[]> RadioGMuted;           // los silenciados por el administrador
         public event Action ChatReset;          // conexión nueva: el servidor vuelve a mandar lo último
         public event Action<string> ChatError;  // «notin» (no estás en la sala) · «slow» (demasiados seguidos)
         // Mapa grande (servidor con «READY 4»; MainMenuForm.MapaSala.cs y RoomMap.cs): agujas, señales y trenes de la sala.
@@ -172,20 +181,31 @@ namespace SelectOR
             return body;
         }
 
+        // «SELECTOR JEFES [{z,n,s,w,m}]» (también en la tarjeta de la sala: MainMenuForm.SalaPeek)
+        internal static List<JefeZone> ParseJefes(string json)
+        {
+            var l = new List<JefeZone>();
+            using (var d = System.Text.Json.JsonDocument.Parse(json))
+                foreach (var e in d.RootElement.EnumerateArray())
+                    l.Add(new JefeZone
+                    {
+                        Zone = e.GetProperty("z").GetString(), Name = e.GetProperty("n").GetString(),
+                        Sigs = e.GetProperty("s").EnumerateArray().Select(x => x.GetInt32()).ToArray(),
+                        Nodes = e.GetProperty("w").EnumerateArray().Select(x => x.GetInt32()).ToArray(),
+                        Manual = e.TryGetProperty("m", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.True
+                    });
+            return l;
+        }
+
+        // «Juan (Aeropuerto, Museo), Ana (Sur)»: cada jefe con sus dependencias
+        internal static string JefesText(IEnumerable<JefeZone> zones)
+            => string.Join(", ", zones.GroupBy(z => z.Name).Select(g => g.Key + " (" + string.Join(", ", g.Select(z => z.Zone).Distinct()) + ")"));
+
         void OnJefes(string json)
         {
             try
             {
-                var l = new List<JefeZone>();
-                using (var d = System.Text.Json.JsonDocument.Parse(json))
-                    foreach (var e in d.RootElement.EnumerateArray())
-                        l.Add(new JefeZone
-                        {
-                            Zone = e.GetProperty("z").GetString(), Name = e.GetProperty("n").GetString(),
-                            Sigs = e.GetProperty("s").EnumerateArray().Select(x => x.GetInt32()).ToArray(),
-                            Nodes = e.GetProperty("w").EnumerateArray().Select(x => x.GetInt32()).ToArray(),
-                            Manual = e.TryGetProperty("m", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.True
-                        });
+                var l = ParseJefes(json);
                 var sj = new Dictionary<int, string>(); var nj = new Dictionary<int, string>();
                 foreach (var z in l) { foreach (int s in z.Sigs) sj[s] = z.Name; foreach (int n in z.Nodes) nj[n] = z.Name; }
                 _sigJefe = sj; _nodeJefe = nj; JefeZones = l;
@@ -220,6 +240,7 @@ namespace SelectOR
         {
             if (!body.StartsWith("SELECTOR ", StringComparison.Ordinal)) return;
             if (body.StartsWith("SELECTOR CHAT ", StringComparison.Ordinal)) { OnChat(body.Substring(14)); return; }
+            if (body.StartsWith("SELECTOR RADIO ", StringComparison.Ordinal)) { OnRadio(body.Substring(15)); return; }
             if (body.StartsWith("SELECTOR TRAINS ", StringComparison.Ordinal)) { OnTrains(body.Substring(16)); return; }
             if (body.StartsWith("SELECTOR TAB ", StringComparison.Ordinal))
             {
@@ -358,6 +379,35 @@ namespace SelectOR
 
         // Escribir en el chat de la sala (lo ven los demás en su HUD y en el chat de Open Rails).
         public void Say(string text) { if (Ready && ChatOk) Send("SAY " + text); }
+
+        // (1.2.90) radio de la sala
+        public void RadioListen() { if (Ready && ChatOk) Send("RADIO LISTEN"); }
+        public void RadioOn() { if (Ready && ChatOk) Send("RADIO ON"); }
+        public void RadioOff() { if (Ready && ChatOk) Send("RADIO OFF"); }
+        int _radioSeq;
+        public void RadioSend(byte[] block) { if (Ready && ChatOk && block != null) Send("RADIO V " + (_radioSeq++) + " " + Convert.ToBase64String(block)); }
+        public void RadioMute(string name, bool on) { if (Ready && ChatOk && !string.IsNullOrEmpty(name)) Send($"RADIO MUTE {name} {(on ? 1 : 0)}"); }
+        public void RadioGMute(string ticket, string name, bool on) { if (Ready && ChatOk) Send($"RADIO GMUTE {ticket} {name} {(on ? 1 : 0)}"); }
+
+        void OnRadio(string s)
+        {
+            try
+            {
+                var t = s.Split(' ');
+                switch (t[0])
+                {
+                    case "START": if (t.Length >= 3) RadioStart?.Invoke(t[1], t[2] == "j"); break;
+                    case "V": if (t.Length >= 4) RadioVoice?.Invoke(t[1], Convert.FromBase64String(t[3])); break;
+                    case "END": if (t.Length >= 2) RadioEnd?.Invoke(t[1]); break;
+                    case "CUT": RadioCut?.Invoke(t.Length >= 2 ? t[1] : "-"); break;
+                    case "OK": RadioOk?.Invoke(); break;
+                    case "ERR": RadioError?.Invoke(t.Length >= 2 ? t[1] : "", t.Length >= 3 ? t[2] : ""); break;
+                    case "WHO": RadioWho?.Invoke(t.Length >= 2 && t[1].Length > 0 ? t[1].Split(',') : Array.Empty<string>()); break;
+                    case "GMUTED": RadioGMuted?.Invoke(t.Length >= 2 && t[1].Length > 0 ? t[1].Split(',') : Array.Empty<string>()); break;
+                }
+            }
+            catch { }
+        }
 
         // jefe de circulación (1.2.75): vale de Supabase (dispatch_ticket_issue)
         public void JefeTake(string ticket) { if (Ready) Send("JEFE TAKE " + ticket); }

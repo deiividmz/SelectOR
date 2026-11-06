@@ -244,11 +244,11 @@ namespace SelectOR
                 int cw = TextRenderer.MeasureText(g, count, fb, Size.Empty, TextFormatFlags.NoPadding).Width + 12, ch = Math.Min(r.Height - 10, 18);
                 var cr = new Rectangle(right - cw, r.Y + (r.Height - ch) / 2, cw, ch);
                 Theme.FillRound(g, cr, ch / 2, Color.FromArgb(229, 115, 115));
-                TextRenderer.DrawText(g, count, fb, cr, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, count, fb, cr, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 right = cr.X - 6;
             }
             var tc = !Enabled ? Color.FromArgb(120, 125, 130) : Active ? Theme.AccentHi : TextColor;
-            TextRenderer.DrawText(g, text, f, new Rectangle(x, r.Y, Math.Max(10, right - x), r.Height), tc,
+            ColorText.Text(g, text, f, new Rectangle(x, r.Y, Math.Max(10, right - x), r.Height), tc,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
 
@@ -276,7 +276,7 @@ namespace SelectOR
                 Glyphs.Draw(g, GlyphKind, new Rectangle(x, cy - gs / 2, gs, gs), tc);
                 x += gs + gap;
             }
-            TextRenderer.DrawText(g, Text, f, new Rectangle(x, r.Y, Math.Max(10, r.Right - x - 2), r.Height - 3), tc,
+            ColorText.Text(g, Text, f, new Rectangle(x, r.Y, Math.Max(10, r.Right - x - 2), r.Height - 3), tc,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             if (Active)
             {
@@ -342,7 +342,7 @@ namespace SelectOR
                     var gbox = new Rectangle(startX, r.Y + (r.Height - gs) / 2, gs, gs);
                     Glyphs.Draw(g, GlyphKind, gbox, tc);
                     var trect = new Rectangle(gbox.Right + gap, r.Y, r.Width - (gbox.Right + gap - r.X) - 4, r.Height);
-                    TextRenderer.DrawText(g, Text, f, trect, tc, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    ColorText.Text(g, Text, f, trect, tc, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 }
                 else
                 {
@@ -351,7 +351,7 @@ namespace SelectOR
                         ? TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis
                         : TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
                     var trect = LeftAlign ? new Rectangle(r.X + LeftPad, r.Y, r.Width - LeftPad - 6, r.Height) : r;
-                    TextRenderer.DrawText(g, txt, f, trect, tc, align);
+                    ColorText.Text(g, txt, f, trect, tc, align);
                 }
             }
         }
@@ -380,8 +380,29 @@ namespace SelectOR
                 Dock = DockStyle.Fill,
                 Font = Theme.Font(10f)
             };
-            if (placeholder != null) Box.PlaceholderText = placeholder;
+            // (1.2.90) el emoji del principio (🔎…), a la izquierda y EN COLOR (el texto de ayuda de un TextBox lo pinta Windows
+            // en gris); el resto, como texto de ayuda
+            if (placeholder != null)
+            {
+                var te = System.Globalization.StringInfo.GetTextElementEnumerator(placeholder);
+                string first = te.MoveNext() ? (string)te.Current : "";
+                if (first.Length > 0 && ColorText.HasEmoji(first) && ColorText.Available)
+                {
+                    _icon = first; placeholder = placeholder.Substring(first.Length).TrimStart();
+                    Padding = new Padding(12 + 22, 7, 10, 7);
+                }
+                Box.PlaceholderText = placeholder;
+            }
             Controls.Add(Box);
+        }
+
+        string _icon;
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (_icon == null) return;
+            using var f = Theme.Font(10f);
+            ColorText.Text(e.Graphics, _icon, f, new Rectangle(8, 0, 24, Height), Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
     }
 
@@ -421,7 +442,7 @@ namespace SelectOR
                 Theme.DrawRoundBorder(g, box, 5, _hover ? Theme.Accent : Theme.Border, 1.4f);
             }
             var tr = new Rectangle(s + 8, 0, Width - s - 8, Height);
-            TextRenderer.DrawText(g, Text, Font, tr, Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            ColorText.Text(g, Text, Font, tr, Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
 
@@ -451,7 +472,7 @@ namespace SelectOR
             using (var pen = new Pen(Checked ? Theme.Accent : (_hover ? Theme.Accent : Theme.Border), 1.6f)) g.DrawEllipse(pen, box);
             if (Checked) using (var b = new SolidBrush(Theme.AccentHi)) g.FillEllipse(b, box.X + 5, box.Y + 5, s - 10, s - 10);
             var tr = new Rectangle(s + 8, 0, Width - s - 8, Height);
-            TextRenderer.DrawText(g, Text, Font, tr, Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            ColorText.Text(g, Text, Font, tr, Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
 
@@ -548,9 +569,9 @@ namespace SelectOR
             int x = ring.Right + 10;
             using (var f = Theme.Font(17f, FontStyle.Bold))
             {
-                TextRenderer.DrawText(g, "Select", f, new Point(x - 2, (Height - 26) / 2), Theme.Text, TextFormatFlags.NoPadding);
+                ColorText.Text(g, "Select", f, new Point(x - 2, (Height - 26) / 2), Theme.Text, TextFormatFlags.NoPadding);
                 var w = TextRenderer.MeasureText(g, "Select", f, Size.Empty, TextFormatFlags.NoPadding).Width;
-                TextRenderer.DrawText(g, "OR", f, new Point(x - 2 + w, (Height - 26) / 2), Theme.Accent, TextFormatFlags.NoPadding);
+                ColorText.Text(g, "OR", f, new Point(x - 2 + w, (Height - 26) / 2), Theme.Accent, TextFormatFlags.NoPadding);
             }
         }
     }
@@ -603,7 +624,7 @@ namespace SelectOR
                 else
                 {
                     string t = SelectedIndex >= 0 ? GetItemText(SelectedItem) : "";
-                    TextRenderer.DrawText(g, t, Font, new Rectangle(10, 0, Width - 38, Height), Enabled ? Theme.Text : Theme.Subtle,
+                    ColorText.Text(g, t, Font, new Rectangle(10, 0, Width - 38, Height), Enabled ? Theme.Text : Theme.Subtle,
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
                 }
             }

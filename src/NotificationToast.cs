@@ -87,7 +87,7 @@ namespace SelectOR
             var ico = new Rectangle(16, 14, 34, 34);
             using (var p = Theme.Round(ico, 10)) using (var b = new SolidBrush(Color.FromArgb(55, _accent))) g.FillPath(b, p);
             using (var fI = new Font("Segoe UI Emoji", 14f * Theme.DpiComp))
-                TextRenderer.DrawText(g, _icon, fI, ico, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, _icon, fI, ico, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
             using var fT = Theme.Font(10.5f, FontStyle.Bold);
             using var fB = Theme.Font(9.5f);
@@ -95,10 +95,10 @@ namespace SelectOR
             int w = Width - PadL - PadR, y = PadT;
             var flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
             int hT = TextRenderer.MeasureText(_title, fT, new Size(w, 999), flags).Height;
-            TextRenderer.DrawText(g, _title, fT, new Rectangle(PadL, y, w, hT), Theme.Text, flags); y += hT + 4;
+            ColorText.Text(g, _title, fT, new Rectangle(PadL, y, w, hT), Theme.Text, flags); y += hT + 4;
             int hB = TextRenderer.MeasureText(_body, fB, new Size(w, 999), flags).Height;
-            TextRenderer.DrawText(g, _body, fB, new Rectangle(PadL, y, w, hB), Color.FromArgb(205, 210, 214), flags | TextFormatFlags.EndEllipsis); y += hB + 8;
-            TextRenderer.DrawText(g, _foot, fF, new Rectangle(PadL, y, w, Height - y), Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+            ColorText.Text(g, _body, fB, new Rectangle(PadL, y, w, hB), Color.FromArgb(205, 210, 214), flags | TextFormatFlags.EndEllipsis); y += hB + 8;
+            ColorText.Text(g, _foot, fF, new Rectangle(PadL, y, w, Height - y), Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
 
             _hitClose = new Rectangle(Width - 28, 10, 16, 16);
             using (var pen = new Pen(_hover ? Theme.Text : Theme.Subtle, 1.6f))

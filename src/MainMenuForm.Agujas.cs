@@ -29,6 +29,7 @@ namespace SelectOR
             _roomSeenMe = DateTime.MinValue; _roomLostTold = false;
             RoomChatHook(_pilot);   // chat de la sala en el HUD (MainMenuForm.ChatSala.cs)
             RoomMapHook(_pilot);    // agujas, señales y trenes en el mapa grande (MainMenuForm.MapaSala.cs)
+            RadioHook(_pilot);      // (1.2.90) la radio de la sala (MainMenuForm.Radio.cs)
         }
 
         // (1.2.75) Open Rails ha perdido la conexión con la sala (su red, el servidor, un nombre repetido…): sigue en marcha, pero
@@ -55,6 +56,7 @@ namespace SelectOR
 
         void PilotStop()
         {
+            RadioStop();
             try { _pilot?.Dispose(); } catch { }
             _pilot = null;
         }

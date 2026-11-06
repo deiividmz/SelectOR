@@ -132,6 +132,12 @@ namespace SelectOR
         // Mandos (Ajustes de SelectOR → Mandos): usarlos al conducir y qué palanca o botón hace qué (Joysticks.cs).
         public bool JoyEnabled { get; set; } = false;   // (de serie, desactivado: el usuario lo marca)
         public List<JoyBinding> JoyBindings { get; set; } = new List<JoyBinding>();
+        // (1.2.90) radio de la sala (RoomRadio.cs): tecla de hablar, volumen (%), a quién no quiero oír y dónde va su mando
+        public string RadioKey { get; set; } = "RControl";
+        public int RadioVolume { get; set; } = 100;
+        public List<string> RadioMuted { get; set; } = new List<string>();
+        public int RadioHudX { get; set; } = int.MinValue;
+        public int RadioHudY { get; set; } = int.MinValue;
         // Gráficos (Ajustes de SelectOR → Gráficos; ReShadeFiles.cs): ReShade con el efecto de SelectOR y sus valores.
         public bool GfxEnabled { get; set; } = false;
         public string GfxPreset { get; set; } = "selector";   // (de serie, el perfil propio de SelectOR: ReShadeFiles.Presets)

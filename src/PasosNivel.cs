@@ -30,7 +30,7 @@ namespace SelectOR
         }
 
         // (RoomMapGeo.Build) los de la ruta; el mundo, en segundo plano
-        internal static List<Cr> Load(RouteGraph g, string routeDir, TrackDatabaseFile tdb)
+        internal static List<Cr> Load(RouteGraph g, string routeDir, TrackDatabaseFile tdb, Action<Dictionary<int, (double x, double z)>> onPosts = null)
         {
             var res = new List<Cr>();
             var items = tdb?.TrackDB?.TrItemTable; var nodes = tdb?.TrackDB?.TrackNodes;
@@ -68,15 +68,21 @@ namespace SelectOR
                 }
             var roots = Enumerable.Range(0, res.Count).Select(Find).ToArray();
             for (int i = 0; i < res.Count; i++) res[i].Cluster = res[roots[i]].Item;
-            if (res.Count > 0)
+            // (2026-11-06) en la misma pasada por el mundo, el poste de cada señal (para dibujarla de su lado de la vía)
+            if (res.Count > 0 || onPosts != null)
             {
                 var byItem = res.ToDictionary(c => c.Item);
-                Task.Run(() => { try { ReadWorld(routeDir, byItem); } catch { } });
+                Task.Run(() =>
+                {
+                    var posts = new Dictionary<int, (double x, double z)>();
+                    try { ReadWorld(routeDir, byItem, onPosts != null ? posts : null); } catch { }
+                    try { onPosts?.Invoke(posts); } catch { }
+                });
             }
             return res;
         }
 
-        static void ReadWorld(string routeDir, Dictionary<int, Cr> byItem)
+        static void ReadWorld(string routeDir, Dictionary<int, Cr> byItem, Dictionary<int, (double x, double z)> posts = null)
         {
             string world = Path.Combine(routeDir, "WORLD");
             if (!Directory.Exists(world)) return;
@@ -87,6 +93,12 @@ namespace SelectOR
                 try { wf = new WorldFile(w); } catch { continue; }
                 foreach (var o in wf.Tr_Worldfile)
                 {
+                    if (posts != null && o is SignalObj so && so.SignalUnits?.Units != null && so.Position != null)
+                    {
+                        double px = wf.TileX * 2048.0 + so.Position.X, pz = wf.TileZ * 2048.0 + so.Position.Z;
+                        foreach (var u in so.SignalUnits.Units) if (u != null) posts[(int)u.TrItem] = (px, pz);
+                        continue;
+                    }
                     if (o is not LevelCrossingObj lc || lc.trItemIDList == null) continue;
                     int gi = group++;
                     foreach (var id in lc.trItemIDList)

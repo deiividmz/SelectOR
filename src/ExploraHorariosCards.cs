@@ -74,20 +74,20 @@ namespace SelectOR
                 int tw = TW(t, _fTag) + Theme.Px(12);
                 var tr = new Rectangle(rail.X + Theme.Px(6), rail.Y + Theme.Px(6), tw, Theme.Px(16));
                 Fill(g, tr, Theme.Px(5), Color.FromArgb(190, 16, 18, 20));
-                TextRenderer.DrawText(g, t, _fTag, tr, c, C1);
+                ColorText.Text(g, t, _fTag, tr, c, C1);
             }
             if (FavOf?.Invoke(it) == true)
             {
                 var sr = new Rectangle(rail.Right - Theme.Px(26), rail.Y + Theme.Px(4), Theme.Px(22), Theme.Px(20));
                 Fill(g, sr, Theme.Px(10), Color.FromArgb(160, 0, 0, 0));
-                TextRenderer.DrawText(g, "★", _fStar, sr, Theme.Gold, C1);
+                ColorText.Text(g, "★", _fStar, sr, Theme.Gold, C1);
             }
             int y = rail.Bottom + Theme.Px(8);
-            TextRenderer.DrawText(g, it.ToString(), _fT, new Rectangle(x, y, w, Theme.Px(20)), Theme.Text, L1);
+            ColorText.Text(g, it.ToString(), _fT, new Rectangle(x, y, w, Theme.Px(20)), Theme.Text, L1);
             y += Theme.Px(24);
             // datos
             int cx = x;
-            if (sp == null) TextRenderer.DrawText(g, LblLoading, _fS, new Rectangle(x, y, w, Theme.Px(18)), Theme.Subtle, L1);
+            if (sp == null) ColorText.Text(g, LblLoading, _fS, new Rectangle(x, y, w, Theme.Px(18)), Theme.Subtle, L1);
             else
             {
                 var parts = new List<string>();
@@ -127,16 +127,16 @@ namespace SelectOR
             int pad = Theme.Px(12), right = rc.Right - pad;
             if (FavOf?.Invoke(it) == true)
             {
-                TextRenderer.DrawText(g, "★", _fStar, new Rectangle(right - Theme.Px(20), rc.Y, Theme.Px(20), rc.Height), Theme.Gold, C1);
+                ColorText.Text(g, "★", _fStar, new Rectangle(right - Theme.Px(20), rc.Y, Theme.Px(20), rc.Height), Theme.Gold, C1);
                 right -= Theme.Px(26);
             }
             int x = rc.X + pad, cy = rc.Y + (rc.Height - Theme.Px(20)) / 2;
             string name = it.ToString();
             int nameW = Math.Min(TW(name, _fT) + Theme.Px(4), Math.Max(Theme.Px(120), (int)((right - x) * 0.45)));
-            TextRenderer.DrawText(g, name, _fT, new Rectangle(x, rc.Y, nameW, rc.Height), Theme.Text, L1);
+            ColorText.Text(g, name, _fT, new Rectangle(x, rc.Y, nameW, rc.Height), Theme.Text, L1);
             int cx = x + nameW + Theme.Px(12);
             var sp = CachedSpec(it);
-            if (sp == null) { TextRenderer.DrawText(g, LblLoading, _fS, new Rectangle(cx, rc.Y, Math.Max(0, right - cx), rc.Height), Theme.Subtle, L1); return; }
+            if (sp == null) { ColorText.Text(g, LblLoading, _fS, new Rectangle(cx, rc.Y, Math.Max(0, right - cx), rc.Height), Theme.Subtle, L1); return; }
             if (sp.Known)
             {
                 string t = sp.Freight ? LblFreight : LblPax;
@@ -286,8 +286,8 @@ namespace SelectOR
             {
                 var r = new Rectangle((i % Columns) * (cw + gap), (i / Columns) * (ch + gap), cw, ch);
                 g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, r, Theme.Px(9), Color.FromArgb(52, 56, 60)); g.SmoothingMode = SmoothingMode.None;
-                TextRenderer.DrawText(g, Items[i].cap, _fC, new Rectangle(r.X + Theme.Px(10), r.Y + Theme.Px(6), r.Width - Theme.Px(14), Theme.Px(14)), Theme.Subtle, L);
-                TextRenderer.DrawText(g, Items[i].val, _fV, new Rectangle(r.X + Theme.Px(10), r.Y + Theme.Px(21), r.Width - Theme.Px(14), Theme.Px(20)), ValueColors.TryGetValue(i, out var vc) ? vc : Theme.Text, L);
+                ColorText.Text(g, Items[i].cap, _fC, new Rectangle(r.X + Theme.Px(10), r.Y + Theme.Px(6), r.Width - Theme.Px(14), Theme.Px(14)), Theme.Subtle, L);
+                ColorText.Text(g, Items[i].val, _fV, new Rectangle(r.X + Theme.Px(10), r.Y + Theme.Px(21), r.Width - Theme.Px(14), Theme.Px(20)), ValueColors.TryGetValue(i, out var vc) ? vc : Theme.Text, L);
             }
         }
     }
@@ -453,15 +453,15 @@ namespace SelectOR
             using (var p = new Pen(Line)) g.DrawLine(p, rc.X, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
             var cw = Cols5(rc.Width);
             int x = rc.X + Theme.Px(14), gap = Theme.Px(10);
-            TextRenderer.DrawText(g, r.Time, _fTime, new Rectangle(x, rc.Y, cw[0], rc.Height), Amber, L1); x += cw[0] + gap;
-            TextRenderer.DrawText(g, r.Name, _fName, new Rectangle(x, rc.Y, cw[1], rc.Height), Color.White, L1); x += cw[1] + gap;
+            ColorText.Text(g, r.Time, _fTime, new Rectangle(x, rc.Y, cw[0], rc.Height), Amber, L1); x += cw[0] + gap;
+            ColorText.Text(g, r.Name, _fName, new Rectangle(x, rc.Y, cw[1], rc.Height), Color.White, L1); x += cw[1] + gap;
             string route = r.From.Length > 0 ? r.From + (r.To.Length > 0 && r.To != r.From ? "  →  " + r.To : "") : r.Via;
-            TextRenderer.DrawText(g, route, _fD, new Rectangle(x, rc.Y + Theme.Px(7), cw[2], Theme.Px(20)), Color.White, L1);
-            TextRenderer.DrawText(g, r.From.Length > 0 ? r.Via : "", _fDs, new Rectangle(x, rc.Y + Theme.Px(27), cw[2], Theme.Px(16)), Color.FromArgb(138, 143, 148), L1);
+            ColorText.Text(g, route, _fD, new Rectangle(x, rc.Y + Theme.Px(7), cw[2], Theme.Px(20)), Color.White, L1);
+            ColorText.Text(g, r.From.Length > 0 ? r.Via : "", _fDs, new Rectangle(x, rc.Y + Theme.Px(27), cw[2], Theme.Px(16)), Color.FromArgb(138, 143, 148), L1);
             x += cw[2] + gap;
             string st = r.Stops < 0 ? "—" : r.Stops == 0 ? LblNoStops : r.Stops == 1 ? LblStop : string.Format(LblStops, r.Stops);
-            TextRenderer.DrawText(g, st, _fP, new Rectangle(x, rc.Y, cw[3], rc.Height), r.Stops > 0 ? Color.FromArgb(207, 211, 214) : Color.FromArgb(110, 115, 120), L1); x += cw[3] + gap;
-            TextRenderer.DrawText(g, r.Consist, _fDs, new Rectangle(x, rc.Y, rc.Right - x - Theme.Px(10), rc.Height), Color.FromArgb(138, 143, 148), L1);
+            ColorText.Text(g, st, _fP, new Rectangle(x, rc.Y, cw[3], rc.Height), r.Stops > 0 ? Color.FromArgb(207, 211, 214) : Color.FromArgb(110, 115, 120), L1); x += cw[3] + gap;
+            ColorText.Text(g, r.Consist, _fDs, new Rectangle(x, rc.Y, rc.Right - x - Theme.Px(10), rc.Height), Color.FromArgb(138, 143, 148), L1);
         }
 
         protected override void AfterPaint(Graphics g, int first, int last) => PaintHead(g);
@@ -471,13 +471,13 @@ namespace SelectOR
             var hr = new Rectangle(0, 0, ClientSize.Width, HeadH);
             using (var b = new SolidBrush(BoardBg)) g.FillRectangle(b, hr);
             int x = Theme.Px(14);
-            TextRenderer.DrawText(g, Title, _fTitle, new Rectangle(x, Theme.Px(8), hr.Width / 2, Theme.Px(18)), Amber, L1);
-            TextRenderer.DrawText(g, Hint, _fH, new Rectangle(hr.Width / 2, Theme.Px(8), hr.Width / 2 - Theme.Px(14), Theme.Px(18)), Color.FromArgb(138, 143, 148), R1);
+            ColorText.Text(g, Title, _fTitle, new Rectangle(x, Theme.Px(8), hr.Width / 2, Theme.Px(18)), Amber, L1);
+            ColorText.Text(g, Hint, _fH, new Rectangle(hr.Width / 2, Theme.Px(8), hr.Width / 2 - Theme.Px(14), Theme.Px(18)), Color.FromArgb(138, 143, 148), R1);
             var cw = Cols5(hr.Width - Theme.Px(4));
             int gap = Theme.Px(10);
             for (int i = 0; i < Heads.Length; i++)
             {
-                TextRenderer.DrawText(g, Heads[i], _fH, new Rectangle(x, Theme.Px(32), cw[i], Theme.Px(18)), Color.FromArgb(138, 143, 148), L1);
+                ColorText.Text(g, Heads[i], _fH, new Rectangle(x, Theme.Px(32), cw[i], Theme.Px(18)), Color.FromArgb(138, 143, 148), L1);
                 x += cw[i] + gap;
             }
             using (var p = new Pen(Color.FromArgb(36, 39, 42))) g.DrawLine(p, 0, HeadH - 1, hr.Width, HeadH - 1);
@@ -569,7 +569,7 @@ namespace SelectOR
             foreach (var p in Brief)
             {
                 int h = ParaH(p, w);
-                TextRenderer.DrawText(g, p, _fP, new Rectangle(x, y, w, h), Color.FromArgb(205, 210, 214), Wrap);
+                ColorText.Text(g, p, _fP, new Rectangle(x, y, w, h), Color.FromArgb(205, 210, 214), Wrap);
                 y += h + Theme.Px(6);
             }
         }
@@ -596,8 +596,8 @@ namespace SelectOR
             const TextFormatFlags L = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
             int capH = Theme.Px(18);
             int hw = TextRenderer.MeasureText(Hint, _fH, Size.Empty, TextFormatFlags.NoPadding).Width + 4;
-            TextRenderer.DrawText(g, Caption, _fC, new Rectangle(0, 0, Width - hw - 8, capH), Theme.Subtle, L);
-            if (_hover && Image != null) TextRenderer.DrawText(g, Hint, _fH, new Rectangle(Width - hw, 0, hw, capH), Theme.AccentHi, L);
+            ColorText.Text(g, Caption, _fC, new Rectangle(0, 0, Width - hw - 8, capH), Theme.Subtle, L);
+            if (_hover && Image != null) ColorText.Text(g, Hint, _fH, new Rectangle(Width - hw, 0, hw, capH), Theme.AccentHi, L);
             var r = new Rectangle(0, capH + Theme.Px(4), Width - 1, Height - capH - Theme.Px(5));
             g.SmoothingMode = SmoothingMode.AntiAlias;
             Theme.FillRound(g, r, Theme.Px(10), CardPaint.Rail);
@@ -607,7 +607,7 @@ namespace SelectOR
             using (var p = new Pen(Color.FromArgb(70, 255, 255, 255))) g.DrawLine(p, r.X + Theme.Px(10), r.Bottom - Theme.Px(10), r.Right - Theme.Px(10), r.Bottom - Theme.Px(10));
             if (Image == null)
             {
-                TextRenderer.DrawText(g, Loading ? I18n.T("Dibujando la composición…") : Placeholder, _fP, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                ColorText.Text(g, Loading ? I18n.T("Dibujando la composición…") : Placeholder, _fP, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return;
             }
             var area = Rectangle.Inflate(r, -Theme.Px(10), -Theme.Px(8));
@@ -640,10 +640,10 @@ namespace SelectOR
             int nw = TW(n, _fN) + Theme.Px(14);
             var nr = new Rectangle(rc.Right - nw - Theme.Px(10), rc.Y + (rc.Height - Theme.Px(20)) / 2, nw, Theme.Px(20));
             Fill(g, nr, Theme.Px(10), sel ? Color.FromArgb(60, 76, 175, 80) : Color.FromArgb(40, 255, 255, 255));
-            TextRenderer.DrawText(g, n, _fN, nr, sel ? Theme.AccentHi : Theme.Subtle, C1);
+            ColorText.Text(g, n, _fN, nr, sel ? Theme.AccentHi : Theme.Subtle, C1);
             int x = rc.X + Theme.Px(14), w = nr.X - x - Theme.Px(8);
-            TextRenderer.DrawText(g, en.Title, _fT, new Rectangle(x, rc.Y + Theme.Px(8), w, Theme.Px(19)), sel ? Theme.Text : Color.FromArgb(222, 226, 229), L1);
-            TextRenderer.DrawText(g, en.Sub, _fS, new Rectangle(x, rc.Y + Theme.Px(28), w, Theme.Px(16)), Theme.Subtle, L1);
+            ColorText.Text(g, en.Title, _fT, new Rectangle(x, rc.Y + Theme.Px(8), w, Theme.Px(19)), sel ? Theme.Text : Color.FromArgb(222, 226, 229), L1);
+            ColorText.Text(g, en.Sub, _fS, new Rectangle(x, rc.Y + Theme.Px(28), w, Theme.Px(16)), Theme.Subtle, L1);
         }
     }
 
@@ -677,7 +677,7 @@ namespace SelectOR
                     var p = (NameText ?? "").Split(new[] { ' ', '_', '.', '-' }, StringSplitOptions.RemoveEmptyEntries);
                     string ini = p.Length == 0 ? "?" : (p.Length == 1 ? p[0].Substring(0, Math.Min(2, p[0].Length)) : "" + p[0][0] + p[1][0]).ToUpperInvariant();
                     using var f = Theme.Font(Math.Max(7f, d / 3.2f / Theme.UiScale), FontStyle.Bold);
-                    TextRenderer.DrawText(g, ini, f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    ColorText.Text(g, ini, f, r, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 }
                 using (var pen = new Pen(Color.FromArgb(120, 102, 197, 106), 1.5f)) g.DrawEllipse(pen, r);
             }

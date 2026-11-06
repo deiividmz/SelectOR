@@ -322,12 +322,12 @@ namespace SelectOR
                     }
                     if (row.On) using (var pen = new Pen(Enabled2 && row.Count > 0 ? Color.White : Theme.Subtle, 2f)) g.DrawLines(pen, new[] { new PointF(bx.X + bx.Width * .22f, bx.Y + bx.Height * .52f), new PointF(bx.X + bx.Width * .43f, bx.Y + bx.Height * .72f), new PointF(bx.X + bx.Width * .78f, bx.Y + bx.Height * .3f) });
                     int tx = bx.Right + Theme.Px(12);
-                    TextRenderer.DrawText(g, row.Label, f, new Rectangle(tx, r.Y, r.Width / 2, r.Height), Enabled2 && row.Count > 0 ? Theme.Text : Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    ColorText.Text(g, row.Label, f, new Rectangle(tx, r.Y, r.Width / 2, r.Height), Enabled2 && row.Count > 0 ? Theme.Text : Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                     string sub = row.Count == 0 ? I18n.T("sin cambios") : string.Format(I18n.T(row.Count == 1 ? "{0} imagen · {1}" : "{0} imágenes · {1}"), row.Count, FmtBytes(row.Bytes));
                     if (row.Count > 1 && row.Changed == 0) sub = string.Format(I18n.T("{0} imágenes (todas iguales) · {1}"), row.Count, FmtBytes(row.Bytes));
                     else if (row.Count > 1 && row.Changed < row.Count) sub = string.Format(I18n.T(row.Changed == 1 ? "{0} imágenes (1 distinta) · {1}" : "{0} imágenes ({2} distintas) · {1}"), row.Count, FmtBytes(row.Bytes), row.Changed);
                     else if (row.Count == 1 && row.Changed == 0) sub = string.Format(I18n.T("1 imagen (igual) · {0}"), FmtBytes(row.Bytes));
-                    TextRenderer.DrawText(g, sub, fs, new Rectangle(r.X, r.Y, r.Width - Theme.Px(12), r.Height), Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.NoPrefix);
+                    ColorText.Text(g, sub, fs, new Rectangle(r.X, r.Y, r.Width - Theme.Px(12), r.Height), Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.NoPrefix);
                 }
             }
             int At(Point p) { for (int i = 0; i < Rows.Count; i++) if (RowRect(i).Contains(p)) return i; return -1; }
@@ -393,18 +393,18 @@ namespace SelectOR
                 _prev = _next = Rectangle.Empty;
                 if (_files.Count == 0)
                 {
-                    TextRenderer.DrawText(g, I18n.T("El clima de SelectOR no cambia este grupo: se ven las imágenes de Open Rails."), f, Rectangle.Inflate(box, -24, -24), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+                    ColorText.Text(g, I18n.T("El clima de SelectOR no cambia este grupo: se ven las imágenes de Open Rails."), f, Rectangle.Inflate(box, -24, -24), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
                     return;
                 }
                 // cabecera: el nombre y, si hay varias, flechas
                 var head = new Rectangle(box.X + 12, box.Y + 8, box.Width - 24, Theme.Px(28));
                 string t = _files[_idx].name + (_files.Count > 1 ? "   (" + (_idx + 1) + " / " + _files.Count + ")" : "");
-                TextRenderer.DrawText(g, t, fb, head, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, t, fb, head, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 if (_files.Count > 1)
                 {
                     _prev = new Rectangle(head.X, head.Y, Theme.Px(34), head.Height); _next = new Rectangle(head.Right - Theme.Px(34), head.Y, Theme.Px(34), head.Height);
-                    TextRenderer.DrawText(g, "◀", fb, _prev, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                    TextRenderer.DrawText(g, "▶", fb, _next, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, "◀", fb, _prev, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, "▶", fb, _next, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 }
                 int top = head.Bottom + 6, gap = 12, w = (box.Width - 24 - gap) / 2, h = box.Height - top - Theme.Px(34);
                 Pane(g, new Rectangle(box.X + 12, top, w, h), _a, I18n.T("Open Rails"), Theme.Subtle, fs, f);
@@ -425,8 +425,8 @@ namespace SelectOR
                     g.InterpolationMode = k > 1 ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear;
                     g.DrawImage(img, r.X + (r.Width - w) / 2, r.Y + (r.Height - h) / 2, w, h);
                 }
-                else TextRenderer.DrawText(g, I18n.T("(sin descargar)"), f, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                TextRenderer.DrawText(g, label, fs, new Rectangle(r.X, r.Bottom + 6, r.Width, 20), lc, TextFormatFlags.HorizontalCenter);
+                else ColorText.Text(g, I18n.T("(sin descargar)"), f, r, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                ColorText.Text(g, label, fs, new Rectangle(r.X, r.Bottom + 6, r.Width, 20), lc, TextFormatFlags.HorizontalCenter);
             }
             protected override void OnMouseUp(MouseEventArgs e)
             {
@@ -455,18 +455,18 @@ namespace SelectOR
                 var box = new Rectangle(0, 0, Width - 1, Height - 1);
                 using (var p = Theme.Round(box, 8)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, p);
                 using var f = Theme.Font(9f); using var fs = Theme.Font(8.25f);
-                if (Rows.Count == 0) { TextRenderer.DrawText(g, I18n.T("Sin imágenes: añade las del clima."), f, box, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter); return; }
+                if (Rows.Count == 0) { ColorText.Text(g, I18n.T("Sin imágenes: añade las del clima."), f, box, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter); return; }
                 int vis = Math.Max(1, (Height - 8) / RowH); _top = Math.Max(0, Math.Min(_top, Rows.Count - vis));
                 for (int i = _top; i < Rows.Count && i < _top + vis; i++)
                 {
                     var r = new Rectangle(4, 4 + (i - _top) * RowH, Width - 9, RowH - 2); var row = Rows[i];
                     if (i == _sel) using (var p = Theme.Round(r, 6)) using (var b = new SolidBrush(Color.FromArgb(40, 60, 46))) g.FillPath(b, p);
                     var tf = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis;
-                    TextRenderer.DrawText(g, row.Name, f, new Rectangle(r.X + 8, r.Y, r.Width * 30 / 100, r.Height), row.State == 2 ? Theme.Subtle : Theme.Text, tf);
-                    TextRenderer.DrawText(g, row.Group + " · " + FmtBytes(row.Bytes) + (row.Same ? " · " + I18n.T("igual que la de Open Rails") : ""), fs, new Rectangle(r.X + r.Width * 31 / 100, r.Y, r.Width * 56 / 100, r.Height), Theme.Subtle, tf);
+                    ColorText.Text(g, row.Name, f, new Rectangle(r.X + 8, r.Y, r.Width * 30 / 100, r.Height), row.State == 2 ? Theme.Subtle : Theme.Text, tf);
+                    ColorText.Text(g, row.Group + " · " + FmtBytes(row.Bytes) + (row.Same ? " · " + I18n.T("igual que la de Open Rails") : ""), fs, new Rectangle(r.X + r.Width * 31 / 100, r.Y, r.Width * 56 / 100, r.Height), Theme.Subtle, tf);
                     string st = row.State == 0 ? I18n.T("publicada") : row.State == 1 ? I18n.T("nueva") : I18n.T("se quita");
                     Color sc = row.State == 0 ? Theme.Subtle : row.State == 1 ? Theme.AccentHi : Color.FromArgb(229, 115, 115);
-                    TextRenderer.DrawText(g, st, fs, new Rectangle(r.X, r.Y, r.Width - 8, r.Height), sc, tf | TextFormatFlags.Right);
+                    ColorText.Text(g, st, fs, new Rectangle(r.X, r.Y, r.Width - 8, r.Height), sc, tf | TextFormatFlags.Right);
                 }
             }
             protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); int i = _top + (e.Y - 4) / RowH; _sel = i >= 0 && i < Rows.Count ? i : -1; Invalidate(); }

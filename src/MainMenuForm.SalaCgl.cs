@@ -53,12 +53,15 @@ namespace SelectOR
 
         bool SalaWanted => _activePage == 2 && SalaRouteHere && _chkSala != null && _chkSala.Checked;
 
+        // (1.2.90) el texto (x 32, 290 de ancho) más el hueco del 🖥 del puesto de mando, que ven todos (antes lo tapaba)
+        const int SalaHostBase = 326 + 34;
+
         // La casilla, a la izquierda de CONDUCIR (BuildBottomBar): solo en Conducción libre con la ruta de la sala.
         Panel BuildSalaCheck()
         {
-            _salaHost = new Panel { Dock = DockStyle.Right, Width = 326, BackColor = Theme.Surface, Visible = false };
+            _salaHost = new Panel { Dock = DockStyle.Right, Width = SalaHostBase, BackColor = Theme.Surface, Visible = false };
             _chkSala = new ThemeCheck { Text = Tr("Conducir en la sala compartida"), ForeColor = Theme.Text, BackColor = Theme.Surface, Size = new Size(280, 28), Checked = true };
-            var sub = new Label { Text = SalaSubText(), AutoSize = false, Size = new Size(260, 34),
+            var sub = new Label { Text = SalaSubText(), AutoSize = false, Size = new Size(290, 48), AutoEllipsis = true,
                                   ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8.25f) };
             _salaSub = sub;
             _chkSala.CheckedChanged += (s, e) =>
@@ -69,14 +72,26 @@ namespace SelectOR
             };
             Action place = () =>
             {
-                int h = _chkSala.Height + sub.Height;
-                int y = Math.Max(0, (_salaHost.ClientSize.Height - h) / 2);
+                // (1.2.90) con la 3.ª línea (el jefe) la casilla y el texto no cabían en la barra: el texto mide lo que
+                // ocupa de verdad y, si hace falta, la casilla se pega a él
+                int textH = TextRenderer.MeasureText(sub.Text ?? "", sub.Font, new Size(sub.Width, 999), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + 2;
+                sub.Height = Math.Min(Theme.Px(60), textH);
+                int H = _salaHost.ClientSize.Height, chkH = _chkSala.Height;
+                int gap = chkH + sub.Height <= H ? chkH : Math.Max(Theme.Px(20), H - sub.Height);
+                int y = Math.Max(0, (H - gap - sub.Height) / 2);
                 _chkSala.Location = new Point(6, y);
-                sub.Location = new Point(6 + 26, y + _chkSala.Height);
+                sub.Location = new Point(6 + 26, y + gap);
+                _chkSala.SendToBack();   // si se pisan, lo de abajo de la casilla es solo margen (los iconos siguen delante)
             };
             _salaHost.Resize += (s, e) => place();
             _salaHost.HandleCreated += (s, e) => place();
+            sub.TextChanged += (s, e) => place();
             _salaHost.Controls.Add(_chkSala); _salaHost.Controls.Add(sub);
+            // (2026-11-06) el jefe de circulación cambia en cualquier momento: se vuelve a preguntar cada minuto mientras se ve
+            var tick = new System.Windows.Forms.Timer { Interval = 60_000 };
+            tick.Tick += (s, e) => { if (_salaHost.Visible && Visible && WindowState != FormWindowState.Minimized) SalaVersionRefresh(); };
+            _salaHost.HandleCreated += (s, e) => tick.Start();
+            _salaHost.Disposed += (s, e) => tick.Dispose();
             BuildSalaWeatherButton();   // ⛅ el clima de la sala, para el administrador (MainMenuForm.ClimaSala.cs)
             BuildSalaAiButton();        // 🚆 el horario de los trenes IA, para el administrador (MainMenuForm.HorarioSala.cs)
             BuildSalaDispatchButton();  // 🖥 el puesto de mando de la sala, para todos (MainMenuForm.PuestoMando.cs)
@@ -98,8 +113,13 @@ namespace SelectOR
             // 2.ª línea: el tiempo de la sala (MainMenuForm.ClimaSala.cs) y su versión de Open Rails
             string wx = SalaWeatherText(), ver = _salaOrVersion == null ? null : string.Format(Tr(wx.Length > 0 ? "Open Rails {0}" : "Sala con Open Rails {0}"), _salaOrVersion);
             string second = string.Join(" · ", new[] { wx, ver }.Where(x => !string.IsNullOrEmpty(x)));
-            return Tr("Con los demás jugadores") + " · " + SalaClockText() + (second.Length > 0 ? "\n" + second : "");
+            // 3.ª línea (2026-11-06): quién es el jefe de circulación y en qué dependencias (null: un servidor de antes, que no lo dice)
+            string jefe = _salaJefes == null ? null
+                        : _salaJefes.Count == 0 ? Tr("Sin jefe de circulación")
+                        : string.Format(Tr(_salaJefes.Select(z => z.Name).Distinct().Count() == 1 ? "Jefe de circulación: {0}" : "Jefes de circulación: {0}"), SwitchPilot.JefesText(_salaJefes));
+            return Tr("Con los demás jugadores") + " · " + SalaClockText() + (second.Length > 0 ? "\n" + second : "") + (jefe != null ? "\n" + jefe : "");
         }
+        List<SwitchPilot.JefeZone> _salaJefes;   // (SalaVersionRefresh) los jefes de la sala, de «SELECTOR JEFES»
 
         // La tarjeta de la ruta de la sala: el distintivo.
         (string text, Color color)? SalaRouteBadge(ORTS.Menu.Route r)
@@ -113,7 +133,7 @@ namespace SelectOR
         {
             _salaPromo = new Panel { Dock = DockStyle.Top, Height = 168, BackColor = Theme.BgSidebar, Padding = new Padding(0, 0, 0, 8), Visible = false };
             var card = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(12, 10, 12, 10) };
-            var title = new Label { Text = "🌐  " + Tr("Multijugador SelectOR"), Dock = DockStyle.Top, Height = 22, ForeColor = Theme.AccentHi, BackColor = Theme.Surface, Font = Theme.Font(9.5f, FontStyle.Bold) };
+            var title = new EmojiLabel { Text = "🌐  " + Tr("Multijugador SelectOR"), Dock = DockStyle.Top, Height = 22, ForeColor = Theme.AccentHi, BackColor = Theme.Surface, Font = Theme.Font(9.5f, FontStyle.Bold) };
             var text = new Label { Text = Tr("La sala compartida es en la ruta CGL_V22N_RE. Descárgala de su web oficial y descomprímela en tu contenido (ROUTES, GLOBAL y SOUND); luego vuelve a abrir SelectOR."),
                                    Dock = DockStyle.Top, Height = 64, ForeColor = Theme.Text, BackColor = Theme.Surface, Font = Theme.Font(8.5f) };
             _salaPromoVer = new Label { Text = "", Dock = DockStyle.Top, Height = 18, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f) };
@@ -145,7 +165,7 @@ namespace SelectOR
         // La versión de Open Rails de la sala, preguntándole (como mucho cada 5 min).
         async void SalaVersionRefresh()
         {
-            if (_salaVersionAsking || DateTime.UtcNow - _salaVersionAt < TimeSpan.FromMinutes(5)) return;
+            if (_salaVersionAsking || DateTime.UtcNow - _salaVersionAt < TimeSpan.FromSeconds(50)) return;   // (antes 5 min: ahora dice también el jefe)
             _salaVersionAsking = true;
             try
             {
@@ -154,6 +174,7 @@ namespace SelectOR
                 _salaVersionAt = DateTime.UtcNow;
                 if (info?.OrVersion != null) _salaOrVersion = info.OrVersion;
                 if (info != null && info.Season >= 0) { _salaSeason = info.Season; _salaWeather = info.Weather; _salaOffset = info.Offset; }
+                if (info != null) _salaJefes = info.Jefes;
             }
             catch { }
             finally { _salaVersionAsking = false; }
@@ -265,6 +286,7 @@ namespace SelectOR
             public string Route, Tdb, Disp, OrVersion; public int Players;
             public int Season = -1, Weather = -1;   // el clima de la sala (−1: un servidor de antes, que no lo dice)
             public int Offset;                       // la hora de la sala: minutos de adelanto (+) o retraso (−) sobre la de España
+            public List<SwitchPilot.JefeZone> Jefes;   // (2026-11-06) los jefes de circulación (null: un servidor de antes)
             public int SavedSecs = -1; public string SavedPat, SavedCon;   // (1.2.75) tu tren de antes, guardado en la sala: hace cuánto, recorrido y tren
             public List<(string name, int tx, int tz, double x, double z, bool player)> Trains = new();
             public Dictionary<string, (int node, int mu, int dir, double len)> Track = new(StringComparer.Ordinal);
@@ -322,6 +344,10 @@ namespace SelectOR
                             // «SELECTOR SAVED segundos\trecorrido\ttren» (1.2.75): tu tren de antes sigue en la sala
                             var sv = f.Substring(15).Split('\t');
                             if (sv.Length >= 3 && int.TryParse(sv[0].Trim(), out int secs) && secs >= 0) { info.SavedSecs = secs; info.SavedPat = sv[1]; info.SavedCon = sv[2]; }
+                        }
+                        else if (f.StartsWith("SELECTOR JEFES ", StringComparison.Ordinal) && info != null)
+                        {
+                            try { info.Jefes = SwitchPilot.ParseJefes(f.Substring(15)); } catch { }
                         }
                         else if (f.StartsWith("SELECTOR TRAINS ", StringComparison.Ordinal) && info != null)
                         {

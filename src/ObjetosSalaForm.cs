@@ -180,11 +180,11 @@ namespace SelectOR
             using (var b = new SolidBrush(sel ? Theme.Surface2 : Theme.BgSidebar)) e.Graphics.FillRectangle(b, e.Bounds);
             if (sel) using (var a = new SolidBrush(Color.FromArgb(255, 160, 40))) e.Graphics.FillRectangle(a, e.Bounds.X, e.Bounds.Y + 5, 3, e.Bounds.Height - 10);
             int h = e.Bounds.Height / 2;
-            TextRenderer.DrawText(e.Graphics, (IsWorker(o.Kind) ? "🚧 " : o.Kind == "fuego" || o.Kind == "incendio" ? "🔥 " : "⛰ ") + KindLabel(o.Kind), _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 2, e.Bounds.Width - 14, h),
+            ColorText.Text(e.Graphics, (IsWorker(o.Kind) ? "🚧 " : o.Kind == "fuego" || o.Kind == "incendio" ? "🔥 " : "⛰ ") + KindLabel(o.Kind), _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 2, e.Bounds.Width - 14, h),
                 Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             string fig = IsWorker(o.Kind) ? Tr(Figures.FirstOrDefault(x => x.fig == o.Figure).label ?? o.Figure) + " · " : "";
             using var small = Theme.Font(8.25f);
-            TextRenderer.DrawText(e.Graphics, fig + Where(o), small, new Rectangle(e.Bounds.X + 30, e.Bounds.Y + h - 2, e.Bounds.Width - 34, h),
+            ColorText.Text(e.Graphics, fig + Where(o), small, new Rectangle(e.Bounds.X + 30, e.Bounds.Y + h - 2, e.Bounds.Width - 34, h),
                 Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 

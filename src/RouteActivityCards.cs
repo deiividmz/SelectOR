@@ -110,9 +110,9 @@ namespace SelectOR
         {
             int x = Pad, y = Pad, tw = TextW(Width);
             const TextFormatFlags L = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
-            TextRenderer.DrawText(g, Caption, _fCap, new Rectangle(x, y, tw, _fCap.Height), Theme.AccentHi, L);
+            ColorText.Text(g, Caption, _fCap, new Rectangle(x, y, tw, _fCap.Height), Theme.AccentHi, L);
             y += _fCap.Height + Theme.Px(2);
-            TextRenderer.DrawText(g, string.IsNullOrEmpty(Title) ? Placeholder : Title, _fTitle, new Rectangle(x, y, Width - Pad * 2, _fTitle.Height), Color.White, L);
+            ColorText.Text(g, string.IsNullOrEmpty(Title) ? Placeholder : Title, _fTitle, new Rectangle(x, y, Width - Pad * 2, _fTitle.Height), Color.White, L);
             y += _fTitle.Height + Theme.Px(10);
             // datos en pastillas (con emoji a color)
             int cx = x, ch = Theme.Px(28);
@@ -134,7 +134,7 @@ namespace SelectOR
             if (dh > 0)
             {
                 y += Theme.Px(12);
-                TextRenderer.DrawText(g, Description, _fDesc, new Rectangle(x, y, tw, dh), Color.FromArgb(214, 218, 220), Wrap | TextFormatFlags.EndEllipsis);
+                ColorText.Text(g, Description, _fDesc, new Rectangle(x, y, tw, dh), Color.FromArgb(214, 218, 220), Wrap | TextFormatFlags.EndEllipsis);
                 y += dh;
             }
             _more = Rectangle.Empty;
@@ -145,7 +145,7 @@ namespace SelectOR
                 int w = TextRenderer.MeasureText(t, _fMore, Size.Empty, TextFormatFlags.NoPadding).Width;
                 _more = new Rectangle(x, y, w, _fMore.Height);
                 using var fu = new Font(_fMore, _moreHover ? FontStyle.Bold | FontStyle.Underline : FontStyle.Bold);
-                TextRenderer.DrawText(g, t, fu, _more, Theme.AccentHi, TextFormatFlags.NoPadding);
+                ColorText.Text(g, t, fu, _more, Theme.AccentHi, TextFormatFlags.NoPadding);
             }
         }
         protected override void OnMouseMove(MouseEventArgs e)
@@ -242,15 +242,15 @@ namespace SelectOR
             _liveDot = new Rectangle(x, cy - dot / 2, dot, dot);
             g.SmoothingMode = SmoothingMode.None;
             x += dot + Theme.Px(8);
-            TextRenderer.DrawText(g, LblLive, _fLiveCap, new Rectangle(x, r.Y, capW + 2, ph), Color.FromArgb(120, 220, 120), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ColorText.Text(g, LblLive, _fLiveCap, new Rectangle(x, r.Y, capW + 2, ph), Color.FromArgb(120, 220, 120), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             x += capW + gap;
-            TextRenderer.DrawText(g, t1, _fLive, new Rectangle(x, r.Y, w1 + 2, ph), Color.White, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ColorText.Text(g, t1, _fLive, new Rectangle(x, r.Y, w1 + 2, ph), Color.White, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             x += w1;
             if (t2.Length > 0)
             {
                 using (var b = new SolidBrush(Color.FromArgb(110, 255, 255, 255))) g.FillEllipse(b, x + sep / 2 - Theme.Px(2), cy - Theme.Px(2), Theme.Px(4), Theme.Px(4));
                 x += sep;
-                TextRenderer.DrawText(g, t2, _fLive, new Rectangle(x, r.Y, w2 + 2, ph), Color.FromArgb(150, 190, 255), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, t2, _fLive, new Rectangle(x, r.Y, w2 + 2, ph), Color.FromArgb(150, 190, 255), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
             return y + ph;
         }
@@ -274,12 +274,12 @@ namespace SelectOR
             int d = Theme.Px(34), ix = r.X + Theme.Px(10), iy = r.Y + (r.Height - d) / 2;
             using (var b = new SolidBrush(c)) g.FillEllipse(b, ix, iy, d, d);
             g.SmoothingMode = SmoothingMode.None;
-            TextRenderer.DrawText(g, icon, _fLinkI, new Rectangle(ix, iy, d, d), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ColorText.Text(g, icon, _fLinkI, new Rectangle(ix, iy, d, d), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             int tx = ix + d + Theme.Px(10), tw = r.Right - tx - Theme.Px(28);
-            TextRenderer.DrawText(g, title, _fLinkT, new Rectangle(tx, r.Y + Theme.Px(8), tw, Theme.Px(18)), Color.White, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
-            TextRenderer.DrawText(g, sub, _fLinkS, new Rectangle(tx, r.Y + Theme.Px(27), tw, Theme.Px(16)), Color.FromArgb(200, 205, 210), TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+            ColorText.Text(g, title, _fLinkT, new Rectangle(tx, r.Y + Theme.Px(8), tw, Theme.Px(18)), Color.White, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+            ColorText.Text(g, sub, _fLinkS, new Rectangle(tx, r.Y + Theme.Px(27), tw, Theme.Px(16)), Color.FromArgb(200, 205, 210), TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
             // flecha «sale fuera»
-            TextRenderer.DrawText(g, "↗", _fLinkT, new Rectangle(r.Right - Theme.Px(26), r.Y, Theme.Px(20), r.Height), hover ? Color.White : Color.FromArgb(170, 175, 180), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            ColorText.Text(g, "↗", _fLinkT, new Rectangle(r.Right - Theme.Px(26), r.Y, Theme.Px(20), r.Height), hover ? Color.White : Color.FromArgb(170, 175, 180), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         const TextFormatFlags WrapL = TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.TextBoxControl;
@@ -385,8 +385,8 @@ namespace SelectOR
             // abajo del todo: versión de SelectOR y de Open Rails (más grande y en negrita) y copyright
             {
                 int fy = Height - Theme.Px(50);
-                TextRenderer.DrawText(g, Footer, _fFoot, new Rectangle(0, fy, Width, Theme.Px(22)), Color.FromArgb(196, 202, 207), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-                TextRenderer.DrawText(g, Copyright, _fCopy, new Rectangle(0, fy + Theme.Px(24), Width, Theme.Px(18)), Color.FromArgb(120, 126, 132), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, Footer, _fFoot, new Rectangle(0, fy, Width, Theme.Px(22)), Color.FromArgb(196, 202, 207), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, Copyright, _fCopy, new Rectangle(0, fy + Theme.Px(24), Width, Theme.Px(18)), Color.FromArgb(120, 126, 132), TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
             }
             if (nh > 0) PaintNews(g, new Rectangle((Width - nw) / 2, card.Bottom + nGap, nw, nh));
             // logotipo grande
@@ -396,13 +396,13 @@ namespace SelectOR
             SelectorLogo.DrawRing(g, new Rectangle(lx, ly, ring, ring));
             g.SmoothingMode = SmoothingMode.None;
             int th = _fLogo.Height, tx = lx + ring + Theme.Px(14), ty = ly + (ring - th) / 2;
-            TextRenderer.DrawText(g, "Select", _fLogo, new Point(tx, ty), Theme.Text, TextFormatFlags.NoPadding);
-            TextRenderer.DrawText(g, "OR", _fLogo, new Point(tx + tw1, ty), Theme.Accent, TextFormatFlags.NoPadding);
+            ColorText.Text(g, "Select", _fLogo, new Point(tx, ty), Theme.Text, TextFormatFlags.NoPadding);
+            ColorText.Text(g, "OR", _fLogo, new Point(tx + tw1, ty), Theme.Accent, TextFormatFlags.NoPadding);
             int y = ly + ring + Theme.Px(28), iw = card.Width - Theme.Px(60), ix = card.X + Theme.Px(30);
-            TextRenderer.DrawText(g, Title, _fT, new Rectangle(ix, y, iw, _fT.Height + 4), Color.White, C);
+            ColorText.Text(g, Title, _fT, new Rectangle(ix, y, iw, _fT.Height + 4), Color.White, C);
             y += _fT.Height + Theme.Px(10);
             int sh = TextRenderer.MeasureText(g, Sub, _fS, new Size(iw, 1000), C).Height;
-            TextRenderer.DrawText(g, Sub, _fS, new Rectangle(ix, y, iw, sh), Theme.Subtle, C);
+            ColorText.Text(g, Sub, _fS, new Rectangle(ix, y, iw, sh), Theme.Subtle, C);
             y += sh + Theme.Px(18);
             // pastilla con la flecha hacia la lista
             if (!string.IsNullOrEmpty(Arrow))
@@ -410,7 +410,7 @@ namespace SelectOR
                 int aw = TextRenderer.MeasureText(g, Arrow, _fA, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.Px(28), ah = Theme.Px(32);
                 var ar = new Rectangle(card.X + (card.Width - aw) / 2, y, aw, ah);
                 g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, ar, ah / 2, Theme.Accent); g.SmoothingMode = SmoothingMode.None;
-                TextRenderer.DrawText(g, Arrow, _fA, ar, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, Arrow, _fA, ar, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 y += ah + Theme.Px(14);
             }
             // cifras del contenido
@@ -448,7 +448,7 @@ namespace SelectOR
             int cols = r.Width > Theme.Px(560) ? 2 : 1, gap = Theme.Px(24);
             // cabecera: «✨ NOVEDADES DE LA VERSIÓN 1.2.48»
             var hr = new Rectangle(r.X + Theme.Px(24), r.Y + Theme.Px(14), r.Width - Theme.Px(48), Theme.Px(20));
-            TextRenderer.DrawText(g, "✨  " + NewsTitle, _fNewsCap, hr, Theme.AccentHi, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            ColorText.Text(g, "✨  " + NewsTitle, _fNewsCap, hr, Theme.AccentHi, TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             var hs = NewsRowHeights(g, colW, cols);
             int shown = Math.Min(News.Count, rows * cols), y = r.Y + Theme.Px(44);
             var col = Color.FromArgb(200, 206, 211);
@@ -463,10 +463,10 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.None;
                 int tx = x + Theme.Px(14), tw = colW - Theme.Px(14);
                 var (t, titW, first, rest) = SplitNews(g, k, tw);
-                TextRenderer.DrawText(g, t, _fNewsT, new Point(tx, y), Theme.Text, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-                if (first.Length > 0) TextRenderer.DrawText(g, first, _fNews, new Point(tx + titW, y + 1), col, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, t, _fNewsT, new Point(tx, y), Theme.Text, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                if (first.Length > 0) ColorText.Text(g, first, _fNews, new Point(tx + titW, y + 1), col, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
                 if (rest.Length > 0)
-                    TextRenderer.DrawText(g, rest, _fNews, new Rectangle(tx, y + _fNews.Height + Theme.Px(3), tw, RestHeight(g, rest, tw)), col, WrapL);
+                    ColorText.Text(g, rest, _fNews, new Rectangle(tx, y + _fNews.Height + Theme.Px(3), tw, RestHeight(g, rest, tw)), col, WrapL);
             }
         }
     }
@@ -493,7 +493,7 @@ namespace SelectOR
             g.Clear(Parent?.BackColor ?? Theme.Bg);
             _rects.Clear();
             int w = Width - 1, y = 0;
-            TextRenderer.DrawText(g, Caption, _fCap, new Rectangle(0, y, w, Theme.Px(18)), Theme.Subtle, L);
+            ColorText.Text(g, Caption, _fCap, new Rectangle(0, y, w, Theme.Px(18)), Theme.Subtle, L);
             y += Theme.Px(24);
             var icons = new List<(string, Rectangle)>();
             for (int i = 0; i < Items.Count; i++)
@@ -509,10 +509,10 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.None;
                 icons.Add((it.Icon, ic));
                 int nw = TextRenderer.MeasureText(it.Count ?? "", _fN, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.Px(6);
-                TextRenderer.DrawText(g, it.Count ?? "", _fN, new Rectangle(r.Right - nw - Theme.Px(12), r.Y, nw, r.Height), it.Tint, L | TextFormatFlags.Right);
+                ColorText.Text(g, it.Count ?? "", _fN, new Rectangle(r.Right - nw - Theme.Px(12), r.Y, nw, r.Height), it.Tint, L | TextFormatFlags.Right);
                 int tx = ic.Right + Theme.Px(12), tw = r.Right - nw - Theme.Px(18) - tx;
-                TextRenderer.DrawText(g, it.Title, _fT, new Rectangle(tx, r.Y + Theme.Px(13), tw, Theme.Px(20)), Theme.Text, L);
-                TextRenderer.DrawText(g, it.Sub, _fS, new Rectangle(tx, r.Y + Theme.Px(34), tw, Theme.Px(18)), Theme.Subtle, L);
+                ColorText.Text(g, it.Title, _fT, new Rectangle(tx, r.Y + Theme.Px(13), tw, Theme.Px(20)), Theme.Text, L);
+                ColorText.Text(g, it.Sub, _fS, new Rectangle(tx, r.Y + Theme.Px(34), tw, Theme.Px(18)), Theme.Subtle, L);
                 y += r.Height + Theme.Px(8);
             }
             ColorText.DrawCells(g, icons, _fIc, Theme.Text, ClientRectangle);
@@ -524,9 +524,9 @@ namespace SelectOR
                 var r = new Rectangle((i % 2) * (sw + Theme.Px(8)), y + (i / 2) * (sh + Theme.Px(8)), sw, sh);
                 g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, r, Theme.Px(10), Color.FromArgb(52, 56, 60)); g.SmoothingMode = SmoothingMode.None;
                 int x = r.X + Theme.Px(12), tw = r.Width - Theme.Px(20);
-                TextRenderer.DrawText(g, cap, _fSc, new Rectangle(x, r.Y + Theme.Px(8), tw, Theme.Px(14)), Theme.Subtle, L);
-                TextRenderer.DrawText(g, val, _fSv, new Rectangle(x, r.Y + Theme.Px(22), tw, Theme.Px(22)), Theme.Text, L);
-                TextRenderer.DrawText(g, sub, _fSs, new Rectangle(x, r.Y + Theme.Px(43), tw, Theme.Px(14)), Theme.Subtle, L);
+                ColorText.Text(g, cap, _fSc, new Rectangle(x, r.Y + Theme.Px(8), tw, Theme.Px(14)), Theme.Subtle, L);
+                ColorText.Text(g, val, _fSv, new Rectangle(x, r.Y + Theme.Px(22), tw, Theme.Px(22)), Theme.Text, L);
+                ColorText.Text(g, sub, _fSs, new Rectangle(x, r.Y + Theme.Px(43), tw, Theme.Px(14)), Theme.Subtle, L);
             }
         }
         protected override void OnMouseMove(MouseEventArgs e)
@@ -576,9 +576,9 @@ namespace SelectOR
                 pw = TW(d, _fP) + Theme.Px(14);
                 var pr = new Rectangle(right - pw, y, pw, Theme.Px(19));
                 Fill(g, pr, Theme.Px(6), Color.FromArgb(44, DiffColors[m.Diff]));
-                TextRenderer.DrawText(g, d, _fP, pr, DiffColors[m.Diff], C1);
+                ColorText.Text(g, d, _fP, pr, DiffColors[m.Diff], C1);
             }
-            TextRenderer.DrawText(g, it.ToString(), _fT, new Rectangle(x, y - 1, right - x - pw - Theme.Px(8), Theme.Px(22)), Theme.Text, L1);
+            ColorText.Text(g, it.ToString(), _fT, new Rectangle(x, y - 1, right - x - pw - Theme.Px(8), Theme.Px(22)), Theme.Text, L1);
             y += Theme.Px(28);
             // hora · duración · estación y clima
             int mx = x;
@@ -589,7 +589,7 @@ namespace SelectOR
                 if (glyph != null) { Glyphs.Draw(g, glyph, new Rectangle(mx, y + Theme.Px(1), gs, gs), Theme.Subtle); g.SmoothingMode = SmoothingMode.None; mx += gs + Theme.Px(5); }
                 var f = bold ? _fMB : _fM;
                 int w = Math.Min(TW(text, f), right - mx);
-                TextRenderer.DrawText(g, text, f, new Rectangle(mx, y, w + 2, Theme.Px(18)), bold ? Theme.Text : Theme.Subtle, L1);
+                ColorText.Text(g, text, f, new Rectangle(mx, y, w + 2, Theme.Px(18)), bold ? Theme.Text : Theme.Subtle, L1);
                 mx += w + Theme.Px(14);
             }
             Seg("clock", m.Start, true);
@@ -668,7 +668,7 @@ namespace SelectOR
             foreach (var p in Paragraphs)
             {
                 int h = ParaH(p, w - Theme.Px(24));
-                TextRenderer.DrawText(g, p, _fP, new Rectangle(x + Theme.Px(12), py, w - Theme.Px(24), h), Color.FromArgb(214, 218, 220), Wrap);
+                ColorText.Text(g, p, _fP, new Rectangle(x + Theme.Px(12), py, w - Theme.Px(24), h), Color.FromArgb(214, 218, 220), Wrap);
                 py += h + Theme.Px(8);
             }
         }

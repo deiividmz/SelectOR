@@ -211,7 +211,8 @@ namespace SelectOR
 
         // «Tú» en la leyenda de una sala: tu papel (null fuera de una sala).
         string RoomMeStatus() => !RoomMapOn ? null : (_pilot.IsDispatcher ? Tr("despachador") : _pilot.Helper ? Tr("ayudante") : Tr("jugador"))
-                                 + (_pilot.JefeZones.Count > 0 ? " · " + string.Format(Tr("Jefes de circulación: {0}"), string.Join(", ", _pilot.JefeZones.Select(z => z.Name).Distinct())) : "");
+                                 + " · " + (_pilot.JefeZones.Count == 0 ? Tr("Sin jefe de circulación")   // (2026-11-06) y en qué dependencias
+                                            : string.Format(Tr(_pilot.JefeZones.Select(z => z.Name).Distinct().Count() == 1 ? "Jefe de circulación: {0}" : "Jefes de circulación: {0}"), SwitchPilot.JefesText(_pilot.JefeZones)));
 
         // Jefes de circulación (1.2.75): en sus estaciones, las agujas y las órdenes a las señales son suyas. El jefe de esa
         // aguja o señal, si no soy yo (null: la puedo mover)

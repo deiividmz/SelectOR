@@ -97,7 +97,7 @@ namespace SelectOR
             var g = e.Graphics; g.Clear(BackColor);
             if (_items.Count == 0)
             {
-                TextRenderer.DrawText(g, EmptyText, _fMsg, new Rectangle(Theme.Px(20), Theme.Px(30), ClientSize.Width - Theme.Px(40), Theme.Px(80)), Theme.Subtle,
+                ColorText.Text(g, EmptyText, _fMsg, new Rectangle(Theme.Px(20), Theme.Px(30), ClientSize.Width - Theme.Px(40), Theme.Px(80)), Theme.Subtle,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
                 return;
             }
@@ -116,7 +116,7 @@ namespace SelectOR
                 using (var sb = new SolidBrush(cc)) g.FillRectangle(sb, rc.X, rc.Y + Theme.Px(12), Theme.Px(3), rc.Height - Theme.Px(24));
 
                 int x = rc.X + Theme.Px(16), y = rc.Y + Theme.Px(14);
-                TextRenderer.DrawText(g, it.Number + ".", _fNum, new Rectangle(x, y - Theme.Px(2), NumW, Theme.Px(30)), Theme.AccentHi, One);
+                ColorText.Text(g, it.Number + ".", _fNum, new Rectangle(x, y - Theme.Px(2), NumW, Theme.Px(30)), Theme.AccentHi, One);
                 int tx = x + NumW, tw = TextW;
                 // categoría a la derecha del título
                 int pw = TextRenderer.MeasureText(g, cl, _fPill).Width + Theme.Px(14), ph = Theme.Px(20);
@@ -124,21 +124,21 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var pb = new SolidBrush(Color.FromArgb(45, cc))) using (var pp = Theme.Round(pill, ph / 2)) g.FillPath(pb, pp);
                 g.SmoothingMode = SmoothingMode.None;
-                TextRenderer.DrawText(g, cl, _fPill, pill, cc, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, it.Title, _fTitle, new Rectangle(tx, y, pill.Left - tx - Theme.Px(10), Theme.Px(26)), Theme.Text, One);
+                ColorText.Text(g, cl, _fPill, pill, cc, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, it.Title, _fTitle, new Rectangle(tx, y, pill.Left - tx - Theme.Px(10), Theme.Px(26)), Theme.Text, One);
                 y += Theme.Px(26);
                 if (it.Body.Length > 0)
                 {
                     y += Theme.Px(6);
                     var br = new Rectangle(tx, y, tw, 100000);
                     int bh = TextRenderer.MeasureText(g, it.Body, _fBody, new Size(tw, 100000), Wrap).Height;
-                    TextRenderer.DrawText(g, it.Body, _fBody, new Rectangle(tx, y, tw, bh), Color.FromArgb(214, 218, 222), Wrap);
+                    ColorText.Text(g, it.Body, _fBody, new Rectangle(tx, y, tw, bh), Color.FromArgb(214, 218, 222), Wrap);
                     y += bh;
                 }
                 y += Theme.Px(8);
                 string foot = string.Format(I18n.T("Publicada por {0} · {1}"), it.By.Length > 0 ? it.By : "—", it.When)
                               + (it.EditedWhen.Length > 0 && it.EditedWhen != it.When ? "   ·   " + string.Format(I18n.T("editada por {0} · {1}"), it.EditedBy.Length > 0 ? it.EditedBy : "—", it.EditedWhen) : "");
-                TextRenderer.DrawText(g, foot, _fSmall, new Rectangle(tx, y, tw, Theme.Px(18)), Theme.Subtle, One);
+                ColorText.Text(g, foot, _fSmall, new Rectangle(tx, y, tw, Theme.Px(18)), Theme.Subtle, One);
             }
         }
 

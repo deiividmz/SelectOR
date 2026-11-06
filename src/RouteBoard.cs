@@ -19,7 +19,14 @@ namespace SelectOR
         public RouteGraph G; public RoomMapGeo Geo;
         public List<(int e, double a, double b)> Circuits = new();
         public sealed class Sw { public RouteGraph.SwitchGeo S; public int Node, Order; public PointF At; public PointF[][] Legs = new PointF[2][]; public int Number; public string Station; public string Label; }   // Label: (1.2.81) como en su esquema («7», «12a»)
-        public sealed class Sg { public RoomMapGeo.Sig S; public PointF At; public PointF Dir; public PointF SideV; }   // Dir: hacia donde rige; SideV: hacia donde está la señal
+        public sealed class Sg
+        {
+            public RoomMapGeo.Sig S; public PointF At; public PointF Dir;   // Dir: hacia donde rige
+            // SideV: hacia donde está la señal. (2026-11-06) Con su poste en el mundo en cuanto se ha leído; hasta entonces, a la
+            // derecha de la marcha (antes se miraba su punto en la vía, que siempre está encima: salían todas a la derecha)
+            internal Func<PointF?> SideFn; PointF? _sv; PointF _def;
+            public PointF SideV { get { if (_sv == null && SideFn != null) _sv = SideFn(); return _sv ?? _def; } set => _def = value; }
+        }
         public sealed class Plat { public int E; public double A, B; public int Side; public string Label; public string Station; }
         public readonly List<Sw> Switches = new();
         // (1.2.81, petición) los escapes en tijera, como en el esquema: S = a0, a1 (una paralela), b0, b1 (la otra); diagonales a0-b1
@@ -313,7 +320,19 @@ namespace SelectOR
                 var wp = b.At(sg.Edge, sg.Off); var w1 = b.At(sg.Edge, Math.Max(0, sg.Off - 3)); var w2 = b.At(sg.Edge, Math.Min(E.Len, sg.Off + 3));
                 double wdx = (w2.X - w1.X) * dir, wdy = (w2.Y - w1.Y) * dir, wl = Math.Sqrt(wdx * wdx + wdy * wdy);
                 if (wl < 1e-6) { wdx = dx; wdy = dy; } else { wdx /= wl; wdy /= wl; }
-                b.Signals.Add(new Sg { S = sg, At = wp, Dir = new PointF((float)wdx, (float)wdy), SideV = new PointF((float)(-wdy * side), (float)(wdx * side)) });
+                float fx = (float)wdx, fy = (float)wdy; double tdx = dx, tdy = dy, tpx = px, tpy = py; var sgo = sg;
+                b.Signals.Add(new Sg
+                {
+                    S = sg, At = wp, Dir = new PointF(fx, fy), SideV = new PointF(-fy * side, fx * side),
+                    SideFn = () =>
+                    {
+                        if (double.IsNaN(sgo.PostLat)) return null;
+                        var (rx2, ry2) = g.Proj(sgo.PostLat, sgo.PostLon);
+                        double cr = tdx * (ry2 - tpy) - tdy * (rx2 - tpx), lat2 = Math.Sqrt((rx2 - tpx) * (rx2 - tpx) + (ry2 - tpy) * (ry2 - tpy));
+                        int sd = Math.Abs(cr) > 0.3 && lat2 < 25 ? Math.Sign(cr) : 1;
+                        return new PointF(-fy * sd, fx * sd);
+                    }
+                });
             }
             // (1.2.84) pasos a nivel: en su vía, con la dirección de la vía
             if (geo.LevelCrossings != null)

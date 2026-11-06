@@ -68,9 +68,9 @@ namespace SelectOR
             DrawIconPill(g, tr, "🏆", Theme.Gold);
             int tx = tr.Right + 18, tw = W - tx - Pad;
             using (var fT = Theme.Font(16f, FontStyle.Bold))
-                TextRenderer.DrawText(g, I18n.T("¡Enhorabuena!"), fT, new Rectangle(tx, y0 + 4, tw, 32), Theme.Text, flL);
+                ColorText.Text(g, I18n.T("¡Enhorabuena!"), fT, new Rectangle(tx, y0 + 4, tw, 32), Theme.Text, flL);
             using (var fS = Theme.Font(10f))
-                TextRenderer.DrawText(g, string.Format(I18n.T("Tus empresas han ganado premios en la Liga de {0}."), _month), fS,
+                ColorText.Text(g, string.Format(I18n.T("Tus empresas han ganado premios en la Liga de {0}."), _month), fS,
                     new Rectangle(tx, y0 + 38, tw, Theme.Px(42)), Theme.Subtle,
                     TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
@@ -87,23 +87,23 @@ namespace SelectOR
                 using (var b = new SolidBrush(Theme.Gold)) g.FillRectangle(b, card.X, card.Y + 10, 3, card.Height - 20);
                 int cx = card.X + CardPad + 4, cw = card.Width - CardPad * 2 - 4;
                 int cy = card.Y + CardPad - 4;
-                TextRenderer.DrawText(g, c.Name, fName, new Rectangle(cx, cy, cw - 150, NameH), Theme.Text, flL);
-                TextRenderer.DrawText(g, "+" + _eur(c.Total), fName, new Rectangle(cx, cy, cw, NameH), Theme.AccentHi, flR);
+                ColorText.Text(g, c.Name, fName, new Rectangle(cx, cy, cw - 150, NameH), Theme.Text, flL);
+                ColorText.Text(g, "+" + _eur(c.Total), fName, new Rectangle(cx, cy, cw, NameH), Theme.AccentHi, flR);
                 cy += NameH;
                 foreach (var p in c.Prizes)
                 {
                     var chip = new Rectangle(cx, cy + 3, LineH - 6, LineH - 6);
                     using (var pth = Theme.Round(chip, 6)) using (var b = new SolidBrush(Color.FromArgb(70, p.Tint))) g.FillPath(b, pth);
-                    TextRenderer.DrawText(g, p.Icon, fEmoji, chip, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                    TextRenderer.DrawText(g, p.Label, fLine, new Rectangle(chip.Right + 10, cy, cw - chip.Width - 160, LineH), Theme.Text, flL);
-                    TextRenderer.DrawText(g, _eur(p.Amount), fAmt, new Rectangle(cx, cy, cw, LineH), Theme.Subtle, flR);
+                    ColorText.Text(g, p.Icon, fEmoji, chip, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    ColorText.Text(g, p.Label, fLine, new Rectangle(chip.Right + 10, cy, cw - chip.Width - 160, LineH), Theme.Text, flL);
+                    ColorText.Text(g, _eur(p.Amount), fAmt, new Rectangle(cx, cy, cw, LineH), Theme.Subtle, flR);
                     cy += LineH;
                 }
                 y += card.Height + Gap;
             }
             if (_more > 0)
             {
-                TextRenderer.DrawText(g, string.Format(I18n.T("… y {0} empresas más."), _more), fLine, new Rectangle(Pad + 4, y - 4, W - Pad * 2, 22), Theme.Subtle, flL);
+                ColorText.Text(g, string.Format(I18n.T("… y {0} empresas más."), _more), fLine, new Rectangle(Pad + 4, y - 4, W - Pad * 2, 22), Theme.Subtle, flL);
                 y += 22;
             }
 
@@ -113,13 +113,13 @@ namespace SelectOR
                 double tot = 0; foreach (var c in _cos) tot += c.Total;
                 using var pen = new Pen(Theme.Border);
                 g.DrawLine(pen, Pad, y + 2, W - Pad, y + 2);
-                TextRenderer.DrawText(g, I18n.T("Total cobrado"), fName, new Rectangle(Pad + 4, y + 6, W - Pad * 2, 26), Theme.Text, flL);
-                TextRenderer.DrawText(g, _eur(tot), fName, new Rectangle(Pad, y + 6, W - Pad * 2 - 4, 26), Theme.Gold, flR);
+                ColorText.Text(g, I18n.T("Total cobrado"), fName, new Rectangle(Pad + 4, y + 6, W - Pad * 2, 26), Theme.Text, flL);
+                ColorText.Text(g, _eur(tot), fName, new Rectangle(Pad, y + 6, W - Pad * 2 - 4, 26), Theme.Gold, flR);
                 y += 34;
             }
 
             using var fNote = Theme.Font(9f);
-            TextRenderer.DrawText(g, I18n.T("El dinero ya está en la tesorería de la empresa."), fNote, new Rectangle(Pad + 4, y, W - Pad * 2, 24), Theme.Subtle, flL);
+            ColorText.Text(g, I18n.T("El dinero ya está en la tesorería de la empresa."), fNote, new Rectangle(Pad + 4, y, W - Pad * 2, 24), Theme.Subtle, flL);
         }
 
         // Confeti fijo alrededor del trofeo (siempre igual: no «baila» al repintar).

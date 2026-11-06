@@ -72,7 +72,7 @@ namespace SelectOR
             if (e.Index < 0 || sender is not ComboBox c) return;
             bool sel = (e.State & DrawItemState.Selected) != 0 && (e.State & DrawItemState.ComboBoxEdit) == 0;
             using (var b = new SolidBrush(sel ? Theme.Accent : Theme.Surface2)) e.Graphics.FillRectangle(b, e.Bounds);
-            TextRenderer.DrawText(e.Graphics, c.GetItemText(c.Items[e.Index]), c.Font, new Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 10, e.Bounds.Height),
+            ColorText.Text(e.Graphics, c.GetItemText(c.Items[e.Index]), c.Font, new Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 10, e.Bounds.Height),
                 sel ? Color.White : Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
         }
 
@@ -109,17 +109,17 @@ namespace SelectOR
                     using (var b = new SolidBrush(Color.FromArgb(40, IconColor))) g.FillEllipse(b, x, cy - d / 2, d, d);
                     using (var p = new Pen(Color.FromArgb(Glyph ? 230 : 150, IconColor), Glyph ? 2f : 1.5f)) g.DrawEllipse(p, x, cy - d / 2, d, d);
                     g.SmoothingMode = SmoothingMode.None;
-                    TextRenderer.DrawText(g, _icon, Glyph ? _fG : _fI, new Rectangle(x, cy - d / 2, d, d), Glyph ? IconColor : Theme.Text,
+                    ColorText.Text(g, _icon, Glyph ? _fG : _fI, new Rectangle(x, cy - d / 2, d, d), Glyph ? IconColor : Theme.Text,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     x += d + Theme.Px(16);
                 }
                 const TextFormatFlags L = TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
                 if (_sub.Length == 0)
-                    TextRenderer.DrawText(g, _title, _fT, new Rectangle(x, 0, Width - x - Theme.Px(20), Height), Theme.Text, L);
+                    ColorText.Text(g, _title, _fT, new Rectangle(x, 0, Width - x - Theme.Px(20), Height), Theme.Text, L);
                 else
                 {
-                    TextRenderer.DrawText(g, _title, _fT, new Rectangle(x, cy - Theme.Px(24), Width - x - Theme.Px(20), Theme.Px(28)), Theme.Text, L);
-                    TextRenderer.DrawText(g, _sub, _fS, new Rectangle(x, cy + Theme.Px(4), Width - x - Theme.Px(20), Theme.Px(20)), Theme.Subtle, L);
+                    ColorText.Text(g, _title, _fT, new Rectangle(x, cy - Theme.Px(24), Width - x - Theme.Px(20), Theme.Px(28)), Theme.Text, L);
+                    ColorText.Text(g, _sub, _fS, new Rectangle(x, cy + Theme.Px(4), Width - x - Theme.Px(20), Theme.Px(20)), Theme.Subtle, L);
                 }
                 using (var p = new Pen(Theme.Border)) g.DrawLine(p, 0, Height - 1, Width, Height - 1);
             }
@@ -159,10 +159,10 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var b = new SolidBrush(Theme.Accent)) g.FillEllipse(b, 0, (Height - d) / 2, d, d);
                 g.SmoothingMode = SmoothingMode.None;
-                TextRenderer.DrawText(g, N.ToString(), _fN, new Rectangle(0, (Height - d) / 2, d, d), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, N.ToString(), _fN, new Rectangle(0, (Height - d) / 2, d, d), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 int tx = d + Theme.Px(10);
                 int tw = TextRenderer.MeasureText(Text, _fT, Size.Empty, TextFormatFlags.NoPadding).Width;
-                TextRenderer.DrawText(g, Text, _fT, new Rectangle(tx, 0, Width - tx, Height), Theme.AccentHi, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.Text(g, Text, _fT, new Rectangle(tx, 0, Width - tx, Height), Theme.AccentHi, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 using (var p = new Pen(Theme.Border)) g.DrawLine(p, tx + tw + Theme.Px(12), Height / 2, Width, Height / 2);
             }
         }

@@ -369,7 +369,7 @@ namespace SelectOR
             if (e.Index < 0 || sender is not ComboBox c) return;
             bool sel = (e.State & DrawItemState.Selected) != 0 && (e.State & DrawItemState.ComboBoxEdit) == 0;
             using (var b = new SolidBrush(sel ? Theme.Accent : Theme.Surface2)) e.Graphics.FillRectangle(b, e.Bounds);
-            TextRenderer.DrawText(e.Graphics, c.GetItemText(c.Items[e.Index]), c.Font, new Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 10, e.Bounds.Height),
+            ColorText.Text(e.Graphics, c.GetItemText(c.Items[e.Index]), c.Font, new Rectangle(e.Bounds.X + 8, e.Bounds.Y, e.Bounds.Width - 10, e.Bounds.Height),
                 sel ? Color.White : Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
         }
 
@@ -400,31 +400,31 @@ namespace SelectOR
                 using (var path = TopRound(band, Theme.Px(12))) using (var b = new LinearGradientBrush(band, Theme.Accent, Theme.Accent2, LinearGradientMode.Horizontal)) g.FillPath(b, path);
                 g.SmoothingMode = SmoothingMode.None;
                 int x = r.X + Theme.Px(18), w = r.Width - Theme.Px(36);
-                TextRenderer.DrawText(g, I18n.T("BILLETE DE SERVICIO PROGRAMADO"), _fBand, new Rectangle(x, band.Y, w, band.Height), Color.White, L);
-                TextRenderer.DrawText(g, "🚆", _fPath, new Rectangle(x, band.Y, w, band.Height), Color.White, L | TextFormatFlags.Right);
+                ColorText.Text(g, I18n.T("BILLETE DE SERVICIO PROGRAMADO"), _fBand, new Rectangle(x, band.Y, w, band.Height), Color.White, L);
+                ColorText.Text(g, "🚆", _fPath, new Rectangle(x, band.Y, w, band.Height), Color.White, L | TextFormatFlags.Right);
                 int y = band.Bottom + Theme.Px(14);
                 // ruta y recorrido
-                TextRenderer.DrawText(g, (Route ?? "").ToUpperInvariant(), _fRoute, new Rectangle(x, y, w, Theme.Px(26)), Ink, L); y += Theme.Px(28);
-                TextRenderer.DrawText(g, "→ " + Path, _fPath, new Rectangle(x, y, w, Theme.Px(18)), Faint, L); y += Theme.Px(26);
+                ColorText.Text(g, (Route ?? "").ToUpperInvariant(), _fRoute, new Rectangle(x, y, w, Theme.Px(26)), Ink, L); y += Theme.Px(28);
+                ColorText.Text(g, "→ " + Path, _fPath, new Rectangle(x, y, w, Theme.Px(18)), Faint, L); y += Theme.Px(26);
                 // tren: 2D como en Servicios (o el aviso en la franja)
-                TextRenderer.DrawText(g, I18n.T("TREN"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
-                TextRenderer.DrawText(g, TrainText, _fVal, new Rectangle(x, y, w, Theme.Px(18)), Ink, L); y += Theme.Px(22);
+                ColorText.Text(g, I18n.T("TREN"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
+                ColorText.Text(g, TrainText, _fVal, new Rectangle(x, y, w, Theme.Px(18)), Ink, L); y += Theme.Px(22);
                 var strip = new Rectangle(x, y, w, Theme.Px(44));
                 SchedBoard.Strip(g, strip, Fleet ? Image : TrainFigures.For(Kind == "" ? null : Kind, Math.Min(Theme.Px(40), strip.Height - Theme.Px(6))),
                                 Fleet && Loading ? I18n.T("dibujando…") : Fleet && Image == null ? "🚆  " + I18n.T("sin composición 2D") : !Fleet ? "🚆  " + I18n.T("sin tren asignado") : null, _fSmall);
                 y = strip.Bottom + Theme.Px(14);
                 // salida
-                TextRenderer.DrawText(g, I18n.T("SALIDA"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
-                if (WhenBad) { TextRenderer.DrawText(g, When, _fVal, new Rectangle(x, y, w, Theme.Px(20)), Color.FromArgb(178, 59, 59), L); y += Theme.Px(24); }
+                ColorText.Text(g, I18n.T("SALIDA"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
+                if (WhenBad) { ColorText.Text(g, When, _fVal, new Rectangle(x, y, w, Theme.Px(20)), Color.FromArgb(178, 59, 59), L); y += Theme.Px(24); }
                 else
                 {
-                    TextRenderer.DrawText(g, Time, _fTime, new Rectangle(x, y, w, Theme.Px(24)), Color.FromArgb(150, 100, 10), L); y += Theme.Px(26);
-                    TextRenderer.DrawText(g, Day, _fPath, new Rectangle(x, y, w, Theme.Px(18)), Ink, L); y += Theme.Px(22);
+                    ColorText.Text(g, Time, _fTime, new Rectangle(x, y, w, Theme.Px(24)), Color.FromArgb(150, 100, 10), L); y += Theme.Px(26);
+                    ColorText.Text(g, Day, _fPath, new Rectangle(x, y, w, Theme.Px(18)), Ink, L); y += Theme.Px(22);
                 }
-                TextRenderer.DrawText(g, Repeat, _fSmall, new Rectangle(x, y, w, Theme.Px(16)), Faint, L); y += Theme.Px(24);
+                ColorText.Text(g, Repeat, _fSmall, new Rectangle(x, y, w, Theme.Px(16)), Faint, L); y += Theme.Px(24);
                 // prima
-                TextRenderer.DrawText(g, I18n.T("PRIMA DEL SERVIDOR"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
-                TextRenderer.DrawText(g, Prima, _fVal, new Rectangle(x, y, w, Theme.Px(18)), Color.FromArgb(46, 125, 50), L); y += Theme.Px(26);
+                ColorText.Text(g, I18n.T("PRIMA DEL SERVIDOR"), _fCap, new Rectangle(x, y, w, Theme.Px(14)), Faint, L); y += Theme.Px(16);
+                ColorText.Text(g, Prima, _fVal, new Rectangle(x, y, w, Theme.Px(18)), Color.FromArgb(46, 125, 50), L); y += Theme.Px(26);
                 // troquel: línea discontinua con muescas a los lados
                 int ty = Math.Max(y, r.Bottom - Theme.Px(78));
                 using (var p = new Pen(Dash, 1.4f) { DashStyle = DashStyle.Dash }) g.DrawLine(p, r.X + Theme.Px(14), ty, r.Right - Theme.Px(14), ty);
@@ -434,7 +434,7 @@ namespace SelectOR
                 g.SmoothingMode = SmoothingMode.None;
                 // matriz: la nota (o quién puede reservarlo) y el código de barras
                 string stub = Note.Length > 0 ? "«" + Note + "»" : I18n.T("Cualquier socio podrá reservarlo.");
-                TextRenderer.DrawText(g, stub, Note.Length > 0 ? _fNote : _fSmall, new Rectangle(x, ty + Theme.Px(10), w, Theme.Px(18)), Faint, L);
+                ColorText.Text(g, stub, Note.Length > 0 ? _fNote : _fSmall, new Rectangle(x, ty + Theme.Px(10), w, Theme.Px(18)), Faint, L);
                 var rnd = new Random((Route + Time + Day).GetHashCode());
                 int bx = x, by = ty + Theme.Px(34), bh = Theme.Px(26);
                 using (var b = new SolidBrush(Ink))

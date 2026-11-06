@@ -1174,10 +1174,10 @@ namespace SelectOR
                     int nameW = Math.Min(nameSz.Width, Math.Max(0, room - numSz.Width - numGap));
                     int lblW = numSz.Width + (nameW > 14 ? numGap + nameW : 0);
                     int lblX = x + Math.Max(3, (w - lblW) / 2);
-                    TextRenderer.DrawText(g, num, fNum, new Rectangle(lblX, 2, numSz.Width + 2, Ed2DLabelH - 4),
+                    ColorText.Text(g, num, fNum, new Rectangle(lblX, 2, numSz.Width + 2, Ed2DLabelH - 4),
                         Theme.AccentHi, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     if (nameW > 14 && cname.Length > 0)
-                        TextRenderer.DrawText(g, cname, fName, new Rectangle(lblX + numSz.Width + numGap, 2, nameW, Ed2DLabelH - 4),
+                        ColorText.Text(g, cname, fName, new Rectangle(lblX + numSz.Width + numGap, 2, nameW, Ed2DLabelH - 4),
                             Blend(Theme.Text, Theme.Subtle, 0.25f),
                             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
                     _ed2DSlots.Add((x, x + w));

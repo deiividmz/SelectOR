@@ -81,7 +81,7 @@ namespace SelectOR
                 using (var pen = new Pen(c, 1.6f)) g.DrawRectangle(pen, box);
                 x += box.Width + 6;
                 var sz = TextRenderer.MeasureText(g, t, f, Size.Empty, TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, t, f, new Point(x, cy - sz.Height / 2), Theme.Text, TextFormatFlags.NoPadding);
+                ColorText.Text(g, t, f, new Point(x, cy - sz.Height / 2), Theme.Text, TextFormatFlags.NoPadding);
                 x += sz.Width + 22;
             }
         }

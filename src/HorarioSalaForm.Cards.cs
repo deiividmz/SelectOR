@@ -123,7 +123,7 @@ namespace SelectOR
                 g.Clear(BackColor);
                 if (Items.Count == 0)
                 {
-                    TextRenderer.DrawText(g, EmptyText, FText, ClientRectangle, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+                    ColorText.Text(g, EmptyText, FText, ClientRectangle, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
                     return;
                 }
                 int dy = AutoScrollPosition.Y;
@@ -159,37 +159,37 @@ namespace SelectOR
                 var smallSz = TextRenderer.MeasureText(small, FSmall);
                 int rw = Math.Max(bigSz.Width, smallSz.Width);
                 int rx = r.Right - Pad - rw;
-                TextRenderer.DrawText(g, big, FBig, new Rectangle(rx, y, rw, Theme.Px(24)), dim, TextFormatFlags.Right | TextFormatFlags.NoPrefix);
-                TextRenderer.DrawText(g, small, FSmall, new Rectangle(rx, y + Theme.Px(24), rw, Theme.Px(18)), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, big, FBig, new Rectangle(rx, y, rw, Theme.Px(24)), dim, TextFormatFlags.Right | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, small, FSmall, new Rectangle(rx, y + Theme.Px(24), rw, Theme.Px(18)), Theme.Subtle, TextFormatFlags.Right | TextFormatFlags.NoPrefix);
 
                 // título: nombre (del color de su recorrido), tipo y si está desactivado
                 int avail = rx - x - Theme.Px(10);
                 string name = string.IsNullOrEmpty(s.Name) ? "?" : s.Name;
                 var nsz = TextRenderer.MeasureText(name, FTitle);
                 int nw = Math.Min(nsz.Width, Math.Max(Theme.Px(40), avail / 2));
-                TextRenderer.DrawText(g, name, FTitle, new Rectangle(x, y, nw, Theme.Px(26)), s.Active ? col : Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                ColorText.Text(g, name, FTitle, new Rectangle(x, y, nw, Theme.Px(26)), s.Active ? col : Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                 int px = x + nw + Theme.Px(8);
                 px = Pill(g, KindName(s.Kind), px, y + Theme.Px(3), Color.FromArgb(70, 120, 170));
                 if (!s.Active) Pill(g, Tr("Desactivado"), px + Theme.Px(6), y + Theme.Px(3), Color.FromArgb(150, 110, 60));
                 y += Theme.Px(26) + Theme.Px(6);
 
                 // recorrido, composición y paradas, enteros
-                TextRenderer.DrawText(g, s.RouteText, FText, new Rectangle(x, y, avail, Theme.Px(20)), dim, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                ColorText.Text(g, s.RouteText, FText, new Rectangle(x, y, avail, Theme.Px(20)), dim, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                 y += Theme.Px(20);
                 Line(g, Tr("Composición"), s.Consist, x, y, tw);
                 y += Theme.Px(20);
                 if (!string.IsNullOrEmpty(s.Hint)) { Line(g, Tr("Recorrido"), HintText(s.Hint), x, y, tw); y += Theme.Px(20); }   // (1.2.79)
                 y += Theme.Px(4);
                 var lab = Tr("Paradas") + ": ";
-                TextRenderer.DrawText(g, lab + StopsText(s), FText, new Rectangle(x, y, tw - Theme.Px(4), r.Bottom - y), dim, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, lab + StopsText(s), FText, new Rectangle(x, y, tw - Theme.Px(4), r.Bottom - y), dim, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
             }
 
             void Line(Graphics g, string label, string value, int x, int y, int w)
             {
                 x += Theme.Px(3); w -= Theme.Px(3);   // (sin el margen de TextRenderer: alineado con las demás líneas)
                 var ls = TextRenderer.MeasureText(label + ": ", FText, new Size(9999, 99), TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, label + ": ", FText, new Point(x, y), Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, string.IsNullOrEmpty(value) ? "—" : value, FText, new Rectangle(x + ls.Width, y, w - ls.Width, Theme.Px(20)), Theme.Text, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+                ColorText.Text(g, label + ": ", FText, new Point(x, y), Theme.Subtle, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+                ColorText.Text(g, string.IsNullOrEmpty(value) ? "—" : value, FText, new Rectangle(x + ls.Width, y, w - ls.Width, Theme.Px(20)), Theme.Text, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             }
 
             int Pill(Graphics g, string text, int x, int y, Color c)
@@ -197,7 +197,7 @@ namespace SelectOR
                 var sz = TextRenderer.MeasureText(text, FSmall);
                 var rr = new Rectangle(x, y, sz.Width + Theme.Px(10), Theme.Px(20));
                 using (var path = Round(rr, rr.Height / 2)) using (var b = new SolidBrush(Color.FromArgb(60, c))) g.FillPath(b, path);
-                TextRenderer.DrawText(g, text, FSmall, rr, Color.FromArgb(Math.Min(255, c.R + 70), Math.Min(255, c.G + 70), Math.Min(255, c.B + 70)), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                ColorText.Text(g, text, FSmall, rr, Color.FromArgb(Math.Min(255, c.R + 70), Math.Min(255, c.G + 70), Math.Min(255, c.B + 70)), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 return rr.Right;
             }
 

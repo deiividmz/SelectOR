@@ -157,15 +157,15 @@ namespace SelectOR
 
             // Línea 1: importe · (empresa) · estado
             int aw = TW(Eur(l.Amount), _fAmt);
-            TextRenderer.DrawText(g, Eur(l.Amount), _fAmt, new Rectangle(x, y - Theme.Px(2), aw + 4, Theme.Px(30)), Theme.Text, L1);
+            ColorText.Text(g, Eur(l.Amount), _fAmt, new Rectangle(x, y - Theme.Px(2), aw + 4, Theme.Px(30)), Theme.Text, L1);
             int lx = x + aw + Theme.Px(14);
             string what = (l.ShowCompany ? l.Company + (l.CompanyCode.Length > 0 ? " (" + l.CompanyCode + ")" + "  ·  " : "  ·  ") : "")
                           + string.Format(I18n.T("{0} meses"), l.Months);
             int pw = TW(st, _fPill) + Theme.Px(20), ph = Theme.Px(22);
             var pill = new Rectangle(right - pw, y + Theme.Px(2), pw, ph);
             Fill(g, pill, ph / 2, Color.FromArgb(45, sc));
-            TextRenderer.DrawText(g, st, _fPill, pill, sc, C1);
-            TextRenderer.DrawText(g, what, _fTitle, new Rectangle(lx, y, pill.Left - lx - Theme.Px(10), Theme.Px(26)), Theme.Text, L1);
+            ColorText.Text(g, st, _fPill, pill, sc, C1);
+            ColorText.Text(g, what, _fTitle, new Rectangle(lx, y, pill.Left - lx - Theme.Px(10), Theme.Px(26)), Theme.Text, L1);
             y += Theme.Px(32);
 
             // Línea 2: condiciones
@@ -177,7 +177,7 @@ namespace SelectOR
                 l2 = string.Format(I18n.T("TIN {0} %  ·  TAE {1} %  ·  cuota {2}/mes  ·  intereses {3}"),
                          l.Tin.ToString("N2", Es), (MainMenuForm.LoanTae(l.Amount, l.FeePct, l.Tin, l.Months) * 100).ToString("N2", Es),
                          Eur(l.Payment), Eur(l.InterestTotal));
-            TextRenderer.DrawText(g, l2, _fText, new Rectangle(x, y, right - x, Theme.Px(20)), Theme.Subtle, L1);
+            ColorText.Text(g, l2, _fText, new Rectangle(x, y, right - x, Theme.Px(20)), Theme.Subtle, L1);
             y += Theme.Px(24);
 
             // Línea 3: progreso de la devolución (o nota del banco)
@@ -192,17 +192,17 @@ namespace SelectOR
                 string l3 = string.Format(I18n.T("{0}/{1} cuotas"), l.Paid, l.Months) + "   ·   " + string.Format(I18n.T("pendiente {0}"), Eur(l.Outstanding));
                 if (l.Status == "active" && l.NextDue != DateTime.MinValue) l3 += "   ·   " + string.Format(I18n.T("próxima cuota el {0}"), l.NextDue.ToString("dd/MM/yyyy", Es));
                 if (l.Late > 0) l3 += "   ·   " + string.Format(I18n.T(l.Late == 1 ? "{0} cuota impagada" : "{0} cuotas impagadas"), l.Late);
-                TextRenderer.DrawText(g, l3, l.Late > 0 ? _fBold : _fText, new Rectangle(bar.Right + Theme.Px(12), y, right - bar.Right - Theme.Px(12), Theme.Px(20)), l.Late > 0 ? Red : Theme.Text, L1);
+                ColorText.Text(g, l3, l.Late > 0 ? _fBold : _fText, new Rectangle(bar.Right + Theme.Px(12), y, right - bar.Right - Theme.Px(12), Theme.Px(20)), l.Late > 0 ? Red : Theme.Text, L1);
             }
             else if (l.ShowCompany && l.Status == "pending")
             {
                 string co = string.Format(I18n.T("Saldo {0}  ·  neto 90 días {1} ({2} servicios)  ·  deuda viva {3}"),
                     double.IsNaN(l.CoBalance) ? "—" : Eur(Math.Round(l.CoBalance)), double.IsNaN(l.CoNet90) ? "—" : Eur(Math.Round(l.CoNet90)),
                     l.CoServices90 < 0 ? "—" : l.CoServices90.ToString("N0", Es), double.IsNaN(l.CoDebt) ? "—" : Eur(Math.Round(l.CoDebt)));
-                TextRenderer.DrawText(g, co, _fText, new Rectangle(x, y, right - x, Theme.Px(20)), Theme.Text, L1);
+                ColorText.Text(g, co, _fText, new Rectangle(x, y, right - x, Theme.Px(20)), Theme.Text, L1);
             }
             else if (l.Note.Length > 0)
-                TextRenderer.DrawText(g, "🏦  " + l.Note, _fText, new Rectangle(x, y, right - x, Theme.Px(20)), Theme.Text, L1);
+                ColorText.Text(g, "🏦  " + l.Note, _fText, new Rectangle(x, y, right - x, Theme.Px(20)), Theme.Text, L1);
         }
     }
 

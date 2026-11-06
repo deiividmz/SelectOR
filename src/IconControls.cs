@@ -110,7 +110,7 @@ namespace SelectOR
                 var box = new Rectangle(r.X + r.Width / 2 - gs / 2, label ? r.Y + 6 : r.Y + (r.Height - gs) / 2, gs, gs);
                 Glyphs.Draw(g, Kinds[i], box, sel ? Color.White : Color.FromArgb(196, 200, 205));
                 if (label)
-                    TextRenderer.DrawText(g, Tips[i], sel ? fb : f, new Rectangle(r.X + 2, box.Bottom + 2, r.Width - 4, r.Bottom - box.Bottom - 4), sel ? Theme.Text : Theme.Subtle,
+                    ColorText.Text(g, Tips[i], sel ? fb : f, new Rectangle(r.X + 2, box.Bottom + 2, r.Width - 4, r.Bottom - box.Bottom - 4), sel ? Theme.Text : Theme.Subtle,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             }
         }
@@ -134,7 +134,7 @@ namespace SelectOR
             if (kind != null && kind.StartsWith("txt:"))
             {
                 using (var f = Theme.Font(b.Height * 0.52f, FontStyle.Bold))
-                    TextRenderer.DrawText(g, kind.Substring(4), f, b, textColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, kind.Substring(4), f, b, textColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return;
             }
             int cx = b.X + b.Width / 2, cy = b.Y + b.Height / 2;
@@ -451,7 +451,7 @@ namespace SelectOR
             int r = (int)(b.Width * 0.44f);
             using (var cb = new SolidBrush(Color.FromArgb(76, 175, 80))) g.FillEllipse(cb, cx - r, cy - r, r * 2, r * 2);
             using (var f = Theme.Font(b.Height * 0.5f, FontStyle.Bold))
-                TextRenderer.DrawText(g, "i", f, new Rectangle(cx - r, cy - r, r * 2, r * 2), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                ColorText.Text(g, "i", f, new Rectangle(cx - r, cy - r, r * 2, r * 2), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
         // Escudo con una marca (carné por puntos · Revisión).

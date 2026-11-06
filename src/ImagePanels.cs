@@ -50,7 +50,7 @@ namespace SelectOR
                 if (string.IsNullOrEmpty(RouteName))
                 {
                     using (var f = Theme.Font(12f))
-                        TextRenderer.DrawText(g, I18n.T(Placeholder), f, rect, Theme.Subtle,
+                        ColorText.Text(g, I18n.T(Placeholder), f, rect, Theme.Subtle,
                             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 }
                 else
@@ -84,8 +84,8 @@ namespace SelectOR
                             g.FillPath(pgb, gp);
                     }
                     var nameRect = new Rectangle(cx - maxW / 2, top, maxW, nameSize.Height + 4);
-                    TextRenderer.DrawText(g, RouteName, nf, new Rectangle(nameRect.X + 1, nameRect.Y + 2, nameRect.Width, nameRect.Height), Color.FromArgb(200, 0, 0, 0), flags);
-                    TextRenderer.DrawText(g, RouteName, nf, nameRect, Color.White, flags);
+                    ColorText.Text(g, RouteName, nf, new Rectangle(nameRect.X + 1, nameRect.Y + 2, nameRect.Width, nameRect.Height), Color.FromArgb(200, 0, 0, 0), flags);
+                    ColorText.Text(g, RouteName, nf, nameRect, Color.White, flags);
                     nf.Dispose();
                 }
             }
@@ -221,18 +221,18 @@ namespace SelectOR
             else
             {
                 using (var f = Theme.Font(9.5f))
-                    TextRenderer.DrawText(g, EmptyText ?? I18n.T("Generando vista 3D…"), f, imgArea, Theme.Subtle,
+                    ColorText.Text(g, EmptyText ?? I18n.T("Generando vista 3D…"), f, imgArea, Theme.Subtle,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
 
             var capRect = new Rectangle(rect.X + 8, rect.Bottom - 24, rect.Width - 16, 20);
             using (var f = Theme.Font(9.5f, FontStyle.Bold))
-                TextRenderer.DrawText(g, Caption ?? "", f, capRect, Theme.Text,
+                ColorText.Text(g, Caption ?? "", f, capRect, Theme.Text,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
             if (Rotatable && _image != null)
                 using (var f = Theme.Font(8f))
-                    TextRenderer.DrawText(g, I18n.T("↺ arrastra para girar · rueda: zoom"), f, new Rectangle(rect.X + 8, rect.Y + 6, rect.Width - 56, 16), Color.FromArgb(150, Theme.Subtle),
+                    ColorText.Text(g, I18n.T("↺ arrastra para girar · rueda: zoom"), f, new Rectangle(rect.X + 8, rect.Y + 6, rect.Width - 56, 16), Color.FromArgb(150, Theme.Subtle),
                         TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis);
 
             if (ExpandVisible)

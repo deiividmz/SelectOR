@@ -108,7 +108,7 @@ namespace SelectOR
             if (!string.IsNullOrEmpty(_title))
             {
                 using var fT = Theme.Font(8.6f, FontStyle.Bold);
-                TextRenderer.DrawText(g, _title, fT, new Rectangle(Edge + Pad, y, Width - 2 * (Edge + Pad), Theme.Px(28)), Theme.Subtle,
+                ColorText.Text(g, _title, fT, new Rectangle(Edge + Pad, y, Width - 2 * (Edge + Pad), Theme.Px(28)), Theme.Subtle,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                 y += Theme.Px(28); g.DrawLine(sep, Edge + Pad, y + SepH / 2, Width - Edge - Pad, y + SepH / 2); y += SepH;
             }
@@ -132,7 +132,7 @@ namespace SelectOR
                     tx += CheckW;
                 }
                 var col = !it.Enabled ? Theme.Subtle : it.Color.IsEmpty ? Theme.Text : it.Color;
-                TextRenderer.DrawText(g, it.Text ?? "", Font, new Rectangle(tx, y, Width - tx - Edge - Pad, RowH), col,
+                ColorText.Text(g, it.Text ?? "", Font, new Rectangle(tx, y, Width - tx - Edge - Pad, RowH), col,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                 if (live) _rows.Add((row, i));
                 y += RowH;

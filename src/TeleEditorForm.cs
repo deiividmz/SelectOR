@@ -98,10 +98,10 @@ namespace SelectOR
             }
             else x += Theme.Px(128);
             bool mine = Mine(name);
-            TextRenderer.DrawText(g, Teleindicadores.Nice(name), _list.Font, new Rectangle(x, e.Bounds.Y + Theme.Px(4), e.Bounds.Right - x - 4, e.Bounds.Height / 2), sel ? Theme.Text : Theme.Text,
+            ColorText.Text(g, Teleindicadores.Nice(name), _list.Font, new Rectangle(x, e.Bounds.Y + Theme.Px(4), e.Bounds.Right - x - 4, e.Bounds.Height / 2), sel ? Theme.Text : Theme.Text,
                                   TextFormatFlags.Bottom | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             using var fs = Theme.Font(8f);
-            TextRenderer.DrawText(g, mine ? Tr("hecho con SelectOR") : Tr("del autor"), fs, new Rectangle(x, e.Bounds.Y + e.Bounds.Height / 2, e.Bounds.Right - x - 4, e.Bounds.Height / 2 - Theme.Px(4)),
+            ColorText.Text(g, mine ? Tr("hecho con SelectOR") : Tr("del autor"), fs, new Rectangle(x, e.Bounds.Y + e.Bounds.Height / 2, e.Bounds.Right - x - 4, e.Bounds.Height / 2 - Theme.Px(4)),
                                   mine ? Theme.AccentHi : Theme.Subtle, TextFormatFlags.Top | TextFormatFlags.NoPrefix);
         }
 

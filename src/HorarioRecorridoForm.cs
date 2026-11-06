@@ -233,7 +233,7 @@ namespace SelectOR
                     var sz = TextRenderer.MeasureText(tag, f);
                     var r = new Rectangle((int)mid.X - sz.Width / 2 - 3, (int)mid.Y - sz.Height - 8, sz.Width + 6, sz.Height + 2);
                     using (var bb = new SolidBrush(Color.FromArgb(230, 24, 28, 34))) g.FillRectangle(bb, r);
-                    TextRenderer.DrawText(g, tag, f, r, c, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    ColorText.Text(g, tag, f, r, c, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 }
             }
             if (_hover >= 0 && _hover < _g.Edges.Length) Line(_g.Edges[_hover].Vec, Color.FromArgb(200, 255, 255, 255), 5f);

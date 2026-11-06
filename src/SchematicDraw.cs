@@ -678,6 +678,7 @@ namespace SelectOR
                         key.Append(compact ? 'c' : (char)('a' + Math.Min(20, (int)(fs.Width / Math.Max(1, lr0)))));
                     }
                     else { float r = 3.2f * sk; along = 2 * r; across = 2 * r; key.Append('o'); }
+                    key.Append(sg.Side < 0 ? '-' : sg.Side > 0 ? '+' : '0');   // (2026-11-06: el lado llega al leer el mundo)
                     if (zoom >= 1.0f && sg.Sig?.Obj >= 0) extra += 2 * sk + g.MeasureString(sg.Sig.Obj.ToString(System.Globalization.CultureInfo.InvariantCulture), fi).Width;
                     size[sg] = (along, across, extra);
                 }
@@ -744,7 +745,8 @@ namespace SelectOR
                 // de qué vía era cada una ni hacia dónde miraba.
                 // El mástil, corto: la figura pegada a su vía (con el de antes, la señal → de una vía y la ← de la de al lado se
                 // encontraban a media altura en el mismo punto y parecían un solo mástil con dos brazos).
-                int side0 = sg.Face < 0 ? -1 : 1, dir0 = sg.Face; var (along, across, extra) = size[sg];
+                // (2026-11-06) del lado en que está de verdad; si no se sabe (encima de la vía), a la derecha de la marcha
+                int side0 = sg.Side != 0 ? sg.Side : sg.Face < 0 ? -1 : 1, dir0 = sg.Face; var (along, across, extra) = size[sg];
                 float mast = Math.Min(m0, Math.Max(lw / 2 + across / 2 + 2f, 4f));
                 float stepA = Math.Max(4f, (along + extra + 4 * sk) / 2);
                 var l = new List<(SigPlace, float)>();

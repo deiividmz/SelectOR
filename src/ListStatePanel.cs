@@ -56,7 +56,7 @@ namespace SelectOR
             {
                 // Tarjetas «fantasma» con un brillo que pasa: se ve que algo está llegando y dónde.
                 using (var f = Theme.Font(9f, FontStyle.Bold))
-                    TextRenderer.DrawText(g, _text, f, new Rectangle(pad, pad, Width - pad * 2, 20), Theme.Subtle, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+                    ColorText.Text(g, _text, f, new Rectangle(pad, pad, Width - pad * 2, 20), Theme.Subtle, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
                 int y = pad + 28, h = 64, gap = 10;
                 float phase = _angle / 360f;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -83,10 +83,10 @@ namespace SelectOR
             using (var fi = EmojiPicker.EmojiFont(24f))
                 ColorText.DrawCells(g, new[] { (Icon, new Rectangle(0, cy - 64, Width, 44)) }, fi, Theme.Subtle, ClientRectangle);
             using (var f = Theme.Font(10.5f, FontStyle.Bold))
-                TextRenderer.DrawText(g, _text, f, new Rectangle(8, cy - 14, Width - 16, 24), Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis);
+                ColorText.Text(g, _text, f, new Rectangle(8, cy - 14, Width - 16, 24), Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis);
             if (Hint.Length > 0)
                 using (var f2 = Theme.Font(9f))
-                    TextRenderer.DrawText(g, Hint, f2, new Rectangle(16, cy + 14, Width - 32, Height - cy - 14), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
+                    ColorText.Text(g, Hint, f2, new Rectangle(16, cy + 14, Width - 32, Height - cy - 14), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
         }
     }
 }

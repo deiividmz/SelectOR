@@ -253,6 +253,7 @@ namespace SelectOR
         // Botones: órdenes de Open Rails por su nombre («|»: la primera que tenga esa versión).
         public static readonly (string id, string label)[] ButtonActions =
         {
+            ("SelectorRadio", "Radio de la sala (mantener para hablar)"),   // (1.2.90) no va a Open Rails: la atiende SelectOR (RoomRadio)
             ("ControlHorn", "Bocina"),
             ("ControlBell", "Campana"),
             ("ControlSander", "Arenero"),

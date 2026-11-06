@@ -161,7 +161,7 @@ namespace SelectOR
             {
                 var g = e.Graphics; g.Clear(Theme.Bg); g.SmoothingMode = SmoothingMode.AntiAlias;
                 using var fh = Theme.Font(8.5f, FontStyle.Bold); using var f = Theme.Font(8.5f);
-                TextRenderer.DrawText(g, I18n.T("TEXTURA DE LAS NUBES") + (_on ? "" : "  ·  " + I18n.T("(con el grupo Nubes activado)")), fh, new Rectangle(0, 0, Width, Theme.Px(22)), Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                ColorText.Text(g, I18n.T("TEXTURA DE LAS NUBES") + (_on ? "" : "  ·  " + I18n.T("(con el grupo Nubes activado)")), fh, new Rectangle(0, 0, Width, Theme.Px(22)), Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                 for (int i = 0; i < _tiles.Count; i++)
                 {
                     var r = TileRect(i); if (r.Right < 0 || r.Left > Width) continue;
@@ -184,10 +184,10 @@ namespace SelectOR
                     }
                     else
                     {
-                        TextRenderer.DrawText(g, t.Loading ? I18n.T("descargando…") : "☁", f, ir, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                        ColorText.Text(g, t.Loading ? I18n.T("descargando…") : "☁", f, ir, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                         if (!t.Loading && t.Sha != null) NeedImage?.Invoke(t.Sha);
                     }
-                    TextRenderer.DrawText(g, t.Label, sel ? fh : f, new Rectangle(r.X + 4, ir.Bottom + 2, r.Width - 8, Theme.Px(22)), sel ? Theme.AccentHi : Theme.Text,
+                    ColorText.Text(g, t.Label, sel ? fh : f, new Rectangle(r.X + 4, ir.Bottom + 2, r.Width - 8, Theme.Px(22)), sel ? Theme.AccentHi : Theme.Text,
                                           TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                 }
             }

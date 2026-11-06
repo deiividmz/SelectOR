@@ -74,22 +74,22 @@ namespace SelectOR
             var codeC = it.Code == "train_kind" ? Blue : isA ? Carne.Red : Amber;
             Fill(g, codeR, Theme.Px(8), Color.FromArgb(annulled ? 30 : 45, codeC));
             Stroke(g, codeR, Theme.Px(8), Color.FromArgb(annulled ? 90 : 200, codeC), 1.2f);
-            TextRenderer.DrawText(g, Carne.Code(it.Code), _fCode, codeR, annulled ? Theme.Subtle : codeC, C1);
+            ColorText.Text(g, Carne.Code(it.Code), _fCode, codeR, annulled ? Theme.Subtle : codeC, C1);
             int tx = codeR.Right + Theme.Px(14);
 
             // Derecha: puntos y estado
             int rightW = Theme.Px(190), right = rc.Right - rightW;
             var pr = new Rectangle(right, y - Theme.Px(2), rightW - pad, Theme.Px(30));
             if (it.Code != "train_kind")   // el aviso de tipo cambiado no resta puntos
-                TextRenderer.DrawText(g, Carne.PointsText(it.Points), _fPts, pr, annulled ? Theme.Subtle : Carne.Red, R1);
+                ColorText.Text(g, Carne.PointsText(it.Points), _fPts, pr, annulled ? Theme.Subtle : Carne.Red, R1);
             string st = Carne.StatusName(it.Status);
             int pw = TW(st, _fPill) + Theme.Px(20), ph = Theme.Px(22);
             var pill = new Rectangle(rc.Right - pad - pw, pr.Bottom + Theme.Px(4), pw, ph);
             var sc = Carne.StatusColor(it.Status);
             Fill(g, pill, ph / 2, Color.FromArgb(45, sc));
-            TextRenderer.DrawText(g, st, _fPill, pill, sc, C1);
+            ColorText.Text(g, st, _fPill, pill, sc, C1);
             if (!pending && it.Reviewer.Length > 0)
-                TextRenderer.DrawText(g, string.Format(I18n.T("revisada por {0}"), it.Reviewer), _fSmall,
+                ColorText.Text(g, string.Format(I18n.T("revisada por {0}"), it.Reviewer), _fSmall,
                     new Rectangle(right, pill.Bottom + Theme.Px(2), rightW - pad, Theme.Px(18)), Theme.Subtle, R1);
             using (var sep = new Pen(Theme.Surface2)) g.DrawLine(sep, right - Theme.Px(8), rc.Y + Theme.Px(12), right - Theme.Px(8), rc.Bottom - Theme.Px(12));
 
@@ -115,14 +115,14 @@ namespace SelectOR
                                 : it.MapNote ?? I18n.T("Preparando el mapa…");
                     using (var bp = Theme.Round(mapR, Theme.Px(8))) using (var b = new SolidBrush(Color.FromArgb(30, 34, 38))) g.FillPath(b, bp);
                     var nr = Rectangle.Inflate(mapR, -Theme.Px(14), -Theme.Px(10));
-                    TextRenderer.DrawText(g, note, _fText, nr, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+                    ColorText.Text(g, note, _fText, nr, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
                 }
             }
 
             int tw = contentRight - Theme.Px(18) - tx;
             // 1) nombre de la infracción
             int nw = Math.Min(TW(Carne.Name(it.Code), _fTitle), tw);
-            TextRenderer.DrawText(g, Carne.Name(it.Code), _fTitle, new Rectangle(tx, y, nw + 2, Theme.Px(22)), annulled ? Theme.Subtle : Theme.Text, L1);
+            ColorText.Text(g, Carne.Name(it.Code), _fTitle, new Rectangle(tx, y, nw + 2, Theme.Px(22)), annulled ? Theme.Subtle : Theme.Text, L1);
             // Cuándo ocurrió: tiempo desde el inicio del servicio
             string at = it.AtText;
             if (at.Length > 0 && tx + nw + Theme.Px(24) < tx + tw)
@@ -130,20 +130,20 @@ namespace SelectOR
                 int aw = TW("⏱ " + at, _fBold) + Theme.Px(16), ah = Theme.Px(20);
                 var ar = new Rectangle(tx + nw + Theme.Px(12), y + 1, Math.Min(aw, tx + tw - (tx + nw + Theme.Px(12))), ah);
                 Fill(g, ar, ah / 2, Color.FromArgb(40, Blue));
-                TextRenderer.DrawText(g, "⏱ " + at, _fBold, ar, annulled ? Theme.Subtle : Blue, C1);
+                ColorText.Text(g, "⏱ " + at, _fBold, ar, annulled ? Theme.Subtle : Blue, C1);
             }
             // 2) maquinista · empresa · fecha
             int ly = y + Theme.Px(24), lx = tx;
             int dw = Math.Min(TW(it.Driver, _fBold), tw / 2);
-            TextRenderer.DrawText(g, it.Driver, _fBold, new Rectangle(lx, ly, dw, Theme.Px(20)), Theme.Text, L1);
+            ColorText.Text(g, it.Driver, _fBold, new Rectangle(lx, ly, dw, Theme.Px(20)), Theme.Text, L1);
             lx += dw + Theme.Px(8);
             string meta = "🏢 " + it.Company + "    🕒 " + it.When;
-            if (lx < tx + tw) TextRenderer.DrawText(g, meta, _fText, new Rectangle(lx, ly, tx + tw - lx, Theme.Px(20)), Theme.Subtle, L1);
+            if (lx < tx + tw) ColorText.Text(g, meta, _fText, new Rectangle(lx, ly, tx + tw - lx, Theme.Px(20)), Theme.Subtle, L1);
             // 3) tren · recorrido · detalle
             string l3 = "🚆 " + (it.Train.Length > 0 ? it.Train : "—");
             if (it.Route.Length > 0) l3 += "    🛤 " + it.Route;
             if (it.Detail.Length > 0) l3 += "    ·  " + it.Detail;
-            TextRenderer.DrawText(g, l3, _fText, new Rectangle(tx, ly + Theme.Px(22), tw, Theme.Px(20)), Theme.Subtle, L1);
+            ColorText.Text(g, l3, _fText, new Rectangle(tx, ly + Theme.Px(22), tw, Theme.Px(20)), Theme.Subtle, L1);
         }
     }
 }

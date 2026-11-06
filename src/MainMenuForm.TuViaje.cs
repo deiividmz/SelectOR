@@ -300,7 +300,7 @@ namespace SelectOR
                 Glyphs.Draw(g, "train", new Rectangle(tr.X + tw / 2 - 8, tr.Y + th / 2 - 8, 16, 16), Theme.Text);
                 string txt = Empty ?? (Km > 0 ? Km.ToString("N1", I18n.Culture) + " km" : "")
                              + (Empty == null && Count > 0 ? (Km > 0 ? "  ·  " : "") + string.Format(I18n.T(Count == 1 ? "{0} recorrido" : "{0} recorridos"), Count) : "");
-                TextRenderer.DrawText(g, txt, _f, new Rectangle(0, cy + 11, Width, Height - cy - 11), Theme.Subtle,
+                ColorText.Text(g, txt, _f, new Rectangle(0, cy + 11, Width, Height - cy - 11), Theme.Subtle,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
             }
         }
@@ -348,7 +348,7 @@ namespace SelectOR
                 if (!string.IsNullOrEmpty(Glyph)) Glyphs.Draw(g, Glyph, new Rectangle(x, Height / 2 - 9, 18, 18), Theme.Text);
                 x += 24;
                 int tw = TextRenderer.MeasureText(Text ?? "", _f, Size.Empty, TextFormatFlags.NoPadding).Width;
-                TextRenderer.DrawText(g, Text ?? "", _f, new Rectangle(x, 0, tw + 2, Height), on || !Toggle ? Theme.Text : Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                ColorText.Text(g, Text ?? "", _f, new Rectangle(x, 0, tw + 2, Height), on || !Toggle ? Theme.Text : Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
                 x += tw + 8;
                 float cy = Height / 2f;
                 if (Toggle)
