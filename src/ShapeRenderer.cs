@@ -74,7 +74,7 @@ namespace SelectOR
         }
     }
 
-    public static class ShapeRenderer
+    public static partial class ShapeRenderer
     {
         // ---- recursos MonoGame (creados perezosamente en el hilo de UI) ----
         static System.Windows.Forms.Form _hiddenForm;

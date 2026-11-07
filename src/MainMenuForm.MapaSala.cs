@@ -153,6 +153,17 @@ namespace SelectOR
                 if (meW.Length > 0 && string.Equals(kv.Value.train, meW, StringComparison.OrdinalIgnoreCase)) { v.Banner = string.Format(Tr("Señal {0} en parada: {1}"), kv.Key, SwitchPilot.Lang(kv.Value.text)); break; }
             foreach (var t in p.Trains)
                 if (!t.player && !RoomLoose.Is(t.name) && OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) v.AiTrains.Add((t.name, la, lo, t.kmh));
+            // (1.2.91) los jefes de circulación, en su dependencia: su centro y lo que ocupa, por sus agujas y señales
+            foreach (var z in p.JefeZones)
+            {
+                var pts = new List<(double la, double lo)>();
+                if (z.Nodes != null) foreach (var w in geo.Switches) if (Array.IndexOf(z.Nodes, w.Node) >= 0) pts.Add((w.Lat, w.Lon));
+                if (z.Sigs != null) foreach (var sg in geo.Signals) if (Array.IndexOf(z.Sigs, sg.Obj) >= 0) pts.Add((sg.Lat, sg.Lon));
+                if (pts.Count == 0) continue;
+                double cla = pts.Average(q => q.la), clo = pts.Average(q => q.lo);
+                double rad = pts.Max(q => HudMapDetail.Meters(cla, clo, q.la, q.lo));
+                v.Jefes.Add((z.Name, z.Zone, cla, clo, rad, RoomColor(z.Name)));
+            }
             return v;
         }
 
@@ -210,9 +221,8 @@ namespace SelectOR
         }
 
         // «Tú» en la leyenda de una sala: tu papel (null fuera de una sala).
-        string RoomMeStatus() => !RoomMapOn ? null : (_pilot.IsDispatcher ? Tr("despachador") : _pilot.Helper ? Tr("ayudante") : Tr("jugador"))
-                                 + " · " + (_pilot.JefeZones.Count == 0 ? Tr("Sin jefe de circulación")   // (2026-11-06) y en qué dependencias
-                                            : string.Format(Tr(_pilot.JefeZones.Select(z => z.Name).Distinct().Count() == 1 ? "Jefe de circulación: {0}" : "Jefes de circulación: {0}"), SwitchPilot.JefesText(_pilot.JefeZones)));
+        // (1.2.91) los jefes de circulación ya no van aquí: se ven en el mapa, en su dependencia (halo y «👮 nombre», RoomMap.cs)
+        string RoomMeStatus() => !RoomMapOn ? null : (_pilot.IsDispatcher ? Tr("despachador") : _pilot.Helper ? Tr("ayudante") : Tr("jugador"));
 
         // Jefes de circulación (1.2.75): en sus estaciones, las agujas y las órdenes a las señales son suyas. El jefe de esa
         // aguja o señal, si no soy yo (null: la puedo mover)

@@ -21,7 +21,7 @@ using System.Windows.Forms;
 
 namespace SelectOR
 {
-    public sealed class ObjetosSalaForm : Form
+    public sealed partial class ObjetosSalaForm : Form
     {
         public sealed class RoomObj
         {
@@ -33,14 +33,44 @@ namespace SelectOR
             ("obra_saluda", "Operario que saluda al tren"), ("obra_espera", "Operario de pie"),
             ("derrumbe", "Derrumbe de tierras"), ("derrumbe_grande", "Derrumbe grande"), ("roca", "Roca caída"), ("piedras", "Piedras en la vía"),
             ("fuego", "Fuego"), ("incendio", "Incendio"),
+            ("cartel_parada", "Cartel de parada absoluta"),   // (1.2.91) la forma de la ruta, en medio de la vía
+            // (1.2.91) personas: bomberos, policía, sanitarios y vigilantes (Rocketbox), en varias posturas
+            ("bomb_trabaja", "Bombero trabajando"), ("bomb_agachado", "Bombero agachado"), ("bomb_espera", "Bombero de pie"), ("bomb_saluda", "Bombero que saluda al tren"),
+            ("poli_espera", "Policía de pie"), ("poli_indica", "Policía dando indicaciones"), ("poli_telefono", "Policía hablando por teléfono"), ("poli_saluda", "Policía que saluda al tren"),
+            ("sani_agachado", "Sanitario atendiendo (agachado)"), ("sani_espera", "Sanitario de pie"), ("sani_habla", "Sanitario hablando"),
+            ("vigi_espera", "Vigilante de seguridad de pie"), ("vigi_telefono", "Vigilante hablando por teléfono"), ("vigi_saluda", "Vigilante que saluda al tren"),
         };
-        static bool IsWorker(string kind) => kind.StartsWith("obra_");
+        static bool OnTrack(string kind) => kind == "cartel_parada";   // (se pone en el eje de la vía, mirando a lo largo)
+        // (1.2.91) personas: operarios y los demás oficios; el grupo es el prefijo («obra_», «bomb_»…), común al tipo y a sus figuras
+        static readonly string[] PersonGroups = { "obra_", "bomb_", "poli_", "sani_", "vigi_" };
+        internal static bool IsWorker(string kind) => kind != null && kind.Length > 5 && Array.IndexOf(PersonGroups, kind.Substring(0, 5)) >= 0;
+        static string Group(string kind) => IsWorker(kind) ? kind.Substring(0, 5) : "";
+        internal static string PersonIcon(string kind) => Group(kind) switch { "bomb_" => "🚒 ", "poli_" => "👮 ", "sani_" => "🚑 ", "vigi_" => "🛡 ", _ => "🚧 " };
+        internal static Color PersonColor(string kind) => Group(kind) switch
+        {
+            "bomb_" => Color.FromArgb(230, 50, 40), "poli_" => Color.FromArgb(40, 110, 230), "sani_" => Color.FromArgb(240, 240, 240), "vigi_" => Color.FromArgb(140, 150, 160),
+            _ => kind.EndsWith("_saluda") ? Color.FromArgb(255, 200, 40) : Color.FromArgb(255, 130, 20)
+        };
         public static readonly (string fig, string label)[] Figures =
         {
             ("*", "Cualquiera"), ("obra_h07", "Hombre · chaleco naranja"), ("obra_h08", "Hombre · chaleco amarillo"), ("obra_m01", "Mujer · chaleco amarillo"),
             ("obra_h02", "Hombre · buzo azul"), ("obra_h05", "Hombre · buzo azul (2)"), ("obra_h03", "Hombre · buzo y herramientas"),
             ("obra_h06", "Hombre · buzo y herramientas (2)"), ("obra_h04", "Hombre · peto y camisa blanca"), ("obra_h01", "Hombre · careta de soldar"),
+            ("bomb_h05", "Bombero · uniforme azul marino"), ("bomb_h06", "Bombero · traje beige"),
+            ("poli_h04", "Policía · uniforme negro y boina"), ("poli_h06", "Policía · chaleco antibalas"),
+            ("sani_h01", "Sanitario · bata blanca"), ("sani_h02", "Sanitario · uniforme azul de emergencias"),
+            ("vigi_h01", "Vigilante · uniforme gris"),
         };
+        readonly List<string> _figKeys = new List<string>();   // (las figuras de la lista, según el grupo del tipo elegido)
+        void FillFigures(string kind)
+        {
+            string g = Group(kind);
+            _fig.Items.Clear(); _figKeys.Clear();
+            foreach (var (f, l) in Figures)
+                if (f == "*" || (g.Length > 0 && f.StartsWith(g))) { _figKeys.Add(f); _fig.Items.Add(Tr(l)); }
+            _fig.SelectedIndex = 0;
+            _fig.Enabled = g.Length > 0;
+        }
         static string Tr(string s) => I18n.T(s);
         static string KindLabel(string k) => Tr(Kinds.FirstOrDefault(x => x.kind == k).label ?? k);
 
@@ -72,10 +102,9 @@ namespace SelectOR
             _kind = DialogKit.Combo(); _kind.Dock = DockStyle.Top; _kind.DropDownStyle = ComboBoxStyle.DropDownList;
             foreach (var (_, l) in Kinds) _kind.Items.Add(Tr(l));
             _kind.SelectedIndex = 0;
-            _kind.SelectedIndexChanged += (s, e) => { UpdateStatus(); _fig.Enabled = IsWorker(Kinds[Math.Max(0, _kind.SelectedIndex)].kind); };   // (la figura, solo los operarios)
+            _kind.SelectedIndexChanged += (s, e) => { UpdateStatus(); FillFigures(Kinds[Math.Max(0, _kind.SelectedIndex)].kind); };   // (la figura, solo las personas: las de su oficio)
             _fig = DialogKit.Combo(); _fig.Dock = DockStyle.Top; _fig.DropDownStyle = ComboBoxStyle.DropDownList;
-            foreach (var (_, l) in Figures) _fig.Items.Add(Tr(l));
-            _fig.SelectedIndex = 0;
+            FillFigures(Kinds[0].kind);
             var hint = new Label
             {
                 Dock = DockStyle.Top, Height = Theme.Px(92), Font = Theme.Font(8.75f), ForeColor = Theme.Subtle, BackColor = side.BackColor,
@@ -100,10 +129,15 @@ namespace SelectOR
             var turn = DialogKit.Secondary(Tr("Girar 45°"), 140); turn.Click += (s, e) => { if (_sel >= 0) _ = Turn(_sel, 45); };
             var del = DialogKit.Secondary(Tr("Quitar"), 140); del.Click += (s, e) => { if (_sel >= 0) _ = Remove(_sel); };
             var all = DialogKit.Danger(Tr("Quitar todos"), 140); all.Click += async (s, e) => await RemoveAll();
-            buttons.Controls.AddRange(new Control[] { turn, del, all });
+            buttons.Controls.AddRange(new Control[] { turn, del });
+            if (Supa.IsSuperadmin)   // (1.2.91) «Quitar todos» y los autorizados, solo el administrador (ObjetosSalaForm.Autorizados.cs)
+            {
+                var auth = DialogKit.Secondary(Tr("Autorizados…"), 140); auth.Click += async (s, e) => await EditEditors(auth);
+                buttons.Controls.AddRange(new Control[] { all, auth });
+            }
             // (orden de Dock.Top: lo último añadido queda arriba)
             side.Controls.Add(_list); side.Controls.Add(buttons);
-            foreach (var c in new Control[] { _count, Gap(8), hint, Gap(8), _fig, Cap(Tr("FIGURA")), _kind, Cap(Tr("PONER EN EL MAPA")) }) side.Controls.Add(c);
+            foreach (var c in new Control[] { _count, Gap(8), hint, Gap(4), BuildPhotoCheck(), Gap(8), _fig, Cap(Tr("FIGURA")), _kind, Cap(Tr("PONER EN EL MAPA")) }) side.Controls.Add(c);   // (1.2.91: y la vista fotorrealista)
 
             _map = new RouteLiveMap { Dock = DockStyle.Fill };
             _map.EmptyText = Tr("Cargando el mapa de la ruta…");
@@ -120,6 +154,7 @@ namespace SelectOR
             if (IsDisposed) return;
             if (d == null) { _map.EmptyText = Tr("No se ha podido leer el mapa de la ruta."); return; }
             _map.SetData(d);
+            ApplyPhoto();   // (1.2.91) el terreno bajo las vías (ObjetosSalaForm.Terreno.cs)
         }
 
         async Task Reload()
@@ -180,7 +215,7 @@ namespace SelectOR
             using (var b = new SolidBrush(sel ? Theme.Surface2 : Theme.BgSidebar)) e.Graphics.FillRectangle(b, e.Bounds);
             if (sel) using (var a = new SolidBrush(Color.FromArgb(255, 160, 40))) e.Graphics.FillRectangle(a, e.Bounds.X, e.Bounds.Y + 5, 3, e.Bounds.Height - 10);
             int h = e.Bounds.Height / 2;
-            ColorText.Text(e.Graphics, (IsWorker(o.Kind) ? "🚧 " : o.Kind == "fuego" || o.Kind == "incendio" ? "🔥 " : "⛰ ") + KindLabel(o.Kind), _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 2, e.Bounds.Width - 14, h),
+            ColorText.Text(e.Graphics, (IsWorker(o.Kind) ? PersonIcon(o.Kind) : o.Kind == "fuego" || o.Kind == "incendio" ? "🔥 " : OnTrack(o.Kind) ? "🛑 " : "⛰ ") + KindLabel(o.Kind), _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 2, e.Bounds.Width - 14, h),
                 Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             string fig = IsWorker(o.Kind) ? Tr(Figures.FirstOrDefault(x => x.fig == o.Figure).label ?? o.Figure) + " · " : "";
             using var small = Theme.Font(8.25f);
@@ -196,6 +231,16 @@ namespace SelectOR
             {
                 var p = scr(o.Lat, o.Lon); bool sel = o.Id == _sel;
                 float r = sel ? 9 : 6;
+                if (OnTrack(o.Kind))
+                {
+                    var st0 = g.Save(); g.TranslateTransform(p.X, p.Y); g.RotateTransform((float)o.Bearing);
+                    float pw = Theme.Px(sel ? 18 : 14), ph = Theme.Px(sel ? 7 : 5);
+                    using (var b = new SolidBrush(Color.FromArgb(230, 210, 30, 30))) g.FillRectangle(b, -pw / 2, -ph / 2, pw, ph);
+                    using (var pen = new Pen(sel ? Color.White : Color.FromArgb(250, 245, 245), sel ? 2.2f : 1.4f)) g.DrawRectangle(pen, -pw / 2, -ph / 2, pw, ph);
+                    using (var pen = new Pen(Color.FromArgb(250, 245, 245), 1.6f)) g.DrawLine(pen, 0, -ph / 2, 0, -ph / 2 - Theme.Px(7));   // (hacia donde mira)
+                    g.Restore(st0);
+                    continue;
+                }
                 if (!IsWorker(o.Kind))
                 {
                     // su tamaño de verdad (largo × ancho, en m) girado a su rumbo
@@ -212,7 +257,7 @@ namespace SelectOR
                 double a = o.Bearing * Math.PI / 180;
                 var tip = new PointF(p.X + (float)Math.Sin(a) * (r + 9), p.Y - (float)Math.Cos(a) * (r + 9));
                 using (var pen = new Pen(Color.FromArgb(255, 200, 120), 2.2f)) g.DrawLine(pen, p, tip);
-                using (var b = new SolidBrush(o.Kind == "obra_saluda" ? Color.FromArgb(255, 200, 40) : Color.FromArgb(255, 130, 20))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
+                using (var b = new SolidBrush(PersonColor(o.Kind))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
                 using (var pen = new Pen(sel ? Color.White : Color.FromArgb(60, 30, 0), sel ? 2.5f : 1.2f)) g.DrawEllipse(pen, p.X - r, p.Y - r, 2 * r, 2 * r);
             }
         }
@@ -257,9 +302,10 @@ namespace SelectOR
         }
 
         // hacia la vía más cercana (a menos de 60 m); si está encima de ella, a lo largo; sin vía cerca, al norte
-        double FaceTrack(double lat, double lon, string kind = "obra_")
+        double FaceTrack(double lat, double lon, string kind = "obra_espera")
         {
             var d = _map.Data; if (d == null) return 0;
+            if (OnTrack(kind)) return d.TrackBearing(lat, lon, 60, out double tb0) ? (tb0 + 360) % 360 : 0;   // (mirando a lo largo de la vía)
             if (!IsWorker(kind) && d.Snap(lat, lon, 60, out double tla, out double tlo))
             {
                 double dy0 = (tla - lat) * 111320, dx0 = (tlo - lon) * 111320 * Math.Cos(lat * Math.PI / 180);
@@ -276,13 +322,24 @@ namespace SelectOR
         async Task Place(double lat, double lon)
         {
             if (_busy) return;
+            var kind0 = Kinds[Math.Max(0, _kind.SelectedIndex)].kind;
+            if (OnTrack(kind0))
+            {
+                // (1.2.91) en medio de la vía: el punto del eje más cercano (a menos de 40 m)
+                if (_map.Data == null || !_map.Data.Snap(lat, lon, 40, out double sla, out double slo))
+                {
+                    ThemedBox.Show(this, Tr("El cartel de parada absoluta va en medio de una vía: haz clic encima de una."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                lat = sla; lon = slo;
+            }
             if (!OrGeo.TryWorld(_routeDir, lat, lon, out double wx, out double wz))
             {
                 ThemedBox.Show(this, Tr("No se ha podido pasar ese punto a la posición de Open Rails."), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             int tx = (int)Math.Round(wx / 2048.0), tz = (int)Math.Round(wz / 2048.0);
-            var kind = Kinds[Math.Max(0, _kind.SelectedIndex)].kind; var fig = IsWorker(kind) ? Figures[Math.Max(0, _fig.SelectedIndex)].fig : "*";
+            var kind = Kinds[Math.Max(0, _kind.SelectedIndex)].kind; var fig = IsWorker(kind) && _fig.SelectedIndex >= 0 && _fig.SelectedIndex < _figKeys.Count ? _figKeys[_fig.SelectedIndex] : "*";
             _busy = true;
             try
             {

@@ -41,16 +41,11 @@ namespace SelectOR
         // (BuildSalaCheck) el botón ⛅, a la derecha de la casilla; solo para el administrador
         void BuildSalaWeatherButton()
         {
-            // (1.2.77) el icono en color, como los demás de SelectOR (EmojiIcon)
-            _salaWxBtn = new EmojiIcon { Text = "⛅", Size = new Size(30, 30),
-                                     ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(13f), Cursor = Cursors.Hand, Visible = false };
+            // (1.2.91) un botón con su icono y su texto (MainMenuForm.SalaBotones.cs)
+            _salaWxBtn = new SalaButton("⛅", Tr("Clima")) { Visible = false };
             _salaWxBtn.Click += async (s, e) => await EditSalaWeather();
             new ToolTip().SetToolTip(_salaWxBtn, Tr("Clima de la sala (administrador)"));
-            Action place = () => _salaWxBtn.Location = new Point(_salaHost.ClientSize.Width - _salaWxBtn.Width - 4, Math.Max(0, (_salaHost.ClientSize.Height - _salaWxBtn.Height) / 2));
-            _salaHost.Resize += (s, e) => place();
-            _salaHost.HandleCreated += (s, e) => place();
             _salaHost.Controls.Add(_salaWxBtn);
-            _salaWxBtn.BringToFront();
         }
 
         // (SalaCheckUpdate) a la vista solo para el administrador (la sesión puede llegar después)
@@ -58,11 +53,12 @@ namespace SelectOR
         {
             if (_salaWxBtn == null || _salaHost == null) return;
             bool admin = Supa.IsSuperadmin && Supa.IsLoggedIn;
-            bool ai = (Supa.IsSuperadmin || Supa.IsAiEditor) && Supa.IsLoggedIn;   // (1.2.81) también los gestores del horario
-            if (_salaWxBtn.Visible == admin && (_salaAiBtn == null || _salaAiBtn.Visible == ai)) return;
+            bool ai = Supa.IsLoggedIn;   // (1.2.91) el 🚆 para todos: cómo ves los trenes IA (y, el administrador y los gestores, su horario)
+            if (_salaWxOn == admin && _salaAiOn == ai) return;
+            _salaWxOn = admin; _salaAiOn = ai;
             _salaWxBtn.Visible = admin;
-            if (_salaAiBtn != null) _salaAiBtn.Visible = ai;   // (1.2.77) 🚆 el horario de los trenes IA
-            _salaHost.Width = SalaHostBase + (admin ? 34 : 0) + (ai ? 34 : 0);   // (SalaHostBase ya lleva el 🖥 del puesto de mando)
+            if (_salaAiBtn != null) _salaAiBtn.Visible = ai;
+            SalaButtonsLayout();   // (1.2.91) botones con texto: la casilla se ensancha lo que ocupan
         }
 
         async Task EditSalaWeather()

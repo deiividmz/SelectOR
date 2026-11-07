@@ -1,4 +1,4 @@
-// (2026-11-04) PUESTO DE MANDO · «🚧 Objetos»: solo el administrador. Abre la ventana de los objetos de la sala
+// (2026-11-04) PUESTO DE MANDO · «🚧 Objetos»: el administrador (1.2.91: y quien él autorice). Abre la ventana de los objetos de la sala
 // (ObjetosSalaForm.cs: operarios de vía en un punto del mapa), que MainMenuForm le da en OpenObjects.
 
 using System;

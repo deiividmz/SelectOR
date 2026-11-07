@@ -1,10 +1,10 @@
-﻿1.2.90
-Alquila trenes a otras empresas|En Flota → «Vender, alquilar o desguazar…» ofreces un tren 7, 14 o 30 días; la otra empresa te paga el alquiler en cada servicio y al acabar vuelve a tu flota.
-El mercado mira tu carpeta|Cada tren del mercado dice si ya tienes todo su material o qué te falta.
-Portal de transparencia|Tablón → Transparencia enseña cómo va cada empresa en el mes y qué cuenta en la Liga, con «¿Cómo se calcula?».
-Tarifas nuevas|Los viajeros dependen de la demanda y no del tamaño del tren, el billete y los costes suben, y comprar trenes es mucho más barato (un 59 %).
-Radio de la sala|En la sala compartida mantienes pulsada una tecla (Control derecho, de serie) o un botón de tu mando para hablar, y se oye como por una radio.
-Jefe de circulación a la vista|La tarjeta de la sala y el mapa grande dicen quién lleva cada estación.
-Señales en su lado|En el puesto de mando las señales salen del lado de la vía en que están de verdad.
-Tablón renovado|Cabecera de teleindicador, pestañas con icono y emojis a color.
-Túneles con luz|Con CYZYRails, los túneles de vía doble de la CGL tienen luces en las paredes, como el resto de túneles de la ruta.
+﻿1.2.91
+Premios en la sala compartida|Si haces el servicio en la sala compartida de principio a fin, tu empresa cobra un 15 % más del beneficio, un 5 % más si un jefe de circulación lleva el mando, y 1.000 € al llegar a 5 servicios en la semana. En Mi perfil ves tus servicios en la sala, tu racha y sus insignias.
+Más gente junto a la vía|En la sala compartida pueden aparecer bomberos, policías, sanitarios y vigilantes de seguridad: trabajando, atendiendo a alguien, hablando por teléfono o saludando al tren.
+Cartel de parada absoluta|En la sala compartida puede aparecer en medio de la vía el cartel de parada absoluta de la CGL.
+Tú eliges cómo ves los trenes IA|En la sala compartida, «Trenes IA» → «Cómo veo los trenes IA»: eliges con qué tren de tu carpeta ves cada servicio, con su composición en 2D. Solo cambia en tu Open Rails.
+Puesto de mando con capas|El botón «🗺 Capas» enseña el tramo de cada dependencia, los PK de la ruta y los objetos de la sala; con un clic en una franja se abre esa dependencia.
+Jefes en el mapa grande|Cada jefe de circulación sale con su distintivo encima de su estación.
+Teleindicadores centrados|El texto de los teleindicadores sale siempre centrado, sea corto o largo.
+Casilla de la sala más clara|«Puesto de mando», «Trenes IA» y «Clima» son botones con icono y texto, y la lista de conectados de la pestaña Ruta sale al momento.
+Todo en el mapa grande|En la sala compartida ya no se abre la ventana de Ctrl+9: las agujas, las señales y los trenes están en el mapa grande del HUD.

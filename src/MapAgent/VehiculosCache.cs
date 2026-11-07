@@ -120,6 +120,29 @@ namespace SelectOR.Comun
         static readonly Regex BlockRx = new Regex(@"\b(Engine|Wagon)\s*\(", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         static readonly Regex FlipRx = new Regex(@"\bFlip\s*\(", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         static readonly Regex CarRx = new Regex(@"\b(EngineData|WagonData)\s*\(\s*(?:""([^""]*)""|(\S+))\s+(?:""([^""]*)""|([^\s)]+))\s*\)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // (1.2.91) un .con suelto (los trenes IA de la sala, con la composición que elige el usuario): sus vehículos, si
+        // están todos en la carpeta de trenes de esta sesión; si falta alguno, null
+        public static Con ReadCon(string path, string basePath)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+            string root = Path.Combine(basePath ?? "", "trains", "trainset");
+            string t = Read(path) ?? "";
+            var blocks = BlockRx.Matches(t).Cast<Match>().Select(b => b.Index).ToList();
+            var c = new Con { Name = Path.GetFileNameWithoutExtension(path) };
+            foreach (Match m in CarRx.Matches(t))
+            {
+                int b0 = blocks.LastOrDefault(x => x <= m.Index), b1 = blocks.FirstOrDefault(x => x > m.Index);
+                if (b1 <= b0) b1 = t.Length;
+                bool flip = FlipRx.Match(t.Substring(b0, b1 - b0)).Success;
+                bool eng = m.Groups[1].Value.StartsWith("E", StringComparison.OrdinalIgnoreCase);
+                string name = m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value, folder = m.Groups[4].Success ? m.Groups[4].Value : m.Groups[5].Value;
+                string rel = folder.Trim() + "\\" + name.Trim() + (eng ? ".eng" : ".wag");
+                if (!File.Exists(Path.Combine(root, rel))) return null;
+                c.Cars.Add((rel, eng)); c.Flips.Add(flip);
+            }
+            return c.Cars.Count > 0 ? c : null;
+        }
+
         static List<Con> BuildConsists(string basePath, Dictionary<string, (double, char)> have)
         {
             string dir = Path.Combine(basePath ?? "", "trains", "consists");

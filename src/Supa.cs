@@ -34,6 +34,7 @@ namespace SelectOR
         // vuelve a comprobar el servidor en cada operación.
         public static bool IsSuperadmin { get; private set; }
         public static bool IsAiEditor { get; private set; }   // (1.2.81) gestor del horario de la sala (o el administrador)
+        public static bool IsObjectEditor { get; private set; }   // (1.2.91) puede poner y quitar objetos de la sala (o el administrador)
         static string _superadminCheckedFor;   // usuario para el que ya se consultó
 
         static HttpClient _http;
@@ -68,7 +69,7 @@ namespace SelectOR
         {
             AccessToken = null; RefreshToken = null; _accessExpiresUtc = DateTime.MinValue;
             UserId = null; Email = null; Username = null;
-            IsSuperadmin = false; IsAiEditor = false; _superadminCheckedFor = null;
+            IsSuperadmin = false; IsAiEditor = false; IsObjectEditor = false; _superadminCheckedFor = null;
         }
 
         public static void SetUsername(string u) { if (!string.IsNullOrWhiteSpace(u)) Username = u; }
@@ -177,7 +178,17 @@ namespace SelectOR
                     ed = r2.IsSuccessStatusCode && t2.Trim() == "true";
                 }
                 catch { }
-            IsSuperadmin = su; IsAiEditor = ed; _superadminCheckedFor = forUser;
+            // (1.2.91) autorizado para los objetos de la sala (sql/objetos-sala-editores.sql)
+            bool ob = su;
+            if (!su && forUser != null)
+                try
+                {
+                    var r3 = await Send(Req(HttpMethod.Post, "/rest/v1/rpc/is_object_editor", "{}", useUserToken: true));
+                    var t3 = await r3.Content.ReadAsStringAsync();
+                    ob = r3.IsSuccessStatusCode && t3.Trim() == "true";
+                }
+                catch { }
+            IsSuperadmin = su; IsAiEditor = ed; IsObjectEditor = ob; _superadminCheckedFor = forUser;
         }
 
         /// <summary>Devuelve null si OK, o el mensaje de error.</summary>

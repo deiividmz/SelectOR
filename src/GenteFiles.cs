@@ -29,7 +29,7 @@ namespace SelectOR
         static readonly CultureInfo CI = CultureInfo.InvariantCulture;
         const float Scale = 0.01f;   // (el paquete va en cm)
         // la huella del paquete que va con esta versión (rocketbox/Gente.pack del conversor; si se rehace, se cambia aquí)
-        public const string PackSha = "9bb7239b7a890a8d7abfdbfbcbcc77aa93f3ba68ef301b1d0133fbcb7f0c9a88";   // (38 personas, sin f06, f10, f16, m15, m19 y m21; y desde 2026-11-04, para los objetos de la sala, 9 operarios de vía «obra_…», 4 derrumbes y el fuego «obj_…»)
+        public const string PackSha = "f341c2a9c4b9deef1e3c6bb2722e29525a87d45a92193f29a1a2e7e8346e482a";   // (38 personas, sin f06, f10, f16, m15, m19 y m21; para los objetos de la sala, 9 operarios de vía «obra_…», 4 derrumbes y el fuego «obj_…» (2026-11-04) y, desde 2026-11-07, 7 personas de otros oficios: bomb_h05/h06, poli_h04/h06, sani_h01/h02, vigi_h01)
         public static string PackName => "Gente_" + PackSha.Substring(0, 12) + ".pack";
         public static string PackUrl => Supa.BuiltInUrl.TrimEnd('/') + "/storage/v1/object/public/updates/" + PackName;
         public static string LocalPack => Path.Combine(AppContext.BaseDirectory, "Gente.pack");   // (junto a SelectOR: el del administrador)

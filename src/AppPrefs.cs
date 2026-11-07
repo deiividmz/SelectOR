@@ -111,6 +111,8 @@ namespace SelectOR
         // Horarios: tren elegido por el usuario para una línea. Clave = archivo del horario + "|" + tren; valor = el .con
         // (su nombre de archivo, sin extensión). El horario original no se toca: se conduce una copia (HorarioTrenes).
         public Dictionary<string, string> TtConsistOverride { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // (1.2.91) los trenes IA de la sala, como los quiere ver el usuario: servicio del horario de la sala → su .con (ruta entera)
+        public Dictionary<string, string> SalaAiConsist { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         // Conducción libre: itinerario elegido para la próxima conducción en cada ruta. Clave = carpeta de la ruta (RouteKey),
         // valor = Id del itinerario guardado (SavedItineraries). Se carga solo en el HUD y la hoja de ruta al conducir.
         public Dictionary<string, string> ExploreItinerary { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

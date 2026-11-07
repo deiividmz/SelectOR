@@ -66,6 +66,11 @@ namespace SelectOR
             // Servicio programado (servicios-programados.sql): turno cumplido y prima que paga el servidor (no está en el neto)
             public bool SchedDone;
             public double SchedBonus;
+            // (1.2.91) Plus de sala compartida (sala-premios.sql): lo paga el servidor a la empresa (no está en el neto)
+            public bool Room;
+            public double RoomBonus, RoomPct, RoomJefeBonus, RoomJefePct, RoomStreak;
+            public string RoomJefes = "";
+            public int RoomWeek, RoomStreakN = 5;
             // Alegaciones (alegaciones.sql), solo en un servicio mío: las que ya hice, por sanción (su id) o por la
             // anulación («svc:» + el id del servicio); null = no se puede alegar (no es mío o el servidor no las tiene).
             public Dictionary<string, (string status, string answer)> Appeals;
@@ -565,6 +570,31 @@ namespace SelectOR
                     int h2 = TextRenderer.MeasureText(why, _fS, new Size(iw, 0), Wrap).Height;
                     if (g != null) ColorText.Text(g, why, _fS, new Rectangle(x, y, iw, h2), Faint, Wrap);
                     y += h2 + Theme.Px(6);
+                }
+                if (_d.Room)
+                {
+                    // (1.2.91) el plus de sala compartida: aparte del neto (lo paga el servidor)
+                    y += Theme.Px(4); DashLine(g, x, y, iw); y += Theme.Px(8);
+                    void Line(string lbl, double v)
+                    {
+                        string amt = "+" + v.ToString("N2", Es) + " €";
+                        int aw = TextRenderer.MeasureText(amt, _fL, Size.Empty, TextFormatFlags.NoPadding).Width;
+                        if (g != null)
+                        {
+                            ColorText.Text(g, lbl, _fL, new Rectangle(x, y, iw - aw - 8, Theme.Px(18)), Ink, TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                            ColorText.Text(g, amt, _fL, new Rectangle(x + iw - aw, y, aw, Theme.Px(18)), PosC, TextFormatFlags.NoPadding);
+                        }
+                        y += Theme.Px(19);
+                    }
+                    Line(string.Format(I18n.T("Plus de sala compartida (+{0} %)"), _d.RoomPct.ToString("0.#", Es)), _d.RoomBonus);
+                    if (_d.RoomJefeBonus > 0)
+                        Line(string.Format(I18n.T("Con jefe de circulación (+{0} %)"), _d.RoomJefePct.ToString("0.#", Es)) + (_d.RoomJefes.Length > 0 ? " · " + _d.RoomJefes : ""), _d.RoomJefeBonus);
+                    if (_d.RoomStreak > 0) Line(string.Format(I18n.T("Racha semanal ({0} servicios en la sala)"), _d.RoomStreakN), _d.RoomStreak);
+                    string why = I18n.T("Por hacer el servicio en la sala compartida. Lo paga el servidor a la tesorería de la empresa: no cuenta en el neto del viaje ni en la liga.")
+                        + (_d.RoomStreak > 0 ? "" : " " + string.Format(I18n.T("Racha de esta semana: {0} de {1}."), Math.Min(_d.RoomWeek, _d.RoomStreakN), _d.RoomStreakN));
+                    int h3 = TextRenderer.MeasureText(why, _fS, new Size(iw, 0), Wrap).Height;
+                    if (g != null) ColorText.Text(g, why, _fS, new Rectangle(x, y, iw, h3), Faint, Wrap);
+                    y += h3 + Theme.Px(6);
                 }
                 if (!_hasDetail)
                 {

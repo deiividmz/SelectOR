@@ -1,10 +1,10 @@
-﻿1.2.90
-Rent trains to other companies|In Fleet → «Sell, rent out or scrap…» you offer a train for 7, 14 or 30 days; the other company pays you rent for every service and it comes back to your fleet at the end.
-The market checks your folder|Every train on the market says whether you already have all its rolling stock or what is missing.
-Transparency portal|Board → Transparency shows how each company is doing this month and what counts in the League, with «How is it calculated?».
-New rates|Passengers depend on demand, not train size; fares and costs go up; and buying trains is much cheaper (59 % less).
-Room radio|In the shared room you hold a key (Right Ctrl by default) or a controller button to talk, and it sounds like a real radio.
-Dispatcher in view|The room card and the big map show who is running each station.
-Signals on their side|In the control centre signals appear on the side of the track where they really are.
-Board refreshed|Departure-board header, tabs with icons and colour emojis.
-Lit tunnels|With CYZYRails, the double-track tunnels on CGL have lights on their walls, like the route's other tunnels.
+﻿1.2.91
+Rewards in the shared room|If you run a service in the shared room from start to finish, your company earns 15 % more of the profit, 5 % more if a dispatcher is in charge, and €1,000 when you reach 5 services in a week. My profile shows your services in the room, your streak and their badges.
+More people by the track|Firefighters, police officers, paramedics and security guards can appear in the shared room: working, helping someone, on the phone or waving at the train.
+Absolute stop sign|CGL's absolute stop sign can appear in the middle of the track in the shared room.
+You choose how you see AI trains|In the shared room, «AI trains» → «How I see the AI trains»: pick which train from your folder you see for each service, with its 2D consist. It only changes in your Open Rails.
+Control centre with layers|The «🗺 Layers» button shows each signal box's section, the route's mileposts and the room's objects; click a band to open that signal box.
+Dispatchers on the big map|Each dispatcher appears with their badge above their station.
+Centred indicator boards|Indicator board text is always centred, whether short or long.
+Clearer room panel|«Control centre», «AI trains» and «Weather» are buttons with an icon and text, and the Route tab's list of connected players shows up straight away.
+Everything on the big map|In the shared room the Ctrl+9 window no longer opens: switches, signals and trains are on the HUD's big map.

@@ -128,6 +128,7 @@ namespace SelectOR.MapAgent
                     if (cmd.StartsWith("TYPING ", StringComparison.Ordinal)) { if (int.TryParse(cmd.Substring(7), out int secs)) Teclado.Typing(secs); continue; }   // (también en la sala)
                     if (cmd.StartsWith("PAX ", StringComparison.Ordinal)) { Viajeros3D.Pax(cmd.Substring(4)); continue; }   // (el contador de viajeros: gente en los andenes)
                     if (cmd.StartsWith("OBJ ", StringComparison.Ordinal)) { Viajeros3D.ObjCmd(cmd.Substring(4)); continue; }   // (los objetos de la sala: Viajeros3D.Objetos.cs)
+                    if (cmd.StartsWith("AICON ", StringComparison.Ordinal)) { IaComposiciones.Cmd(cmd.Substring(6)); continue; }   // (1.2.91) los trenes IA de la sala con tu composición
                     if (Controls.Do(cmd, sim)) continue;
                     if (!mp && _mapOn && sim.Signals != null) Command(sim, cmd);
                 }

@@ -475,7 +475,8 @@ namespace SelectOR
         static float Sq(RectangleF r, Point p) { float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2; return (cx - p.X) * (cx - p.X) + (cy - p.Y) * (cy - p.Y); }
 
         // zoom en píxeles por metro
-        public static void Draw(Graphics g, RouteBoard b, SchematicLive live, PointF origin, float zoom, Rectangle area)
+        public static void Draw(Graphics g, RouteBoard b, SchematicLive live, PointF origin, float zoom, Rectangle area,
+                                Action<Graphics, Func<PointF, PointF>, float, RectangleF> under = null)   // under: (1.2.91) debajo de las vías (las dependencias del puesto)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
@@ -486,6 +487,7 @@ namespace SelectOR
             bool InView(PointF[] pts) { foreach (var q in pts) if (view.Contains(q)) return true; var bb = Bounds(pts); return bb.IntersectsWith(view); }
             float lw = Math.Max(1.6f, Math.Min(7f, 1.0f + zoom * 1.7f));
             bool detail = zoom >= 0.08f, near = zoom >= 0.45f, close = zoom >= 1.1f;
+            try { under?.Invoke(g, P, zoom, view); } catch { }
 
             // andenes (de cerca): una barra junto a su vía, del lado sin otra vía
             float ph = Math.Max(3f, Math.Min(10f, 3.2f * zoom));

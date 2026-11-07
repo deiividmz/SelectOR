@@ -1497,6 +1497,10 @@ namespace SelectOR
             kpis.Controls.Add(KpiTile(Tr("VEL. MEDIA"), out _profSpeedVal, "🚄", ColOrange));
             kpis.Controls.Add(KpiTile(Tr("VIAJEROS"), out _profPaxVal, "🧍", ColTeal));
             kpis.Controls.Add(KpiTile(Tr("TURNOS CUMPLIDOS"), out _profSchedVal, "🗓", ColGold));
+            kpis.Controls.Add(KpiTile(Tr("SERVICIOS EN LA SALA"), out _profRoomVal, "🤝", ColTeal));   // (1.2.91: sala-premios.sql)
+            kpis.Controls.Add(KpiTile(Tr("RACHA DE LA SEMANA"), out _profRoomWeekVal, "🔥", ColOrange));
+            kpis.Controls.Add(_profRoomJefeTile = KpiTile(Tr("DIRIGIDOS COMO JEFE"), out _profRoomJefeVal, "👮", ColViolet));
+            _profRoomJefeTile.Visible = false;
             t.Controls.Add(kpis);
 
             _badgesHeader = EmpHeader("INSIGNIAS");
@@ -2321,6 +2325,7 @@ namespace SelectOR
                 }
             }
             catch { }
+            await RoomBonusInto(data, s.Id);   // (1.2.91) plus de sala compartida
             // el mapa, sobre el detalle de la ruta si está instalada en este equipo (si no, solo el recorrido)
             if (data.Map != null)
             {
@@ -2431,7 +2436,7 @@ namespace SelectOR
         // Grupo de cada concepto para los filtros del extracto (1 ingresos · 2 canon · 3 energía · 4 salarios · 5 flota · 6 otros).
         static int BankGroup(BankStatement.Move m) => m.Concept switch
         {
-            "income" or "prize" or "sched_bonus" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
+            "income" or "prize" or "sched_bonus" or "room_bonus" or "room_streak" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
         };
 
         DateTime BankPeriodStart() => _bankPeriod switch
@@ -2560,6 +2565,8 @@ namespace SelectOR
             "other" => Tr("Otro"),
             "prize" => Tr("Premio"),   // los de la liga y el de bienvenida: la descripción dice cuál
             "sched_bonus" => Tr("Prima de servicio programado"),
+            "room_bonus" => Tr("Plus de sala compartida"),
+            "room_streak" => Tr("Racha semanal en la sala"),
             "adjustment" => Tr("Ajuste de saldo"),
             _ => c
         };
@@ -5024,6 +5031,7 @@ namespace SelectOR
 
             var tLic = LoadLicense();   // carné por puntos (a la vez que los servicios)
             var tSched = LoadSchedMeritAsync();   // turnos cumplidos (servicios programados)
+            var tRoom = LoadRoomMeritAsync();     // (1.2.91) servicios en la sala compartida
             LoadMyPhoto();
             // Servicios de empresa donde soy el maquinista
             var (sj, se) = await Supa.SelectAsync(
@@ -5054,6 +5062,7 @@ namespace SelectOR
             __pf.Dispose();
             try { await tLic; } catch { }
             try { await tSched; } catch { }
+            try { await tRoom; } catch { }
             using (Perf.T("Mi perfil · rango e insignias"))
             UpdateRankAndBadges(totalKm, trips, hours, invalid, routeCount.Count, totalPax, trainCount.Count, avg);
             var __pt = Perf.T("Mi perfil · trenes y rutas");
@@ -5184,6 +5193,19 @@ namespace SelectOR
                 Badge("🗓", Tr("Primer turno cumplido"), _profSchedDone >= 1, ColGold, _profSchedDone / 1.0);
                 Badge("📋", Tr("10 turnos cumplidos"), _profSchedDone >= 10, ColGold, _profSchedDone / 10.0);
                 Badge("🎗", Tr("50 turnos cumplidos"), _profSchedDone >= 50, ColOrange, _profSchedDone / 50.0);
+                // (1.2.91) Sala compartida (sala-premios.sql)
+                Badge("🤝", Tr("Primer servicio en la sala"), _roomSvc >= 1, ColTeal, _roomSvc / 1.0);
+                Badge("🚉", Tr("10 servicios en la sala"), _roomSvc >= 10, ColTeal, _roomSvc / 10.0);
+                Badge("🛤", Tr("50 servicios en la sala"), _roomSvc >= 50, ColBlue, _roomSvc / 50.0);
+                Badge("🏟", Tr("100 servicios en la sala"), _roomSvc >= 100, ColGold, _roomSvc / 100.0);
+                Badge("🔥", Tr("Racha semanal en la sala"), _roomStreaks >= 1, ColOrange, Math.Min(_roomWeek, _roomStreakN) / (double)_roomStreakN);
+                Badge("☄", Tr("10 rachas semanales"), _roomStreaks >= 10, ColOrange, _roomStreaks / 10.0);
+                if (_roomDirected > 0)
+                {
+                    Badge("👮", Tr("Primer servicio dirigido como jefe"), _roomDirected >= 1, ColViolet, _roomDirected / 1.0);
+                    Badge("📡", Tr("25 servicios dirigidos"), _roomDirected >= 25, ColViolet, _roomDirected / 25.0);
+                    Badge("🎙", Tr("100 servicios dirigidos"), _roomDirected >= 100, ColGold, _roomDirected / 100.0);
+                }
                 var firma = new System.Text.StringBuilder();
                 foreach (var x in lista) firma.Append(x.text).Append(x.earned ? '1' : '0').Append('|');
                 foreach (var x in lista) firma.Append(((int)(x.prog * 20)).ToString());
@@ -9055,6 +9077,7 @@ namespace SelectOR
 
             _estimatedKm = 0;
             if (r.Valid) (r.SchedDone, r.SchedBonus) = await SchedOfServiceAsync(svc);   // turno cumplido y prima del servidor
+            if (r.Valid) await RoomBonusInto(r, svc);   // (1.2.91) plus de sala compartida
             if (showDialog) r.Map = await BuildTripMap(openedUtc);
             if (!r.Valid) return ShowNotRegistered(r, showDialog);
             Msg(_empHomeMsg, Tr("Servicio registrado."), false);
@@ -9073,6 +9096,7 @@ namespace SelectOR
             }
             string sum = string.Format(Tr("Servicio registrado · {0} km · neto {1}"), r.Km.ToString("0.0", EsEs), r.Net.ToString("+#,##0.00 €;-#,##0.00 €", EsEs));
             if (r.SchedDone) sum += " · " + (r.SchedBonus > 0 ? string.Format(Tr("turno cumplido, prima {0}"), r.SchedBonus.ToString("+#,##0.00 €", EsEs)) : Tr("turno cumplido"));
+            if (r.Room) sum += " · " + string.Format(Tr("plus de sala {0}"), (r.RoomBonus + r.RoomJefeBonus + r.RoomStreak).ToString("+#,##0.00 €", EsEs));
             return (true, sum);
         }
 

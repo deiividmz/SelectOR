@@ -6,7 +6,12 @@
 //  · Tipos:
 //      operarios de vía: obra_trabaja · obra_agachado · obra_espera · obra_saluda (de pie; saluda con la mano y mira al tren
 //        cuando pasa uno a menos de 150 m). Figura: «obra_h07»… (gente.txt, del mismo Gente.pack que la gente) o «*».
+//      (1.2.91) personas de otros oficios, igual que los operarios: bomb_ (bomberos), poli_ (policía), sani_ (sanitarios),
+//        vigi_ (vigilantes) + postura (trabaja · agachado · espera · saluda · indica/habla: gesticula · telefono); sus
+//        figuras llevan el mismo prefijo («bomb_h05»).
 //      fijos: derrumbe · derrumbe_grande · roca · piedras (tierra y rocas escaneadas: «obj_<tipo>» en gente.txt).
+//      cartel_parada (1.2.91): el cartel de parada absoluta de la propia ruta (SHAPES\Cartel_Parada_Absoluta.s), en medio
+//        de la vía y mirando a lo largo de ella; si la ruta no lo trae, no se pone.
 //      fuego · incendio: llamas animadas (16 fotogramas, «obj_<tipo>_NN»; se suman a la imagen: se ven igual de noche), de
 //        noche una luz naranja que parpadea en el suelo («obj_luz<tipo>_N») y humo con el sistema de partículas de Open Rails
 //        (el de las locomotoras: ParticleEmitterViewer, con obj_humo.ace), saliendo por encima de las llamas.
@@ -68,6 +73,22 @@ namespace SelectOR.MapAgent
             if (++_objErrors >= 20 && _objOn) { _objOn = false; Agent.Log("objetos de la sala: demasiados fallos; se dejan de dibujar en esta sesión (Open Rails sigue)"); }
         }
 
+        // (1.2.91) personas: operarios de vía y, además, bomberos, policía, sanitarios y vigilantes; el prefijo es el oficio,
+        // común al tipo («bomb_saluda») y a sus figuras («bomb_h05»); lo de detrás del prefijo del tipo, la postura
+        static readonly string[] PersonGroups = { "obra_", "bomb_", "poli_", "sani_", "vigi_" };
+        internal static bool IsPerson(string n) => n != null && n.Length > 5 && Array.IndexOf(PersonGroups, n.Substring(0, 5)) >= 0;
+        static string PostureAnim(string kind)
+        {
+            switch (kind.Length > 5 ? kind.Substring(5) : "")
+            {
+                case "trabaja": return "work";
+                case "agachado": return "crouch";
+                case "indica": case "habla": return "talk";
+                case "telefono": return "phone";
+                default: return "idle";   // (espera; saluda: quieto hasta que pasa un tren)
+            }
+        }
+
         // las figuras de gente.txt para objetos («obra_h07 1.4 1.5 work=4 …», «obj_derrumbe 0 0 idle=1», «obj_fuego_00 …»)
         static List<(string name, Dictionary<string, float> anims)> ObraList()
         {
@@ -81,7 +102,7 @@ namespace SelectOR.MapAgent
                     foreach (var line in File.ReadAllLines(f))
                     {
                         var t = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (t.Length < 4 || !(t[0].StartsWith("obra_") || t[0].StartsWith("obj_"))) continue;
+                        if (t.Length < 4 || !(IsPerson(t[0]) || t[0].StartsWith("obj_"))) continue;
                         var an = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
                         foreach (var x in t.Skip(3)) { var kv = x.Split('='); if (kv.Length == 2 && float.TryParse(kv[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float v)) an[kv[0]] = v; }
                         l.Add((t[0], an));
@@ -89,7 +110,7 @@ namespace SelectOR.MapAgent
             }
             catch { }
             _obra = l;
-            Agent.Log(l.Count > 0 ? $"objetos de la sala: {l.Count(x => x.Item1.StartsWith("obra_"))} operarios de vía y {l.Count(x => x.Item1.StartsWith("obj_"))} piezas de objetos disponibles" : "objetos de la sala: no hay figuras (falta la gente de SelectOR: SELECTOR_GENTE_DIR)");
+            Agent.Log(l.Count > 0 ? $"objetos de la sala: {l.Count(x => x.Item1.StartsWith("obra_"))} operarios de vía, {l.Count(x => IsPerson(x.Item1) && !x.Item1.StartsWith("obra_"))} personas de otros oficios y {l.Count(x => x.Item1.StartsWith("obj_"))} piezas de objetos disponibles" : "objetos de la sala: no hay figuras (falta la gente de SelectOR: SELECTOR_GENTE_DIR)");
             return l;
         }
         static bool Has(string name) => ObraList().Any(x => x.name.Equals(name, StringComparison.OrdinalIgnoreCase));
@@ -138,8 +159,9 @@ namespace SelectOR.MapAgent
         {
             var all = ObraList();
             if (o.IsFire) return Has($"obj_{o.Kind}_00") ? "obj_" + o.Kind : null;
-            if (!o.Kind.StartsWith("obra_")) { string n = "obj_" + o.Kind; return Has(n) ? n : null; }
-            var l = all.Where(x => x.name.StartsWith("obra_")).ToList(); if (l.Count == 0) return null;
+            if (!IsPerson(o.Kind)) { string n = "obj_" + o.Kind; return Has(n) ? n : null; }
+            string grp = o.Kind.Substring(0, 5);
+            var l = all.Where(x => x.name.StartsWith(grp, StringComparison.OrdinalIgnoreCase)).ToList(); if (l.Count == 0) return null;
             if (o.FigName != "*" && l.Any(x => x.name.Equals(o.FigName, StringComparison.OrdinalIgnoreCase))) return o.FigName;
             return l[Math.Abs(o.Id) % l.Count].name;
         }
@@ -158,6 +180,7 @@ namespace SelectOR.MapAgent
                 foreach (var o in objs)
                 {
                     if (o.F != null) continue;
+                    if (RouteShapes.TryGetValue(o.Kind, out var rshape)) { o.F = RouteFig(rshape); continue; }   // (1.2.91) formas de la ruta
                     string name = FigFor(o); if (name == null) { o.F = new Fig { Failed = true }; continue; }   // (esta versión no la trae)
                     if (_figs.TryGetValue(name, out var have)) { o.F = have; continue; }
                     var fig = new Fig { Name = name };
@@ -184,6 +207,33 @@ namespace SelectOR.MapAgent
             }
             catch (Exception ex) { ObjFailed("carga", ex); }
         }
+        // (1.2.91) objetos que son una forma de la propia ruta (SHAPES), con sus texturas: el cartel de parada absoluta
+        static readonly Dictionary<string, string> RouteShapes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["cartel_parada"] = "Cartel_Parada_Absoluta.s",
+        };
+        static Fig RouteFig(string file)
+        {
+            string key = "route:" + file;
+            if (_figs.TryGetValue(key, out var have)) return have;
+            var fig = new Fig { Name = key };
+            try
+            {
+                string route = MPManager.Simulator?.RoutePath;
+                string path = string.IsNullOrEmpty(route) ? null : Path.Combine(route, "SHAPES", file);
+                if (path != null && File.Exists(path) && _get != null)
+                {
+                    var shape = _get.Invoke(_mgr, new object[] { path });
+                    if (shape != null) fig.Anims["idle"] = (new[] { shape }, 1);
+                }
+                Agent.Log(fig.Anims.Count > 0 ? $"objetos de la sala: cargado {file} de la ruta" : $"objetos de la sala: la ruta no trae {file}");
+            }
+            catch (Exception ex) { ObjFailed("forma de la ruta", ex); }
+            fig.Failed = fig.Anims.Count == 0; fig.Ready = !fig.Failed;
+            _figs[key] = fig;
+            return fig;
+        }
+
         // (hilo de carga, Viewer.Mark) que Open Rails no descargue lo que se usa
         static void MarkFigs()
         {
@@ -365,7 +415,7 @@ namespace SelectOR.MapAgent
                 if (lead == null) return;
                 double now = _clock.Elapsed.TotalSeconds;
                 _trainsNow.Clear();
-                bool anyWave = false; foreach (var o in objs) if (o.Kind == "obra_saluda") { anyWave = true; break; }
+                bool anyWave = false; foreach (var o in objs) if (IsPerson(o.Kind) && o.Kind.EndsWith("_saluda")) { anyWave = true; break; }
                 if (anyWave) try { foreach (var t in sim.Trains) if (t.Cars.Count > 0) { _trainsNow.Add(t.Cars[0].WorldPosition); if (t.Cars.Count > 1) _trainsNow.Add(t.Cars[t.Cars.Count - 1].WorldPosition); } } catch { }
                 int night = -1; bool camOk = false, camLooked = false; int ctx = 0, ctz = 0; Vector3 cloc = Vector3.Zero;
                 float dt = 1 / 30f;
@@ -401,9 +451,9 @@ namespace SelectOR.MapAgent
                         continue;
                     }
                     // qué hace
-                    string want = o.Kind == "obra_trabaja" ? "work" : o.Kind == "obra_agachado" ? "crouch" : "idle";
+                    string want = PostureAnim(o.Kind);
                     float face = -o.Bearing * (float)Math.PI / 180f;   // (su rumbo; saludando, hacia el tren)
-                    if (o.Kind == "obra_saluda")
+                    if (IsPerson(o.Kind) && o.Kind.EndsWith("_saluda"))
                     {
                         Vector3 close = Vector3.Zero; bool any = false; float bd = 150 * 150;
                         foreach (var w in _trainsNow)
@@ -415,7 +465,7 @@ namespace SelectOR.MapAgent
                     }
                     if (!f.Anims.ContainsKey(want)) want = f.Anims.ContainsKey("idle") ? "idle" : f.Anims.Keys.First();
                     o.Anim = want;
-                    if (o.Kind.StartsWith("obra_"))
+                    if (IsPerson(o.Kind))
                     {
                         float diff = Ang(face - o.Heading); float turn = 2.2f * dt;
                         o.Heading = Ang(o.Heading + Math.Max(-turn, Math.Min(turn, diff)));
@@ -425,7 +475,7 @@ namespace SelectOR.MapAgent
                     int n = frames.Length; object shape;
                     if (n == 1 || dist > 300) shape = frames[0];   // (lejos, quieto: no se nota y ahorra)
                     else { double u = ((now * o.Rate + o.Clock) % (2 * secs)) / secs; double k = u <= 1 ? u : 2 - u; shape = frames[Math.Min(n - 1, (int)(k * (n - 1) + 0.5))]; }
-                    Prep(shape, frame, o.Wp, dist < 80 && o.Kind.StartsWith("obra_") ? _flags : _noShadow);
+                    Prep(shape, frame, o.Wp, dist < 80 && IsPerson(o.Kind) ? _flags : _noShadow);
                 }
             }
             catch (Exception ex) { ObjFailed("dibujo", ex); }

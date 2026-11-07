@@ -2381,6 +2381,7 @@ namespace SelectOR
             if (i == PageEmpresas) OnEmpresasShown();
             if (i == 3) { UpdateTimetableBriefing(); UpdateTimetablePreview(); }   // resumen + render 3D del tren del timetable
             RutaLiveTimerUpdate();   // el mapa en vivo de Ruta solo consulta mientras se ve
+            if (i == 0 && previous != 0) RefreshRutaSala();   // (1.2.91) quién está en la sala, al volver a Ruta (sin esperar 15 s)
             UpdateStatus();
             LayoutBottomBar();   // Ruta y el Editor no llevan barra inferior
             __rest.Dispose();

@@ -54,7 +54,7 @@ namespace SelectOR
         bool SalaWanted => _activePage == 2 && SalaRouteHere && _chkSala != null && _chkSala.Checked;
 
         // (1.2.90) el texto (x 32, 290 de ancho) más el hueco del 🖥 del puesto de mando, que ven todos (antes lo tapaba)
-        const int SalaHostBase = 326 + 34;
+        const int SalaHostBase = 326;   // (1.2.91: solo el texto; los botones, a su derecha: SalaButtonsLayout)
 
         // La casilla, a la izquierda de CONDUCIR (BuildBottomBar): solo en Conducción libre con la ruta de la sala.
         Panel BuildSalaCheck()
@@ -111,8 +111,8 @@ namespace SelectOR
         string SalaSubText()
         {
             // 2.ª línea: el tiempo de la sala (MainMenuForm.ClimaSala.cs) y su versión de Open Rails
-            string wx = SalaWeatherText(), ver = _salaOrVersion == null ? null : string.Format(Tr(wx.Length > 0 ? "Open Rails {0}" : "Sala con Open Rails {0}"), _salaOrVersion);
-            string second = string.Join(" · ", new[] { wx, ver }.Where(x => !string.IsNullOrEmpty(x)));
+            // (1.2.91, petición) sin la versión de Open Rails de la sala: solo su tiempo
+            string second = SalaWeatherText();
             // 3.ª línea (2026-11-06): quién es el jefe de circulación y en qué dependencias (null: un servidor de antes, que no lo dice)
             string jefe = _salaJefes == null ? null
                         : _salaJefes.Count == 0 ? Tr("Sin jefe de circulación")
@@ -131,12 +131,12 @@ namespace SelectOR
         // En la lista de rutas, si no se tiene la de la sala: qué es y el botón para bajarla de su web.
         Panel BuildSalaPromo()
         {
-            _salaPromo = new Panel { Dock = DockStyle.Top, Height = 168, BackColor = Theme.BgSidebar, Padding = new Padding(0, 0, 0, 8), Visible = false };
+            _salaPromo = new Panel { Dock = DockStyle.Top, Height = 150, BackColor = Theme.BgSidebar, Padding = new Padding(0, 0, 0, 8), Visible = false };
             var card = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(12, 10, 12, 10) };
             var title = new EmojiLabel { Text = "🌐  " + Tr("Multijugador SelectOR"), Dock = DockStyle.Top, Height = 22, ForeColor = Theme.AccentHi, BackColor = Theme.Surface, Font = Theme.Font(9.5f, FontStyle.Bold) };
             var text = new Label { Text = Tr("La sala compartida es en la ruta CGL_V22N_RE. Descárgala de su web oficial y descomprímela en tu contenido (ROUTES, GLOBAL y SOUND); luego vuelve a abrir SelectOR."),
                                    Dock = DockStyle.Top, Height = 64, ForeColor = Theme.Text, BackColor = Theme.Surface, Font = Theme.Font(8.5f) };
-            _salaPromoVer = new Label { Text = "", Dock = DockStyle.Top, Height = 18, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f) };
+            _salaPromoVer = new Label { Text = "", Dock = DockStyle.Top, Height = 0, Visible = false, ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8f) };   // (1.2.91, petición: sin la versión de Open Rails de la sala)
             var btn = DialogKit.Fit(DialogKit.Primary("⬇  " + Tr("Descargar la ruta")), 190);
             btn.Dock = DockStyle.Bottom;
             btn.Click += (s, e) => OpenLink(SalaDownloadUrl);
@@ -181,7 +181,6 @@ namespace SelectOR
             try
             {
                 if (_salaSub != null) _salaSub.Text = SalaSubText();
-                if (_salaPromoVer != null) _salaPromoVer.Text = _salaOrVersion != null ? string.Format(Tr("Sala con Open Rails {0}"), _salaOrVersion) : "";
             }
             catch { }
         }

@@ -77,10 +77,11 @@ namespace SelectOR
                 _localSeen = _localMap.Connected;
                 RoomLog(_localSeen ? "conducción libre: Open Rails conectado" : "conducción libre: Open Rails desconectado");
                 if (_localSeen && (_paxActive || _paxWanted)) PaxTell("ON");   // (el agente espera las cifras del contador)
-                if (_localSeen) ObjectsTick(true);
+                if (_localSeen) { ObjectsTick(true); AiConsistTick(true); }
             }
             if (!_localSeen) return;
             ObjectsTick(false);   // (la sala: sus objetos, si han cambiado)
+            AiConsistTick(false); // (1.2.91) la sala: los trenes IA con tu composición
             MapGeoEnsure();
             var l = _localMap;
             if (_roomGeo != null && l.SigStates != null && _roomSigsSeen == DateTime.MinValue)

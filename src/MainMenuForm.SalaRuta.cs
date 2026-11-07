@@ -16,6 +16,7 @@ namespace SelectOR
         Timer _rutaSalaTimer;
         bool _rutaSalaBusy;
         string _rutaSalaLast;   // (para no repintar si no cambia)
+        int _rutaSalaFails;     // (1.2.91) consultas fallidas seguidas: una suelta no borra la lista
 
         // (BuildRutaPage) la franja, oculta fuera de la ruta de la sala
         Panel BuildRutaSala()
@@ -47,7 +48,8 @@ namespace SelectOR
             {
                 if (_rutaSala == null) return;
                 bool show = SalaRouteHere;
-                if (_rutaSala.Visible != show) _rutaSala.Visible = show;
+                // (1.2.91) al aparecer o desaparecer, la página se vuelve a maquetar (antes se quedaba pisada o sin sitio hasta cambiar de pestaña)
+                if (_rutaSala.Visible != show) { _rutaSala.Visible = show; _rutaSala.Parent?.PerformLayout(); _rutaSala.Parent?.Invalidate(true); }
                 if (!show || _activePage != 0 || !Visible || WindowState == FormWindowState.Minimized || _rutaSalaBusy) return;
                 _rutaSalaBusy = true;
                 SalaInfo info;
@@ -55,9 +57,14 @@ namespace SelectOR
                 finally { _rutaSalaBusy = false; }
                 if (!SalaRouteHere) return;
                 string txt; int count = -1;
-                if (info == null) txt = Tr("SALA COMPARTIDA") + "  ·  " + Tr("no se puede consultar ahora");
+                if (info == null)
+                {
+                    if (++_rutaSalaFails < 3 && _rutaSalaLast != null) return;   // (una consulta suelta que falla: se queda lo de antes)
+                    txt = Tr("SALA COMPARTIDA") + "  ·  " + Tr("no se puede consultar ahora");
+                }
                 else
                 {
+                    _rutaSalaFails = 0;
                     var names = info.Trains.Where(t => t.player).Select(t => t.name).Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
                     count = Math.Max(names.Count, info.Players);
                     txt = Tr("SALA COMPARTIDA") + "  ·  " + (count == 0 ? Tr("nadie conectado ahora")
@@ -68,6 +75,7 @@ namespace SelectOR
                 _rutaSalaText.Tag = count;
                 _rutaSalaText.Text = txt;
                 _rutaSalaText.Invalidate();
+                if (_rutaSala.Height <= 0 || _rutaSalaText.Width <= 0) { _rutaSala.Parent?.PerformLayout(); _rutaSala.Parent?.Invalidate(true); }
             }
             catch { }
         }

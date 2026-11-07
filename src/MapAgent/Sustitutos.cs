@@ -90,7 +90,10 @@ namespace SelectOR.MapAgent
                 int num = tr.Field("TrainNum").GetValue<int>();
                 // UPDATETRAIN de un tren que ya está (el tuyo, al desacoplar): sus coches siguen como estaban
                 bool exists = __instance is MSGUpdateTrain && MPManager.Simulator?.Trains?.Any(t => t != null && t.Number == num) == true;
-                if (!exists) Whole(_cars, tr.Field("flipped").GetValue<int[]>(), _lens, null, num, null);
+                // (1.2.91) un tren IA de la sala con la composición que ha elegido el usuario para su servicio
+                var mine = __instance is MSGTrain ? IaComposiciones.For(tr.Field("name").GetValue<string>()) : null;
+                if (!exists && mine != null) Force(_cars, tr.Field("flipped").GetValue<int[]>(), mine, num, tr.Field("name").GetValue<string>());
+                else if (!exists) Whole(_cars, tr.Field("flipped").GetValue<int[]>(), _lens, null, num, null);
             }
             catch { _cars = null; }
         }
@@ -134,6 +137,22 @@ namespace SelectOR.MapAgent
             string key = (con ?? "") + "|" + string.Join(";", orig);
             if (_wholeSaid.TryAdd(key, true))
                 Agent.Log($"tren que falta{(string.IsNullOrEmpty(con) ? "" : " («" + con + "»)")} ({n} vehículos): entero con tu composición «{best.Name}» ({cn} vehículos{(n != cn ? (n % cn == 0 ? $", ×{n / cn}" : ", ajustada") : "")}{(rev ? ", al revés" : "")}; puntos {score:F1})");
+        }
+
+        // (1.2.91) la lista entera con la composición elegida (aunque tengas todos sus vehículos): como Whole
+        static void Force(string[] cars, int[] flipped, VehiculosCache.Con best, int num, string name)
+        {
+            if (cars == null || flipped == null || cars.Length == 0 || flipped.Length != cars.Length || best.Cars.Count == 0) return;
+            int n = cars.Length, cn = best.Cars.Count;
+            var map = Map(n, cn, best);
+            bool flips = best.Flips.Count == cn;
+            bool f0 = flips && best.Flips[map[0]];
+            bool rev = (flipped[0] != 0) != f0 && Rel(cars[0]).EndsWith(".eng", StringComparison.OrdinalIgnoreCase) == best.Cars[map[0]].eng;
+            var orig = (string[])cars.Clone();
+            for (int i = 0; i < n; i++) { cars[i] = best.Cars[map[i]].rel; flipped[i] = ((flips && best.Flips[map[i]]) ^ rev) ? 1 : 0; }
+            _orig = orig; _origNum = num; _origUser = null;
+            if (_wholeSaid.TryAdd("IA|" + name, true))
+                Agent.Log($"tren IA «{name}» ({n} vehículos): con tu composición «{best.Name}» ({cn} vehículos{(n != cn ? (n % cn == 0 ? $", ×{n / cn}" : ", ajustada") : "")}{(rev ? ", al revés" : "")})");
         }
 
         // qué vehículo de la composición va en cada sitio del tren (n vehículos con una composición de cn)

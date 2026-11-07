@@ -103,6 +103,7 @@ namespace SelectOR
             BuildJefeBar(top);   // jefes de circulación (DispatchForm.Jefe.cs; necesita la lista)
             BuildItinBar(top);   // mando manual / automático (DispatchForm.Itinerarios.cs)
             BuildObjectsBtn(top);   // (2026-11-04) 🚧 objetos de la sala, solo el administrador (DispatchForm.Objetos.cs)
+            BuildLayersBtn(top);    // (1.2.91) 🗺 capas: dependencias, PK y objetos (DispatchForm.Capas.cs)
 
             _canvas = new Canvas { Dock = DockStyle.Fill, BackColor = SchematicDraw.Bg, Cursor = Cursors.Hand };
             _canvas.Paint += (s, e) => Paint_(e.Graphics);
@@ -143,7 +144,7 @@ namespace SelectOR
                 {
                     bool own = Me != null && (RouteBoardDraw.SignalAt(_board, e.Location, Theme.Px(4)) is RouteBoard.Sg bs && MySig(bs.S.Obj)
                                               || RouteBoardDraw.SwitchAt(_board, e.Location) is RouteBoard.Sw bw && MyNode(bw.Node));
-                    _canvas.Cursor = own || _pick != null || StationAt(e.Location) != null ? Cursors.Hand : Cursors.SizeAll;
+                    _canvas.Cursor = own || _pick != null || StationAt(e.Location) != null || ZoneBandAt(e.Location) != null ? Cursors.Hand : Cursors.SizeAll;
                     if (_pick != null) _canvas.Invalidate();
                     // (1.2.77) por qué está en parada la señal que hay bajo el ratón
                     string wt = RouteBoardDraw.SignalAt(_board, e.Location, Theme.Px(4)) is RouteBoard.Sg ws && _pilot != null && _pilot.SigWhy.TryGetValue(ws.S.Obj, out var ww)
@@ -175,7 +176,8 @@ namespace SelectOR
                 {
                     if (PickClick(e.Location)) return;     // eligiendo el destino de un itinerario
                     if (JefeClick(e.Location)) return;     // con el mando: una aguja o una señal
-                    var st = StationAt(e.Location); if (st != null && _list.Items.Contains(st)) Select(st);
+                    var st = StationAt(e.Location); if (st != null && _list.Items.Contains(st)) { Select(st); return; }
+                    var zb = ZoneBandAt(e.Location); if (zb != null && _list.Items.Contains(zb)) Select(zb);   // (1.2.91) clic en la franja de una dependencia (también los trayectos)
                     return;
                 }
                 if (Overview) { var z = ZoneAt(e.Location); if (z != null) Select(z); return; }
@@ -197,7 +199,7 @@ namespace SelectOR
             _blink.Tick += (s, e) => { if (_blinking && (Board || !Overview)) _canvas.Invalidate(); };
             _blink.Start();
             _timer = new Timer { Interval = 1000 };
-            _timer.Tick += (s, e) => { UpdateStatus(); if (JefeBarStale()) UpdateJefe(); JefeKeepAlive(); RefreshHeaders(); _canvas.Invalidate(); };
+            _timer.Tick += (s, e) => { UpdateStatus(); if (JefeBarStale()) UpdateJefe(); JefeKeepAlive(); RefreshHeaders(); LayersTick(); _canvas.Invalidate(); };
             Shown += async (s, e) => await Prepare();
             FormClosing += (s, e) => LeaveOnClose();   // con el mando: se suelta
             FormClosed += (s, e) => { _timer.Stop(); _blink.Stop(); try { _pilot?.Dispose(); } catch { } };
@@ -782,7 +784,8 @@ namespace SelectOR
             if (Board)
             {
                 var lv = LiveBoard();
-                RouteBoardDraw.Draw(g, _board, lv, _bOrigin, _bZoom, area);
+                RouteBoardDraw.Draw(g, _board, lv, _bOrigin, _bZoom, area, DrawZonesUnder);
+                DrawBoardLayers(g, area);   // (1.2.91) PK y objetos de la sala (DispatchForm.Capas.cs)
                 _blinking = lv?.Blinking == true;
                 if (_pick == null && !(_itinMsg != null && DateTime.UtcNow < _itinMsgUntil))
                     using (var hf = Theme.Font(8.6f)) using (var tb = new SolidBrush(Theme.Subtle))
@@ -798,7 +801,7 @@ namespace SelectOR
                 using (var bg = new SolidBrush(SchematicDraw.Bg)) g.FillRectangle(bg, area);
                 ColorText.Text(g, Tr("Esta dependencia no tiene esquema."), Theme.Font(10f), area, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
-            else { var lv = Live(); SchematicDraw.Draw(g, _cur, lv, _origin, _zoom, area); _blinking = lv?.Blinking == true; }
+            else { var lv = Live(); SchematicDraw.Draw(g, _cur, lv, _origin, _zoom, area); _blinking = lv?.Blinking == true; DrawSchematicLayers(g, area); }
             // «← Plano general»
             using (var bf = Theme.Font(9f, FontStyle.Bold))
             {

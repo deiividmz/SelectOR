@@ -236,7 +236,7 @@ namespace SelectOR.MapAgent
                 var t = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                 if (t.Length >= 2 && t[0] == "#max") { int.TryParse(t[1], out max); continue; }
                 if (t.Length < 3 || t[0].StartsWith("#")) continue;
-                if (t[0].StartsWith("obra_") || t[0].StartsWith("obj_")) continue;   // (operarios de vía y derrumbes: solo como objetos de la sala)
+                if (IsPerson(t[0]) || t[0].StartsWith("obj_")) continue;   // (operarios de vía, demás oficios y derrumbes: solo como objetos de la sala)
                 var anims = t.Skip(3).Select(x => x.Split('=')).Where(x => x.Length == 2).Select(x => (x[0], float.Parse(x[1], ci))).ToList();
                 if (!anims.Any(x => x.Item1 == "idle")) anims.Insert(0, ("idle", 4f));
                 all.Add((t[0], float.Parse(t[1], ci), float.Parse(t[2], ci), anims));

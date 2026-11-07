@@ -11,6 +11,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SelectOR
@@ -28,6 +29,10 @@ namespace SelectOR
         }
         readonly List<SuspectRow> _susRows = new(), _susShown = new();
         Panel _susPanel; CardTable _susList; Label _susDetail, _susMsg; RoundButton _susSanction, _susDismiss;
+        // (1.2.91, petición 2026-11-07) la composición 2D del tren de cada servicio (la que se guardó al abrirlo: ServiceImages)
+        readonly Dictionary<string, Bitmap> _susStrips = new(StringComparer.OrdinalIgnoreCase);
+        readonly HashSet<string> _susNoImg = new(StringComparer.OrdinalIgnoreCase);
+        PictureBox _susPic; int _susSeq;
 
         Panel BuildSuspectsPanel()
         {
@@ -41,6 +46,9 @@ namespace SelectOR
                 TitleCol = 0, SubCols = new[] { 1, 2 }, QuoteCol = 3, PillCol = 4, QuoteMarks = false, AutoHeight = true, SubChips = true
             };
             _susList.Accent = row => _susShown.FirstOrDefault(x => x.Id == row.Key) is SuspectRow r ? (r.Sanctioned ? Theme.SurfaceHi : r.Score >= 3 ? Carne.Red : Carne.Gold) : null;
+            _susList.StripHeight = 56; _susList.StripRows = 1;   // (1.2.91) el tren en 2D, debajo del texto de la tarjeta
+            _susList.Strip = row => row.Key != null && _susStrips.TryGetValue(row.Key, out var b) ? b : null;
+            _susList.StripNote = row => row.Key != null && _susNoImg.Contains(row.Key) ? Tr("Sin composición guardada") : null;
             _susList.SelectedIndexChanged += (s, e) => ShowSuspect();
             _susList.ItemActivated += _ => SanctionSuspect();
             var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Padding = new Padding(16, 12, 16, 12), Margin = new Padding(0) };
@@ -52,7 +60,9 @@ namespace SelectOR
             _susDismiss.Click += (s, e) => DismissSuspect();
             _susMsg = EmpMsg(); _susMsg.MaximumSize = new Size(420, 0);
             btns.Controls.Add(_susSanction); btns.Controls.Add(_susDismiss); btns.Controls.Add(_susMsg);
-            right.Controls.Add(_susDetail); right.Controls.Add(btns);
+            _susPic = new PictureBox { Dock = DockStyle.Top, Height = Theme.Px(84), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Theme.Surface, Visible = false, Margin = new Padding(0) };
+            var picGap = new Panel { Dock = DockStyle.Top, Height = Theme.Px(10), BackColor = Theme.Surface };
+            right.Controls.Add(_susDetail); right.Controls.Add(picGap); right.Controls.Add(_susPic); right.Controls.Add(btns);
             t.Controls.Add(_susList, 0, 0); t.Controls.Add(right, 1, 0);
             _susPanel.Controls.Add(t);
             return _susPanel;
@@ -88,6 +98,24 @@ namespace SelectOR
             }
             catch { }
             FillSuspects();
+            FetchSuspectStrips(++_susSeq);
+        }
+
+        // (1.2.91) la composición 2D de cada servicio de la lista: de la caché de disco o de Supabase (ServiceImages)
+        async void FetchSuspectStrips(int seq)
+        {
+            foreach (var r in _susRows.ToList())
+            {
+                if (seq != _susSeq || IsDisposed) return;
+                if (string.IsNullOrEmpty(r.Id) || _susStrips.ContainsKey(r.Id) || _susNoImg.Contains(r.Id)) continue;
+                string file = null;
+                try { file = await ServiceImages.GetAsync(r.CompanyId, r.Id); } catch { file = null; }
+                var bmp = file == null ? null : await Task.Run(() => LoadStripFile(file));
+                if (seq != _susSeq || IsDisposed) { bmp?.Dispose(); return; }
+                if (bmp == null) _susNoImg.Add(r.Id); else _susStrips[r.Id] = bmp;
+                _susList?.Invalidate();
+                if (SelectedSuspect()?.Id == r.Id) ShowSuspect();
+            }
         }
 
         string N0(double v) => v.ToString("N0", I18n.Culture);
@@ -132,6 +160,11 @@ namespace SelectOR
             var r = SelectedSuspect();
             if (_susSanction != null) _susSanction.Enabled = r != null;
             if (_susDismiss != null) _susDismiss.Enabled = r != null;
+            if (_susPic != null)
+            {
+                var img = r != null && _susStrips.TryGetValue(r.Id, out var b) ? b : null;
+                _susPic.Image = img; _susPic.Visible = img != null;
+            }
             if (r == null) { _susDetail.Text = Tr("Elige un servicio de la lista."); return; }
             var l = new List<string>
             {

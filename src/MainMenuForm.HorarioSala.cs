@@ -17,22 +17,11 @@ namespace SelectOR
 
         void BuildSalaAiButton()
         {
-            // (1.2.77) el icono en color, como los demás de SelectOR (EmojiIcon)
-            _salaAiBtn = new EmojiIcon { Text = "🚆", Size = new Size(30, 30),
-                                     ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(12.5f), Cursor = Cursors.Hand, Visible = false };
-            _salaAiBtn.Click += (s, e) => OpenHorarioSala();
-            new ToolTip().SetToolTip(_salaAiBtn, Tr("Horario de la sala: trenes IA (administrador y gestores del horario)"));
-            Action place = () =>
-            {
-                int right = _salaWxBtn != null && _salaWxBtn.Visible ? _salaWxBtn.Left - 4 : _salaHost.ClientSize.Width - 4;
-                _salaAiBtn.Location = new Point(right - _salaAiBtn.Width, Math.Max(0, (_salaHost.ClientSize.Height - _salaAiBtn.Height) / 2));
-            };
-            _salaHost.Resize += (s, e) => place();
-            _salaHost.HandleCreated += (s, e) => place();
-            _salaAiBtn.VisibleChanged += (s, e) => place();
-            if (_salaWxBtn != null) { _salaWxBtn.VisibleChanged += (s, e) => place(); _salaWxBtn.LocationChanged += (s, e) => place(); }
+            // (1.2.91) un botón con su icono y su texto, para todos (MainMenuForm.SalaBotones.cs)
+            _salaAiBtn = new SalaButton("🚆", Tr("Trenes IA")) { Visible = false };
+            _salaAiBtn.Click += (s, e) => SalaAiButtonClick();   // (1.2.91) cómo ves los trenes IA (MainMenuForm.SalaAiTrenes.cs)
+            new ToolTip().SetToolTip(_salaAiBtn, Tr("Trenes IA de la sala: cómo los ves tú (y, el administrador, su horario)"));
             _salaHost.Controls.Add(_salaAiBtn);
-            _salaAiBtn.BringToFront();
         }
 
         void OpenHorarioSala()

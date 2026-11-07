@@ -18,7 +18,7 @@ namespace SelectOR
 
         void OpenObjetosSala()
         {
-            if (!Supa.IsSuperadmin || !Supa.IsLoggedIn) return;
+            if (!(Supa.IsSuperadmin || Supa.IsObjectEditor) || !Supa.IsLoggedIn) return;   // (1.2.91: también los autorizados)
             if (_objetos != null && !_objetos.IsDisposed) { _objetos.WindowState = System.Windows.Forms.FormWindowState.Normal; _objetos.Activate(); return; }
             if (!SalaRouteHere) return;
             string dir = _curRoute.Path;

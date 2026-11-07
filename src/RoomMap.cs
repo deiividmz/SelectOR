@@ -329,6 +329,8 @@ namespace SelectOR
         public Func<int, int> HeadDraw;                    // (1.2.75) su estado de dibujo (índice en su tipo del sigcfg), -1 = no se sabe
         public bool SignalsOk;                             // la foto de señales cuadra con la ruta
         public List<(string name, double lat, double lon, double kmh)> AiTrains = new();
+        // (1.2.91) los jefes de circulación activos: en cada dependencia suya, su centro, lo que ocupa (m) y el color del jefe
+        public List<(string jefe, string zone, double lat, double lon, double radiusM, Color color)> Jefes = new();
         // (1.2.75) itinerarios de la sala: su camino (anulándose: ámbar) y, mientras se elige el destino de uno, los posibles
         public List<(List<(double lat, double lon)> pts, int kind)> Itins = new();   // kind: 0 establecido · 1 anulándose · 2 en cola
         public sealed class ItinPick { public int Origin; public readonly List<ItinPickOpt> Opts = new(); }
@@ -674,6 +676,29 @@ namespace SelectOR
                     var sz = g.MeasureString(lab, lf);
                     using (var bb = new SolidBrush(Color.FromArgb(220, 15, 17, 19))) g.FillRectangle(bb, c.X + r + 2, c.Y - sz.Height / 2, sz.Width, sz.Height);
                     using (var tb = new SolidBrush(o.Opt.Mine ? ItinGreen : Color.White)) g.DrawString(lab, lf, tb, c.X + r + 2, c.Y - sz.Height / 2);
+                }
+            }
+            // (1.2.91) los jefes de circulación: un halo de su color sobre su dependencia y, encima, «👮 nombre»
+            if (v.Jefes.Count > 0)
+            {
+                using var jf = Theme.Font(8.4f, FontStyle.Bold);
+                var badges = new List<RectangleF>();
+                foreach (var j in v.Jefes)
+                {
+                    var c = pj(j.lat, j.lon);
+                    float rr = (float)Math.Max(16, Math.Min(260, j.radiusM / Math.Max(0.01, mPerPx) + 14));
+                    if (!RectangleF.Inflate(view, rr, rr).Contains(c)) continue;
+                    using (var hb = new SolidBrush(Color.FromArgb(34, j.color))) g.FillEllipse(hb, c.X - rr, c.Y - rr, 2 * rr, 2 * rr);
+                    using (var hp = new Pen(Color.FromArgb(170, j.color), 2f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash }) g.DrawEllipse(hp, c.X - rr, c.Y - rr, 2 * rr, 2 * rr);
+                    string lab = "👮 " + j.jefe;
+                    var sz = g.MeasureString(lab, jf);
+                    var box = new RectangleF(c.X - sz.Width / 2 - 6, c.Y - rr - sz.Height - 6, sz.Width + 12, sz.Height + 4);
+                    if (box.Y < area.Top + 34) box.Y = Math.Min(c.Y - box.Height / 2, area.Top + 34);   // (que no la tape la barra de arriba)
+                    int tries = 0; while (badges.Any(q => q.IntersectsWith(box)) && tries++ < 4) box.Y += box.Height + 2;
+                    badges.Add(box);
+                    using (var bb = new SolidBrush(Color.FromArgb(235, 18, 21, 25))) g.FillRectangle(bb, box);
+                    using (var bp = new Pen(j.color, 1.6f)) g.DrawRectangle(bp, box.X, box.Y, box.Width, box.Height);
+                    ColorText.Text(g, lab, jf, Rectangle.Round(box), j.color, System.Windows.Forms.TextFormatFlags.HorizontalCenter | System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.NoPrefix);
                 }
             }
             // trenes de la IA

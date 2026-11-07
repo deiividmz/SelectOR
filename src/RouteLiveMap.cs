@@ -394,6 +394,9 @@ namespace SelectOR
         }
 
         public RouteMapData Data => _d;
+        // (1.2.91) debajo de las vías (la vista fotorrealista del terreno): con Underlay, la capa de vías va transparente
+        public Action<Graphics, Func<double, double, PointF>> Underlay;
+        public void RedrawLayer() { DropLayer(); Invalidate(); }
 
         public void SetData(RouteMapData d)
         {
@@ -479,13 +482,13 @@ namespace SelectOR
             if (_rendering || _d == null || Width < 20 || Height < 20) return;
             _rendering = true;
             var d = _d; double cx = _cx, cy = _cy, s = _s, fitS = _fitS;
-            int W = Width + Margin2 * 2, H = Height + Margin2 * 2, gen = _gen;
+            int W = Width + Margin2 * 2, H = Height + Margin2 * 2, gen = _gen; bool under = Underlay != null;
             string family; float emPx;
             using (var f = Theme.Font(8.5f)) { family = f.FontFamily.Name; emPx = f.SizeInPoints * DeviceDpi / 72f; }
             Task.Run(() =>
             {
                 Bitmap b = null;
-                try { b = RenderLayer(d, cx, cy, s, fitS, W, H, family, emPx); } catch { b?.Dispose(); b = null; }
+                try { b = RenderLayer(d, cx, cy, s, fitS, W, H, family, emPx, under); } catch { b?.Dispose(); b = null; }
                 return b;
             }).ContinueWith(t =>
             {
@@ -513,11 +516,11 @@ namespace SelectOR
         // Se puede llamar desde cualquier hilo: todo lo que usa lo crea aquí. Los nombres van en un único
         // trazado de texto (contorno + relleno: dos llamadas), no uno a uno: con cientos de estaciones es lo
         // que más pesaba.
-        public static Bitmap RenderLayer(RouteMapData d, double cx, double cy, double s, double fitS, int W, int H, string family, float emPx)
+        public static Bitmap RenderLayer(RouteMapData d, double cx, double cy, double s, double fitS, int W, int H, string family, float emPx, bool transparent = false)
         {
             var bmp = new Bitmap(W, H, PixelFormat.Format32bppPArgb);
             using var g = Graphics.FromImage(bmp);
-            g.Clear(Bg);
+            g.Clear(transparent ? Color.Transparent : Bg);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float hx = W / 2f, hy = H / 2f;
             double vx0 = cx - (hx + 10) / s, vx1 = cx + (hx + 10) / s, vy0 = cy - (hy + 10) / s, vy1 = cy + (hy + 10) / s;
@@ -660,6 +663,7 @@ namespace SelectOR
                 else { var (x, y) = _d.Proj(fm.Lat, fm.Lon); _cx = x; _cy = y; }
             }
 
+            if (Underlay != null) { try { Underlay(g, (la, lo) => ScrLL(la, lo)); } catch { } }   // (1.2.91) el terreno, debajo de las vías
             DrawLayer(g);
             if (NeedsLayer())
             {

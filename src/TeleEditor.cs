@@ -170,6 +170,8 @@ namespace SelectOR
         public static Bitmap Render(Bitmap model, List<string> lines)
         {
             LastFits = true;
+            // (1.2.90) sin espacios de más (al principio, al final o repetidos): descentraban el texto
+            lines = (lines ?? new List<string>()).Select(l => System.Text.RegularExpressions.Regex.Replace(l ?? "", @"\s+", " ").Trim()).ToList();
             var px = Read(model);
             int w = model.Width, h = model.Height;
             bool led = IsLed(model);
@@ -278,6 +280,28 @@ namespace SelectOR
             var bgC = new List<int>();
             for (int y = Math.Max(0, y0); y <= Math.Min(h - 1, y1); y++) for (int x = Math.Max(0, x0); x <= Math.Min(w - 1, x1); x++) { int c = px[y * w + x]; if (!Lit(c)) bgC.Add(c); }
             int bg = Mean(bgC);
+            // (1.2.90) el panel ENTERO, no solo donde estaba el texto del modelo (si iba a la izquierda o era corto, el nuevo
+            // salía descentrado o cortado): se alarga a cada lado mientras las columnas sigan siendo fondo del panel, y se
+            // ajusta a la rejilla de los puntos
+            {
+                int bgL = Lum(bg), ya = Math.Max(0, y0), yb = Math.Min(h - 1, y1);
+                bool PanelCol(int x)
+                {
+                    int n = 0, ok = 0;
+                    for (int y = ya; y <= yb; y++) { int c = px[y * w + x]; n++; if (A(c) >= 128 && !Lit(c) && Math.Abs(Lum(c) - bgL) <= 45) ok++; }
+                    return n > 0 && ok * 10 >= n * 9;
+                }
+                int L = x0, R = x1;
+                while (L - 1 >= 0 && PanelCol(L - 1)) L--;
+                while (R + 1 < w && PanelCol(R + 1)) R++;
+                if (colPos.Count > 0 && pitchX > 0.5)
+                {
+                    int nl = (int)Math.Floor((colPos[0] - dotW / 2.0 - L) / pitchX), nr = (int)Math.Floor((R - (colPos[^1] + dotW / 2.0)) / pitchX);
+                    if (nl > 0) x0 = (int)Math.Round(colPos[0] - nl * pitchX - dotW / 2.0);
+                    if (nr > 0) x1 = (int)Math.Round(colPos[^1] + nr * pitchX + dotW / 2.0);
+                }
+                LastInfo += $" · panel entero {x0}-{x1}";
+            }
             // borrar lo encendido del modelo (todo el panel, con su alfa)
             for (int y = Math.Max(0, y0 - 1); y <= Math.Min(h - 1, y1 + 1); y++)
                 for (int x = Math.Max(0, x0 - 1); x <= Math.Min(w - 1, x1 + 1); x++) px[y * w + x] = Rgb(bg, A(px[y * w + x]));
@@ -348,7 +372,21 @@ namespace SelectOR
             var (cols, gp) = GlyphFit(glyphs, span, pitch, gap, out bool fits);
             if (!fits) LastFits = false;
             double width = GlyphsWidth(glyphs, cols, pitch, gp);
-            double x = c0 + Math.Max(0, (span - width) / 2);
+            // (1.2.90) centrado por los puntos que se encienden: las columnas vacías de la primera y la última letra
+            // (la «I», el «1»…) no cuentan
+            int Blank(byte[] g, bool left)
+            {
+                if (g == null || g.Length == 0) return 0;
+                for (int k = 0; k < cols; k++)
+                {
+                    int col = left ? k : cols - 1 - k;
+                    for (int r = 0; r < 7; r++) if ((GlyphCols(g, cols, r) >> (cols - 1 - col) & 1) == 1) return k;
+                }
+                return 0;
+            }
+            var firstG = glyphs.FirstOrDefault(g => g.Length > 0); var lastG = glyphs.LastOrDefault(g => g.Length > 0);
+            double lb = Blank(firstG, true) * pitch, rb = Blank(lastG, false) * pitch;
+            double x = fits ? c0 + (span - (width - lb - rb)) / 2 - lb : c0 + Math.Max(0, (span - width) / 2);
             foreach (var g in glyphs)
             {
                 if (g.Length == 0) { x += ((cols - 1) * pitch + gp) * 0.6; continue; }
@@ -444,6 +482,19 @@ namespace SelectOR
             // las líneas nuevas en los huecos de las del modelo (si hay más líneas que huecos, el último se reparte)
             var text = lines.Where(l => l.Length > 0).ToList();
             if (text.Count == 0) return;
+            // (1.2.90) menos líneas que huecos en el modelo: el texto, centrado también en vertical (antes iba a los huecos de
+            // arriba: «SOL» en una placa de cuatro líneas salía pegado arriba), con el alto de la línea más grande del modelo
+            if (text.Count < slots.Count && slots.Count > 1)
+            {
+                var ord = slots.OrderBy(r => r.Top).ToList();
+                int top = ord[0].Top, bot = ord.Max(r => r.Bottom), hMax = ord.Max(r => r.Height);
+                var gaps = new List<int>(); for (int i = 1; i < ord.Count; i++) gaps.Add(Math.Max(0, ord[i].Top - ord[i - 1].Bottom));
+                int k = text.Count, gap = Math.Max(2, gaps.Count > 0 ? Median(gaps) : hMax / 2);
+                if (k * hMax + (k - 1) * gap > bot - top) hMax = Math.Max(4, (bot - top - (k - 1) * gap) / k);
+                int block = k * hMax + (k - 1) * gap, y = (top + bot) / 2 - block / 2;
+                int sx0 = ord.Min(r => r.Left), sx1 = ord.Max(r => r.Right);
+                slots = Enumerable.Range(0, k).Select(i => new Rectangle(sx0, y + i * (hMax + gap), sx1 - sx0, hMax)).ToList();
+            }
             var use = new List<(Rectangle r, string t)>();
             for (int i = 0; i < text.Count; i++)
             {
