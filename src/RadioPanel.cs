@@ -122,7 +122,7 @@ namespace SelectOR
             using (var lb = new SolidBrush(lc)) g.FillEllipse(lb, led);
             x = led.Right + Theme.Px(8);
             using var f1 = Theme.Font(9.5f, FontStyle.Bold); using var f2 = Theme.Font(8f);
-            string top = "📻  " + (mine ? I18n.T("Hablando…") : someone ? (r.TalkingJefe ? string.Format(I18n.T("{0} (jefe de circulación)"), r.Talking) : r.Talking) : I18n.T("Radio de la sala"));
+            string top = "📻  " + (mine ? I18n.T("Hablando…") : someone ? (r.TalkingJefe ? string.Format(I18n.T("{0} (jefe de circulación)"), r.Talking + CertBadges.Tag(r.Talking)) : r.Talking + CertBadges.Tag(r.Talking)) : I18n.T("Radio de la sala"));
             string sub = r == null ? I18n.T("Sin conexión con la sala")
                        : r.FreshNote ?? (someone ? I18n.T("está hablando") : string.Format(I18n.T("Mantén pulsado para hablar · «{0}»"), KeyLabel()));
             int w = Width - x - Theme.Px(8);

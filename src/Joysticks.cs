@@ -30,6 +30,11 @@ namespace SelectOR
         public string Action { get; set; }      // THROTTLE · TRAIN_BRAKE · … (palancas) u orden de Open Rails (botones)
         public bool Invert { get; set; }
         public double Dead { get; set; } = 0.03; // zona muerta en cada extremo (y en el centro de las palancas con centro)
+        // (2026-11-08) palancas combinadas: el reposo a mano (fracción del recorrido desde la tracción máxima, como el
+        // Combined_Control del .eng); null = automático, según el tren
+        public double? Rest { get; set; }
+        // (2026-11-08) botones: «conmutador» (cada pulsación cambia: activo hasta la siguiente) en vez de «pulsador»
+        public bool Toggle { get; set; }
     }
 
     public static class Joy
@@ -235,18 +240,26 @@ namespace SelectOR
             ("ENGINE_BRAKE", "Freno de locomotora"),
             ("DYNAMIC_BRAKE", "Freno dinámico"),
             ("THROTTLE_DYNAMIC", "Regulador + freno dinámico"),
+            ("THROTTLE_TRAIN", "Regulador + freno de tren"),                    // (2026-11-08) manipulador combinado (UT, Euromed…)
+            ("COMBINED", "Combinado (por tren)"),                    // (2026-11-08) dinámico o de tren, lo que diga su .eng
             ("CRUISE_SPEED", "Control de crucero: velocidad"),
             ("DIRECTION", "Inversor"),
         };
 
         // Palancas con el reposo en el centro (−1…1).
-        public static bool Centered(string action) => action == "DIRECTION" || action == "THROTTLE_DYNAMIC";
+        public static bool Centered(string action) => action == "DIRECTION" || Combined(action);
+        // las combinadas (regulador arriba, freno abajo; con su punto de reposo)
+        public static bool Combined(string action) => action == "THROTTLE_DYNAMIC" || action == "THROTTLE_TRAIN" || action == "COMBINED";
 
         // Las que no pueden ir a la vez (mandan lo mismo a Open Rails): al asignar una, se quitan las otras.
         public static string[] Conflicts(string action) => action switch
         {
-            "THROTTLE_DYNAMIC" => new[] { "THROTTLE", "DYNAMIC_BRAKE" },
-            "THROTTLE" or "DYNAMIC_BRAKE" => new[] { "THROTTLE_DYNAMIC" },
+            "THROTTLE_DYNAMIC" => new[] { "THROTTLE", "DYNAMIC_BRAKE", "THROTTLE_TRAIN", "COMBINED" },
+            "THROTTLE_TRAIN" => new[] { "THROTTLE", "TRAIN_BRAKE", "THROTTLE_DYNAMIC", "COMBINED" },
+            "COMBINED" => new[] { "THROTTLE", "TRAIN_BRAKE", "DYNAMIC_BRAKE", "THROTTLE_DYNAMIC", "THROTTLE_TRAIN" },
+            "THROTTLE" => new[] { "THROTTLE_DYNAMIC", "THROTTLE_TRAIN", "COMBINED" },
+            "DYNAMIC_BRAKE" => new[] { "THROTTLE_DYNAMIC", "COMBINED" },
+            "TRAIN_BRAKE" => new[] { "THROTTLE_TRAIN", "COMBINED" },
             _ => Array.Empty<string>()
         };
 
@@ -307,9 +320,18 @@ namespace SelectOR
         // Regulador, frenos y crucero: 0…1, con zona muerta en los extremos (para llegar seguro a 0 y a 1). Inversor y
         // combinado: −1…1 con zona muerta en el centro (inversor: < −0,5 atrás, > 0,5 adelante; en vapor, el corte de
         // admisión · combinado: + regulador, − freno dinámico).
-        public static float Value(JoyBinding b, float raw)
+        // vrest (2026-11-08): dónde está el reposo de una combinada, en el recorrido de la palanca (0 freno máximo, 1 tracción
+        // máxima; 0,5 el centro). Por encima, + regulador; por debajo, − freno; cada lado de 0 a 1 en su tramo.
+        public static float Value(JoyBinding b, float raw, double vrest = 0.5)
         {
             double v = b.Invert ? 1 - raw : raw, d = Math.Max(0, Math.Min(0.2, b.Dead));
+            if (Combined(b.Action) && Math.Abs(vrest - 0.5) > 0.001)
+            {
+                double r = Math.Max(0.05, Math.Min(0.95, vrest)), z = Math.Max(d, 0.04);
+                if (Math.Abs(v - r) < z) return 0;
+                if (v > r) return (float)Math.Max(0, Math.Min(1, (v - r - z) / Math.Max(0.05, 1 - r - z - d)));
+                return (float)-Math.Max(0, Math.Min(1, (r - z - v) / Math.Max(0.05, r - z - d)));
+            }
             if (Centered(b.Action))
             {
                 double c = v * 2 - 1;   // −1…1
@@ -320,6 +342,54 @@ namespace SelectOR
             if (v <= d) return 0;
             if (v >= 1 - d) return 1;
             return (float)((v - d) / (1 - 2 * d));
+        }
+    }
+
+    // (2026-11-08) El manipulador combinado del pupitre del tren, del .eng de su máquina de cabeza:
+    //   Combined_Control ( mín máx reparto inicial mandoA mandoB )   p. ej. ( 0 1 0.5 0.5 throttle train )
+    // En Open Rails el manipulador va de 0 (tracción máxima) a 1 (freno máximo), con el reposo en «reparto». Con eso, la
+    // palanca «según el tren» sabe qué freno lleva (dinámico o de tren) y dónde tiene su reposo.
+    public sealed class JoyCab
+    {
+        public string Brake;        // "DYNAMIC_BRAKE" · "TRAIN_BRAKE"
+        public double Split;        // el reposo, desde la tracción máxima (0–1)
+        public string Engine;       // nombre del .eng (para enseñarlo)
+
+        // El reposo en el recorrido de la palanca (0 freno máximo, 1 tracción máxima).
+        public double Rest => 1 - Split;
+
+        static readonly System.Text.RegularExpressions.Regex Rx = new System.Text.RegularExpressions.Regex(
+            @"Combined_Control\s*\(\s*([-\d.eE]+)\s+([-\d.eE]+)\s+([-\d.eE]+)\s+([-\d.eE]+)\s+""?(\w+)""?\s+""?(\w+)""?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        public static JoyCab Parse(string engPath)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(engPath) || !System.IO.File.Exists(engPath)) return null;
+                var raw = System.IO.File.ReadAllBytes(engPath);
+                string txt;
+                if (raw.Length >= 2 && raw[0] == 0xFF && raw[1] == 0xFE) txt = System.Text.Encoding.Unicode.GetString(raw, 2, raw.Length - 2);
+                else if (raw.Length >= 2 && raw[1] == 0 && raw[0] != 0) txt = System.Text.Encoding.Unicode.GetString(raw);
+                else txt = System.Text.Encoding.Latin1.GetString(raw);
+                var all = Rx.Matches(txt);   // (si sale más de una vez, Open Rails se queda con la última)
+                if (all.Count == 0) return null;
+                var m = all[all.Count - 1];
+                var ci = System.Globalization.CultureInfo.InvariantCulture;
+                if (!double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, ci, out double mn)) mn = 0;
+                if (!double.TryParse(m.Groups[2].Value, System.Globalization.NumberStyles.Float, ci, out double mx)) mx = 1;
+                if (!double.TryParse(m.Groups[3].Value, System.Globalization.NumberStyles.Float, ci, out double sp)) return null;
+                string a = m.Groups[5].Value.ToLowerInvariant(), b = m.Groups[6].Value.ToLowerInvariant();
+                if (a != "throttle" && b != "throttle") return null;   // (otros combinados: no son regulador + freno)
+                string other = a == "throttle" ? b : a;
+                string brake = other.StartsWith("dyn") ? "DYNAMIC_BRAKE" : other == "train" || other == "air" || other.Contains("brake") ? "TRAIN_BRAKE" : null;
+                if (brake == null) return null;
+                double split = mx > mn ? (sp - mn) / (mx - mn) : sp;
+                if (a != "throttle") split = 1 - split;   // («dynamic throttle»: el freno primero)
+                split = Math.Max(0.05, Math.Min(0.95, split));
+                return new JoyCab { Brake = brake, Split = split, Engine = System.IO.Path.GetFileNameWithoutExtension(engPath) };
+            }
+            catch { return null; }
         }
     }
 }

@@ -57,7 +57,7 @@ namespace SelectOR
             var m = new ChatMsg { Id = ++_roomChatSeq, AtUtc = at, Fixed = true };
             if (kind == 'm')
             {
-                m.User = from; m.Body = text;
+                m.User = from + CertBadges.Tag(from); m.Body = text;   // (2026-11-08) sus títulos
                 // (1.2.77) el jefe de circulación con alguna dependencia ahora, con su etiqueta
                 if (_pilot != null && _pilot.JefeZones.Any(z => z.Name == from)) m.User = from + "  · " + Tr("Jefe de circulación");
                 // (el chat agrupa por UserId: cada jugador el suyo; los míos, como míos)

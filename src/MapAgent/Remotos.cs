@@ -9,6 +9,14 @@
 //    (Train.CheckBackwardClearance): su ruta aquí es solo la de cuando llegaron y, al salirse de ella, Open Rails los ponía
 //    fuera de control y rehacía su ruta, que fallaba (NullReferenceException en GenerateValidRoute en cada fotograma desde
 //    que hay trenes IA en la sala). Quien los mueve es su dueño (o el despachador): aquí solo se dibujan.
+//  · (1.2.92) Más fallos de Open Rails con los trenes de la sala, en cada fotograma (registro de un usuario, 08/11):
+//    - CheckEndOfRoutePosition mira el recorrido (TCRoute) de un tren remoto, que no tiene: sin recorrido, «no ha llegado».
+//    - TrainCar.UpdateGravity (CYZY y otras: «Train != null & Train.IsPlayerDriven», con & y no &&) falla con un coche
+//      que no sabe de qué tren es: al colocar los coches de un tren (CalculatePositionOfCars), el coche sin tren es suyo.
+//    - SetTrainOutOfControl: un tren remoto que se sale de su camino aquí (UpdateTrainPositionInformation,
+//      UpdateSectionState, CheckSignalPassed) se ponía «fuera de control»: reiniciaba señales de tu Open Rails y rehacía
+//      su ruta, que fallaba en cada fotograma. Los remotos los mueve su dueño o el servidor: aquí no se tocan (con el sí
+//      del usuario, 08/11, porque reiniciaba señales locales).
 //  · (1.2.82) Tren de la sala al que le faltan coches para siempre (vehículos que no tienes y sin sustituto): Open Rails,
 //    al ver que no cuadran los coches, lo pedía otra vez (GETTRAIN), lo recargaba entero cada 11 s y, mientras tanto, no
 //    lo movía (en tu pantalla se quedaba quieto donde apareció). Ahora, tras 30 s pidiéndolo sin que cuadre, se mueve con
@@ -42,6 +50,12 @@ namespace SelectOR.MapAgent
                 if (mv != null) { h.Patch(mv, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeMove))); n++; }
                 var back = AccessTools.Method(typeof(Orts.Simulation.Physics.Train), "CheckBackwardClearance");
                 if (back != null) { h.Patch(back, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeBackward))); n++; }
+                var ooc = AccessTools.Method(typeof(Orts.Simulation.Physics.Train), "SetTrainOutOfControl");
+                if (ooc != null) { h.Patch(ooc, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeOutOfControl))); n++; }
+                var eor = AccessTools.Method(typeof(Orts.Simulation.Physics.Train), "CheckEndOfRoutePosition", Type.EmptyTypes);
+                if (eor != null && eor.ReturnType == typeof(bool)) { h.Patch(eor, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeEndOfRoute))); n++; }
+                foreach (var cp in AccessTools.GetDeclaredMethods(typeof(Orts.Simulation.Physics.Train)).Where(m => m.Name == "CalculatePositionOfCars"))
+                    h.Patch(cp, prefix: new HarmonyMethod(typeof(Remotos), nameof(BeforeCarsPosition)));
                 var add = AccessTools.Method(typeof(OnlineTrains), "AddPlayers");
                 if (add != null)
                 {
@@ -123,6 +137,47 @@ namespace SelectOR.MapAgent
                 return false;
             }
             catch { return true; }
+        }
+
+        // (1.2.92) un tren remoto, en un jugador, no se pone fuera de control (ver arriba); una vez en el registro por tren
+        static readonly System.Collections.Generic.HashSet<int> _oocSaid = new System.Collections.Generic.HashSet<int>();
+        static bool BeforeOutOfControl(Orts.Simulation.Physics.Train __instance, Orts.Simulation.Physics.Train.OUTOFCONTROL reason)
+        {
+            try
+            {
+                if (__instance.TrainType != Orts.Simulation.Physics.Train.TRAINTYPE.REMOTE || !MPManager.IsClient()) return true;
+                if (_oocSaid.Add(__instance.Number)) Agent.Log($"tren de la sala nº{__instance.Number}: Open Rails lo ponía fuera de control ({reason}); es de otro, no se toca");
+                return false;
+            }
+            catch { return true; }
+        }
+
+        // (1.2.92) sin recorrido (tren remoto): no ha llegado al final de nada
+        static bool BeforeEndOfRoute(Orts.Simulation.Physics.Train __instance, ref bool __result)
+        {
+            try
+            {
+                if (__instance.TCRoute != null) return true;
+                __result = false;
+                return false;
+            }
+            catch { return true; }
+        }
+
+        // (1.2.92) coches que no saben de qué tren son: del que los está colocando (una vez en el registro por tren)
+        static readonly System.Collections.Generic.HashSet<int> _orphanSaid = new System.Collections.Generic.HashSet<int>();
+        static void BeforeCarsPosition(Orts.Simulation.Physics.Train __instance)
+        {
+            try
+            {
+                var cars = __instance?.Cars;
+                if (cars == null) return;
+                int fixedN = 0;
+                for (int i = 0; i < cars.Count; i++) if (cars[i] != null && cars[i].Train == null) { cars[i].Train = __instance; fixedN++; }
+                if (fixedN > 0 && _orphanSaid.Add(__instance.Number))
+                    Agent.Log($"tren nº{__instance.Number} ({__instance.TrainType}): {fixedN} de {cars.Count} coches no sabían de qué tren eran; se les pone (Open Rails fallaba en cada fotograma)");
+            }
+            catch { }
         }
 
         static void AfterAdd(MSGPlayer player)

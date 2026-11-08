@@ -1,10 +1,13 @@
-﻿1.2.91
-Rewards in the shared room|If you run a service in the shared room from start to finish, your company earns 15 % more of the profit, 5 % more if a dispatcher is in charge, and €1,000 when you reach 5 services in a week. My profile shows your services in the room, your streak and their badges.
-More people by the track|Firefighters, police officers, paramedics and security guards can appear in the shared room: working, helping someone, on the phone or waving at the train.
-Absolute stop sign|CGL's absolute stop sign can appear in the middle of the track in the shared room.
-You choose how you see AI trains|In the shared room, «AI trains» → «How I see the AI trains»: pick which train from your folder you see for each service, with its 2D consist. It only changes in your Open Rails.
-Control centre with layers|The «🗺 Layers» button shows each signal box's section, the route's mileposts and the room's objects; click a band to open that signal box.
-Dispatchers on the big map|Each dispatcher appears with their badge above their station.
-Centred indicator boards|Indicator board text is always centred, whether short or long.
-Clearer room panel|«Control centre», «AI trains» and «Weather» are buttons with an icon and text, and the Route tab's list of connected players shows up straight away.
-Everything on the big map|In the shared room the Ctrl+9 window no longer opens: switches, signals and trains are on the HUD's big map.
+﻿1.2.92
+Driver and dispatcher certificates|In My profile → Certificates you take the exam and level up (B, A and A+) with your services. To take command as a dispatcher you need to pass its exam. Certified players carry their badge in the room, the chat and the radio, and companies can ask for a certificate in their Board job offers.
+Tips on the Board|A new section with tips to earn more on every trip: fares, passengers by time of day and weather, and more, with current figures.
+Faster routes|In the control centre, click the signal and click the destination: the route is drawn straight away. Right-click for more options, and «Replay» sets the last ones again.
+Only your signal boxes|The «Only mine» button in the control centre shows only the signal boxes you run, and it's remembered.
+Disconnect from the control centre|Dispatchers can disconnect a player or remove loose wagons within their signal boxes, always with a reason that the player sees.
+Applicant profile|Managers can see the profile of whoever asks to join their company before accepting them.
+Every passenger counts in the league|The league and your service log count every passenger you carry, even though fares have their limit.
+More compatible controllers|Settings → Controllers: throttle + train brake lever, a combined lever that adapts to each train (with its rest point, automatic or manual) and buttons that stay on until the next press.
+Snappier set speed|In Stable, Testing and CYZYRails the cruise control set speed moves as quickly as in New Year.
+Lights on Breclav - Praha|With CYZYRails, the stations on the Breclav - Praha route light up in yellow.
+Steadier room trains|Your Open Rails no longer stalls with other players' trains that leave their path, and an AI train no longer couples to yours.
+No Ctrl+9 in the room|In the shared room the Ctrl+9 window no longer opens with any Open Rails version.

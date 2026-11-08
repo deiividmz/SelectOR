@@ -115,7 +115,7 @@ namespace SelectOR
             {
                 bool jefe = ChatIsJefe(from);
                 bool me = string.Equals(from, _me, StringComparison.Ordinal);
-                Put(from, jefe ? ChatJefe : me ? Theme.Accent : ChatName, FontStyle.Bold);
+                Put(from + CertBadges.Tag(from), jefe ? ChatJefe : me ? Theme.Accent : ChatName, FontStyle.Bold);   // (2026-11-08) sus títulos
                 if (jefe) Put("  [" + Tr("Jefe de circulación") + "]", ChatJefe, FontStyle.Bold, 8f);
                 Put(":  " + text, Theme.Text);
             }

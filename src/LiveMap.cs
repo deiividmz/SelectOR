@@ -604,7 +604,7 @@ namespace SelectOR
             if (includeMe)
                 rows.Add((I18n.T("Tú") + (string.IsNullOrWhiteSpace(meName) ? "" : " (" + LiveMates.ShortName(meName) + ")"),
                           meStatus ?? Status(meCompany), Color.FromArgb(120, 210, 150), null));
-            foreach (var m in mates) rows.Add((m.Short, m.Status ?? Status(m.Company), m.Color, m));
+            foreach (var m in mates) rows.Add((m.Short + (m.Room ? CertBadges.Tag(m.Name) : ""), m.Status ?? Status(m.Company), m.Color, m));   // (2026-11-08) sus títulos, en la sala
             int extra = Math.Max(0, rows.Count - maxRows);
             if (extra > 0) rows.RemoveRange(maxRows, rows.Count - maxRows);
 

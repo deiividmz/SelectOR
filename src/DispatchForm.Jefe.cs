@@ -248,7 +248,7 @@ namespace SelectOR
             // (1.2.75) donde se ve la señal (mástil, luces, número); si no, junto al pie del mástil como antes
             var sg = SchematicDraw.SignalAt(_cur, p, Theme.Px(4)) is Schematic.Signal hit && hit.Sig != null && hit.Sig.Obj >= 0 && MySig(hit.Sig.Obj) ? hit
                 : _cur.Signals.Where(q => q.Sig != null && q.Sig.Obj >= 0 && MySig(q.Sig.Obj)).Select(q => (q, d: D(Sc(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
-            if (sg != null) { SignalMenu(sg.Sig, p); return true; }
+            if (sg != null) { SignalLeft(sg.Sig, p); return true; }
             // (1.2.81) también las de una travesía (en su rombo): la lista de todas, como en el mapa grande del HUD; y con el número
             // que se ve en el esquema (antes salía el nodo del .tdb)
             var sws = SchematicDraw.SwitchesAt(_cur, _origin, _zoom, p, R * 1.4f).Where(q => MyNode(q.node)).ToList();
@@ -322,7 +322,7 @@ namespace SelectOR
             static float D(PointF a, Point b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
             var sg = RouteBoardDraw.SignalAt(_board, p, Theme.Px(4)) is RouteBoard.Sg hit && hit.S.Obj >= 0 && MySig(hit.S.Obj) ? hit
                 : _board.Signals.Where(q => q.S.Obj >= 0 && MySig(q.S.Obj)).Select(q => (q, d: D(Bp(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
-            if (sg != null) { SignalMenu(sg.S, p); return true; }
+            if (sg != null) { SignalLeft(sg.S, p); return true; }
             // (1.2.81) una tijera: el mismo menú que en el esquema (sus cuatro combinaciones)
             // (salvo que se pulse encima de una aguja suelta que hay al lado: su número o la tijera pueden quedar pegados)
             bool onLoose = _board.Switches.Any(q => !_board.ScissorNodes.Contains(q.Node) && D(Bp(q.At), p) < Theme.Px(7));

@@ -99,7 +99,7 @@ namespace SelectOR
             };
             _list.SelectedIndexChanged += (s, e) => { if (_list.SelectedItem is string st) { if (st == General) ShowOverview(); else ShowZone(st); } };
             try { Native.UseDarkScrollBars(_list); } catch { }
-            side.Controls.Add(_list); side.Controls.Add(cap);
+            side.Controls.Add(_list); BuildMineBtn(side); side.Controls.Add(cap);   // (2026-11-08) «Solo las mías» (DispatchForm.Mias.cs)
             BuildJefeBar(top);   // jefes de circulación (DispatchForm.Jefe.cs; necesita la lista)
             BuildItinBar(top);   // mando manual / automático (DispatchForm.Itinerarios.cs)
             BuildObjectsBtn(top);   // (2026-11-04) 🚧 objetos de la sala, solo el administrador (DispatchForm.Objetos.cs)
@@ -170,12 +170,15 @@ namespace SelectOR
             _canvas.MouseLeave += (s, e) => { if (_hover != null) { _hover = null; _canvas.Invalidate(); } };
             _canvas.MouseUp += (s, e) =>
             {
+                if (e.Button == MouseButtons.Right && !_dragging && (Board || !Overview) && (SignalRightClick(e.Location) || TrainClick(e.Location))) return;   // (2026-11-08) el menú de la señal o del tren
                 if (e.Button != MouseButtons.Left || _dragging) { _dragging = false; return; }
                 if (NoticeClick(e.Location)) return;   // una notificación de Tab: a esa señal (DispatchForm.Avisos.cs)
+                if ((Board || !Overview) && RecentClick(e.Location)) return;   // (2026-11-08) «Repetir» un itinerario
                 if (Board)
                 {
                     if (PickClick(e.Location)) return;     // eligiendo el destino de un itinerario
                     if (JefeClick(e.Location)) return;     // con el mando: una aguja o una señal
+                    if (TrainClick(e.Location)) return;    // (2026-11-08) con el mando: un tren (DispatchForm.Expulsar.cs)
                     var st = StationAt(e.Location); if (st != null && _list.Items.Contains(st)) { Select(st); return; }
                     var zb = ZoneBandAt(e.Location); if (zb != null && _list.Items.Contains(zb)) Select(zb);   // (1.2.91) clic en la franja de una dependencia (también los trayectos)
                     return;
@@ -184,11 +187,18 @@ namespace SelectOR
                 if (_backBox.Contains(e.Location)) { PickCancel(); Select(General); return; }
                 if (PickClick(e.Location)) return;     // eligiendo el destino de un itinerario (DispatchForm.Itinerarios.cs)
                 if (JefeClick(e.Location)) return;     // con el mando: una aguja o una señal (DispatchForm.Jefe.cs)
+                if (TrainClick(e.Location)) return;    // (2026-11-08) con el mando: un tren (DispatchForm.Expulsar.cs)
                 using var g2 = _canvas.CreateGraphics();
                 var x = SchematicDraw.ExitAt(_cur, _origin, _zoom, e.Location, g2);
                 if (x != null && _list.Items.Contains(x.Station)) Select(x.Station);
             };
-            _canvas.DoubleClick += (s, e) => { if (Board) FitBoard(); else if (Overview) FitOverview(); else Fit(); };
+            _canvas.DoubleClick += (s, e) =>
+            {
+                // (2026-11-08) el doble clic en una señal tuya es para su itinerario (y en «Repetir», nada): no se ajusta la vista
+                var mp = _canvas.PointToClient(Cursor.Position);
+                if ((Board || !Overview) && (MySignalAt(mp) != null || _recentHit.Any(h => h.r.Contains(mp)))) return;
+                if (Board) FitBoard(); else if (Overview) FitOverview(); else Fit();
+            };
             new ToolTip().SetToolTip(_canvas, Tr("rueda: zoom · arrastrar: mover · doble clic: ajustar"));
             _canvas.Resize += (s, e) => { if (Board) { if (!_bFitted) FitBoard(); } else if (Overview ? !_ovFitted : !_fitted) { if (Overview) FitOverview(); else Fit(); } };
 
@@ -199,7 +209,7 @@ namespace SelectOR
             _blink.Tick += (s, e) => { if (_blinking && (Board || !Overview)) _canvas.Invalidate(); };
             _blink.Start();
             _timer = new Timer { Interval = 1000 };
-            _timer.Tick += (s, e) => { UpdateStatus(); if (JefeBarStale()) UpdateJefe(); JefeKeepAlive(); RefreshHeaders(); LayersTick(); _canvas.Invalidate(); };
+            _timer.Tick += (s, e) => { UpdateStatus(); if (JefeBarStale()) UpdateJefe(); JefeKeepAlive(); RefreshHeaders(); LayersTick(); MineRefresh(); _canvas.Invalidate(); };
             Shown += async (s, e) => await Prepare();
             FormClosing += (s, e) => LeaveOnClose();   // con el mando: se suelta
             FormClosed += (s, e) => { _timer.Stop(); _blink.Stop(); try { _pilot?.Dispose(); } catch { } };
@@ -440,6 +450,7 @@ namespace SelectOR
                 else l.Add((off - 2, off + 2));
             }
             var ends = new List<(double x, double y, double mps, bool loose)>();   // (1.2.84) cola y cabeza de cada tren: pasos a nivel
+            _trainSeen.Clear();
             foreach (var t in p.Trains)
             {
                 if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
@@ -494,6 +505,7 @@ namespace SelectOR
                 if (body.Count == 0) continue;
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
                 live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
+                _trainSeen.Add((t.name, t.player, body.ToArray()));   // (2026-11-08) para el clic en un tren (DispatchForm.Expulsar.cs)
             }
             // itinerarios de las señales abiertas (de estación, con alguna aguja, y los rebases), solo las que se ven
             if (sigOk && _sbe != null && _bZoom >= 0.08f)
@@ -698,6 +710,7 @@ namespace SelectOR
                 else l.Add((off - 2, off + 2));
             }
             var ends = new List<(double x, double y, double mps, bool loose)>();   // (1.2.84) cola y cabeza de cada tren: pasos a nivel
+            _trainSeen.Clear();
             foreach (var t in p.Trains)
             {
                 if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
@@ -751,6 +764,7 @@ namespace SelectOR
                 if (body.Count == 0) continue;
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
                 live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
+                _trainSeen.Add((t.name, t.player, body.ToArray()));   // (2026-11-08) para el clic en un tren (DispatchForm.Expulsar.cs)
             }
             try { live.LevelClosed = PasosNivel.Closed(geo.LevelCrossings, geo.Graph, ends); } catch { }   // (1.2.84)
             // itinerarios: de cada señal abierta a la siguiente, por las agujas como están (los de plena vía, no)

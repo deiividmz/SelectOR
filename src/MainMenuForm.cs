@@ -3433,6 +3433,9 @@ namespace SelectOR
                 // Multijugador: el agente del mapa entra en Open Rails al arrancar (MapAgent\: en el despachador, acepta las
                 // órdenes de señal y los nombramientos de ayudante del mapa grande). No cambia ningún archivo de Open Rails.
                 if (args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) >= 0) MapAgentFiles.Apply(psi);
+                // (2026-11-08) la dirección de la sala compartida: el agente quita el Ctrl+9 si Open Rails se conecta a ella, se entre
+                // como se entre (Actividad, Horarios, la dirección puesta a mano…), no solo por el botón de la sala (MapAgent\SinCtrl9.cs)
+                if (args.IndexOf("-multiplayer", StringComparison.OrdinalIgnoreCase) >= 0) psi.Environment["SELECTOR_SALA_ADDR"] = SalaHost + ":" + SalaPort + ",selector-mp.fly.dev:" + SalaPort;
                 // Sala compartida: el .pat solo para la salida (el agente devuelve las agujas del resto del recorrido: MapAgent\Spawn.cs)
                 if (_roomPending != null) psi.Environment["SELECTOR_SPAWN_ONLY"] = "1";
                 // Conducción libre: el mismo agente, para que el mapa grande haga lo de Ctrl+9 (MainMenuForm.MapaLocal.cs)

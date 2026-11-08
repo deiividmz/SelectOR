@@ -29,8 +29,7 @@ namespace SelectOR
             ("orden_libre", "SEÑALES", "Orden de anuncio o vía libre: vuelve a automática a los", 180, true),
             ("tab", "SEÑALES", "Tab: el rebase autorizado y la espera al jefe de circulación caducan a los", 300, true),
             ("tramo_fuera", "TRENES QUE SE QUEDAN CON LA VÍA", "Tramos cogidos que quedan fuera de la ruta del tren: se sueltan a los", 30, false),
-            ("parado_suelta", "TRENES QUE SE QUEDAN CON LA VÍA", "Tren parado que cierra la señal a otro: suelta su ruta a los", 90, false),
-            ("cede", "TRENES QUE SE QUEDAN CON LA VÍA", "…y después cede la vía durante", 60, false),
+            ("parado_suelta", "TRENES QUE SE QUEDAN CON LA VÍA", "Tren parado que cierra la señal a otro: la cede hasta que arranque a los", 90, false),
         };
         const string SalaRoute = "CGL_V22N_RE";
 

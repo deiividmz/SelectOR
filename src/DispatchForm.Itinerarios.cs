@@ -1,6 +1,8 @@
 ﻿// PUESTO DE MANDO: itinerarios (1.2.75). Como en un puesto de ADIF, el jefe no ordena el aspecto de una señal: establece
 // un itinerario de una señal a la siguiente (o a una topera) y la señal se abre sola, con el aspecto que le toque, cuando
-// llega el tren. Clic en una señal tuya → «Establecer itinerario desde aquí…»: se dibujan en discontinuo los caminos
+// llega el tren. (2026-11-08, más rápido) Clic en una señal tuya sin itinerario: a elegir el destino al momento (antes,
+// por el menú); doble clic, si tiene un solo destino, establecido; botón derecho, el menú entero; abajo, «Repetir» con los
+// últimos; el pedido se ve ya en discontinuo. Antes: clic en una señal tuya → «Establecer itinerario desde aquí…»: se dibujan en discontinuo los caminos
 // posibles con un círculo en cada destino (SchematicCircuits.Options); clic en un círculo y la sala (Itinerarios.cs del
 // despachador) pone las agujas, las enclava y lo guarda. Esc o clic fuera: nada. «Anular itinerario»: sin tren
 // acercándose, al momento; con tren, la señal pasa a parada y las agujas se sueltan a los 2 min.
@@ -86,7 +88,7 @@ namespace SelectOR
             _pilot.ItinReply += (who, ok, o, text) =>
             {
                 if (Me == null || who != Me) return;
-                try { if (!IsDisposed) BeginInvoke(new Action(() => ItinSay(ItinText(text), ok))); } catch { }
+                try { if (!IsDisposed) BeginInvoke(new Action(() => { if (_pending is { } pd && pd.origin == o) _pending = null; ItinSay(ItinText(text), ok); })); } catch { }
             };
         }
 
@@ -160,11 +162,61 @@ namespace SelectOR
             _canvas.Invalidate();
         }
 
-        // (MouseUp) eligiendo destino: un clic en un círculo lo establece; en otro sitio, no se hace nada
+        // (2026-11-08, más rápido) clic en una señal tuya: sin itinerario, a elegir el destino al momento (antes había que pasar
+        // por el menú); con uno (establecido o en cola), su menú. El menú entero, con el botón derecho (SignalRightClick)
+        void SignalLeft(RoomMapGeo.Sig sg, Point p)
+        {
+            if (_pilot.ItinFrom(sg.Obj) != null) { SignalMenu(sg, p); return; }
+            StartPick(sg);
+        }
+
+        // (2026-11-08) botón derecho: el menú de la señal (órdenes, itinerario…)
+        bool SignalRightClick(Point p)
+        {
+            var sg = MySignalAt(p);
+            if (sg == null) return false;
+            PickCancel();
+            SignalMenu(sg, p);
+            return true;
+        }
+
+        // una señal tuya en ese punto (en el tablero o en el esquema que se ve), o null
+        RoomMapGeo.Sig MySignalAt(Point p)
+        {
+            if (Me == null) return null;
+            float R = Theme.Px(11);
+            static float D(PointF a, Point b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+            if (Board)
+            {
+                if (_board == null) return null;
+                var bs = RouteBoardDraw.SignalAt(_board, p, Theme.Px(4)) is RouteBoard.Sg hit && hit.S.Obj >= 0 && MySig(hit.S.Obj) ? hit
+                    : _board.Signals.Where(q => q.S.Obj >= 0 && MySig(q.S.Obj)).Select(q => (q, d: D(Bp(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
+                return bs?.S;
+            }
+            if (_cur == null || Overview) return null;
+            PointF Sc(PointF a) => new PointF(_origin.X + a.X * _zoom, _origin.Y + a.Y * _zoom);
+            var zs = SchematicDraw.SignalAt(_cur, p, Theme.Px(4)) is Schematic.Signal h2 && h2.Sig != null && h2.Sig.Obj >= 0 && MySig(h2.Sig.Obj) ? h2
+                : _cur.Signals.Where(q => q.Sig != null && q.Sig.Obj >= 0 && MySig(q.Sig.Obj)).Select(q => (q, d: D(Sc(q.At), p))).Where(x => x.d < R).OrderBy(x => x.d).Select(x => x.q).FirstOrDefault();
+            return zs?.Sig;
+        }
+
+        // los destinos distintos (cada destino una vez: el camino más corto)
+        static List<SchematicCircuits.ItinOption> Dests(List<SchematicCircuits.ItinOption> opts)
+            => opts.GroupBy(o => o.Dest >= 0 ? "s" + o.Dest : "e" + o.EndEdge).Select(gr => gr.OrderBy(x => x.Len).First()).ToList();
+
+        // (MouseUp) eligiendo destino: un clic en un círculo lo establece; (2026-11-08) otra vez en la señal de origen (o doble
+        // clic en ella), si solo hay un destino, ese; en otra señal tuya, a elegir desde ella; en otro sitio, nada
         bool PickClick(Point p)
         {
             if (_pick is not { } pk) return false;
             var o = PickAt(pk, p);
+            if (o == null && MySignalAt(p) is RoomMapGeo.Sig at)
+            {
+                if (at.Obj != pk.origin.Obj) { StartPick(at); return true; }
+                var ds = Dests(pk.opts);
+                if (ds.Count != 1) { ItinSay(string.Format(Tr("Desde la señal {0} hay {1} destinos: elige uno (los círculos)."), at.Obj, ds.Count), false); return true; }
+                o = ds[0];
+            }
             // (1.2.81) a ese destino se llega por más de un camino: a elegir (al pasar por cada uno, se ve en el mapa)
             var vars = o == null ? null : pk.opts.Where(x => x.Dest == o.Dest && (o.Dest >= 0 || x.EndEdge == o.EndEdge)).OrderBy(x => x.Len).ToList();
             if (vars != null && vars.Count > 1)
@@ -193,9 +245,81 @@ namespace SelectOR
 
         void SetItin(RoomMapGeo.Sig origin, SchematicCircuits.ItinOption o)
         {
+            if (_pilot.ItinFrom(origin.Obj) is SwitchPilot.Itin had)
+            { ItinSay(string.Format(Tr("Ya hay un itinerario desde la señal {0} ({1})."), origin.Obj, ItinName(had)), false); return; }
             _pilot.ItinSet(origin.Obj, o.Dest, o.Switches);
             ItinSay(string.Format(Tr("Estableciendo el itinerario {0} → {1}…"), origin.Obj, o.Dest >= 0 ? o.Dest.ToString() : Tr("topera")), true);
+            // (2026-11-08) a la vista ya, en discontinuo, hasta que la sala conteste; y a «Repetir»
+            _pending = (origin.Obj, o, DateTime.UtcNow.AddSeconds(10));
+            _recent.RemoveAll(r => r.origin.Obj == origin.Obj && r.o.Dest == o.Dest && SameSw(r.o, o));
+            _recent.Insert(0, (origin, o));
+            if (_recent.Count > 12) _recent.RemoveAt(_recent.Count - 1);
             _canvas.Invalidate();
+        }
+
+        static bool SameSw(SchematicCircuits.ItinOption a, SchematicCircuits.ItinOption b)
+            => a.Switches.Count == b.Switches.Count && a.Switches.All(w => b.Switches.Contains(w));
+
+        // (2026-11-08) el itinerario pedido, dibujado ya (hasta que la sala lo tenga o conteste) · los últimos, para repetirlos
+        (int origin, SchematicCircuits.ItinOption o, DateTime until)? _pending;
+        readonly List<(RoomMapGeo.Sig origin, SchematicCircuits.ItinOption o)> _recent = new();
+        readonly List<(Rectangle r, RoomMapGeo.Sig origin, SchematicCircuits.ItinOption o)> _recentHit = new();
+
+        // los de «Repetir» que se pueden pedir desde esta vista (su señal se ve aquí y es tuya), como mucho 5
+        List<(RoomMapGeo.Sig origin, SchematicCircuits.ItinOption o)> RecentHere()
+        {
+            if (Overview && !Board) return new();
+            bool Here(int obj) => Board ? _board != null && _board.Signals.Any(q => q.S.Obj == obj) : _cur != null && _cur.Signals.Any(q => q.Sig != null && q.Sig.Obj == obj);
+            return _recent.Where(r => MySig(r.origin.Obj) && Here(r.origin.Obj)).Take(5).ToList();
+        }
+
+        // (MouseUp) un botón de «Repetir»
+        bool RecentClick(Point p)
+        {
+            if (_pick != null) return false;
+            foreach (var h in _recentHit)
+                if (h.r.Contains(p)) { SetItin(h.origin, h.o); return true; }
+            return false;
+        }
+
+        void DrawRecent(Graphics g, Rectangle area)
+        {
+            _recentHit.Clear();
+            var list = RecentHere();
+            if (list.Count == 0) return;
+            using var f = Theme.Font(8.5f, FontStyle.Bold);
+            int pad = Theme.Px(8), h = Theme.Px(26), x = area.Left + Theme.Px(12), y = area.Bottom - h - Theme.Px(12);
+            string cap = Tr("Repetir:");
+            var cs = TextRenderer.MeasureText(cap, f);
+            TextRenderer.DrawText(g, cap, f, new Rectangle(x, y, cs.Width + 2, h), Color.FromArgb(200, 210, 216), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            x += cs.Width + Theme.Px(6);
+            var mouse = _canvas.PointToClient(Cursor.Position);
+            foreach (var (origin, o) in list)
+            {
+                string t = origin.Obj + " → " + (o.Dest >= 0 ? o.Dest.ToString() : Tr("topera"));
+                var ts = TextRenderer.MeasureText(t, f);
+                var r = new Rectangle(x, y, ts.Width + 2 * pad, h);
+                if (r.Right > area.Right - Theme.Px(12)) break;
+                bool busy = _pilot.ItinFrom(origin.Obj) != null, hov = r.Contains(mouse);
+                using (var b = new SolidBrush(busy ? Color.FromArgb(220, 45, 48, 51) : hov ? Color.FromArgb(240, 30, 90, 45) : Color.FromArgb(230, 20, 60, 30))) g.FillRectangle(b, r);
+                using (var pn = new Pen(busy ? Color.FromArgb(90, 96, 102) : SchematicDraw.RouteColor, 1.5f)) g.DrawRectangle(pn, r);
+                TextRenderer.DrawText(g, t, f, r, busy ? Color.FromArgb(150, 156, 160) : Color.FromArgb(236, 240, 244), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                if (!busy) _recentHit.Add((r, origin, o));
+                x = r.Right + Theme.Px(6);
+            }
+        }
+
+        void DrawPending(Graphics g)
+        {
+            if (_pending is not { } pd) return;
+            bool known = _pilot.ItinFrom(pd.origin) != null;
+            if (known || DateTime.UtcNow > pd.until) { _pending = null; return; }
+            using var pen = new Pen(SchematicDraw.RouteColor, 3.2f) { DashStyle = DashStyle.Dash, LineJoin = LineJoin.Round };
+            foreach (var (e, a, b) in pd.o.Pieces)
+            {
+                var pc = ScreenPiece(e, a, b);
+                if (pc != null && pc.Length >= 2) g.DrawLines(pen, pc);
+            }
         }
 
         // «El más corto (420 m)» / «Por la otra rama de la aguja 7 (480 m)»: lo que cambia frente al más corto
@@ -320,9 +444,13 @@ namespace SelectOR
                     using var f = Theme.Font(8f, FontStyle.Bold);
                     TextRenderer.DrawText(g, lab, f, new Point((int)(s.X + r + 3), (int)(s.Y - r - 2)), h ? SchematicDraw.RouteColor : Color.White, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
                 }
-                Banner(g, area, string.Format(Tr("Itinerario desde la señal {0}: clic en el destino (un círculo) · Esc: cancelar"), pk.origin.Obj), Color.FromArgb(230, 20, 60, 30), Color.FromArgb(200, 240, 200));
+                Banner(g, area, Dests(pk.opts).Count == 1
+                    ? string.Format(Tr("Itinerario desde la señal {0}: clic en el destino o doble clic en la señal · Esc: cancelar"), pk.origin.Obj)
+                    : string.Format(Tr("Itinerario desde la señal {0}: clic en el destino (un círculo) · Esc: cancelar"), pk.origin.Obj), Color.FromArgb(230, 20, 60, 30), Color.FromArgb(200, 240, 200));
                 return;
             }
+            DrawPending(g);
+            DrawRecent(g, area);
             if (_itinMsg != null && DateTime.UtcNow < _itinMsgUntil)
                 Banner(g, area, _itinMsg, _itinMsgOk ? Color.FromArgb(230, 20, 60, 30) : Color.FromArgb(235, 90, 30, 30), Color.FromArgb(236, 240, 244));
         }

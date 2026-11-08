@@ -97,6 +97,7 @@ namespace SelectOR
         public string JefeMe { get; private set; }                   // yo, como jefe (tras JEFEOK)
         public event Action JefeChanged;
         public event Action<string> AiRetired;                       // (1.2.78) «*» o el servicio (con %xx): la sala ha pasado la orden de retirar trenes IA
+        public event Action<string, bool, string> KickReply;         // (2026-11-08) usuario o «#número», hecho o no, texto (es · en) o código
         public event Action<string> JefeError;                       // ticket · busy estación nombre · offline · notake
         // Servidor con «READY 5»: el despachador también pide señales desde el mapa (con el agente del mapa en su Open Rails)
         // y nombra ayudantes desde él; quién es quién en la sala.
@@ -293,6 +294,13 @@ namespace SelectOR
             if (t[0] == "HELPER" && t.Length > 1) { Helper = t[1] == "1"; return; }
             if (t[0] == "JEFEOK" && t.Length > 1) { JefeMe = t[1]; try { JefeChanged?.Invoke(); } catch { } return; }
             if (t[0] == "AIRETIRED" && t.Length > 1) { try { AiRetired?.Invoke(t[1]); } catch { } return; }
+            // (2026-11-08) expulsiones: «KICKOK qué texto» · «KICKERR qué motivo» (qué: el usuario o «#número»; con %xx)
+            if ((t[0] == "KICKOK" || t[0] == "KICKERR") && t.Length > 1)
+            {
+                string what = Uri.UnescapeDataString(t[1]), text = t.Length > 2 ? Uri.UnescapeDataString(t[2]) : "";
+                try { KickReply?.Invoke(what, t[0] == "KICKOK", text); } catch { }
+                return;
+            }
             if (t[0] == "JEFEERR" && t.Length > 1) { try { JefeError?.Invoke(string.Join(" ", t.Skip(1))); } catch { } return; }
             if (t[0] == "ROLES" && t.Length > 2)
             {
@@ -417,6 +425,9 @@ namespace SelectOR
             if (Ready) Send($"JEFE ADD {Uri.EscapeDataString(zone)} {Csv(sigs)} {Csv(nodes)} {Csv(keys)}" + (force ? " force" : ""));
         }
         public void JefeDel(string zone) { if (Ready) Send("JEFE DEL " + Uri.EscapeDataString(zone)); }
+        // (2026-11-08) desde el puesto: desconectar a un usuario de la sala (con motivo) · retirar unos vagones sueltos
+        public void JefeKick(string user, string reason) { if (Ready) Send("JEFE KICK " + Uri.EscapeDataString(user) + " " + Uri.EscapeDataString(reason)); }
+        public void JefeLoose(int number) { if (Ready) Send("JEFE LOOSE " + number); }
         public void JefeLeave() { if (Ready) Send("JEFE LEAVE"); JefeMe = null; }
         public void JefeDrop(string ticket, string name) { if (Ready) Send("JEFE DROP " + ticket + " " + name); }
         public void TabAnswer(string user, int sig, bool ok) { if (Ready) Send($"JEFE {(ok ? "TABOK" : "TABNO")} {user} {sig}"); }

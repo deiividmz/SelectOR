@@ -306,7 +306,7 @@ namespace SelectOR
         int _tabSeq;
         sealed class ShowRow { public string Id, Name, Code, Slogan, About, Kinds; public bool Seeking, Mine; public int Members, Trains, Services, LeaguePos; public double Km; public Image Logo; }
         sealed class AdRow { public string Id, CompanyId, Company, Title, Body; public bool HasImage, Featured, Mine; public DateTime Expires; public Image Logo; }
-        sealed class JobRow { public string Id, CompanyId, Company, Role, Title, Body, MyStatus; public int MinPoints, MinServices, Seats, Hired, Applicants, MyPoints, MyServices; public bool Member, Mine; public Image Logo; }
+        sealed class JobRow { public string Id, CompanyId, Company, Role, Title, Body, MyStatus, MinCert; public bool CertOk = true; public int MinPoints, MinServices, Seats, Hired, Applicants, MyPoints, MyServices; public bool Member, Mine; public Image Logo; }
         // (1.2.90) Listing: «sale» (a la venta), «rent» (en alquiler) o «rental» (un alquiler de tu empresa, en curso o reciente)
         sealed class MktRow
         {
@@ -321,11 +321,11 @@ namespace SelectOR
         readonly List<JobRow> _jobRows = new();
         readonly List<MktRow> _mktRows = new();
 
-        static readonly string[] TablonTabNames = { "Escaparate", "Anuncios", "Empleo", "Mercado de trenes", "Transparencia" };
-        static readonly string[] TabIcons = { "🏢", "📌", "🧑‍✈️", "🚆", "📊" };
-        static readonly string[] TabKickers = { "Las empresas de SelectOR", "Avisos de las empresas", "Bolsa de trabajo", "Compra, venta y alquiler", "Portal de transparencia" };
+        static readonly string[] TablonTabNames = { "Escaparate", "Anuncios", "Empleo", "Mercado de trenes", "Transparencia", "Consejos" };
+        static readonly string[] TabIcons = { "🏢", "📌", "🧑‍✈️", "🚆", "📊", "💡" };
+        static readonly string[] TabKickers = { "Las empresas de SelectOR", "Avisos de las empresas", "Bolsa de trabajo", "Compra, venta y alquiler", "Portal de transparencia", "Saca más a cada viaje" };
         static readonly Color TabTeal = Color.FromArgb(77, 182, 172), TabOrange = Color.FromArgb(255, 152, 67), TabBlue = Color.FromArgb(120, 144, 226);
-        static readonly Color[] TabColors = { Theme.Gold, TabOrange, TabBlue, Theme.AccentHi, TabTeal };
+        static readonly Color[] TabColors = { Theme.Gold, TabOrange, TabBlue, Theme.AccentHi, TabTeal, Theme.Gold };
         static readonly string[] TabIntros =
         {
             "Las empresas que quieren darse a conocer, con sus datos del mes. Si una busca socios, puedes pedir unirte desde aquí.",
@@ -333,6 +333,7 @@ namespace SelectOR
             "Ofertas de empleo de las empresas. Si cumples los requisitos, apúntate con un mensaje: la empresa acepta o rechaza tu solicitud.",
             "Trenes que venden o alquilan otras empresas, al precio que fija SelectOR según su uso y estado. En cada uno ves si tienes su material en tu carpeta.",
             "Cómo va cada empresa en el mes: lo que cuenta en la Liga y lo que no, y unos indicadores iguales para todas. Sin nombres de maquinistas.",
+            "Consejos para que cada servicio deje más beneficio: qué cobra, qué cuesta y qué hace que suban más viajeros. Las cifras son las de las tarifas de ahora.",
         };
         readonly Dictionary<int, List<string>> _tabNews = new();   // lo último de cada página, para el letrero de la cabecera
 
@@ -429,7 +430,7 @@ namespace SelectOR
             _mktList.StripNote = row => _mktRows.FirstOrDefault(m => m.Key == row.Key) is MktRow m && !m.HasImage ? Tr("Sin composición guardada") : null;
             _trnList = BuildTransparencyList(Cards);   // (1.2.90) MainMenuForm.Transparencia.cs
             var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) };
-            _tabPages = new Panel[5];
+            _tabPages = new Panel[6];
             var lists = new[] { _showList, _adsList, _jobsList, _mktList, _trnList };
             for (int i = 0; i < lists.Length; i++)
             {
@@ -437,6 +438,7 @@ namespace SelectOR
                 lists[i].Dock = DockStyle.Fill; pg.Controls.Add(lists[i]);
                 _tabPages[i] = pg; host.Controls.Add(pg);
             }
+            { var pg = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Visible = false }; pg.Controls.Add(BuildTipsPage()); _tabPages[5] = pg; host.Controls.Add(pg); }   // (2026-11-08) MainMenuForm.Consejos.cs
             t.Controls.Add(host);
 
             _tabBtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0), MaximumSize = new Size(4000, 0) };
@@ -494,7 +496,7 @@ namespace SelectOR
             V(_showEditBtn, _tabPage == 0 && manage);
             V(_adNewBtn, _tabPage == 1 && manage);
             V(_adDelBtn, _tabPage == 1 && (manage || Supa.IsSuperadmin)); if (_adDelBtn != null) _adDelBtn.Enabled = ad != null && (ad.Mine || Supa.IsSuperadmin);
-            V(_jobApplyBtn, _tabPage == 2); if (_jobApplyBtn != null) _jobApplyBtn.Enabled = jb != null && !jb.Member && string.IsNullOrEmpty(jb.MyStatus) && jb.MyPoints >= jb.MinPoints && jb.MyServices >= jb.MinServices;
+            V(_jobApplyBtn, _tabPage == 2); if (_jobApplyBtn != null) _jobApplyBtn.Enabled = jb != null && !jb.Member && string.IsNullOrEmpty(jb.MyStatus) && jb.MyPoints >= jb.MinPoints && jb.MyServices >= jb.MinServices && jb.CertOk;
             V(_jobNewBtn, _tabPage == 2 && manage);
             V(_jobCloseBtn, _tabPage == 2 && (manage || Supa.IsSuperadmin)); if (_jobCloseBtn != null) _jobCloseBtn.Enabled = jb != null && (jb.Mine || Supa.IsSuperadmin);
             // (1.2.90) comprar o alquilar según el anuncio elegido; «Devolver» para los que tu empresa tiene alquilados
@@ -541,6 +543,7 @@ namespace SelectOR
                 case 1: LoadAds(); break;
                 case 2: LoadJobs(); break;
                 case 3: LoadMarket(); break;
+                case 5: LoadTips(); break;
                 default: LoadTransparency(); break;
             }
         }
@@ -827,7 +830,8 @@ namespace SelectOR
                         Id = Str(e, "id"), CompanyId = Str(e, "company_id"), Company = Str(e, "company"), Role = Str(e, "role"), Title = Str(e, "title"), Body = Str(e, "body"),
                         MinPoints = (int)Num(e, "min_points"), MinServices = (int)Num(e, "min_services"), Seats = (int)Num(e, "seats"), Hired = (int)Num(e, "hired"),
                         Applicants = (int)Num(e, "applicants"), MyPoints = (int)Num(e, "my_points"), MyServices = (int)Num(e, "my_services"), MyStatus = Str(e, "my_status"),
-                        Member = Bool(e, "member"), Mine = Bool(e, "mine"), Logo = LogoFor(Str(e, "company_id"), Str(e, "logo"))
+                        Member = Bool(e, "member"), Mine = Bool(e, "mine"), Logo = LogoFor(Str(e, "company_id"), Str(e, "logo")),
+                        MinCert = Str(e, "min_cert"), CertOk = Str(e, "min_cert").Length == 0 || Bool(e, "my_cert_ok")   // (2026-11-08) certificacion.sql
                     });
             }
             catch { }
@@ -837,8 +841,9 @@ namespace SelectOR
                 var req = new List<string>();
                 if (r.MinPoints > 0) req.Add(string.Format(Tr("carné con {0} puntos o más"), r.MinPoints));
                 if (r.MinServices > 0) req.Add(string.Format(Tr("{0} servicios hechos"), r.MinServices));
+                if (r.MinCert.Length > 0) req.Add("🎓 " + CertReqText(r.MinCert));
                 string reqTxt = req.Count == 0 ? Tr("sin requisitos") : Tr("Requisitos: ") + string.Join(", ", req);
-                bool ok = r.MyPoints >= r.MinPoints && r.MyServices >= r.MinServices;
+                bool ok = r.MyPoints >= r.MinPoints && r.MyServices >= r.MinServices && r.CertOk;
                 string state = r.Member ? Tr("Ya eres socio") : r.MyStatus switch { "pending" => Tr("Solicitud enviada"), "approved" => Tr("Aceptada"), "rejected" => Tr("Rechazada"), _ => ok ? Tr("Cumples los requisitos") : Tr("No cumples los requisitos") };
                 Color stc = r.Member || r.MyStatus == "approved" ? Theme.AccentHi : r.MyStatus == "rejected" || (!ok && string.IsNullOrEmpty(r.MyStatus)) ? Color.FromArgb(229, 115, 115) : r.MyStatus == "pending" ? Color.FromArgb(120, 144, 226) : Theme.AccentHi;
                 string plazas = string.Format(r.Seats == 1 ? Tr("{0} plaza") : Tr("{0} plazas"), r.Seats) + (r.Applicants > 0 ? "  ·  " + string.Format(r.Applicants == 1 ? Tr("{0} apuntado") : Tr("{0} apuntados"), r.Applicants) : "");
@@ -855,7 +860,7 @@ namespace SelectOR
             var r = Sel(_jobsList, _jobRows); if (r == null) return;
             if (r.Member) { Msg(_tabMsg, Tr("Ya eres socio de esa empresa."), true); return; }
             if (!string.IsNullOrEmpty(r.MyStatus)) { Msg(_tabMsg, Tr("Ya te has apuntado a esta oferta."), true); return; }
-            if (r.MyPoints < r.MinPoints || r.MyServices < r.MinServices) { Msg(_tabMsg, Tr("No cumples los requisitos de esta oferta."), true); return; }
+            if (r.MyPoints < r.MinPoints || r.MyServices < r.MinServices || !r.CertOk) { Msg(_tabMsg, Tr("No cumples los requisitos de esta oferta."), true); return; }
             string note = null;
             using (var dlg = new FormDialog(r.Title, Tr("Apuntarme"), 580, "🧑‍✈️", r.Company + " · " + JobRoleText(r.Role)))
             {
@@ -875,6 +880,10 @@ namespace SelectOR
             LoadJobs();
         }
 
+        // (2026-11-08) los títulos que puede pedir una oferta
+        static readonly string[] CertReqs = { null, "B", "A", "A+", "jefe" };
+        static string CertReqText(string c) => c == "jefe" ? Tr("título de jefe de circulación") : string.Format(Tr("título de maquinista {0} o superior"), c);
+
         async void NewJob()
         {
             var c = _empSel; if (c == null || !(CanManage() || Supa.IsSuperadmin)) return;
@@ -885,13 +894,18 @@ namespace SelectOR
             dlg.AddCombo("pts", Tr("Puntos mínimos del carné"), Enumerable.Range(0, 16).Select(i => i == 0 ? Tr("Sin mínimo") : i.ToString(I18n.Culture)), 0);
             dlg.AddCombo("srv", Tr("Servicios hechos como mínimo"), new[] { 0, 5, 10, 25, 50, 100, 250 }.Select(i => i == 0 ? Tr("Sin mínimo") : i.ToString(I18n.Culture)), 0);
             dlg.AddCombo("seats", Tr("Plazas"), Enumerable.Range(1, 10).Select(i => i.ToString(I18n.Culture)), 0);
+            dlg.AddCombo("cert", Tr("Título que pide"), CertReqs.Select(x => x == null ? Tr("Ninguno") : CertReqText(x)), 0);   // (2026-11-08) certificación
             dlg.Validate = async f =>
             {
                 string ti = f.Get("title"), bo = f.Get("body");
                 if (ti.Length < 3) return Tr("El título de la oferta es demasiado corto.");
                 if (ti.Length > 80 || bo.Length > 400) return Tr("El texto es demasiado largo.");
                 int srv = new[] { 0, 5, 10, 25, 50, 100, 250 }[Math.Max(0, f.Index("srv"))];
-                var (_, e) = await Supa.RpcAsync("job_create", new { p_company = c.Id, p_role = JobRoles[Math.Max(0, f.Index("role"))], p_title = ti, p_body = bo, p_min_points = Math.Max(0, f.Index("pts")), p_min_services = srv, p_seats = Math.Max(0, f.Index("seats")) + 1 });
+                string cert = CertReqs[Math.Max(0, f.Index("cert"))];
+                var (_, e) = cert == null
+                    ? await Supa.RpcAsync("job_create", new { p_company = c.Id, p_role = JobRoles[Math.Max(0, f.Index("role"))], p_title = ti, p_body = bo, p_min_points = Math.Max(0, f.Index("pts")), p_min_services = srv, p_seats = Math.Max(0, f.Index("seats")) + 1 })
+                    : await Supa.RpcAsync("job_create_cert", new { p_company = c.Id, p_role = JobRoles[Math.Max(0, f.Index("role"))], p_title = ti, p_body = bo, p_min_points = Math.Max(0, f.Index("pts")), p_min_services = srv, p_seats = Math.Max(0, f.Index("seats")) + 1, p_min_cert = cert });
+                if (e != null && cert != null && MissingRpc(e)) return Tr("El servidor aún no tiene los títulos (falta certificacion.sql).");
                 return e != null ? Tr("Error: ") + e : null;
             };
             if (dlg.ShowDialog(this) != DialogResult.OK) return;

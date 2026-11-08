@@ -56,6 +56,7 @@ namespace SelectOR
         // HUD de servicio (overlay pequeño sobre Open Rails mientras conduces un servicio de empresa).
         public bool ServiceHud { get; set; } = true;
         public bool HudCollapsed { get; set; }
+        public bool PuestoSoloMias { get; set; }   // (2026-11-08) Puesto de Mando: la lista solo con tus dependencias
         public bool HudMapOpen { get; set; } = true;   // mini-mapa desplegado por defecto
         public int HudX { get; set; } = -1;
         public int HudY { get; set; } = -1;

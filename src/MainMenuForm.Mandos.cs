@@ -21,6 +21,10 @@ namespace SelectOR
         readonly Dictionary<string, float> _joyAxSent = new();
         readonly Dictionary<string, bool> _joyBtnSent = new();
         DateTime _joyEnumAt = DateTime.MinValue, _joyConnAt = DateTime.MinValue;
+        // (2026-11-08) el manipulador del tren que se conduce (del .eng, al conectarse Open Rails) y los conmutadores
+        JoyCab _joyCab; string _joyCabEng;
+        readonly Dictionary<string, bool> _joyBtnRaw = new();   // conmutadores: si el botón estaba pulsado (para el flanco)
+        readonly Dictionary<string, bool> _joyToggled = new();  // conmutadores: activo o no
 
         bool JoyWanted() => _prefs?.JoyEnabled == true && _prefs.JoyBindings != null && _prefs.JoyBindings.Count > 0;
 
@@ -34,6 +38,8 @@ namespace SelectOR
 
         void ShowSelectorSettings()
         {
+            JoyDetectCab();   // (el del tren elegido, para el reposo automático que se enseña)
+            SelectorSettingsDialog.CabNow = () => _joyCab;
             using var dlg = new SelectorSettingsDialog(_prefs);
             dlg.ShowDialog(this);
         }
@@ -41,7 +47,7 @@ namespace SelectOR
         void JoyStart()
         {
             JoyStop();
-            _joyAxSent.Clear(); _joyBtnSent.Clear(); _joyEnumAt = DateTime.MinValue; _joyConnAt = DateTime.MinValue;
+            _joyAxSent.Clear(); _joyBtnSent.Clear(); _joyBtnRaw.Clear(); _joyToggled.Clear(); _joyEnumAt = DateTime.MinValue; _joyConnAt = DateTime.MinValue;
             _joyTimer = new Timer { Interval = 25 };
             _joyTimer.Tick += (s, e) => JoyTick();
             _joyTimer.Start();
@@ -60,7 +66,11 @@ namespace SelectOR
             var l = _localMap; var binds = _prefs?.JoyBindings;
             if (l == null || binds == null) return;
             if (!l.Connected) return;
-            if (l.ConnectedAt != _joyConnAt) { _joyConnAt = l.ConnectedAt; _joyAxSent.Clear(); _joyBtnSent.Clear(); }   // (Open Rails nuevo: todo otra vez)
+            if (l.ConnectedAt != _joyConnAt)   // (Open Rails nuevo: todo otra vez)
+            {
+                _joyConnAt = l.ConnectedAt; _joyAxSent.Clear(); _joyBtnSent.Clear(); _joyBtnRaw.Clear(); _joyToggled.Clear();
+                JoyDetectCab();
+            }
             // los mandos: al principio y, si falta alguno de los asignados, cada 3 s (se enchufa más tarde)
             bool missing = binds.Any(b => !_joyDevs.Any(d => d.Key == b.Device));
             if (_joyEnumAt == DateTime.MinValue || (missing && DateTime.UtcNow - _joyEnumAt > TimeSpan.FromSeconds(3)))
@@ -74,10 +84,10 @@ namespace SelectOR
             foreach (var b in binds.Where(b => b.Axis))
             {
                 if (!ok.Contains(b.Device)) continue;
-                float v = Joy.Value(b, _joySt[b.Device].Axes[Math.Max(0, Math.Min(5, b.Index))]);
+                float v = Joy.Value(b, _joySt[b.Device].Axes[Math.Max(0, Math.Min(5, b.Index))], JoyRest(b));
                 if (_joyAxSent.TryGetValue(b.Action, out float last) && Math.Abs(v - last) < 0.004f) continue;
                 _joyAxSent[b.Action] = v;
-                if (b.Action == "THROTTLE_DYNAMIC") JoyCombined(l, v);
+                if (Joy.Combined(b.Action)) JoyCombined(l, v, JoyBrakeOf(b.Action));
                 else if (b.Action == "CRUISE_SPEED")
                     l.Send("CRUISE " + v.ToString("0.000", CultureInfo.InvariantCulture) + " " + Math.Round(Math.Max(0, _svcMaxKmh)).ToString(CultureInfo.InvariantCulture));
                 else l.Send("CAB " + b.Action + " " + v.ToString("0.000", CultureInfo.InvariantCulture));
@@ -86,6 +96,13 @@ namespace SelectOR
             foreach (var g in binds.Where(b => !b.Axis).GroupBy(b => b.Action))
             {
                 bool down = g.Any(b => ok.Contains(b.Device) && Joy.Down(_joySt[b.Device], b.Index));
+                if (g.Any(b => b.Toggle))   // conmutador: cada pulsación cambia (activo hasta la siguiente)
+                {
+                    bool wasRaw = _joyBtnRaw.TryGetValue(g.Key, out bool r0) && r0;
+                    _joyBtnRaw[g.Key] = down;
+                    if (down && !wasRaw) _joyToggled[g.Key] = !(_joyToggled.TryGetValue(g.Key, out bool t0) && t0);
+                    down = _joyToggled.TryGetValue(g.Key, out bool t1) && t1;
+                }
                 bool known = _joyBtnSent.TryGetValue(g.Key, out bool was);
                 if (known && was == down) continue;
                 if (!known && !down) { _joyBtnSent[g.Key] = false; continue; }   // (al empezar, los sueltos no se mandan)
@@ -99,15 +116,46 @@ namespace SelectOR
         // Regulador + freno dinámico en una palanca (v: + regulador, − freno dinámico, 0 los dos sueltos). Primero se suelta
         // el otro, y el freno dinámico solo se manda al ir hacia él o al volver (en punto muerto Open Rails avisa de que no
         // se puede usar cada vez que le llega, aunque sea un 0).
-        void JoyCombined(LocalMapLink l, float v)
+        // (2026-11-08) también regulador + freno de tren (brake: DYNAMIC_BRAKE o TRAIN_BRAKE).
+        void JoyCombined(LocalMapLink l, float v, string brake = "DYNAMIC_BRAKE")
         {
             float thr = Math.Max(0, v), dyn = Math.Max(0, -v);
-            float lastThr = _joyAxSent.TryGetValue("THROTTLE", out var t0) ? t0 : -1, lastDyn = _joyAxSent.TryGetValue("DYNAMIC_BRAKE", out var d0) ? d0 : 0;
+            float lastThr = _joyAxSent.TryGetValue("THROTTLE", out var t0) ? t0 : -1, lastDyn = _joyAxSent.TryGetValue(brake, out var d0) ? d0 : (brake == "TRAIN_BRAKE" ? -1 : 0);
             string F(float x) => x.ToString("0.000", CultureInfo.InvariantCulture);
             if (thr == 0 && lastThr != 0) { l.Send("CAB THROTTLE 0.000"); _joyAxSent["THROTTLE"] = 0; }
-            if (dyn == 0 && lastDyn > 0) { l.Send("CAB DYNAMIC_BRAKE 0.000"); _joyAxSent["DYNAMIC_BRAKE"] = 0; }
+            // (el de tren sí se manda a 0 la primera vez: si no, se quedaría como lo dejó Open Rails al cargar)
+            if (dyn == 0 && lastDyn != 0) { l.Send("CAB " + brake + " 0.000"); _joyAxSent[brake] = 0; }
             if (thr > 0) { l.Send("CAB THROTTLE " + F(thr)); _joyAxSent["THROTTLE"] = thr; }
-            if (dyn > 0) { l.Send("CAB DYNAMIC_BRAKE " + F(dyn)); _joyAxSent["DYNAMIC_BRAKE"] = dyn; }
+            if (dyn > 0) { l.Send("CAB " + brake + " " + F(dyn)); _joyAxSent[brake] = dyn; }
+        }
+
+        // El freno de cada palanca combinada: «según el tren», el de su manipulador (si no lo tiene, el de tren).
+        string JoyBrakeOf(string action) => action switch
+        {
+            "THROTTLE_DYNAMIC" => "DYNAMIC_BRAKE",
+            "THROTTLE_TRAIN" => "TRAIN_BRAKE",
+            _ => _joyCab?.Brake ?? "TRAIN_BRAKE",
+        };
+
+        // Dónde está el reposo de una palanca combinada (0 freno máximo … 1 tracción máxima): el de a mano, el del
+        // manipulador del tren o, si no tiene, el centro.
+        double JoyRest(JoyBinding b)
+        {
+            if (!Joy.Combined(b.Action)) return 0.5;
+            if (b.Rest is double r) return 1 - Math.Max(0.05, Math.Min(0.95, r));
+            return _joyCab?.Rest ?? 0.5;
+        }
+
+        // El manipulador del tren que se va a conducir (su máquina de cabeza).
+        void JoyDetectCab()
+        {
+            string eng = null;
+            try { eng = (_drivenConsist ?? CurrentDrivenConsist())?.Locomotive?.FilePath; } catch { }
+            if (eng == _joyCabEng) return;
+            _joyCabEng = eng; _joyCab = JoyCab.Parse(eng);
+            if (!string.IsNullOrEmpty(eng))
+                RoomLog(_joyCab == null ? $"mandos: {System.IO.Path.GetFileName(eng)} sin manipulador combinado"
+                    : $"mandos: {System.IO.Path.GetFileName(eng)} manipulador {_joyCab.Brake} reposo {_joyCab.Split:0.00}");
         }
     }
 }

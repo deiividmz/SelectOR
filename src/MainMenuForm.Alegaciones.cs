@@ -67,14 +67,18 @@ namespace SelectOR
         // Al cambiar de pestaña en Revisión: las infracciones o las alegaciones.
         void RevTabChanged(int i)
         {
-            bool ap = i == RevTabAppeals, sus = i == RevTabSuspects;
+            bool ap = i == RevTabAppeals, sus = i == RevTabSuspects, kk = i == RevTabKicks, ct = i == RevTabTitles;
             if (_algPanel != null) _algPanel.Visible = ap;
             if (_susPanel != null) _susPanel.Visible = sus;
-            if (_revList != null) _revList.Visible = !ap && !sus;
-            if (_revBtns != null) _revBtns.Visible = !ap && !sus;
-            if (_revIntro != null) _revIntro.Text = Tr(ap ? RevIntroAp : sus ? RevIntroSus : RevIntroInfr);
+            if (_kickPanel != null) _kickPanel.Visible = kk;
+            if (_certPanel != null) _certPanel.Visible = ct;
+            if (_revList != null) _revList.Visible = !ap && !sus && !kk && !ct;
+            if (_revBtns != null) _revBtns.Visible = !ap && !sus && !kk && !ct;
+            if (_revIntro != null) _revIntro.Text = Tr(ap ? RevIntroAp : sus ? RevIntroSus : kk ? RevIntroKicks : ct ? RevIntroTitles : RevIntroInfr);
             if (ap) LoadAppeals();
             if (sus) LoadSuspects();
+            if (kk) LoadKicks();
+            if (ct) LoadCertAdmin();
         }
 
         async void LoadAppeals()

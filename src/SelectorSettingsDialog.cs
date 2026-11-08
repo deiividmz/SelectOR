@@ -88,7 +88,7 @@ namespace SelectOR
 
             // dos columnas: palancas y botones
             var cols = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Bg, ColumnCount = 2, RowCount = 1, Padding = new Padding(0, Theme.Px(10), 0, 0) };
-            cols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55)); cols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            cols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60)); cols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
             var left = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0, 0, Theme.Px(10), 0) };
             var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(Theme.Px(10), 0, 0, 0) };
             var lblAx = SectionLabel(I18n.T("PALANCAS"));
@@ -271,7 +271,7 @@ namespace SelectOR
             var d = _devs.FirstOrDefault(x => x.Axes >= 3);
             if (d == null) { _status = I18n.T("No hay ningún mando con 3 palancas conectado."); return; }
             string[] acts = { "THROTTLE", "TRAIN_BRAKE", "ENGINE_BRAKE" };
-            Bindings.RemoveAll(x => x.Axis && (acts.Contains(x.Action) || x.Action == "THROTTLE_DYNAMIC" || (x.Device == d.Key && x.Index < 3)));
+            Bindings.RemoveAll(x => x.Axis && (acts.Contains(x.Action) || Joy.Combined(x.Action) || (x.Device == d.Key && x.Index < 3)));
             for (int i = 0; i < 3; i++) Bindings.Add(new JoyBinding { Device = d.Key, DeviceName = d.Name, Axis = true, Index = i, Action = acts[i] });
             Save(); Rebuild();
             _status = string.Format(I18n.T("{0}: palanca 1 regulador, 2 freno de tren, 3 freno de locomotora (muévelas para comprobarlo)."), d.Name);
@@ -288,13 +288,15 @@ namespace SelectOR
                     Tag = a.id, Title = I18n.T(a.label),
                     Sub = b == null ? I18n.T("Sin asignar") : string.Format(I18n.T("Palanca {0} · {1}"), Joy.AxisName(b.Device, b.Index), b.DeviceName),
                     HasBar = b != null, Centered = Joy.Centered(a.id),
-                    Chips = b == null ? new[] { I18n.T("Asignar") } : new[] { I18n.T("Asignar"), b.Invert ? I18n.T("Invertida ✓") : I18n.T("Invertir"), I18n.T("Quitar") }
+                    Chips = b == null ? new[] { I18n.T("Asignar") }
+                          : Joy.Combined(a.id) ? new[] { I18n.T("Asignar"), b.Invert ? I18n.T("Invertida ✓") : I18n.T("Invertir"), RestChip(b), I18n.T("Quitar") }
+                          : new[] { I18n.T("Asignar"), b.Invert ? I18n.T("Invertida ✓") : I18n.T("Invertir"), I18n.T("Quitar") }
                 };
             }).ToList();
             _buttons.Rows = Bindings.Where(x => !x.Axis).OrderBy(x => x.DeviceName).ThenBy(x => x.Index).Select(b => new RowsView.Row
             {
                 Tag = b, Title = Joy.Label(b.Action), Sub = string.Format(I18n.T("Botón {0} · {1}"), Joy.ButtonName(b.Device, b.Index), b.DeviceName), Lamp = true,
-                Chips = new[] { I18n.T("Quitar") }
+                Chips = new[] { b.Toggle ? I18n.T("Conmutador ✓") : I18n.T("Pulsador"), I18n.T("Quitar") }
             }).ToList();
             _btnQuick.Visible = _devs.Any(x => x.Axes >= 3);
             UpdateRows();
@@ -307,7 +309,7 @@ namespace SelectOR
                 var b = Bindings.FirstOrDefault(x => x.Axis && x.Action == (string)r.Tag);
                 var s = b == null ? null : StateOf(b.Device);
                 r.Live = s != null && Dev(b.Device) != null;
-                r.Value = s == null ? 0 : Joy.Value(b, s.Axes[Math.Max(0, Math.Min(5, b.Index))]);
+                r.Value = s == null ? 0 : Joy.Value(b, s.Axes[Math.Max(0, Math.Min(5, b.Index))], RestOf(b));
             }
             foreach (var r in _buttons.Rows)
             {
@@ -324,12 +326,63 @@ namespace SelectOR
             if (chip == 0) { StartCapture(act, false); return; }
             if (b == null) return;
             if (chip == 1) { b.Invert = !b.Invert; Save(); Rebuild(); }
-            if (chip == 2) { Bindings.Remove(b); Save(); Rebuild(); _status = string.Format(I18n.T("{0}: sin asignar."), Joy.Label(act)); }
+            if (Joy.Combined(act) && chip == 2) { AskRest(b); return; }
+            if (chip == (Joy.Combined(act) ? 3 : 2)) { Bindings.Remove(b); Save(); Rebuild(); _status = string.Format(I18n.T("{0}: sin asignar."), Joy.Label(act)); }
         }
 
         void ButtonChip(RowsView.Row r, int chip)
         {
-            if (chip == 0 && r.Tag is JoyBinding b) { Bindings.Remove(b); Save(); Rebuild(); }
+            if (r.Tag is not JoyBinding b) return;
+            if (chip == 0)
+            {
+                // (2026-11-08) el mismo botón para todas sus asignaciones de esa orden (se juntan al mandarlo)
+                bool t = !b.Toggle;
+                foreach (var x in Bindings.Where(x => !x.Axis && x.Action == b.Action)) x.Toggle = t;
+                Save(); Rebuild();
+                _status = string.Format(t ? I18n.T("{0}: conmutador (una pulsación lo activa y la siguiente lo suelta).") : I18n.T("{0}: pulsador (activo mientras lo mantienes pulsado)."), Joy.Label(b.Action));
+            }
+            if (chip == 1) { Bindings.Remove(b); Save(); Rebuild(); }
+        }
+
+        // ---------------- el reposo de las palancas combinadas (2026-11-08) ----------------
+        public static Func<JoyCab> CabNow;   // el manipulador del tren elegido (MainMenuForm)
+
+        static string RestChip(JoyBinding b) => b.Rest is double r
+            ? string.Format(I18n.T("Reposo {0} %"), Math.Round(r * 100)) : I18n.T("Reposo");
+
+        // dónde está el reposo en el recorrido de la palanca (0 freno máximo, 1 tracción máxima)
+        static double RestOf(JoyBinding b)
+        {
+            if (!Joy.Combined(b.Action)) return 0.5;
+            if (b.Rest is double r) return 1 - Math.Max(0.05, Math.Min(0.95, r));
+            JoyCab c = null; try { c = CabNow?.Invoke(); } catch { }
+            return c?.Rest ?? 0.5;
+        }
+
+        void AskRest(JoyBinding b)
+        {
+            JoyCab c = null; try { c = CabNow?.Invoke(); } catch { }
+            using var dlg = new FormDialog(I18n.T("Reposo de la palanca"), I18n.T("Aceptar"), 500, "🎚", Joy.Label(b.Action));
+            dlg.AddInfo(I18n.T("El punto de la palanca donde no hay ni tracción ni freno, medido desde la tracción máxima (50 % = en el centro). Si tu palanca tiene una muesca, ponlo donde está."));
+            var box = dlg.AddText("r", I18n.T("Reposo (%)"), b.Rest is double r ? Math.Round(r * 100).ToString(System.Globalization.CultureInfo.InvariantCulture) : "", I18n.T("automático"));
+            dlg.AddInfo(c == null
+                ? I18n.T("Déjalo vacío para usar el del manipulador de cada tren (si su .eng no tiene, en el centro). Ahora: sin manipulador combinado en el tren elegido.")
+                : string.Format(I18n.T("Déjalo vacío para usar el del manipulador de cada tren. Tren elegido ({0}): regulador + {1}, reposo al {2} %."), c.Engine,
+                    I18n.T(c.Brake == "DYNAMIC_BRAKE" ? "freno dinámico" : "freno de tren"), Math.Round(c.Split * 100)));
+            dlg.Validate = d =>
+            {
+                string t = d.Get("r").Trim().TrimEnd('%').Trim();
+                if (t.Length == 0) return System.Threading.Tasks.Task.FromResult<string>(null);
+                if (!double.TryParse(t.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) || v < 5 || v > 95)
+                    return System.Threading.Tasks.Task.FromResult(I18n.T("Escribe un número entre 5 y 95, o déjalo vacío."));
+                return System.Threading.Tasks.Task.FromResult<string>(null);
+            };
+            dlg.Shown += (s, e) => { try { box.Box.Focus(); box.Box.SelectAll(); } catch { } };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            string txt = dlg.Get("r").Trim().TrimEnd('%').Trim();
+            b.Rest = txt.Length > 0 && double.TryParse(txt.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double val)
+                ? Math.Round(val) / 100.0 : (double?)null;
+            Save(); Rebuild();
         }
 
         // ---------------- los mandos, en vivo ----------------
@@ -411,14 +464,25 @@ namespace SelectOR
                     ColorText.Text(g, Empty, fS, new Rectangle(4, 6, Width - 8, 60), Theme.Subtle, TextFormatFlags.WordBreak);
                     return;
                 }
-                _scroll = Math.Max(0, Math.Min(_scroll, Rows.Count * (RowH + 6) - Height));
+                _scroll = Math.Max(0, Math.Min(_scroll, Rows.Count * (RowH + 6) - 6 - Height));
                 int y = -_scroll;
+                // (2026-11-08) si no caben todas, una barra a la derecha que lo enseña (se baja con la rueda)
+                int total = Rows.Count * (RowH + 6) - 6;
+                bool over = total > Height;
+                int rowW = Width - 1 - (over ? Theme.Px(10) : 0);
+                if (over)
+                {
+                    var track = new Rectangle(Width - Theme.Px(5), 0, Theme.Px(4), Height);
+                    int th = Math.Max(Theme.Px(24), Height * Height / total), ty = (int)((long)(Height - th) * _scroll / Math.Max(1, total - Height));
+                    using (var tp = Theme.Round(track, 2)) using (var tb = new SolidBrush(Theme.Surface)) g.FillPath(tb, tp);
+                    using (var hp = Theme.Round(new Rectangle(track.X, ty, track.Width, th), 2)) using (var hb = new SolidBrush(Theme.Subtle)) g.FillPath(hb, hp);
+                }
                 // (la barra, en la misma columna en todas las filas: a la izquierda de los botoncitos de la fila que más ocupan)
                 int chipsMax = 0;
                 foreach (var rr in Rows) { int w0 = 0; foreach (var c0 in rr.Chips) w0 += TextRenderer.MeasureText(c0, fC).Width + 16 + 6; chipsMax = Math.Max(chipsMax, w0); }
                 foreach (var row in Rows)
                 {
-                    var box = new Rectangle(0, y, Width - 1, RowH);
+                    var box = new Rectangle(0, y, rowW, RowH);
                     y += RowH + 6;
                     if (box.Bottom < 0 || box.Top > Height) continue;
                     using (var p = Theme.Round(box, 9)) using (var b = new SolidBrush(Theme.Surface)) g.FillPath(b, p);
@@ -441,7 +505,7 @@ namespace SelectOR
                         using (var lb = new SolidBrush(!row.Live ? Theme.Surface2 : row.On ? Theme.AccentHi : Color.FromArgb(70, 76, 82))) g.FillEllipse(lb, l);
                         tx += 24;
                     }
-                    int barRight = Width - 1 - 10 - chipsMax;
+                    int barRight = rowW - 10 - chipsMax;
                     int textW = Math.Max(60, (row.HasBar ? barRight - 108 : cx) - tx - 6);
                     ColorText.Text(g, row.Title, fT, new Rectangle(tx, box.Y + 5, textW, 20), Theme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                     ColorText.Text(g, row.Sub ?? "", fS, new Rectangle(tx, box.Y + 25, textW, 18), row.Live || !row.HasBar ? Theme.Subtle : Color.FromArgb(200, 150, 120), TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
@@ -459,8 +523,11 @@ namespace SelectOR
                             }
                             else fill = new Rectangle(bar.X, bar.Y, Math.Max(4, (int)(bar.Width * row.Value)), bar.Height);
                             using (var fp = Theme.Round(fill, 6)) using (var fb = new SolidBrush(Theme.Accent)) g.FillPath(fb, fp);
-                            string txt = (row.Tag as string) == "THROTTLE_DYNAMIC"
-                                ? (row.Value > 0 ? I18n.T("regulador") + " " + (int)Math.Round(row.Value * 100) + "%" : row.Value < 0 ? I18n.T("freno dinámico") + " " + (int)Math.Round(-row.Value * 100) + "%" : I18n.T("en reposo"))
+                            string tag = row.Tag as string;
+                            string brk = tag == "THROTTLE_DYNAMIC" ? I18n.T("freno dinámico") : tag == "THROTTLE_TRAIN" ? I18n.T("freno de tren")
+                                : (CabNow?.Invoke()?.Brake == "DYNAMIC_BRAKE" ? I18n.T("freno dinámico") : CabNow?.Invoke() != null ? I18n.T("freno de tren") : I18n.T("freno"));
+                            string txt = Joy.Combined(tag)
+                                ? (row.Value > 0 ? I18n.T("regulador") + " " + (int)Math.Round(row.Value * 100) + "%" : row.Value < 0 ? brk + " " + (int)Math.Round(-row.Value * 100) + "%" : I18n.T("en reposo"))
                                 : row.Centered ? (row.Value > 0.5f ? I18n.T("adelante") : row.Value < -0.5f ? I18n.T("atrás") : I18n.T("neutro")) : ((int)Math.Round(row.Value * 100)) + "%";
                             using var f8 = Theme.Font(7.5f, FontStyle.Bold);
                             ColorText.Text(g, txt, f8, new Rectangle(bar.X, bar.Bottom + 1, bar.Width, 14), Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);

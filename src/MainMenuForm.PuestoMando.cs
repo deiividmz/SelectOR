@@ -42,7 +42,9 @@ namespace SelectOR
                 _dispatch.ChiefMe = DispatchForm.SupaChiefMe; _dispatch.IssueTicket = DispatchForm.SupaTicket;
                 _dispatch.ChiefsList = DispatchForm.SupaChiefs; _dispatch.ChiefSet = DispatchForm.SupaChiefSet;
             }
-            if ((Supa.IsSuperadmin || Supa.IsObjectEditor) && Supa.IsLoggedIn) _dispatch.OpenObjects = OpenObjetosSala;   // (2026-11-04) 🚧 objetos de la sala (1.2.91: y los autorizados)
+            if ((Supa.IsSuperadmin || Supa.IsObjectEditor) && Supa.IsLoggedIn) _dispatch.OpenObjects = OpenObjetosSala;
+            _dispatch.MineOnlyGet = () => _prefs?.PuestoSoloMias ?? false;   // (2026-11-08) «Solo las mías»
+            _dispatch.MineOnlySet = v => { if (_prefs == null) return; _prefs.PuestoSoloMias = v; try { _prefs.Save(); } catch { } };   // (2026-11-04) 🚧 objetos de la sala (1.2.91: y los autorizados)
             _dispatch.Show(this);
         }
     }

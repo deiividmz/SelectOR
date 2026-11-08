@@ -1210,7 +1210,9 @@ namespace SelectOR
             var jbtns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(2, 0, 2, 0) };
             var jAcc = EmpButton(Tr("Aceptar"), primary: true); jAcc.Width = 150; jAcc.Margin = new Padding(0, 10, 8, 2); jAcc.Click += (s, e) => ApproveJoin();
             var jRej = EmpButton(Tr("Rechazar")); jRej.Width = 150; jRej.Margin = new Padding(0, 10, 2, 2); jRej.Click += (s, e) => RejectJoin();
-            jbtns.Controls.Add(jAcc); jbtns.Controls.Add(jRej);
+            var jPro = EmpButton(Tr("Ver perfil")); jPro.Width = 150; jPro.Margin = new Padding(8, 10, 2, 2); jPro.Click += (s, e) => ShowApplicantProfile();   // (2026-11-08) MainMenuForm.PerfilSolicitante.cs
+            _joinList.ItemActivated += _ => ShowApplicantProfile();
+            jbtns.Controls.Add(jAcc); jbtns.Controls.Add(jRej); jbtns.Controls.Add(jPro);
             pJoin.Controls.Add(jbtns);
 
             var pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -1502,6 +1504,7 @@ namespace SelectOR
             kpis.Controls.Add(_profRoomJefeTile = KpiTile(Tr("DIRIGIDOS COMO JEFE"), out _profRoomJefeVal, "👮", ColViolet));
             _profRoomJefeTile.Visible = false;
             t.Controls.Add(kpis);
+            t.Controls.Add(BuildTitlesSection());   // (2026-11-08) certificación: MainMenuForm.Titulos.cs
 
             _badgesHeader = EmpHeader("INSIGNIAS");
             t.Controls.Add(_badgesHeader);
@@ -5032,6 +5035,7 @@ namespace SelectOR
             var tLic = LoadLicense();   // carné por puntos (a la vez que los servicios)
             var tSched = LoadSchedMeritAsync();   // turnos cumplidos (servicios programados)
             var tRoom = LoadRoomMeritAsync();     // (1.2.91) servicios en la sala compartida
+            _ = LoadTitlesAsync();                // (2026-11-08) títulos (certificación)
             LoadMyPhoto();
             // Servicios de empresa donde soy el maquinista
             var (sj, se) = await Supa.SelectAsync(

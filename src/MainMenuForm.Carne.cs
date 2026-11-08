@@ -610,12 +610,12 @@ namespace SelectOR
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             // Todas · Pendientes (B6/B7 por revisar) · A1 a A4 · B6 y B7 · Alegaciones (MainMenuForm.Alegaciones.cs)
-            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "C1 · C2 · C3", "Alegaciones", "Sospechosos" },
+            var tabs = MakeSubTabs(new[] { "Todas", "Pendientes", "A1 · A2 · A3 · A4", "B6 · B7", "C1 · C2 · C3", "Alegaciones", "Sospechosos", "Expulsiones", "Títulos" },
                                    i => { _revTab = i; RevTabChanged(i); FillReviewCards(); });
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             _revTabBar = tabs;
             var search = new RoundedInput(I18n.T("🔎  Filtrar…")) { Width = 220, Height = 34, Anchor = AnchorStyles.Right, Margin = new Padding(10, 3, 0, 3) };
-            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); FillAppeals(); FillSuspects(); };
+            search.Box.TextChanged += (s, e) => { _revQuery = search.Box.Text.Trim().ToLowerInvariant(); FillReviewCards(); FillAppeals(); FillSuspects(); FillKicks(); FillCertAdmin(); };
             _revSearch = search;
             top.Controls.Add(tabs, 0, 0); top.Controls.Add(search, 1, 0);
             t.Controls.Add(top);
@@ -624,6 +624,8 @@ namespace SelectOR
             revHost.Controls.Add(_revList);
             revHost.Controls.Add(BuildAppealsPanel());
             revHost.Controls.Add(BuildSuspectsPanel());   // (1.2.90) MainMenuForm.Sanciones.cs
+            revHost.Controls.Add(BuildKicksPanel());      // (2026-11-08) MainMenuForm.Expulsiones.cs
+            revHost.Controls.Add(BuildCertAdminPanel());  // (2026-11-08) títulos: MainMenuForm.TitulosAdmin.cs
             t.Controls.Add(revHost);
 
             var btns = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0) };
@@ -700,7 +702,7 @@ namespace SelectOR
             _revList.BeginUpdate();
             _revList.Items.Clear();
             _revList.EmptyText = Tr("No hay infracciones.");
-            if (_revBtns != null) _revBtns.Visible = _revTab != RevTabAppeals && _revTab != RevTabSuspects;   // (Alegaciones y Sospechosos llevan sus botones)
+            if (_revBtns != null) _revBtns.Visible = _revTab != RevTabAppeals && _revTab != RevTabSuspects && _revTab != RevTabKicks && _revTab != RevTabTitles;   // (Alegaciones y Sospechosos llevan sus botones)
             foreach (var r in _revAll)
             {
                 bool tabOk = _revTab switch
