@@ -27,7 +27,7 @@ namespace SelectOR
 
         void OpenDispatch()
         {
-            if (_dispatch != null && !_dispatch.IsDisposed) { _dispatch.WindowState = FormWindowState.Normal; _dispatch.Activate(); return; }
+            if (_dispatch != null && !_dispatch.IsDisposed) { _dispatch.WindowState = FormWindowState.Maximized; _dispatch.Activate(); return; }   // (2026-11-09) maximizado
             if (!SalaRouteHere) return;
             string dir = _curRoute.Path;
             _dispatch = new DispatchForm(dir, SalaHost, SalaPort, (_txtMPUser?.Text ?? "").Trim(),
@@ -43,8 +43,19 @@ namespace SelectOR
                 _dispatch.ChiefsList = DispatchForm.SupaChiefs; _dispatch.ChiefSet = DispatchForm.SupaChiefSet;
             }
             if ((Supa.IsSuperadmin || Supa.IsObjectEditor) && Supa.IsLoggedIn) _dispatch.OpenObjects = OpenObjetosSala;
+            // (2026-11-09) la composición 2D de los trenes de la sala (el .con de cada uno, si está en este equipo: TRAINS\CONSISTS)
+            string consists = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(dir)) ?? dir, "TRAINS", "CONSISTS");
+            _dispatch.ConsistStrip = async name =>
+            {
+                if (string.IsNullOrWhiteSpace(name) || name.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0) return null;
+                string f = await ConsistStripFileAsync(System.IO.Path.Combine(consists, name + ".con"));
+                return await System.Threading.Tasks.Task.Run(() => LoadStripFile(f));
+            };
+            _dispatch.FoldGet = () => _prefs?.PuestoPlegada ?? false;   // (2026-11-10) la columna de dependencias, plegada
+            _dispatch.FoldSet = v => { if (_prefs == null) return; _prefs.PuestoPlegada = v; try { _prefs.Save(); } catch { } };
             _dispatch.MineOnlyGet = () => _prefs?.PuestoSoloMias ?? false;   // (2026-11-08) «Solo las mías»
             _dispatch.MineOnlySet = v => { if (_prefs == null) return; _prefs.PuestoSoloMias = v; try { _prefs.Save(); } catch { } };   // (2026-11-04) 🚧 objetos de la sala (1.2.91: y los autorizados)
+            _dispatch.WindowState = FormWindowState.Maximized;   // (2026-11-09) se abre maximizado
             _dispatch.Show(this);
         }
     }

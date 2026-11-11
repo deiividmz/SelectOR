@@ -2,7 +2,8 @@
 // A la izquierda, qué poner (tipo y figura) y la lista de lo que hay; a la derecha, el mapa de la ruta con los objetos.
 //  · Tipos: operarios de vía (4) y, fijos, derrumbe de tierras, derrumbe grande, roca caída y piedras en la vía (rocas y
 //    tierra escaneadas de Poly Haven, CC0). Encima de la vía, un derrumbe se pone atravesado. Y fuego e incendio (llamas,
-//    luz de noche y humo: MapAgent\Viajeros3D.Objetos.cs).
+//    luz de noche y humo: MapAgent\Viajeros3D.Objetos.cs). (2026-11-10) Y el responsable de circulación (indicaciones a mano;
+//    las cambia el puesto: DispatchForm.Responsable.cs).
 //  · Clic en el mapa: se pone ahí, mirando a la vía más cercana. Clic en uno: se elige. Botón derecho en uno: girarlo o
 //    quitarlo.
 //  · Se guarda en Supabase (sql/objetos-sala.sql: room_objects) con su sitio en Open Rails (tesela y metros, de lat/lon con
@@ -34,6 +35,8 @@ namespace SelectOR
             ("derrumbe", "Derrumbe de tierras"), ("derrumbe_grande", "Derrumbe grande"), ("roca", "Roca caída"), ("piedras", "Piedras en la vía"),
             ("fuego", "Fuego"), ("incendio", "Incendio"),
             ("cartel_parada", "Cartel de parada absoluta"),   // (1.2.91) la forma de la ruta, en medio de la vía
+            // (2026-11-10) en el andén, mirando a la vía: su indicación la cambian el jefe de circulación y el administrador desde el puesto
+            ("responsable", "Responsable de circulación (indicaciones)"),
             // (1.2.91) personas: bomberos, policía, sanitarios y vigilantes (Rocketbox), en varias posturas
             ("bomb_trabaja", "Bombero trabajando"), ("bomb_agachado", "Bombero agachado"), ("bomb_espera", "Bombero de pie"), ("bomb_saluda", "Bombero que saluda al tren"),
             ("poli_espera", "Policía de pie"), ("poli_indica", "Policía dando indicaciones"), ("poli_telefono", "Policía hablando por teléfono"), ("poli_saluda", "Policía que saluda al tren"),
@@ -46,7 +49,8 @@ namespace SelectOR
         internal static bool IsWorker(string kind) => kind != null && kind.Length > 5 && Array.IndexOf(PersonGroups, kind.Substring(0, 5)) >= 0;
         static string Group(string kind) => IsWorker(kind) ? kind.Substring(0, 5) : "";
         internal static string PersonIcon(string kind) => Group(kind) switch { "bomb_" => "🚒 ", "poli_" => "👮 ", "sani_" => "🚑 ", "vigi_" => "🛡 ", _ => "🚧 " };
-        internal static Color PersonColor(string kind) => Group(kind) switch
+        internal static bool IsBt(string kind) => kind == "responsable";   // (2026-11-10) el responsable de circulación: como una persona, sin elegir figura
+        internal static Color PersonColor(string kind) => IsBt(kind) ? Color.FromArgb(225, 45, 40) : Group(kind) switch
         {
             "bomb_" => Color.FromArgb(230, 50, 40), "poli_" => Color.FromArgb(40, 110, 230), "sani_" => Color.FromArgb(240, 240, 240), "vigi_" => Color.FromArgb(140, 150, 160),
             _ => kind.EndsWith("_saluda") ? Color.FromArgb(255, 200, 40) : Color.FromArgb(255, 130, 20)
@@ -135,6 +139,7 @@ namespace SelectOR
                 var auth = DialogKit.Secondary(Tr("Autorizados…"), 140); auth.Click += async (s, e) => await EditEditors(auth);
                 buttons.Controls.AddRange(new Control[] { all, auth });
             }
+            BuildAlertsBtn(buttons);   // (2026-11-09) avisos de incidencias para los Puestos de Mando (ObjetosSalaForm.Avisos.cs)
             // (orden de Dock.Top: lo último añadido queda arriba)
             side.Controls.Add(_list); side.Controls.Add(buttons);
             foreach (var c in new Control[] { _count, Gap(8), hint, Gap(4), BuildPhotoCheck(), Gap(8), _fig, Cap(Tr("FIGURA")), _kind, Cap(Tr("PONER EN EL MAPA")) }) side.Controls.Add(c);   // (1.2.91: y la vista fotorrealista)
@@ -215,7 +220,7 @@ namespace SelectOR
             using (var b = new SolidBrush(sel ? Theme.Surface2 : Theme.BgSidebar)) e.Graphics.FillRectangle(b, e.Bounds);
             if (sel) using (var a = new SolidBrush(Color.FromArgb(255, 160, 40))) e.Graphics.FillRectangle(a, e.Bounds.X, e.Bounds.Y + 5, 3, e.Bounds.Height - 10);
             int h = e.Bounds.Height / 2;
-            ColorText.Text(e.Graphics, (IsWorker(o.Kind) ? PersonIcon(o.Kind) : o.Kind == "fuego" || o.Kind == "incendio" ? "🔥 " : OnTrack(o.Kind) ? "🛑 " : "⛰ ") + KindLabel(o.Kind), _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 2, e.Bounds.Width - 14, h),
+            ColorText.Text(e.Graphics, (IsWorker(o.Kind) ? PersonIcon(o.Kind) : IsBt(o.Kind) ? "🚩 " : o.Kind == "fuego" || o.Kind == "incendio" ? "🔥 " : OnTrack(o.Kind) ? "🛑 " : "⛰ ") + KindLabel(o.Kind), _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y + 2, e.Bounds.Width - 14, h),
                 Theme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             string fig = IsWorker(o.Kind) ? Tr(Figures.FirstOrDefault(x => x.fig == o.Figure).label ?? o.Figure) + " · " : "";
             using var small = Theme.Font(8.25f);
@@ -237,11 +242,16 @@ namespace SelectOR
                     float pw = Theme.Px(sel ? 18 : 14), ph = Theme.Px(sel ? 7 : 5);
                     using (var b = new SolidBrush(Color.FromArgb(230, 210, 30, 30))) g.FillRectangle(b, -pw / 2, -ph / 2, pw, ph);
                     using (var pen = new Pen(sel ? Color.White : Color.FromArgb(250, 245, 245), sel ? 2.2f : 1.4f)) g.DrawRectangle(pen, -pw / 2, -ph / 2, pw, ph);
-                    using (var pen = new Pen(Color.FromArgb(250, 245, 245), 1.6f)) g.DrawLine(pen, 0, -ph / 2, 0, -ph / 2 - Theme.Px(7));   // (hacia donde mira)
+                    // (2026-11-09) la cara del cartel mira al revés de su rumbo (en la forma, la placa roja da a −Z): la ven los trenes
+                    // que van hacia su rumbo. Flecha que llega a la placa por ese lado: «los trenes que vienen por aquí paran».
+                    float al = Theme.Px(sel ? 14 : 11), ah = Theme.Px(4);
+                    using (var pen = new Pen(Color.FromArgb(250, 245, 245), sel ? 2.2f : 1.8f)) g.DrawLine(pen, 0, ph / 2 + al, 0, ph / 2 + ah);
+                    using (var b = new SolidBrush(Color.FromArgb(250, 245, 245)))
+                        g.FillPolygon(b, new[] { new PointF(0, ph / 2 + 1), new PointF(-ah, ph / 2 + ah + 2), new PointF(ah, ph / 2 + ah + 2) });
                     g.Restore(st0);
                     continue;
                 }
-                if (!IsWorker(o.Kind))
+                if (!IsWorker(o.Kind) && !IsBt(o.Kind))
                 {
                     // su tamaño de verdad (largo × ancho, en m) girado a su rumbo
                     var (len, wid) = o.Kind == "derrumbe_grande" ? (19.0, 10.4) : o.Kind == "derrumbe" ? (13.0, 7.2) : o.Kind == "roca" ? (4.4, 3.6) : o.Kind == "incendio" ? (6.0, 9.0) : o.Kind == "fuego" ? (2.2, 2.2) : (6.8, 4.8);
@@ -306,7 +316,7 @@ namespace SelectOR
         {
             var d = _map.Data; if (d == null) return 0;
             if (OnTrack(kind)) return d.TrackBearing(lat, lon, 60, out double tb0) ? (tb0 + 360) % 360 : 0;   // (mirando a lo largo de la vía)
-            if (!IsWorker(kind) && d.Snap(lat, lon, 60, out double tla, out double tlo))
+            if (!IsWorker(kind) && !IsBt(kind) && d.Snap(lat, lon, 60, out double tla, out double tlo))
             {
                 double dy0 = (tla - lat) * 111320, dx0 = (tlo - lon) * 111320 * Math.Cos(lat * Math.PI / 180);
                 if (dx0 * dx0 + dy0 * dy0 <= 3 * 3 && d.TrackBearing(lat, lon, 60, out double tb)) return (tb + 90 + 360) % 360;   // (encima de la vía: atravesado)

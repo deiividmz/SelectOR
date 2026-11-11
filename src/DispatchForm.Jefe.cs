@@ -101,13 +101,15 @@ namespace SelectOR
             if (_jefeLbl == null) return;
             var h = _sel; string own = HeaderOwner(h); bool mine = HeaderMine(h);
             int n = Me == null ? 0 : _pilot.JefeZones.Count(q => q.Name == Me);
-            _jefeLbl.Text = h == null ? (_chiefAllowed ? Tr("Abre una dependencia para tomarla") : "")
-                          : (mine ? Tr("Esta dependencia es tuya") : own != null ? string.Format(Tr("Jefe de circulación: {0}"), own) : Tr("Sin jefe en esta dependencia"));
+            bool isBand = _curBand > 0 && h != null && h.Name == Bandas.Label(_curBand);   // (2026-11-09) una banda entera
+            _jefeLbl.Text = h == null ? (_chiefAllowed ? (BandsOn ? Tr("Abre una banda o una dependencia para tomarla") : Tr("Abre una dependencia para tomarla")) : "")
+                          : (mine ? (isBand ? Tr("Esta banda es tuya") : Tr("Esta dependencia es tuya")) : own != null ? string.Format(Tr("Jefe de circulación: {0}"), own)
+                             : isBand ? Tr("Sin jefe en esta banda") : Tr("Sin jefe en esta dependencia"));
             if (n > 0) _jefeLbl.Text += (_jefeLbl.Text.Length > 0 ? "  ·  " : "") + string.Format(n == 1 ? Tr("{0} tuyo") : Tr("{0} tuyos"), n);
             _jefeLbl.ForeColor = h == null || (own == null && !mine) ? Theme.Subtle : mine ? Color.FromArgb(102, 187, 106) : Color.FromArgb(255, 213, 79);
             bool ready = _pilot != null && _pilot.Ready && _sigZone != null && h != null;
             _jefeBtn.Visible = _chiefAllowed && ready && HeaderFree(h);
-            _jefeBtn.Text = mine ? Tr("Dejar esta dependencia") : _taking ? Tr("Tomando el mando…") : Tr("Tomar esta dependencia");
+            _jefeBtn.Text = mine ? (isBand ? Tr("Dejar esta banda") : Tr("Dejar esta dependencia")) : _taking ? Tr("Tomando el mando…") : isBand ? Tr("Tomar esta banda") : Tr("Tomar esta dependencia");
             _jefeBtn.BackColor = mine ? Color.FromArgb(183, 28, 28) : Theme.Accent;
             _jefesBtn.Visible = _chiefAdmin && _pilot != null && _pilot.Ready;
             UpdateManualBtn();
@@ -363,6 +365,8 @@ namespace SelectOR
             using var f = Theme.Font(8.6f, FontStyle.Bold);
             var sz = TextRenderer.MeasureText(t, f);
             var r = new Rectangle(area.Left + Theme.Px(12), area.Bottom - sz.Height - Theme.Px(20), sz.Width + Theme.Px(20), sz.Height + Theme.Px(10));
+            // (2026-11-09) con la fila de «Repetir» abajo (DispatchForm.Itinerarios.cs), la franja va encima de ella: no se tapan
+            if (RecentHere().Count > 0) r.Y -= Theme.Px(26) + Theme.Px(10);
             using (var b = new SolidBrush(Color.FromArgb(220, 27, 64, 32))) g.FillRectangle(b, r);
             TextRenderer.DrawText(g, t, f, r, Color.FromArgb(200, 240, 200), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
         }

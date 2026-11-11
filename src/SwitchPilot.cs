@@ -51,7 +51,7 @@ namespace SelectOR
         public bool ChatOk { get; private set; }
         public event Action<DateTime, char, string, string> Chat;
         // (1.2.90) la radio de la sala (servidor: Radio.cs). En el hilo de la conexión.
-        public event Action<string, bool> RadioStart;        // quién, jefe de circulación
+        public event Action<string, bool, string> RadioStart;   // quién, jefe de circulación, canal (2026-11-10: «b3», «jefes», «todas»; «*» o vacío: el de siempre)
         public event Action<string, byte[]> RadioVoice;      // quién, un bloque de voz (IMA ADPCM)
         public event Action<string> RadioEnd;                // quién
         public event Action<string> RadioCut;                // quién me ha quitado el canal («-»: se ha acabado el tiempo)
@@ -70,10 +70,45 @@ namespace SelectOR
         public byte[] SigStates { get; private set; }                // dos bytes por cabeza (estado + 1, dibujo + 1)
         public DateTime SigStatesAt { get; private set; }
         public List<(string name, int tx, int tz, double x, double z, double kmh, bool player)> Trains { get; private set; } = new();
+        // (2026-11-09) número de tren de cada maquinista de la sala (SELECTOR TRAINNOS): número, tipo de servicio (C · MD · LD ·
+        // AV · M) y destino. El tuyo lo mandas con SetTrainNo (se vuelve a mandar al reconectar).
+        // (2026-11-10) y sus paradas intermedias (estaciones, mercancías o apartaderos), en orden
+        public Dictionary<string, (string no, string type, string dest, string con, string[] stops)> TrainNos { get; private set; } = new(StringComparer.Ordinal);
+        string _myNo, _myType, _myDest, _myCon; string[] _myStops;
+        // con: el nombre del .con (sin extensión), para su composición 2D en el puesto de mando (2026-11-09; servidores de antes: no lo reenvían)
+        public void SetTrainNo(string no, string type, string dest, string con = null, IList<string> stops = null)
+        {
+            _myNo = no; _myType = type; _myDest = dest; _myCon = con; _myStops = stops?.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+            if (Ready) SendTrainNo();
+        }
+        void SendTrainNo()
+        {
+            if (string.IsNullOrEmpty(_myNo)) return;
+            bool st = _myStops != null && _myStops.Length > 0;
+            Send($"TRAINNO {_myNo} {_myType ?? "-"} {Uri.EscapeDataString(string.IsNullOrEmpty(_myDest) ? "-" : _myDest)}"
+                 + (string.IsNullOrEmpty(_myCon) && !st ? "" : " " + Uri.EscapeDataString(string.IsNullOrEmpty(_myCon) ? "-" : _myCon))
+                 + (st ? " " + Uri.EscapeDataString(string.Join("|", _myStops)) : ""));   // (2026-11-10: las paradas, «A|B|C»)
+        }
+        void OnTrainNos(string s)
+        {
+            var d = new Dictionary<string, (string, string, string, string, string[])>(StringComparer.Ordinal);
+            foreach (var part in s.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = part.Trim().Split(' ');
+                if (f.Length < 4) continue;
+                string dest = Uri.UnescapeDataString(f[3]);
+                string con = f.Length > 4 ? Uri.UnescapeDataString(f[4]) : "";
+                string stops = f.Length > 5 ? Uri.UnescapeDataString(f[5]) : "";
+                d[f[0]] = (f[1], f[2] == "-" ? "" : f[2], dest == "-" ? "" : dest, con == "-" ? "" : con,
+                           stops == "-" || stops.Length == 0 ? Array.Empty<string>() : stops.Split('|', StringSplitOptions.RemoveEmptyEntries));
+            }
+            TrainNos = d;
+        }
         // De cada tren (servidor nuevo): su tramo del .tdb, MUDirection, sentido de la cola y longitud, para su camino por delante.
         public Dictionary<string, (int node, int mu, int dir, double len)> TrainTrack { get; private set; } = new();
         public bool Helper { get; private set; }                     // el despachador te ha nombrado ayudante (señales)
         public event Action<string> MapError;                        // busy · nohelper · notin · nodisp · far · locked · notdisp
+        public event Action<string, int, string> SpadSeen;           // (2026-11-09) (puesto) un maquinista ha rebasado una señal en parada: quién, señal, número de tren («-»)
         public event Action<string, int, int, string> TabAsked;      // (puesto de mando) un maquinista pide paso: quién, señal, 0 no · 1 sí · 2 espera al jefe, motivo
         // jefes de circulación (1.2.75): quién manda en cada estación, y en cada señal y aguja
         public sealed class JefeZone { public string Zone, Name; public int[] Sigs, Nodes; public bool Manual; }   // Manual: mando manual (1.2.75)
@@ -85,6 +120,18 @@ namespace SelectOR
         // (1.2.77) por qué no se abre cada señal en parada que espera un tren (Motivos.cs del despachador): señal → (tren, «es · en»)
         public IReadOnlyDictionary<int, (string train, string text)> SigWhy { get; private set; } = new Dictionary<int, (string, string)>();
         public event Action WhyChanged;
+        // (2026-11-10) el sentido de bloqueo de cada vía de los trayectos: «Dxm» (D: 0/A/B · x: 1 ocupada · m: a automático, j jefe);
+        // null hasta que llega. BlockHash: la huella de los trayectos del despachador (Trayectos.Hash), para no mezclar versiones
+        public string[] Blocks { get; private set; }
+        public string BlockHash { get; private set; }
+        public event Action BlocksChanged;
+        public event Action<string> BlockReply;
+        // (2026-11-10) la indicación de cada responsable de circulación de la sala (id del objeto → reposo · parada · paso · marche)
+        public Dictionary<long, string> BtStates { get; private set; } = new Dictionary<long, string>();
+        public event Action BtSnapshot;                 // todas (al conectarse)
+        public event Action<long, string> BtChanged;    // una recién dada (para el silbato)
+        public event Action<string> BtError;            // noperm · nodisp
+        public void SetBt(long id, string state, string zone) { if (Ready) Send($"BT {id} {state} {Uri.EscapeDataString(string.IsNullOrEmpty(zone) ? "-" : zone)}"); }   // la respuesta del despachador a un cambio (es · en)
         // la parte en el idioma de SelectOR de un texto «es · en»
         public static string Lang(string t) { if (string.IsNullOrEmpty(t)) return t; int k = t.IndexOf(" · ", StringComparison.Ordinal); return k < 0 ? t : I18n.English ? t.Substring(k + 3) : t.Substring(0, k); }
         public event Action<string, bool, int, string> ItinReply;   // quién, bien o no, señal de origen, texto (es · en)
@@ -243,12 +290,50 @@ namespace SelectOR
             if (body.StartsWith("SELECTOR CHAT ", StringComparison.Ordinal)) { OnChat(body.Substring(14)); return; }
             if (body.StartsWith("SELECTOR RADIO ", StringComparison.Ordinal)) { OnRadio(body.Substring(15)); return; }
             if (body.StartsWith("SELECTOR TRAINS ", StringComparison.Ordinal)) { OnTrains(body.Substring(16)); return; }
+            if (body.StartsWith("SELECTOR SPAD ", StringComparison.Ordinal))
+            {
+                var f = body.Substring(14).Split(' ');
+                if (f.Length >= 2 && int.TryParse(f[1], out int sg)) try { SpadSeen?.Invoke(f[0], sg, f.Length > 2 ? f[2] : "-"); } catch { }
+                return;
+            }
+            if (body.StartsWith("SELECTOR TRAINNOS", StringComparison.Ordinal)) { OnTrainNos(body.Length > 18 ? body.Substring(18) : ""); return; }
             if (body.StartsWith("SELECTOR TAB ", StringComparison.Ordinal))
             {
                 var f = body.Substring(13).Split(' ', 4);
                 if (f.Length >= 3 && int.TryParse(f[1], out int sig) && int.TryParse(f[2], out int tst)) try { TabAsked?.Invoke(f[0], sig, tst, f.Length > 3 ? f[3] : ""); } catch { }
                 return;
             }
+            // (2026-11-10) sentido de bloqueo de los trayectos (despachador Bloqueo.cs): «n huella|Dxm,…» · y la respuesta a un cambio
+            if (body.StartsWith("SELECTOR BLOQUEO ", StringComparison.Ordinal))
+            {
+                var st = body.Substring(17);
+                if (st.Trim() == "-") { Blocks = null; BlockHash = null; try { BlocksChanged?.Invoke(); } catch { } return; }   // (se ha ido el despachador)
+                int bar = st.IndexOf('|'); var hd = (bar > 0 ? st.Substring(0, bar) : "").Split(' ');
+                if (bar > 0 && hd.Length >= 2 && int.TryParse(hd[0], out int nv))
+                {
+                    var l = st.Substring(bar + 1).Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (l.Length == nv) { BlockHash = hd[1]; Blocks = l; try { BlocksChanged?.Invoke(); } catch { } }
+                }
+                return;
+            }
+            // (2026-11-10) el responsable de circulación de los andenes (objetos de la sala): «BTS id:estado,…» (todas, al conectarse)
+            // · «BT id estado» (una recién dada) · «BTERR motivo»
+            if (body.StartsWith("SELECTOR BTS ", StringComparison.Ordinal))
+            {
+                var d = new Dictionary<long, string>();
+                foreach (var p in body.Substring(13).Split(',', StringSplitOptions.RemoveEmptyEntries))
+                { var kv = p.Split(':'); if (kv.Length == 2 && long.TryParse(kv[0], out long id)) d[id] = kv[1]; }
+                BtStates = d; try { BtSnapshot?.Invoke(); } catch { }
+                return;
+            }
+            if (body.StartsWith("SELECTOR BT ", StringComparison.Ordinal))
+            {
+                var f = body.Substring(12).Split(' ');
+                if (f.Length >= 2 && long.TryParse(f[0], out long id)) { var d = new Dictionary<long, string>(BtStates) { [id] = f[1] }; BtStates = d; try { BtChanged?.Invoke(id, f[1]); } catch { } }
+                return;
+            }
+            if (body.StartsWith("SELECTOR BTERR ", StringComparison.Ordinal)) { try { BtError?.Invoke(body.Substring(15).Trim()); } catch { } return; }
+            if (body.StartsWith("SELECTOR BLOQUEOMSG ", StringComparison.Ordinal)) { try { BlockReply?.Invoke(body.Substring(20)); } catch { } return; }
             if (body.StartsWith("SELECTOR JEFES ", StringComparison.Ordinal)) { OnJefes(body.Substring(15)); return; }
             if (body.StartsWith("SELECTOR ITINS ", StringComparison.Ordinal)) { OnItins(body.Substring(15)); return; }
             if (body.StartsWith("SELECTOR WHY ", StringComparison.Ordinal))
@@ -288,6 +373,7 @@ namespace SelectOR
                 DriverOk = rv >= 7;
                 Ready = true;
                 if (ChatOk) try { ChatReset?.Invoke(); } catch { }
+                if (MapOk) SendTrainNo();   // (2026-11-09) tu número de tren (un servidor de antes lo tira)
                 return;
             }
             if (t[0] == "CHATERR" && t.Length > 1) { try { ChatError?.Invoke(t[1]); } catch { } return; }
@@ -390,7 +476,9 @@ namespace SelectOR
 
         // (1.2.90) radio de la sala
         public void RadioListen() { if (Ready && ChatOk) Send("RADIO LISTEN"); }
-        public void RadioOn() { if (Ready && ChatOk) Send("RADIO ON"); }
+        public void RadioOn(string channel = null) { if (Ready && ChatOk) Send(string.IsNullOrEmpty(channel) || channel == "*" ? "RADIO ON" : "RADIO ON " + channel); }
+        // (2026-11-10) los canales de banda que oye esta conexión («b3,b4»; ninguno: «-»)
+        public void RadioChannels(IEnumerable<string> bands) { if (Ready && ChatOk) { if (bands == null) { Send("RADIO CH *"); return; } var s = string.Join(",", bands); Send("RADIO CH " + (s.Length == 0 ? "-" : s)); } }   // (null: aún no se sabe; todo, como antes)
         public void RadioOff() { if (Ready && ChatOk) Send("RADIO OFF"); }
         int _radioSeq;
         public void RadioSend(byte[] block) { if (Ready && ChatOk && block != null) Send("RADIO V " + (_radioSeq++) + " " + Convert.ToBase64String(block)); }
@@ -404,7 +492,7 @@ namespace SelectOR
                 var t = s.Split(' ');
                 switch (t[0])
                 {
-                    case "START": if (t.Length >= 3) RadioStart?.Invoke(t[1], t[2] == "j"); break;
+                    case "START": if (t.Length >= 3) RadioStart?.Invoke(t[1], t[2] == "j", t.Length >= 4 ? t[3] : "*"); break;
                     case "V": if (t.Length >= 4) RadioVoice?.Invoke(t[1], Convert.FromBase64String(t[3])); break;
                     case "END": if (t.Length >= 2) RadioEnd?.Invoke(t[1]); break;
                     case "CUT": RadioCut?.Invoke(t.Length >= 2 ? t[1] : "-"); break;
@@ -434,6 +522,8 @@ namespace SelectOR
         // el jefe: agujas y señales aunque no esté conduciendo (el servidor lo deja solo a él)
         public void JefeThrowNode(int node, int pos) { if (Ready) Send($"THROWNODE {node} {pos}"); }
         public void JefeSignal(int obj, int pick) { if (Ready) Send($"SIGNAL {obj} {pick}"); }
+        // (2026-11-10) el sentido de bloqueo de una vía de un trayecto (su número en Trayectos; dir: 'A', 'B' o '0')
+        public void SetBlock(int via, char dir) { if (Ready) Send($"BLOQUEO {via} {dir}"); }
         // (1.2.78) el administrador quita ya los trenes IA de la sala: todos (service null) o los de un servicio
         public void AiRetire(string ticket, string service) { if (Ready) Send("JEFE AIRETIRE " + ticket + " " + (string.IsNullOrEmpty(service) ? "*" : Uri.EscapeDataString(service))); }
         public void JefeManual(string zone, bool on) { if (Ready) Send($"JEFE MANUAL {Uri.EscapeDataString(zone)} {(on ? 1 : 0)}"); }

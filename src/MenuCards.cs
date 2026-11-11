@@ -281,7 +281,7 @@ namespace SelectOR
         {
             if (string.IsNullOrEmpty(s)) return 0;
             if (_tw.TryGetValue((s, f), out int w)) return w;
-            w = TextRenderer.MeasureText(s, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+            w = ColorText.LineWidth(s, f);   // (2026-11-09) con el icono propio, si lo lleva
             if (_tw.Count > 20000) _tw.Clear();
             _tw[(s, f)] = w;
             return w;
@@ -346,6 +346,7 @@ namespace SelectOR
         public Func<object, bool> FavOf;
         public Func<object, (string text, Color color)?> BadgeOf;   // distintivo arriba a la izquierda (rutas autorizadas)
         public Func<object, (string text, Color color)?> Badge2Of;  // otro, abajo a la izquierda de la imagen (Multijugador SelectOR)
+        public Func<object, bool> PinnedOf;   // (2026-11-10) fijada arriba (la de la sala compartida): marco resaltado y chincheta
         readonly Font _fT = Theme.Font(10f, FontStyle.Bold), _fS = Theme.Font(8.25f), _fStar = Theme.Font(12f, FontStyle.Bold), _fB = Theme.Font(7.75f, FontStyle.Bold);
         public RouteCardList() { BackColor = Theme.BgSidebar; }
         protected override void Dispose(bool disposing) { if (disposing) { _fT.Dispose(); _fS.Dispose(); _fStar.Dispose(); _fB.Dispose(); } base.Dispose(disposing); }
@@ -392,8 +393,18 @@ namespace SelectOR
             int x = rc.X + Theme.Px(12), w = rc.Width - Theme.Px(24);
             ColorText.Text(g, TitleOf?.Invoke(it) ?? it.ToString(), _fT, new Rectangle(x, ir.Bottom + Theme.Px(7), w, Theme.Px(20)), Theme.Text, L1);
             ColorText.Text(g, SubOf?.Invoke(it) ?? "", _fS, new Rectangle(x, ir.Bottom + Theme.Px(28), w, Theme.Px(16)), Theme.Subtle, L1);
-            if (sel) Stroke(g, rc, rad, Theme.Accent);
-            else if (i == SelectedIndex && ShowFocus) Stroke(g, rc, rad, Theme.AccentHi, 1f);
+            // (2026-11-10) la fijada: marco dorado (y, si está elegida, el de siempre por dentro) y una chincheta
+            bool pin = PinnedOf?.Invoke(it) == true;
+            if (pin)
+            {
+                Stroke(g, rc, rad, Theme.Gold, 2.6f);
+                var pr = new Rectangle(rc.Right - Theme.Px(FavOf?.Invoke(it) == true ? 58 : 30), rc.Y + Theme.Px(6), Theme.Px(24), Theme.Px(22));
+                Fill(g, pr, Theme.Px(11), Color.FromArgb(150, 0, 0, 0));
+                ColorText.Text(g, "📌", _fS, pr, Theme.Gold, C1);
+            }
+            var inner = pin ? Rectangle.Inflate(rc, -Theme.Px(3), -Theme.Px(3)) : rc;
+            if (sel) Stroke(g, inner, rad, Theme.Accent);
+            else if (i == SelectedIndex && ShowFocus) Stroke(g, inner, rad, Theme.AccentHi, 1f);
         }
     }
 
@@ -423,16 +434,33 @@ namespace SelectOR
                 ColorText.Text(g, text, _fT, new Rectangle(x, 0, maxX - x, ClientSize.Height), ForeColor, F);
                 return;
             }
+            // (2026-11-09) si no caben en una fila, en dos (la barra de abajo: ruta, tren, teleindicador, empresa…); cada valor,
+            // como mucho 300 px (el nombre de un tren muy largo, con «…»)
+            const TextFormatFlags M = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;   // medir sin elipsis
+            var pills = new System.Collections.Generic.List<(string k, string v, int kw, int w)>();
             foreach (var raw in parts)
             {
                 string p = raw.Trim(); if (p.Length == 0) continue;
-                if (x >= maxX - Theme.Px(30)) break;
                 var m = KeyVal.Match(p);
                 string k = m.Success ? m.Groups[1].Value : null, v = m.Success ? m.Groups[2].Value : p;
-                const TextFormatFlags M = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;   // medir sin elipsis
                 int kw = k == null ? 0 : TextRenderer.MeasureText(g, k, _fK, Size.Empty, M).Width + Theme.Px(6);
-                int vw = TextRenderer.MeasureText(g, v, _fV, Size.Empty, M).Width;
-                int w = Math.Min(maxX - x, kw + vw + Theme.Px(22));
+                int vw = Math.Min(Theme.Px(300), TextRenderer.MeasureText(g, v, _fV, Size.Empty, M).Width);
+                pills.Add((k, v, kw, kw + vw + Theme.Px(22)));
+            }
+            int gapX = Theme.Px(8), gapY = Theme.Px(6);
+            int total = System.Linq.Enumerable.Sum(pills, q => q.w) + gapX * Math.Max(0, pills.Count - 1);
+            bool two = total > maxX - x && ClientSize.Height >= 2 * h + gapY + Theme.Px(4);
+            int row = 0, x0 = x;
+            y = two ? (ClientSize.Height - (2 * h + gapY)) / 2 : y;
+            foreach (var (k, v, kw, pw) in pills)
+            {
+                if (x > x0 && x + Math.Min(pw, Theme.Px(120)) > maxX)
+                {
+                    if (two && row == 0) { row = 1; x = x0; y += h + gapY; }
+                    else break;
+                }
+                if (x >= maxX - Theme.Px(30)) break;
+                int w = Math.Min(maxX - x, pw);
                 var r = new Rectangle(x, y, w, h);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 Theme.FillRound(g, r, h / 2, Theme.Surface2);
@@ -440,7 +468,7 @@ namespace SelectOR
                 int tx = r.X + Theme.Px(11);
                 if (k != null) { ColorText.Text(g, k, _fK, new Rectangle(tx, r.Y, kw, h), Theme.Subtle, F); tx += kw; }
                 ColorText.Text(g, v, _fV, new Rectangle(tx, r.Y, r.Right - tx - Theme.Px(10), h), Theme.Text, F);
-                x += w + Theme.Px(8);
+                x += w + gapX;
             }
         }
     }

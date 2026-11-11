@@ -35,7 +35,7 @@ namespace SelectOR
         // Valores de los KPIs (la tira se pinta en DrawKpiStrip; se actualizan y se hace Invalidate).
         string _kpiTreasuryTxt = "—", _kpiMembersTxt = "—", _kpiServicesTxt = "—", _kpiKmTxt = "—";
         Color _kpiTreasuryCol = Theme.Accent;
-        List<(Label header, int[] items)> _navGroups; // encabezados del menú lateral (se ocultan si su grupo no tiene secciones visibles)
+        List<(Control header, int[] items)> _navGroups; // encabezados del menú lateral (se ocultan si su grupo no tiene secciones visibles)
         PictureBox _empLogoPic; Label _logoLink;   // logotipo en la cabecera + enlace para cambiarlo
         Label _empRenameLink;                       // icono ✎ junto al nombre de empresa (renombrar)
         readonly Dictionary<string, (string src, Image img)> _logoCache = new();
@@ -175,6 +175,7 @@ namespace SelectOR
         int _paxBoarded, _paxOnboard, _paxCapacity;  // billetes totales, a bordo ahora, tope de la unidad
         double _paxKm;                                // viajeros·km: cada viajero por los km que va a bordo (billete por km)
         bool _paxActive; bool _paxBusy; volatile bool _paxWanted;   // activo / poll en curso / se quiere seguir cargando andenes
+        RoundedInput[] _pmNight;   // (2026-11-09) plus nocturno: €/km · desde · hasta
         double _paxDemandBase = 60;                  // antigua demanda base fija (app_settings.fleet_pax_demand): ya no se usa, la afluencia sale de las plazas del tren
         Panel _soloPanel;   // panel "Mi perfil"
         // Panel "Mi perfil" (estadísticas privadas del maquinista)
@@ -324,10 +325,13 @@ namespace SelectOR
         readonly List<string> _ledgerIds = new();
         readonly List<SvcRow> _svcRows = new();   // datos por servicio (para la ventana de detalle)
 
+        string _svcLastPlusJson;   // (2026-11-09) los pluses de la última carga
+        string _svcLastCondJson; static bool _svcCondMissing;   // (2026-11-10) hora, estación y clima del simulador (servicio-condiciones.sql)
         sealed class SvcRow
         {
             public string Id, Date, Driver, Route, Status, DriverId = "";
             public double Km, DurationS, Pax, Income, Cost, Net;
+            public double Plus;   // (2026-11-09) pluses del servicio (sala, racha, nocturno, prima de turno): ya sumados en Net
             public double MassT = double.NaN, Capacity = double.NaN;   // toneladas y plazas del tren (NaN = no se sabe)
             public string Train = "";                                   // tren conducido (composición)
             public int Cars, Engines;                                   // vehículos de su .con y cuántos son motrices (0 = no se sabe)
@@ -526,6 +530,8 @@ namespace SelectOR
             ("EMPRESA", new[] { 12, 2, 13, 15, 3, 11, 5 }),   // Chat · Socios · Normas · Rutas · Ajustes · Megafonía · Mi perfil
             ("ADMINISTRACIÓN", new[] { 6, 14, 16, 7, 8 }),    // Revisión (carné) · Préstamos · Catálogo de rutas · Usuarios · Administración
         };
+        // (2026-11-09) colores de las líneas del menú: operación verde, finanzas oro, empresa azul, administración violeta
+        static readonly Color[] NavLineColors = { Color.FromArgb(102, 197, 106), Color.FromArgb(240, 196, 90), Color.FromArgb(120, 144, 226), Color.FromArgb(167, 139, 250) };
         const int RailW = 250;          // ancho del menú lateral de Empresas
         static readonly Color RailCardC = Color.FromArgb(38, 46, 41);   // tarjeta de la empresa (verde muy oscuro)
         AvatarBox _railAvatar;
@@ -540,7 +546,7 @@ namespace SelectOR
         };
         ToolTip _empLogoTip;            // «Cambiar logotipo» (solo se muestra a quien puede cambiarlo)
         bool _subtabAutoFallback;       // se abrió Ranking automáticamente (sin empresas aún): al cargar, volver a Servicios
-        Label _empSectionTitle;         // título de la sección activa (encima de los KPIs)
+        StationSign _empSectionTitle;   // (2026-11-09) cartel de estación con la hora (EmpTema.cs)         // título de la sección activa (encima de los KPIs)
 
         // Vista principal de Empresas: MENÚ LATERAL (empresa + secciones + usuario) | CONTENIDO.
         Panel BuildEmpHomeView()
@@ -559,7 +565,8 @@ namespace SelectOR
             rail.Paint += (s, e) => { using var p = new Pen(Theme.Border); e.Graphics.DrawLine(p, rail.Width - 1, 0, rail.Width - 1, rail.Height); };
 
             // ---------- Tarjeta de EMPRESA: logo + nombre/rol · selector · crear/unirse ----------
-            var card = new Card { Dock = DockStyle.Top, Height = 150, Fill = RailCardC, BorderColor = Color.FromArgb(70, 76, 120, 84), Radius = 14, Padding = new Padding(12) };
+            var card = new Card { Dock = DockStyle.Top, Height = 150, Fill = RailCardC, BorderColor = Color.FromArgb(70, 76, 120, 84), Radius = 14, Padding = new Padding(12, 18, 12, 12) };
+            card.Paint += (s, e) => Hazard.Draw(e.Graphics, new Rectangle(0, 0, card.Width - 1, card.Height - 1), 14, 7);   // (2026-11-09) EmpTema.cs
             var cc = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, BackColor = RailCardC, Margin = new Padding(0) };
             cc.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
@@ -587,10 +594,11 @@ namespace SelectOR
             _logoLink = EmpLink(Tr("Cambiar logotipo")); _logoLink.Visible = false;   // compatibilidad (el logo ya es clicable)
             _logoLink.Click += (s, e) => ChangeLogo();
             // ID propio de la empresa, copiable con un clic.
-            _empCoIdLbl = new Label { AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(8.25f), Cursor = Cursors.Hand, Margin = new Padding(0, 3, 0, 0), BackColor = RailCardC };
+            _empCoIdLbl = new Label { AutoSize = true, ForeColor = Theme.Subtle, Font = Theme.Font(7.75f), Cursor = Cursors.Hand, Margin = new Padding(0, 3, 0, 0), BackColor = RailCardC, Visible = false };
             _empCoIdLbl.Click += (s, e) => { if (!string.IsNullOrEmpty(_empSel?.Code)) { try { Clipboard.SetText(_empSel.Code); Msg(_empHomeMsg, string.Format(Tr("ID de la empresa copiado: {0}"), _empSel.Code), false); } catch { } } };
             _empCoIdLbl.MouseEnter += (s, e) => _empCoIdLbl.ForeColor = Theme.Accent;
             _empCoIdLbl.MouseLeave += (s, e) => _empCoIdLbl.ForeColor = Theme.Subtle;
+            _empCoIdLbl.TextChanged += (s, e) => _empCoIdLbl.Visible = _empCoIdLbl.Text.Length > 0;   // (sin código, sin placa vacía)
             new ToolTip().SetToolTip(_empCoIdLbl, Tr("Clic para copiar el ID de la empresa"));
             txt.Controls.Add(titleRow); txt.Controls.Add(_empRoleLbl); txt.Controls.Add(_empCoIdLbl);
             idRow.Controls.Add(_empLogoPic, 0, 0); idRow.Controls.Add(txt, 1, 0);
@@ -620,16 +628,12 @@ namespace SelectOR
             Native.UseDarkScrollBars(nav);   // por si en una ventana muy baja hace falta desplazar
             _navRows = new List<(Control c, int tipo)>();
             _empSubtabs = new RoundButton[SubNames.Length];
-            _navGroups = new List<(Label header, int[] items)>();
+            _navGroups = new List<(Control header, int[] items)>();
             for (int gi = 0; gi < NavGroupDefs.Length; gi++)
             {
                 var (title, items) = NavGroupDefs[gi];
-                var h = new Label
-                {
-                    Text = Tr(title), AutoSize = false, Height = gi == 0 ? NavHeaderH0 : NavHeaderH, ForeColor = Theme.Subtle,
-                    Font = Theme.Font(7.5f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft,
-                    Padding = new Padding(10, 0, 0, 4), Margin = new Padding(0), BackColor = Theme.BgSidebar
-                };
+                // (2026-11-09) cada grupo, una línea del plano: «L1 OPERACIÓN» con su color (EmpTema.cs)
+                var h = new NavLineHeader { Text = Tr(title), Code = "L" + (gi + 1), LineColor = NavLineColors[gi % NavLineColors.Length], Height = gi == 0 ? NavHeaderH0 : NavHeaderH, Margin = new Padding(0) };
                 h.Dock = DockStyle.Fill;
                 nav.RowStyles.Add(new RowStyle(SizeType.Absolute, gi == 0 ? NavHeaderH0 : NavHeaderH));
                 nav.Controls.Add(h, 0, _navRows.Count);
@@ -640,7 +644,7 @@ namespace SelectOR
                     var b = new RoundButton
                     {
                         Text = Tr(SubNames[idx]), GlyphKind = SubGlyphs[idx], NavStyle = true, NavTint = SubTints[idx], Radius = 9, Height = NavItemH,
-                        Margin = new Padding(0, 1, 0, 1),
+                        Margin = new Padding(0), LineColor = NavLineColors[gi % NavLineColors.Length],   // (2026-11-09) estación de su línea
                         BaseColor = Theme.BgSidebar, HoverColor = Theme.Surface,
                         ActiveColor = Color.FromArgb(40, 70, 44), ActiveTextColor = Theme.AccentHi,
                         TextColor = Color.FromArgb(214, 218, 221), FontSize = 9.5f
@@ -843,8 +847,8 @@ namespace SelectOR
             // (La identidad de la empresa y el usuario viven ahora en el menú lateral.)
             var t = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(20, 10, 4, 0) };
 
-            var titleBar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Theme.Bg };
-            _empSectionTitle = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Text, Font = Theme.Font(16f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+            var titleBar = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.Bg };
+            _empSectionTitle = new StationSign { Dock = DockStyle.Fill, ShowClock = false };   // (sin la hora: a petición)
             titleBar.Controls.Add(_empSectionTitle);
             _liveShareBox = BuildLiveShareBox();   // «Compartir mi posición en el mapa» (solo en Mi perfil)
             titleBar.Controls.Add(_liveShareBox);
@@ -1041,6 +1045,7 @@ namespace SelectOR
 
             _svcCards = new ServiceCardList { Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4) };
             _svcCards.FileLoader = id => ServiceImages.GetAsync(_empSel?.Id, id);
+            _svcCards.PhotoOf = DriverPhoto;   // (2026-11-09) la foto de perfil en vez de las iniciales
             _svcCards.ItemActivated += id => OpenServiceDetail(_svcRows.FindIndex(r => r.Id == id));
 
             var top = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 42, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
@@ -1160,8 +1165,11 @@ namespace SelectOR
             _memberCards = new MemberCardGrid
             {
                 Dock = DockStyle.Fill, Margin = new Padding(2, 4, 2, 4),
-                LblLicense = Tr("Carné"), LblServices = Tr("servicios"), LblKm = Tr("en la empresa"), LblNet = Tr("neto"), LblSuspended = Tr("SUSPENDIDO")
+                LblLicense = Tr("Carné"), LblServices = Tr("servicios"), LblKm = Tr("en la empresa"), LblNet = Tr("neto"), LblSuspended = Tr("SUSPENDIDO"),
+                LblDriver = Tr("Maquinista nivel {0}"), LblJefe = Tr("Jefe de circulación"), LblNoCert = Tr("Sin título")
             };
+            // (2026-11-09) los títulos llegan de Supabase poco a poco: al llegar, se rehacen las tarjetas
+            CertBadges.Changed += () => { try { if (_memberCards != null && !_memberCards.IsDisposed) _memberCards.BeginInvoke((Action)FillMemberCards); } catch { } };
             _memberCards.SelectionChanged += () =>
             {
                 int i = MemberSelectedIndex();   // el desplegable de rol se pone en el del socio elegido
@@ -1277,19 +1285,15 @@ namespace SelectOR
             // --- Tarifas ---
             var pTar = FormPage(true);
             pTar.Controls.Add(EmpHeader("TARIFAS GLOBALES DE LOS SERVICIOS (€) — SOLO ADMINISTRADOR"));
-            pTar.Controls.Add(EmpFieldLabel(Tr("Ingreso por km (mercancías de 500 t)")));
-            _tarIncome = EmpInput("8"); _tarIncome.Width = 240; pTar.Controls.Add(_tarIncome);
-            pTar.Controls.Add(EmpFieldLabel(Tr("Canon AI (administrador de infraestructuras) por km")));
-            _tarCanon = EmpInput("3"); _tarCanon.Width = 240; pTar.Controls.Add(_tarCanon);
-            pTar.Controls.Add(EmpFieldLabel(Tr("Energía / combustible por km (tren de 500 t; escala con la masa)")));
-            _tarEnergy = EmpInput("1.5"); _tarEnergy.Width = 240; pTar.Controls.Add(_tarEnergy);
+            // (2026-11-09) en dos columnas: así cabe sin barras también a 1366×768
             // Salario = fijo por servicio + horas de conducción × precio por hora (con tope; salario-por-tiempo.sql).
-            pTar.Controls.Add(EmpFieldLabel(Tr("Salario del maquinista: fijo por servicio")));
-            _tarSalary = EmpInput("30"); _tarSalary.Width = 240; pTar.Controls.Add(_tarSalary);
-            pTar.Controls.Add(EmpFieldLabel(Tr("Salario del maquinista: por hora de conducción")));
-            _tarSalaryHour = EmpInput("25"); _tarSalaryHour.Width = 240; pTar.Controls.Add(_tarSalaryHour);
-            pTar.Controls.Add(EmpFieldLabel(Tr("Horas de conducción pagadas como máximo por servicio")));
-            _tarSalaryMaxH = EmpInput("6"); _tarSalaryMaxH.Width = 240; pTar.Controls.Add(_tarSalaryMaxH);
+            pTar.Controls.Add(FieldGrid(2, 270,
+                (Tr("Ingreso por km (mercancías de 500 t)"), _tarIncome = EmpInput("8")),
+                (Tr("Canon AI (administrador de infraestructuras) por km"), _tarCanon = EmpInput("3")),
+                (Tr("Energía / combustible por km (tren de 500 t; escala con la masa)"), _tarEnergy = EmpInput("1.5")),
+                (Tr("Salario del maquinista: fijo por servicio"), _tarSalary = EmpInput("30")),
+                (Tr("Salario del maquinista: por hora de conducción"), _tarSalaryHour = EmpInput("25")),
+                (Tr("Horas de conducción pagadas como máximo por servicio"), _tarSalaryMaxH = EmpInput("6"))));
             _tarSaveBtn = EmpButton(Tr("Guardar tarifas"), primary: true); _tarSaveBtn.Width = 200;
             _tarSaveBtn.Click += (s, e) => SaveTariffs();
             pTar.Controls.Add(_tarSaveBtn);
@@ -1347,12 +1351,17 @@ namespace SelectOR
             pPax.Width = 1420; pPax.ColumnCount = 2;
             pPax.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             var L = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(0) };
-            var R = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(48, 0, 0, 0) };
+            var R = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Theme.Bg, Margin = new Padding(30, 0, 0, 0) };
             pPax.Controls.Add(L, 0, 0); pPax.Controls.Add(R, 1, 0);
             L.Controls.Add(EmpHeader("MODELO DE VIAJEROS (GLOBAL, ADMINISTRADOR)"));
-            L.Controls.Add(EmpNote(Tr("Viajeros que esperan = plazas del tren × % base × tamaño de estación × tipo de servicio × hora × estación del año × clima × variación aleatoria. Nunca suben más viajeros que plazas libres.")));
-            L.Controls.Add(EmpFieldLabel(Tr("Viajeros que esperan en una estación de tamaño ×1 (% de las plazas del tren)")));
-            _pmCapPct = EmpInput("12"); _pmCapPct.Anchor = AnchorStyles.Left; _pmCapPct.Width = 200; L.Controls.Add(_pmCapPct);
+            Label NoteW(string t, int w) { var n = EmpNote(t); n.MaximumSize = new Size(w, 0); return n; }   // (2026-11-09) a la medida de su columna
+            L.Controls.Add(NoteW(Tr("Viajeros que esperan = plazas del tren × % base × tamaño de estación × tipo de servicio × hora × estación del año × clima × variación aleatoria. Nunca suben más viajeros que plazas libres."), 580));
+            // (2026-11-09) el texto y su campo en la misma línea (así cabe la pestaña entera a 1366×768)
+            var capRow = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, BackColor = Theme.Bg, Margin = new Padding(0, 2, 0, 2) };
+            capRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 392)); capRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            capRow.Controls.Add(new Label { Text = Tr("Viajeros que esperan en una estación de tamaño ×1 (% de las plazas del tren)"), AutoSize = true, MaximumSize = new Size(386, 0), ForeColor = Theme.Text, Font = Theme.Font(9f), Anchor = AnchorStyles.Left, Margin = new Padding(2, 4, 2, 4) }, 0, 0);
+            _pmCapPct = EmpInput("12"); _pmCapPct.Anchor = AnchorStyles.Left; _pmCapPct.Width = 180; capRow.Controls.Add(_pmCapPct, 1, 0);
+            L.Controls.Add(capRow);
             // La antigua demanda base fija ya no se enseña; el campo se conserva para guardar la economía de flota tal cual.
             _fsPaxDemand = EmpInput("60");
             var profCols = new[] { "Cercanías", "Media", "Larga", "Alta Vel." };
@@ -1360,24 +1369,27 @@ namespace SelectOR
             {
                 ("Demanda relativa (× base)", _pmDemand = new RoundedInput[4]),
                 ("Fracción que baja en cada parada", _pmAlight = new RoundedInput[4]),
-            });
+            }, 200, 96);
             L.Controls.Add(EmpHeader("POR TIPO DE SERVICIO"));
             L.Controls.Add(profGrid);
             L.Controls.Add(EmpHeader("POR TAMAÑO DE ESTACIÓN (METROS DE ANDÉN)"));
-            L.Controls.Add(ParamGrid(new[] { "< 250 m", "250–600 m", "600–1.400 m", "≥ 1.400 m" }, new[] { ("Peso de la estación (× base)", _pmStation = new RoundedInput[4]) }));
+            L.Controls.Add(ParamGrid(new[] { "< 250 m", "250–600 m", "600–1.400 m", "≥ 1.400 m" }, new[] { ("Peso de la estación (× base)", _pmStation = new RoundedInput[4]) }, 200, 96));
+            { var nh = EmpHeader("PLUS NOCTURNO (VIAJEROS)"); nh.Margin = new Padding(2, 6, 2, 2); L.Controls.Add(nh); }
+            L.Controls.Add(NoteW(Tr("€/km × km del servicio × parte de sus paradas hechas de noche (hora del juego)."), 580));
+            L.Controls.Add(ParamGrid(new[] { "€ por km", "Desde (h)", "Hasta (h)" }, new[] { ("Plus", _pmNight = new RoundedInput[3]) }, 200, 96));
 
             R.Controls.Add(EmpHeader("OTROS FACTORES"));
-            R.Controls.Add(EmpNote(Tr("Bajada extra: multiplica la fracción que baja en estaciones de 600 m de andén o más. Variación: ± aleatorio por estación y visita. Reembarque: distancia a la que hay que alejarse para volver a atender la misma estación.")));
+            R.Controls.Add(NoteW(Tr("Bajada extra: multiplica la fracción que baja en estaciones de 600 m de andén o más. Variación: ± aleatorio por estación y visita. Reembarque: distancia a la que hay que alejarse para volver a atender la misma estación."), 400));
             R.Controls.Add(ParamGrid(new[] { "Bajada extra (×)", "Variación (±%)", "Reembarque (m)" },
-                new[] { ("Paradas", _pmMisc = new RoundedInput[3]) }, 90, 132));
+                new[] { ("Paradas", _pmMisc = new RoundedInput[3]) }, 74, 108));
             R.Controls.Add(EmpHeader("CLIMA Y ESTACIÓN DEL AÑO"));
-            R.Controls.Add(EmpNote(Tr("Multiplica la demanda cuando la actividad tiene nieve o lluvia (la lluvia solo afecta a Cercanías y Media Distancia).")));
+            R.Controls.Add(NoteW(Tr("Multiplica la demanda cuando la actividad tiene nieve o lluvia (la lluvia solo afecta a Cercanías y Media Distancia)."), 400));
             R.Controls.Add(ParamGrid(new[] { "Nieve (×)", "Lluvia Cerc. (×)", "Lluvia Media (×)" },
-                new[] { ("Clima", _pmWeather = new RoundedInput[3]) }, 90, 132));
+                new[] { ("Clima", _pmWeather = new RoundedInput[3]) }, 74, 108));
             _pmUseSeason = ParamCheck(Tr("Aplicar la estación del año de la actividad"));
             _pmUseWeather = ParamCheck(Tr("Aplicar el clima de la actividad"));
             R.Controls.Add(_pmUseSeason); R.Controls.Add(_pmUseWeather);
-            R.Controls.Add(ParamButtons(Tr("Guardar modelo de viajeros"), () => SavePaxModel(true)));
+            R.Controls.Add(ParamButtons(Tr("Guardar modelo de viajeros"), () => SavePaxModel(true), stacked: true));   // (uno al lado del otro, más estrechos)
 
             // --- Clasificación (tipo de servicio) ---
             var pCls = FormPage(false); pCls.Width = 720;
@@ -1412,12 +1424,19 @@ namespace SelectOR
             pUpd.Controls.Add(_updPublishBtn);
 
             var pLiga = BuildLeagueSettingsPage();
+            var pSala = BuildSalaSettingsPage();    // (2026-11-09) requisitos y tiempos de la sala (antes en Expulsiones y en Ajustes de SelectOR)
+            var pClima = BuildClimaSettingsPage();  // (2026-11-09) gestionar el clima (antes en Ajustes de SelectOR → Clima)
+            var pEco = BuildEconomyPage();          // (2026-11-09) cobros y pluses que antes solo se cambiaban con SQL (MainMenuForm.AjustesCobros.cs)
             var pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
+            pages.Controls.Add(pSala); pages.Controls.Add(pClima); pages.Controls.Add(pEco);
             pages.Controls.Add(pUpd); pages.Controls.Add(pLiga); pages.Controls.Add(pCls); pages.Controls.Add(pPax); pages.Controls.Add(pFs); pages.Controls.Add(pBal); pages.Controls.Add(pTar);
-            var tabs = MakeSubTabs(new[] { "Tarifas", "Saldos", "Economía de flota", "Viajeros", "Clasificación", "Liga", "Actualizaciones" },
+            var tabs = MakeSubTabs(new[] { "Tarifas", "Saldos", "Economía de flota", "Viajeros", "Clasificación", "Liga", "Actualizaciones", "Sala compartida", "Clima", "Cobros y pluses" },
                 i =>
                 {
                     pTar.Visible = i == 0; pBal.Visible = i == 1; pFs.Visible = i == 2; pPax.Visible = i == 3; pCls.Visible = i == 4; pLiga.Visible = i == 5; pUpd.Visible = i == 6;
+                    pSala.Visible = i == 7; pClima.Visible = i == 8; pEco.Visible = i == 9;
+                    if (i == 9) LoadEconomy();
+                    if (i == 8) RefreshClimaSummary();
                     if (i == 5) LoadLeagueSettings();
                     if (i == 6) RefreshUpdateInfo();
                 });
@@ -1586,8 +1605,10 @@ namespace SelectOR
                 using (var p = Theme.Round(new Rectangle(0, 0, size, size), size / 3))
                 using (var b = new SolidBrush(color)) g.FillPath(b, p);
                 using var f = new Font("Segoe UI Emoji", size * 0.46f * Theme.DpiComp);
-                ColorText.Text(g, icon, f, new Rectangle(0, 0, size, size), Color.White,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                ColorText.IconBg = color;   // (2026-11-09) que el icono se lea sobre su cuadrado
+                try { ColorText.Text(g, icon, f, new Rectangle(0, 0, size, size), Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding); }
+                finally { ColorText.IconBg = null; }
             };
             return pan;
         }
@@ -2154,6 +2175,10 @@ namespace SelectOR
                 "id,consist,consist_mass,consist_capacity,consist_cars,path",
             };
             var tTren = Supa.SelectAllAsync(trenQ(colSets[_svcColsLevel]));
+            // (2026-11-09) los pluses de cada servicio (apuntes de Banca con su servicio): se suman a su beneficio
+            var tPlus = Supa.SelectAllAsync($"ledger?select=service_id,amount&company_id=eq.{Uri.EscapeDataString(c.Id)}&concept=in.(room_bonus,room_streak,night_bonus,sched_bonus)&service_id=not.is.null");
+            // (2026-11-10) la hora, la estación y el clima con que se lanzó el simulador (servicio-condiciones.sql; sin él, nada)
+            var tCond = _svcCondMissing ? null : Supa.SelectAllAsync($"services?select=id,sim_time,sim_season,sim_weather&company_id=eq.{Uri.EscapeDataString(c.Id)}&sim_season=not.is.null");
             var (json, err) = await tLista;
             try
             {
@@ -2183,10 +2208,27 @@ namespace SelectOR
             catch { }
             if (seq != _svcLoadSeq || _empSel?.Id != c.Id) return;   // ya se ha pedido otra
             if (err != null) { _svcRows.Clear(); _svcLastJson = null; _svcCards?.ShowMessage(Tr("Error: ") + err); UpdateServiceTabCounts(); return; }
-            if (json == _svcLastJson && tj == _svcLastTrenJson) return;   // nada ha cambiado
-            _svcLastJson = json; _svcLastTrenJson = tj;
+            string pjs = null; try { var (pj, pe) = await tPlus; if (pe == null) pjs = pj; } catch { }   // (2026-11-09) los pluses
+            string cjs = null;
+            if (tCond != null) try { var (cj, ce) = await tCond; if (ce == null) cjs = cj; else if (ce.IndexOf("sim_", StringComparison.OrdinalIgnoreCase) >= 0 || ce.IndexOf("42703", StringComparison.Ordinal) >= 0) _svcCondMissing = true; } catch { }
+            if (json == _svcLastJson && tj == _svcLastTrenJson && pjs == _svcLastPlusJson && cjs == _svcLastCondJson) return;   // nada ha cambiado
+            _svcLastJson = json; _svcLastTrenJson = tj; _svcLastPlusJson = pjs; _svcLastCondJson = cjs;
+            var conds = new Dictionary<string, (string t, int s, int w)>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(cjs))
+                {
+                    using var cd = JsonDocument.Parse(cjs);
+                    foreach (var e in cd.RootElement.EnumerateArray())
+                    {
+                        int I(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : -1;
+                        conds[Str(e, "id")] = (Str(e, "sim_time"), I("sim_season"), I("sim_weather"));
+                    }
+                }
+            }
+            catch { }
 
-            var rows = await Task.Run(() => ParseServices(json, tj));   // el JSON se lee fuera del hilo de la interfaz
+            var rows = await Task.Run(() => ParseServices(json, tj, pjs));   // el JSON se lee fuera del hilo de la interfaz
             if (seq != _svcLoadSeq) return;
             _svcRows.Clear(); _svcRows.AddRange(rows);
             var items = new List<ServiceCardList.Item>(rows.Count);
@@ -2195,15 +2237,16 @@ namespace SelectOR
                 {
                     Id = r.Id, Driver = r.Driver, Route = r.Route, Path = r.Path, Train = r.Train == "—" ? "" : r.Train, Status = r.Status,
                     Start = r.Start, Km = r.Km, DurationS = r.DurationS, Pax = r.Pax, Capacity = r.Capacity, MassT = r.MassT,
-                    Income = r.Income, Net = r.Net, Cars = r.Cars, Engines = r.Engines, Valid = r.Valid, HasImage = r.HasImage,
-                    Annulled = r.Annulled, AnnulReason = r.AnnulReason
+                    Income = r.Income, Net = r.Net, Plus = r.Plus, Cars = r.Cars, Engines = r.Engines, Valid = r.Valid, HasImage = r.HasImage,
+                    Annulled = r.Annulled, AnnulReason = r.AnnulReason,
+                    SimTime = conds.TryGetValue(r.Id, out var cn) && cn.t.Length > 0 ? cn.t : null, SimSeason = conds.TryGetValue(r.Id, out var cn2) ? cn2.s : -1, SimWeather = conds.TryGetValue(r.Id, out var cn3) ? cn3.w : -1
                 });
             _svcCards?.SetItems(items);
             UpdateServiceTabCounts();
             UpdateCompanyKpis();   // nº de servicios y km totales
         }
 
-        static List<SvcRow> ParseServices(string json, string trenJson)
+        static List<SvcRow> ParseServices(string json, string trenJson, string plusJson = null)
         {
             var tren = new Dictionary<string, (double mass, double cap, string name, int cars, int engines, string path, bool img)>(StringComparer.OrdinalIgnoreCase);
             try
@@ -2216,6 +2259,20 @@ namespace SelectOR
                         double NumOrNaN(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : double.NaN;
                         bool img = e.TryGetProperty("consist_img", out var ci) && ci.ValueKind == JsonValueKind.True;
                         tren[Str(e, "id")] = (NumOrNaN("consist_mass"), NumOrNaN("consist_capacity"), Str(e, "consist"), (int)Num(e, "consist_cars"), (int)Num(e, "consist_engines"), Str(e, "path"), img);
+                    }
+                }
+            }
+            catch { }
+            var plus = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(plusJson))
+                {
+                    using var pd = JsonDocument.Parse(plusJson);
+                    foreach (var e in pd.RootElement.EnumerateArray())
+                    {
+                        string sid = Str(e, "service_id"); if (sid.Length == 0) continue;
+                        plus[sid] = (plus.TryGetValue(sid, out var p0) ? p0 : 0) + Num(e, "amount");
                     }
                 }
             }
@@ -2240,7 +2297,7 @@ namespace SelectOR
                     {
                         Id = id, Date = FmtDate(started), Driver = driver, Route = route, Status = Str(e, "status"), DriverId = Str(e, "driver_id"),
                         Km = Num(e, "km"), DurationS = Num(e, "duration_s"), Pax = Num(e, "pax"), Income = Num(e, "income"),
-                        Cost = Num(e, "cost_total"), Net = Num(e, "net"), Valid = valid,
+                        Cost = Num(e, "cost_total"), Net = Num(e, "net") + (plus.TryGetValue(id, out var pl) ? pl : 0), Plus = plus.TryGetValue(id, out var pl2) ? pl2 : 0, Valid = valid,
                         MassT = tm, Capacity = tc, Train = tn, Cars = tcars, Engines = teng,
                         Path = tpath ?? "", Start = start, HasImage = timg,
                         Annulled = Str(e, "annulled_at").Length > 0, AnnulReason = Str(e, "annul_reason"),
@@ -2439,7 +2496,7 @@ namespace SelectOR
         // Grupo de cada concepto para los filtros del extracto (1 ingresos · 2 canon · 3 energía · 4 salarios · 5 flota · 6 otros).
         static int BankGroup(BankStatement.Move m) => m.Concept switch
         {
-            "income" or "prize" or "sched_bonus" or "room_bonus" or "room_streak" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
+            "income" or "prize" or "sched_bonus" or "room_bonus" or "room_streak" or "night_bonus" => 1, "canon" => 2, "energy" => 3, "salary" => 4, "purchase" or "maintenance" => 5, "loan" => 7, _ => m.Amount >= 0 && m.Concept != "adjustment" ? 1 : 6
         };
 
         DateTime BankPeriodStart() => _bankPeriod switch
@@ -2569,6 +2626,7 @@ namespace SelectOR
             "prize" => Tr("Premio"),   // los de la liga y el de bienvenida: la descripción dice cuál
             "sched_bonus" => Tr("Prima de servicio programado"),
             "room_bonus" => Tr("Plus de sala compartida"),
+            "night_bonus" => Tr("Plus nocturno"),
             "room_streak" => Tr("Racha semanal en la sala"),
             "adjustment" => Tr("Ajuste de saldo"),
             _ => c
@@ -2845,6 +2903,16 @@ namespace SelectOR
                 return new Bitmap(raw);
             }
             catch { return null; }
+        }
+
+        // (2026-11-09) La foto de perfil de un maquinista por su nombre (los socios de la empresa elegida), o null.
+        Image DriverPhoto(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            foreach (var m in _members)
+                if (string.Equals(m.Username, name, StringComparison.OrdinalIgnoreCase))
+                    return _memberPhotos.TryGetValue(m.UserId, out var p) ? p.img : null;
+            return null;
         }
 
         // Guarda (o quita, con data vacío) la foto de un socio, sin volver a decodificarla si no ha cambiado.
@@ -3146,6 +3214,8 @@ namespace SelectOR
                 _serviceHud.RoomMap = RoomMapNow; _serviceHud.RoomClick = RoomMapClick;   // en una sala: agujas, señales y trenes (MainMenuForm.MapaSala.cs)
                 _serviceHud.RoomPlayerClick = RoomPlayerMenu;                             // … y el despachador nombra ayudantes
                 _serviceHud.RoomMeStatus = RoomMeStatus;                                  // … y tu papel en la leyenda
+                _serviceHud.RoomTrainNo = SalaTrainHud;                                   // … y tu número de tren (MainMenuForm.TrenSala.cs)
+                _serviceHud.RoomTrainNoClick = () => BeginInvoke((Action)SalaTrainChange);   // (2026-11-09) … que se cambia con un clic
                 _serviceHud.Me = LiveMe;
                 _serviceHud.Net = HudNetStatus;    // multijugador: ¿conectado al servidor? (MainMenuForm.Online.cs)
                 WireRoadToHud();                   // hoja de ruta: itinerario en el mapa grande
@@ -3525,6 +3595,9 @@ namespace SelectOR
             // Ruta autorizada (rutas-autorizadas.sql): en modo obligatorio, sin ella no hay servicio.
             string routeBlock = await RouteGateAsync(_empOnDutyCompany.Id);
             if (routeBlock != null) { _empStartFailReason = routeBlock; return null; }
+            // (2026-11-09) los km mínimos de la empresa (MainMenuForm.EmpresaRequisitos.cs)
+            string reqBlock = await CompanyReqBlockAsync(_empOnDutyCompany.Id, CurrentPath()?.FilePath);
+            if (reqBlock != null) { _empStartFailReason = reqBlock; return null; }
             var (json, err) = await StartServiceRpc(_empOnDutyCompany.Id, _curRoute?.Name ?? "", CurrentConsistLabel(),
                                                     CurrentPathLabel(), vehicleId, CurrentDrivenConsist());
             if (err != null || string.IsNullOrWhiteSpace(json))
@@ -4119,6 +4192,8 @@ namespace SelectOR
             public bool UseSeason = true, UseWeather = true;
             // Clasificación del tipo de servicio
             public double AvKmh = 250, LargaKmh = 160, MediaKmh = 120, MediaMaxDensity = 1.3;
+            // (2026-11-09) plus nocturno de los servicios de viajeros (sql/plus-nocturno.sql): €/km y de qué hora a qué hora
+            public double NightBonusKm = 12; public int NightFrom = 22, NightTo = 6;
         }
         static PaxModelConfig PaxCfg = new PaxModelConfig();
         static readonly JsonSerializerOptions PaxJsonOpts = new JsonSerializerOptions { IncludeFields = true };
@@ -9082,6 +9157,12 @@ namespace SelectOR
             _estimatedKm = 0;
             if (r.Valid) (r.SchedDone, r.SchedBonus) = await SchedOfServiceAsync(svc);   // turno cumplido y prima del servidor
             if (r.Valid) await RoomBonusInto(r, svc);   // (1.2.91) plus de sala compartida
+            if (r.Valid) await NightBonusInto(r, svc);  // (2026-11-09) plus nocturno (sql/plus-nocturno.sql)
+            if (r.Valid)   // (2026-11-09) requisitos de la empresa: si no llega, el servidor lo anula (empresa-requisitos-anular.sql)
+            {
+                var (annulled, why) = await CompanyReqCheckAsync(svc);
+                if (annulled) r.AnnulText = why; else r.CompanyRuleNote = why ?? "";
+            }
             if (showDialog) r.Map = await BuildTripMap(openedUtc);
             if (!r.Valid) return ShowNotRegistered(r, showDialog);
             Msg(_empHomeMsg, Tr("Servicio registrado."), false);
@@ -9232,6 +9313,7 @@ namespace SelectOR
             }
             catch { }
             UpdateRailAvatar();
+            try { _svcCards?.Invalidate(); } catch { }   // (2026-11-09) fotos en los servicios
             _members.Clear();
             if (err == null)
             {
@@ -9284,6 +9366,7 @@ namespace SelectOR
                     Net = has ? cd.net.ToString("+#,##0;−#,##0", EsEs) + " €" : "—", NetNeg = has && cd.net < 0,
                     Photo = _memberPhotos.TryGetValue(m.UserId, out var mp) ? mp.img : null
                 };
+                if (name != "—") { var ci = CertBadges.Info(name); card.CertDriver = ci.Driver; card.CertJefe = ci.Jefe; }   // (2026-11-09) títulos
                 if (_memberPoints.TryGetValue(m.UserId, out var p) && p.points >= 0)
                 {
                     card.Points = p.points;
@@ -9539,6 +9622,14 @@ namespace SelectOR
                 foreach (var idx in items)
                     if (idx >= 0 && idx < _empSubtabs.Length && _empSubtabs[idx] != null && _empSubtabs[idx].Visible) { any = true; break; }
                 if (header != null) header.Visible = any;
+                // (2026-11-09) la línea empieza en la primera estación que se ve y acaba en la última
+                var vis = new List<RoundButton>();
+                foreach (var idx in items) if (idx >= 0 && idx < _empSubtabs.Length && _empSubtabs[idx] != null && _empSubtabs[idx].Visible) vis.Add(_empSubtabs[idx]);
+                for (int k = 0; k < vis.Count; k++)
+                {
+                    int pos = vis.Count == 1 ? 3 : k == 0 ? 1 : k == vis.Count - 1 ? 2 : 0;
+                    if (vis[k].LinePos != pos) { vis[k].LinePos = pos; vis[k].Invalidate(); }
+                }
             }
         }
 
@@ -9826,11 +9917,12 @@ namespace SelectOR
             Margin = new Padding(2, 8, 2, 2), Padding = new Padding(0, 2, 0, 0)
         };
 
-        FlowLayoutPanel ParamButtons(string saveText, Action save)
+        FlowLayoutPanel ParamButtons(string saveText, Action save, bool stacked = false)
         {
-            var f = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 12, 0, 8) };
-            var bSave = EmpButton(saveText, primary: true); bSave.Width = 300; bSave.Click += (s, e) => save();
-            var bReset = EmpButton(Tr("Restablecer valores por defecto"), primary: false); bReset.Width = 320;
+            // stacked (Viajeros, columna estrecha): los dos botones más estrechos, uno al lado del otro
+            var f = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, stacked ? 8 : 12, 0, 8) };
+            var bSave = EmpButton(saveText, primary: true); bSave.Width = stacked ? 196 : 300; bSave.Click += (s, e) => save();
+            var bReset = EmpButton(Tr("Restablecer valores por defecto"), primary: false); bReset.Width = stacked ? 204 : 320;
             bReset.Click += (s, e) =>
             {
                 FillPaxModelInputs(new PaxModelConfig());
@@ -9856,6 +9948,7 @@ namespace SelectOR
             _pmWeather[0].Box.Text = F(c.SnowFactor); _pmWeather[1].Box.Text = F(c.RainCercanias); _pmWeather[2].Box.Text = F(c.RainMedia);
             _pmClass[0].Box.Text = F(c.AvKmh); _pmClass[1].Box.Text = F(c.LargaKmh); _pmClass[2].Box.Text = F(c.MediaKmh); _pmClass[3].Box.Text = F(c.MediaMaxDensity);
             _pmUseSeason.Checked = c.UseSeason; _pmUseWeather.Checked = c.UseWeather;
+            if (_pmNight != null) { _pmNight[0].Box.Text = F(c.NightBonusKm); _pmNight[1].Box.Text = c.NightFrom.ToString(); _pmNight[2].Box.Text = c.NightTo.ToString(); }
         }
 
         // Lee los campos; devuelve null (y avisa) si algún valor no tiene sentido.
@@ -9874,6 +9967,7 @@ namespace SelectOR
             c.AvKmh = V(_pmClass[0]); c.LargaKmh = V(_pmClass[1]); c.MediaKmh = V(_pmClass[2]); c.MediaMaxDensity = V(_pmClass[3]);
             c.UseSeason = _pmUseSeason.Checked; c.UseWeather = _pmUseWeather.Checked;
             if (_pmCapPct != null) c.CapacityPct = V(_pmCapPct);
+            if (_pmNight != null) { c.NightBonusKm = V(_pmNight[0]); c.NightFrom = (int)Math.Round(V(_pmNight[1])); c.NightTo = (int)Math.Round(V(_pmNight[2])); }
 
             string bad = null;
             if (!(c.CapacityPct > 0 && c.CapacityPct <= 100)) bad = Tr("El % de plazas debe estar entre 0 y 100.");
@@ -9885,6 +9979,8 @@ namespace SelectOR
             if (!(c.AvKmh > c.LargaKmh && c.LargaKmh > c.MediaKmh && c.MediaKmh > 0))
                 bad = Tr("Los umbrales deben cumplir Alta Velocidad > Larga > Media > 0.");
             if (c.MediaMaxDensity <= 0) bad = Tr("La densidad máxima de Media debe ser mayor que 0.");
+            if (!(c.NightBonusKm >= 0 && c.NightBonusKm <= 200)) bad = Tr("El plus nocturno debe estar entre 0 y 200 € por km.");
+            if (c.NightFrom < 0 || c.NightFrom > 23 || c.NightTo < 0 || c.NightTo > 23 || c.NightFrom == c.NightTo) bad = Tr("Las horas del plus nocturno van de 0 a 23 y no pueden ser la misma.");
             if (bad != null) { Msg(_tariffMsg, bad, true); return null; }
             return c;
         }

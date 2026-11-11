@@ -38,7 +38,7 @@ namespace SelectOR
             _rutaLiveRoute = route == null ? null : RouteIds.IdOf(route.Path, route.Name);
             string dir = route?.Path;
             if (string.IsNullOrEmpty(dir) || _rutaMapNone.Contains(dir) || !RutaMapPossible(dir)) { SetRutaMapMode(false); return; }
-            if (_rutaMapCache.TryGetValue(dir, out var cached)) { _rutaMap.SetData(cached); SetRutaMapMode(true); RutaLiveKick(); return; }
+            if (_rutaMapCache.TryGetValue(dir, out var cached)) { _rutaMap.SetData(cached); AddFreight(dir, cached); SetRutaMapMode(true); RutaLiveKick(); return; }
 
             _rutaMap.SetData(null);
             _rutaMap.EmptyText = Tr("Cargando el trazado de la ruta…");
@@ -56,6 +56,7 @@ namespace SelectOR
                         if (token != _rutaMapToken) return;
                         if (d == null) { SetRutaMapMode(false); return; }
                         _rutaMap.SetData(d);
+                        AddFreight(dir, d);   // (2026-11-09) y los sitios de mercancías, cuando esté el grafo
                         UpdateRouteOverview();   // nº de estaciones
                         RutaLiveKick();
                     }));
@@ -164,6 +165,37 @@ namespace SelectOR
                 }
             var st = groups.Values.Select(g => (g.name, g.sLat / g.n, g.sLon / g.n, g.w)).ToList();   // w: andenes (las grandes, primero)
             return RouteMapData.Build(segLat, segLon, st);
+        }
+
+        // (2026-11-09) los sitios de mercancías con nombre (los apartaderos: «Cereales Paco S.A.»), del grafo de la ruta, como
+        // en el puesto y en «Tu tren en la sala»; cuando está, los mapas que enseñan este trazado se repintan solos
+        async void AddFreight(string dir, RouteMapData d)
+        {
+            if (d == null || d.FreightAsked || string.IsNullOrEmpty(dir)) return;
+            d.FreightAsked = true;
+            try { var fr = await FreightLatLonAsync(dir); if (fr.Count > 0) d.SetFreight(fr); } catch { }
+        }
+
+        // los sitios de mercancías de una ruta, en lat/lon (una vez por ruta; también el «Mapa» del recorrido: PathMapDialog)
+        readonly Dictionary<string, Task<List<(string name, double lat, double lon)>>> _freightTasks = new(StringComparer.OrdinalIgnoreCase);
+        Task<List<(string name, double lat, double lon)>> FreightLatLonAsync(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return Task.FromResult(new List<(string, double, double)>());
+            lock (_freightTasks)
+            {
+                if (_freightTasks.TryGetValue(dir, out var t)) return t;
+                t = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var g = await RouteGraphFor(dir); if (g == null) return new List<(string, double, double)>();
+                        return FreightPlaces(g, Schematic.Stations(g).Select(x => x.name)).Select(x => { var (la, lo) = g.Unproj(x.x, x.y); return (x.name, la, lo); }).ToList();
+                    }
+                    catch { return new List<(string, double, double)>(); }
+                });
+                _freightTasks[dir] = t;
+                return t;
+            }
         }
 
         // «Estación Sur Vía 2» → «Estación Sur» (los andenes de una estación se juntan en un solo nombre).

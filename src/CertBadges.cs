@@ -15,6 +15,7 @@ namespace SelectOR
     {
         static readonly object _lock = new object();
         static readonly Dictionary<string, (string Tag, DateTime At)> _map = new(StringComparer.OrdinalIgnoreCase);
+        static readonly Dictionary<string, (string Driver, bool Jefe)> _info = new(StringComparer.OrdinalIgnoreCase);   // (2026-11-09) desglosado
         static readonly HashSet<string> _want = new(StringComparer.OrdinalIgnoreCase);
         static DateTime _next = DateTime.MinValue;
         static bool _busy, _off;
@@ -34,6 +35,13 @@ namespace SelectOR
             }
             if (ask) Kick();
             return t.Length > 0 ? " " + t : "";
+        }
+
+        // (2026-11-09) el título desglosado (nivel de maquinista o "", y si es jefe titulado), para dibujarlo (tarjetas de Socios)
+        public static (string Driver, bool Jefe) Info(string name)
+        {
+            Tag(name);   // (lo pide si no se sabe)
+            lock (_lock) return _info.TryGetValue(name ?? "", out var v) ? v : ("", false);
         }
 
         static void Kick()
@@ -56,6 +64,7 @@ namespace SelectOR
                     return;
                 }
                 var got = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var gotInfo = new Dictionary<string, (string, bool)>(StringComparer.OrdinalIgnoreCase);
                 using (var d = JsonDocument.Parse(json))
                     foreach (var e in d.RootElement.EnumerateArray())
                     {
@@ -67,6 +76,7 @@ namespace SelectOR
                         if (!string.IsNullOrEmpty(dl)) parts.Add("🎓" + dl);
                         if (jf == "titulo") parts.Add("👮");
                         got[n] = string.Join(" ", parts);
+                        gotInfo[n] = (dl ?? "", jf == "titulo");
                     }
                 bool changed = false;
                 lock (_lock)
@@ -75,6 +85,7 @@ namespace SelectOR
                         string t = got.TryGetValue(n, out var x) ? x : "";
                         if (!_map.TryGetValue(n, out var old) || old.Tag != t) changed = true;
                         _map[n] = (t, DateTime.UtcNow);
+                        _info[n] = gotInfo.TryGetValue(n, out var gi) ? gi : ("", false);
                     }
                 if (changed) try { Changed?.Invoke(); } catch { }
             }

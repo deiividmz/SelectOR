@@ -1,4 +1,5 @@
-// AJUSTES → SALA (1.2.77, solo el administrador): los tiempos del multijugador de la sala compartida de CGL —
+﻿// (2026-11-09: ahora en Empresas → Ajustes → Sala compartida; antes era la pestaña «Sala» de Ajustes de SelectOR)
+// SALA (1.2.77, solo el administrador): los tiempos del multijugador de la sala compartida de CGL —
 // itinerarios, agujas, órdenes a las señales, Tab y trenes que se quedan con la vía—. Se guardan en Supabase
 // (sql/plazos-sala.sql: room_timings_get / room_timings_set) y el despachador fijo los lee cada minuto (Plazos.cs del
 // despachador): entran sin reiniciar. Lo que queda como de fábrica no se guarda.
@@ -14,7 +15,7 @@ using System.Windows.Forms;
 
 namespace SelectOR
 {
-    public partial class SelectorSettingsDialog
+    public sealed class SalaTiemposPanel : Panel
     {
         // clave · grupo · texto · de fábrica (s) · en minutos (si no, en segundos)
         public static readonly (string key, string group, string label, double def, bool min)[] SalaPlazos =
@@ -25,49 +26,56 @@ namespace SelectOR
             ("itin_cola", "ITINERARIOS", "Tiempo máximo de un itinerario en cola", 900, true),
             ("aguja_mano", "AGUJAS", "Agujas puestas a mano: protegidas frente a otros maquinistas", 180, true),
             ("aguja_jugador", "AGUJAS", "Agujas cambiadas por un jugador: cuentan como su itinerario", 600, true),
-            ("orden_parada", "SEÑALES", "Orden de parada: vuelve sola a automática a los", 600, true),
-            ("orden_libre", "SEÑALES", "Orden de anuncio o vía libre: vuelve a automática a los", 180, true),
-            ("tab", "SEÑALES", "Tab: el rebase autorizado y la espera al jefe de circulación caducan a los", 300, true),
+            ("orden_parada", "SEÑALES", "Orden de parada (sin jefe de circulación): vuelve sola a automática a los", 600, true),
+            ("orden_libre", "SEÑALES", "Orden de anuncio o vía libre (sin jefe de circulación): vuelve a automática a los", 180, true),
+            ("tab", "SEÑALES", "Tab: el rebase autorizado (sin jefe de circulación) y la espera al jefe caducan a los", 300, true),
             ("tramo_fuera", "TRENES QUE SE QUEDAN CON LA VÍA", "Tramos cogidos que quedan fuera de la ruta del tren: se sueltan a los", 30, false),
             ("parado_suelta", "TRENES QUE SE QUEDAN CON LA VÍA", "Tren parado que cierra la señal a otro: la cede hasta que arranque a los", 90, false),
         };
         const string SalaRoute = "CGL_V22N_RE";
 
-        RoundButton _tabSala;
-        Panel _pageSala;
         Label _lblSala;
         readonly Dictionary<string, RoundedInput> _salaInputs = new();
         bool _salaLoaded;
 
-        Panel BuildSalaPage()
+        public SalaTiemposPanel()
         {
-            var page = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(20), Theme.Px(12), Theme.Px(20), Theme.Px(8)), Visible = false };
+            var page = this; Dock = DockStyle.Fill; BackColor = Theme.Bg; Padding = new Padding(0, Theme.Px(4), 0, Theme.Px(4));
             var info = new Label
             {
                 Text = I18n.T("Tiempos del multijugador de la sala compartida de CGL. Solo el administrador. El despachador de la sala los aplica en un minuto, sin reiniciar; los que dejes como de fábrica no se guardan."),
-                Dock = DockStyle.Top, Height = Theme.Px(42), ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8.75f)
+                Dock = DockStyle.Top, Height = Theme.Px(34), ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8.75f)
             };
-            var list = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, AutoScroll = true };
-            try { Native.UseDarkScrollBars(list); } catch { }
-            int y = 0; string lastGroup = null;
+            // (2026-11-09) en dos columnas (itinerarios y agujas · señales y trenes que se quedan con la vía), filas compactas:
+            // así cabe sin barras en Empresas → Ajustes también a 1366×768
+            var list = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Theme.Bg, ColumnCount = 2, RowCount = 1 };
+            list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            list.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var cols = new[] { new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0, 0, Theme.Px(14), 0) }, new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Margin = new Padding(0) } };
+            list.Controls.Add(cols[0], 0, 0); list.Controls.Add(cols[1], 1, 0);
+            var colOf = new Dictionary<string, int> { ["ITINERARIOS"] = 0, ["AGUJAS"] = 0, ["SEÑALES"] = 1 };
+            var ys = new int[2]; string lastGroup = null;
+            int lw = Theme.Px(270), iw = Theme.Px(70);
             foreach (var p in SalaPlazos)
             {
+                int c = colOf.TryGetValue(p.group, out int cc) ? cc : 1;
+                var col = cols[c]; ref int y = ref ys[c];
                 if (p.group != lastGroup)
                 {
                     lastGroup = p.group;
-                    var g = new Label { Text = I18n.T(p.group), Location = new Point(0, y + Theme.Px(6)), AutoSize = false, Size = new Size(Theme.Px(700), Theme.Px(22)), ForeColor = Theme.AccentHi, BackColor = Theme.Bg, Font = Theme.Font(8.75f, FontStyle.Bold) };
-                    list.Controls.Add(g); y += Theme.Px(30);
+                    var g = new Label { Text = I18n.T(p.group), Location = new Point(0, y + Theme.Px(4)), AutoSize = false, Size = new Size(Theme.Px(500), Theme.Px(20)), ForeColor = Theme.AccentHi, BackColor = Theme.Bg, Font = Theme.Font(8.5f, FontStyle.Bold) };
+                    col.Controls.Add(g); y += Theme.Px(24);
                 }
-                var lab = new Label { Text = I18n.T(p.label), Location = new Point(0, y + Theme.Px(8)), AutoSize = false, Size = new Size(Theme.Px(560), Theme.Px(22)), ForeColor = Theme.Text, BackColor = Theme.Bg, Font = Theme.Font(9.5f) };
-                var inp = new RoundedInput("") { Location = new Point(Theme.Px(570), y + Theme.Px(2)), Size = new Size(Theme.Px(80), Theme.Px(34)) };
+                var lab = new Label { Text = I18n.T(p.label), Location = new Point(0, y), AutoSize = false, Size = new Size(lw, Theme.Px(32)), ForeColor = Theme.Text, BackColor = Theme.Bg, Font = Theme.Font(8.75f), TextAlign = ContentAlignment.MiddleLeft };
+                var inp = new RoundedInput("") { Location = new Point(lw + Theme.Px(8), y + Theme.Px(1)), Size = new Size(iw, Theme.Px(30)) };
                 inp.Box.Text = Show(p.def, p.min);
-                var unit = new Label { Text = p.min ? I18n.T("min") : I18n.T("s"), Location = new Point(Theme.Px(658), y + Theme.Px(8)), AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Bg, Font = Theme.Font(9.5f) };
-                var def = new Label { Text = string.Format(I18n.T("de fábrica: {0}"), Show(p.def, p.min) + " " + (p.min ? I18n.T("min") : I18n.T("s"))), Location = new Point(Theme.Px(700), y + Theme.Px(9)), AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8.5f) };
-                list.Controls.Add(lab); list.Controls.Add(inp); list.Controls.Add(unit); list.Controls.Add(def);
+                var unit = new Label { Text = p.min ? I18n.T("min") : I18n.T("s"), Location = new Point(lw + Theme.Px(12) + iw, y + Theme.Px(7)), AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Bg, Font = Theme.Font(9f) };
+                var def = new Label { Text = string.Format(I18n.T("de fábrica: {0}"), Show(p.def, p.min) + " " + (p.min ? I18n.T("min") : I18n.T("s"))), Location = new Point(lw + Theme.Px(44) + iw, y + Theme.Px(8)), AutoSize = true, ForeColor = Theme.Subtle, BackColor = Theme.Bg, Font = Theme.Font(8f) };
+                col.Controls.Add(lab); col.Controls.Add(inp); col.Controls.Add(unit); col.Controls.Add(def);
                 _salaInputs[p.key] = inp;
-                y += Theme.Px(40);
+                y += Theme.Px(33);
             }
-            var bar = new Panel { Dock = DockStyle.Bottom, Height = Theme.Px(50), BackColor = Theme.Bg };
+            var bar = new Panel { Dock = DockStyle.Bottom, Height = Theme.Px(48), BackColor = Theme.Bg };
             var save = DialogKit.Primary(I18n.T("Guardar"), 140); save.Height = Theme.Px(36);
             var fact = DialogKit.Fit(DialogKit.Secondary(I18n.T("Valores de fábrica")), 160); fact.Height = Theme.Px(36);
             save.Location = new Point(0, Theme.Px(10)); fact.Location = new Point(save.Right + Theme.Px(10), Theme.Px(10));
@@ -75,13 +83,12 @@ namespace SelectOR
             save.Click += async (s, e) => await SalaSave(false);
             fact.Click += async (s, e) =>
             {
-                if (ThemedBox.Show(this, I18n.T("¿Volver a poner todos los tiempos de la sala como de fábrica?"), I18n.T("Sala"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (ThemedBox.Show(FindForm(), I18n.T("¿Volver a poner todos los tiempos de la sala como de fábrica?"), I18n.T("Sala"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 await SalaSave(true);
             };
             bar.Controls.Add(save); bar.Controls.Add(fact); bar.Controls.Add(_lblSala);
             page.Controls.Add(list); page.Controls.Add(bar); page.Controls.Add(info);
             page.VisibleChanged += async (s, e) => { if (page.Visible && !_salaLoaded) await SalaLoad(); };
-            return page;
         }
 
         static string Show(double seconds, bool min) => (min ? seconds / 60.0 : seconds).ToString("0.##", CultureInfo.CurrentCulture);

@@ -30,6 +30,8 @@ namespace SelectOR
             RoomChatHook(_pilot);   // chat de la sala en el HUD (MainMenuForm.ChatSala.cs)
             RoomMapHook(_pilot);    // agujas, señales y trenes en el mapa grande (MainMenuForm.MapaSala.cs)
             RadioHook(_pilot);      // (1.2.90) la radio de la sala (MainMenuForm.Radio.cs)
+            SalaTrainToPilot();     // (2026-11-09) tu número de tren (MainMenuForm.TrenSala.cs)
+            BtHook(_pilot);         // (2026-11-10) el responsable de circulación de los andenes (MainMenuForm.ObjetosSala.cs)
         }
 
         // (1.2.75) Open Rails ha perdido la conexión con la sala (su red, el servidor, un nombre repetido…): sigue en marcha, pero

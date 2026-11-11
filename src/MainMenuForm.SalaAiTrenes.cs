@@ -52,6 +52,10 @@ namespace SelectOR
                     }
             }
             catch (Exception ex) { ThemedBox.Show(this, Tr("No se ha podido leer el horario de la sala: ") + ex.Message, Tr("Trenes IA de la sala"), MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            // (2026-11-11) lo elegido para servicios que ya no están en el horario (borrados o renombrados): fuera (no se ven en la
+            // lista y no se podían quitar)
+            var gone = _prefs.SalaAiConsist.Keys.Where(k => !list.Any(s => string.Equals(s.Name.Trim(), k.Trim(), StringComparison.OrdinalIgnoreCase))).ToList();
+            if (gone.Count > 0 && list.Count > 0) { foreach (var k in gone) _prefs.SalaAiConsist.Remove(k); try { _prefs.Save(); } catch { } _aiConSent = false; }
             list = list.Where(x => x.Active && x.Name.Length > 0).ToList();
             if (list.Count == 0) { ThemedBox.Show(this, Tr("La sala no tiene trenes IA en su horario."), Tr("Trenes IA de la sala"), MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             ShowAiLooksDialog(list);
@@ -87,9 +91,16 @@ namespace SelectOR
                     bool has = !string.IsNullOrEmpty(mine);
                     var t1 = new Label { Text = sv.Name, Font = Theme.Font(10f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Location = new Point(Theme.Px(12), Theme.Px(8)), Size = new Size(width - Theme.Px(260), Theme.Px(20)), AutoEllipsis = true };
                     string route = (sv.From.Length > 0 || sv.To.Length > 0) ? sv.From + " → " + sv.To + "  ·  " : "";
+                    // (2026-11-11) tu tren con otro número de vehículos que el del horario: se ve ajustado (repetido o recortado)
+                    string fit = "";
+                    if (has)
+                    {
+                        int nm = ConCarCount(mine), ns = ConCarCount(SalaConPath(sv.Con));
+                        if (nm > 0 && ns > 0 && nm != ns) fit = "  ·  " + string.Format(Tr("{0} vehículos frente a {1} del horario: se ajusta"), nm, ns);
+                    }
                     var t2 = new Label
                     {
-                        Text = route + (has ? string.Format(Tr("tú: {0}"), Path.GetFileNameWithoutExtension(mine)) : string.Format(Tr("del horario: {0}"), Path.GetFileNameWithoutExtension(sv.Con))),
+                        Text = route + (has ? string.Format(Tr("tú: {0}"), Path.GetFileNameWithoutExtension(mine)) + fit : string.Format(Tr("del horario: {0}"), Path.GetFileNameWithoutExtension(sv.Con))),
                         Font = Theme.Font(8.6f), ForeColor = has ? Theme.AccentHi : Theme.Subtle, AutoSize = false, Location = new Point(Theme.Px(12), Theme.Px(30)), Size = new Size(width - Theme.Px(260), Theme.Px(18)), AutoEllipsis = true
                     };
                     var pick = DialogKit.Secondary(Tr("Elegir…"), Theme.Px(110)); pick.Anchor = AnchorStyles.Right | AnchorStyles.Top;
@@ -153,6 +164,18 @@ namespace SelectOR
             f.ShowDialog(this);
         }
 
+        // (2026-11-11) cuántos vehículos tiene un .con (0 si no se sabe)
+        static int ConCarCount(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return 0;
+                string t = File.ReadAllText(path);
+                return System.Text.RegularExpressions.Regex.Matches(t, @"(?i)\b(Engine|Wagon)\s*\(").Count;
+            }
+            catch { return 0; }
+        }
+
         // el .con de un servicio del horario de la sala, en tu carpeta de contenido (la ruta entera si existe; si no, por su
         // nombre en TRAINS\CONSISTS); null si no lo tienes
         string SalaConPath(string con)
@@ -176,20 +199,33 @@ namespace SelectOR
         // (LocalMapTick, cada segundo) conduciendo en la sala con el agente conectado: la lista, al conectarse o al cambiar
         void AiConsistTick(bool justConnected)
         {
-            if (justConnected) _aiConSent = false;
-            if (_aiConSent) return;
+            if (justConnected) { _aiConSent = false; _aiNumSent.Clear(); }
             if (_roomJoined == null && _roomPending == null) return;
             var l = _localMap; if (l == null || !l.Connected) return;
             try
             {
-                l.Send("AICON BEGIN");
-                foreach (var kv in _prefs.SalaAiConsist)
-                    if (!string.IsNullOrWhiteSpace(kv.Key) && File.Exists(kv.Value)) l.Send("AICON " + kv.Key.Replace('\t', ' ') + "\t" + kv.Value);
-                l.Send("AICON END");
-                _aiConSent = true;
-                if (_prefs.SalaAiConsist.Count > 0) RoomLog($"trenes IA de la sala: {_prefs.SalaAiConsist.Count} con tu composición mandados a Open Rails");
+                if (!_aiConSent)
+                {
+                    l.Send("AICON BEGIN");
+                    foreach (var kv in _prefs.SalaAiConsist)
+                        if (!string.IsNullOrWhiteSpace(kv.Key) && File.Exists(kv.Value)) l.Send("AICON " + kv.Key.Replace('\t', ' ') + "\t" + kv.Value);
+                    l.Send("AICON END");
+                    _aiConSent = true;
+                    if (_prefs.SalaAiConsist.Count > 0) RoomLog($"trenes IA de la sala: {_prefs.SalaAiConsist.Count} con tu composición mandados a Open Rails");
+                }
+                // (2026-11-11) el número de tren de cada tren IA de la sala («IA-nombre-número» de la lista de trenes): los que ya
+                // estaban en la vía al entrar llegan a Open Rails sin su nombre (UPDATETRAIN) y así también se montan con tu .con
+                if (_prefs.SalaAiConsist.Count > 0 && _pilot?.Trains is { } trains)
+                    foreach (var t in trains)
+                    {
+                        if (t.player || !RoomAi.Is(t.name)) continue;
+                        int dash = t.name.LastIndexOf('-');
+                        if (dash < 0 || !int.TryParse(t.name.Substring(dash + 1), out int num) || !_aiNumSent.Add(num)) continue;
+                        l.Send("AICON NUM " + num + "\t" + RoomAi.Label(t.name).Replace('\t', ' '));
+                    }
             }
             catch { }
         }
+        readonly HashSet<int> _aiNumSent = new();
     }
 }

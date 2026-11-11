@@ -17,7 +17,8 @@ namespace SelectOR
 {
     public sealed partial class DispatchForm
     {
-        // State: 0 no · 1 sí · 2 espera al jefe de circulación (con el mando: «Dar paso» y «No»)
+        // State: 0 no · 1 sí · 2 espera al jefe de circulación (con el mando: «Dar paso» y «No») · 3 (2026-11-09) alarma: ha
+        // rebasado la señal en parada (Text: su número de tren)
         sealed class Notice { public string User, Text, Zone, Answer; public int Sig, State; public DateTime At; public RectangleF Box, BtnOk, BtnNo; }
         readonly List<Notice> _notices = new();
         readonly Dictionary<int, DateTime> _flash = new();
@@ -67,6 +68,21 @@ namespace SelectOR
             try { if (!IsDisposed) BeginInvoke(new Action(() => AddNotice(user, sig, state, text))); } catch { }
         }
 
+        // (2026-11-09) Alarma de rebase: solo al jefe de circulación de esa señal (y al administrador, que lo ve todo).
+        void OnSpad(string user, int sig, string no)
+        {
+            try
+            {
+                if (IsDisposed) return;
+                BeginInvoke(new Action(() =>
+                {
+                    if (!MySig(sig) && !(Supa.IsLoggedIn && Supa.IsSuperadmin)) return;
+                    AddNotice(user, sig, 3, no == "-" ? "" : no);
+                }));
+            }
+            catch { }
+        }
+
         void AddNotice(string user, int sig, int state, string text)
         {
             string zone = sig >= 0 && _sigZone != null && _sigZone.TryGetValue(sig, out var z) ? z : null;
@@ -77,7 +93,7 @@ namespace SelectOR
             if (sig >= 0) _flash[sig] = DateTime.Now;
             // la 🔔, en la dependencia de esa señal (si no es la que se ve)
             if (zone != null && zone != _curZone) { _unread.Add(zone); _list.Invalidate(); }
-            Chime();
+            if (state == 3) Alarm(); else Chime();
             FlashTaskbar();
             _timer.Interval = 250;
             _canvas.Invalidate();
@@ -112,6 +128,41 @@ namespace SelectOR
             catch { }
         }
 
+        // (2026-11-09) alarma de rebase: tres pitidos agudos seguidos, dos veces (más urgente que el «din-don»)
+        static byte[] _alarm;
+        static void Alarm()
+        {
+            try
+            {
+                if (_alarm == null)
+                {
+                    const int rate = 22050; var samples = new List<short>();
+                    for (int rep = 0; rep < 2; rep++)
+                    {
+                        for (int b = 0; b < 3; b++)
+                        {
+                            int n = (int)(rate * 0.11);
+                            for (int i = 0; i < n; i++)
+                            {
+                                double t = (double)i / rate, env = Math.Min(1, i / 120.0) * Math.Min(1, (n - i) / 120.0);
+                                samples.Add((short)(Math.Sin(2 * Math.PI * 1320 * t) * env * 9000));
+                            }
+                            for (int i = 0; i < rate * 0.06; i++) samples.Add(0);
+                        }
+                        for (int i = 0; i < rate * 0.25; i++) samples.Add(0);
+                    }
+                    using var ms = new MemoryStream(); using var w = new BinaryWriter(ms);
+                    int bytes = samples.Count * 2;
+                    w.Write("RIFF".ToCharArray()); w.Write(36 + bytes); w.Write("WAVE".ToCharArray());
+                    w.Write("fmt ".ToCharArray()); w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(rate); w.Write(rate * 2); w.Write((short)2); w.Write((short)16);
+                    w.Write("data".ToCharArray()); w.Write(bytes); foreach (var v in samples) w.Write(v);
+                    _alarm = ms.ToArray();
+                }
+                new System.Media.SoundPlayer(new MemoryStream(_alarm)).Play();
+            }
+            catch { }
+        }
+
         [StructLayout(LayoutKind.Sequential)] struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
         [DllImport("user32.dll")] static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
         void FlashTaskbar()
@@ -136,8 +187,8 @@ namespace SelectOR
         // (Paint_) las notificaciones, arriba a la derecha (se van al minuto)
         void DrawNotices(Graphics g, Rectangle area)
         {
-            _notices.RemoveAll(n => (DateTime.Now - n.At).TotalSeconds > (n.State == 2 && n.Answer == null ? 300 : 60));
-            if (_notices.Count == 0) return;
+            _notices.RemoveAll(n => (DateTime.Now - n.At).TotalSeconds > (n.State == 2 && n.Answer == null ? 300 : n.State == 3 ? 120 : 60));
+            if (_notices.Count == 0) { DrawAlerts(g, area, area.Top + Theme.Px(12)); return; }   // (2026-11-09) avisos de incidencias (DispatchForm.Incidencias.cs)
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float w = Theme.Px(340), x = area.Right - w - Theme.Px(12), y = area.Top + Theme.Px(12);
             using var f1 = Theme.Font(9f, FontStyle.Bold); using var f2 = Theme.Font(8.3f); using var fb = new Font("Segoe UI Symbol", 10f);
@@ -145,18 +196,23 @@ namespace SelectOR
             {
                 bool ask = n.State == 2 && n.Answer == null && MySig(n.Sig);
                 string verdict = n.Answer ?? (n.State == 1 ? Tr("concedido") : n.State == 2 ? Tr("espera al jefe de circulación") : Tr("no concedido"));
-                string t2 = (n.Zone != null ? n.Zone + " · " : "") + verdict + (string.IsNullOrEmpty(n.Text) || n.Answer != null ? "" : ": " + n.Text) + $"  ({n.At:HH:mm:ss})";
+                string t2 = n.State == 3
+                    ? (n.Zone != null ? n.Zone + " · " : "") + (string.IsNullOrEmpty(n.Text) ? "" : string.Format(Tr("tren {0}"), n.Text) + " · ") + Tr("la señal estaba en parada") + $"  ({n.At:HH:mm:ss})"
+                    : (n.Zone != null ? n.Zone + " · " : "") + verdict + (string.IsNullOrEmpty(n.Text) || n.Answer != null ? "" : ": " + n.Text) + $"  ({n.At:HH:mm:ss})";
                 float t2h = Math.Min(Theme.Px(50), g.MeasureString(t2, f2, (int)(w - 34)).Height + 2);   // de una a tres líneas
                 float h = Theme.Px(30) + t2h + (ask ? Theme.Px(34) : Theme.Px(4));
                 var box = new RectangleF(x, y, w, h); n.Box = box; n.BtnOk = n.BtnNo = RectangleF.Empty;
-                double age = (DateTime.Now - n.At).TotalSeconds, life = n.State == 2 && n.Answer == null ? 300 : 60;
+                double age = (DateTime.Now - n.At).TotalSeconds, life = n.State == 2 && n.Answer == null ? 300 : n.State == 3 ? 120 : 60;
                 int alpha = age < life - 15 ? 240 : (int)(240 * Math.Max(0, (life - age) / 15));
                 using (var bg = new SolidBrush(Color.FromArgb(alpha, 26, 31, 38))) g.FillRectangle(bg, box);
-                var accent = n.State == 1 ? Color.FromArgb(alpha, 102, 187, 106) : n.State == 2 ? Color.FromArgb(alpha, 79, 195, 247) : Color.FromArgb(alpha, 255, 167, 38);
+                var accent = n.State == 1 ? Color.FromArgb(alpha, 102, 187, 106) : n.State == 2 ? Color.FromArgb(alpha, 79, 195, 247) : n.State == 3 ? Color.FromArgb(alpha, 239, 68, 68) : Color.FromArgb(alpha, 255, 167, 38);
                 using (var ab = new SolidBrush(accent)) g.FillRectangle(ab, box.X, box.Y, 4, box.Height);
                 using (var bp = new Pen(Color.FromArgb(alpha / 2, 120, 130, 140), 1f)) g.DrawRectangle(bp, box.X, box.Y, box.Width, box.Height);
-                string t1 = string.Format(Tr("{0} pide paso (Tab)"), n.User) + (n.Sig >= 0 ? " · " + string.Format(Tr("señal {0}"), n.Sig) : "");
-                using (var bb = new SolidBrush(Color.FromArgb(alpha, 255, 213, 79))) g.DrawString("🔔", fb, bb, box.X + 8, box.Y + 5);   // la campana (Segoe UI Symbol: GDI+ no busca emojis en otras fuentes)
+                string t1 = n.State == 3 ? string.Format(Tr("{0} ha rebasado la señal {1}"), n.User, n.Sig)
+                          : string.Format(Tr("{0} pide paso (Tab)"), n.User) + (n.Sig >= 0 ? " · " + string.Format(Tr("señal {0}"), n.Sig) : "");
+                if (n.State == 3 && age < 20 && ((int)(age * 2) % 2 == 0))   // (los primeros 20 s, el fondo parpadea en rojo)
+                    using (var rb = new SolidBrush(Color.FromArgb(alpha / 3, 239, 68, 68))) g.FillRectangle(rb, box);
+                using (var bb = new SolidBrush(n.State == 3 ? Color.FromArgb(alpha, 239, 68, 68) : Color.FromArgb(alpha, 255, 213, 79))) g.DrawString(n.State == 3 ? "⚠" : "🔔", fb, bb, box.X + 8, box.Y + 5);   // la campana (Segoe UI Symbol: GDI+ no busca emojis en otras fuentes)
                 using (var tb = new SolidBrush(Color.FromArgb(alpha, Theme.Text))) g.DrawString(t1, f1, tb, new RectangleF(box.X + 30, box.Y + 6, box.Width - 34, 18));
                 using (var sb = new SolidBrush(Color.FromArgb(alpha, accent))) g.DrawString(t2, f2, sb, new RectangleF(box.X + 30, box.Y + 26, box.Width - 34, t2h));
                 if (ask)
@@ -174,11 +230,13 @@ namespace SelectOR
                 }
                 y += h + Theme.Px(6);
             }
+            DrawAlerts(g, area, y);   // (2026-11-09) y debajo, los avisos de incidencias
         }
 
         // (clic en el esquema) ¿en una notificación? → a esa estación, centrada en la señal
         bool NoticeClick(Point p)
         {
+            if (AlertClick(p)) return true;   // (2026-11-09) un aviso de incidencia
             var n = _notices.FirstOrDefault(q => q.Box.Contains(p));
             if (n == null) return false;
             // con el mando: la respuesta al Tab

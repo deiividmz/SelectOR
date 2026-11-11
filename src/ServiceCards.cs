@@ -31,11 +31,17 @@ namespace SelectOR
             public string Id = "", Driver = "", Route = "", Path = "", Train = "", Status = "";
             public DateTime Start;               // hora local de salida (MinValue = no se sabe)
             public double Km, DurationS, Pax, Capacity = double.NaN, MassT = double.NaN, Income, Net;
+            public double Plus;   // (2026-11-09) pluses del servicio, ya sumados en Net
+            // (2026-11-10, petición) con qué se lanzó el simulador: la hora de salida configurada («07:30»), la estación (0-3: primavera,
+            // verano, otoño, invierno) y el clima (0-2: despejado, nieve, lluvia); null / −1: no se sabe (servicios de antes)
+            public string SimTime; public int SimSeason = -1, SimWeather = -1;
+            internal (string glyph, string text, string tip)[] Conds; internal int[] CondW;
             public int Cars, Engines;
             public bool Valid = true, HasImage, Annulled;
             public string AnnulReason = "";
             public bool Open => Status == "open";
             // Preparado una vez (SetItems): textos y anchos medidos
+            internal string PlusText;   // (2026-11-09) «pluses +392 €», en su línea
             internal string Search, Initials, Meta, NetText, IncomeText, StatusText, TimeText, Line2, KmText, DurText;
             internal (string text, bool bold)[] Facts;
             internal int DriverW = -1;
@@ -54,8 +60,10 @@ namespace SelectOR
         }
 
         static readonly CultureInfo Es = CultureInfo.GetCultureInfo("es-ES");
-        static readonly Color Blue = Color.FromArgb(120, 144, 226);
+        static readonly Color Blue = Color.FromArgb(250, 196, 40);   // (2026-11-09) «en conducción»: amarillo, como el foco de abajo de su señal (antes azul)
         static readonly Color Red = Color.FromArgb(229, 115, 115);
+        static readonly Color Amber = Color.FromArgb(255, 184, 77);   // (2026-11-09) la hora y las cifras, como un indicador
+        readonly Font _fMono = new Font("Consolas", 9f, FontStyle.Bold), _fMonoBig = new Font("Consolas", 15f, FontStyle.Bold);
         static readonly Color Rail = Color.FromArgb(28, 31, 36);
         static readonly Color HoverFill = Color.FromArgb(50, 54, 57);
         const TextFormatFlags Measure = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
@@ -80,6 +88,7 @@ namespace SelectOR
 
         // Archivo local de la composición de un servicio (lo descarga si hace falta); null = no hay.
         public Func<string, Task<string>> FileLoader;
+        public Func<string, Image> PhotoOf;   // (2026-11-09) la foto de perfil del maquinista (por su nombre), o null: sus iniciales
         readonly Dictionary<string, Bitmap> _img = new Dictionary<string, Bitmap>();
         readonly LinkedList<string> _imgOrder = new LinkedList<string>();
         readonly HashSet<string> _imgPending = new HashSet<string>(), _imgFailed = new HashSet<string>();
@@ -125,6 +134,7 @@ namespace SelectOR
                 _img.Clear(); _fit.Clear();
                 foreach (var f in new[] { _fName, _fMeta, _fFact, _fFactB, _fNet, _fSmall, _fHead, _fHeadSub, _fAvatar, _fMsg, _fStamp, _fRowNet }) f?.Dispose();
                 foreach (var b in new[] { _bSurface, _bHover, _bRail, _bAvatar, _bBlue, _bRed, _bGreen }) b.Dispose();
+                _fMono.Dispose(); _fMonoBig.Dispose();
                 _pSel.Dispose(); _pHover.Dispose(); _pSep.Dispose();
                 _cardPath?.Dispose(); _railPath?.Dispose();
             }
@@ -172,6 +182,7 @@ namespace SelectOR
             it.Meta = string.Join("  ·  ", meta);
             it.NetText = it.Net.ToString("+#,##0.00;−#,##0.00", Es) + " €";
             it.IncomeText = I18n.T("ingreso") + " " + it.Income.ToString("N0", Es) + " €";
+            it.PlusText = it.Plus > 0.005 ? I18n.T("pluses") + " " + it.Plus.ToString("+#,##0", Es) + " €" : null;   // (2026-11-09) incluidos en el beneficio
             it.StatusText = it.Annulled ? I18n.T("Anulado") : it.Valid ? "✓ " + I18n.T("completado") : I18n.T("no validado");
             // Fila fina (servicios anteriores)
             it.TimeText = it.Start == DateTime.MinValue ? "" : it.Start.ToString("HH:mm", Es);
@@ -202,6 +213,15 @@ namespace SelectOR
             else if (!it.Open && it.Pax > 0) { segs.Add(("      🧍 " + it.Pax.ToString("N0", Es), true)); segs.Add((" " + I18n.T("viajeros"), false)); }
             it.Facts = segs.ToArray();
             it.FactW = null; it.DriverW = -1;
+            // (2026-11-10) las condiciones del simulador, con sus iconos (los de Conducción libre)
+            var cs = new List<(string, string, string)>(3);
+            if (!string.IsNullOrEmpty(it.SimTime)) cs.Add(("clock", it.SimTime, I18n.T("Hora de salida en el simulador")));
+            string[] sk = { "spring", "summer", "autumn", "winter" }, sn = { "Primavera", "Verano", "Otoño", "Invierno" };
+            string[] wk = { "clear", "snow", "rain" }, wn = { "Despejado", "Nieve", "Lluvia" };
+            if (it.SimSeason >= 0 && it.SimSeason < 4) cs.Add((sk[it.SimSeason], I18n.T(sn[it.SimSeason]), I18n.T("Estación del año")));
+            if (it.SimWeather >= 0 && it.SimWeather < 3) cs.Add((wk[it.SimWeather], I18n.T(wn[it.SimWeather]), I18n.T("Clima")));
+            it.Conds = cs.ToArray(); it.CondW = null;
+            if (cs.Count > 0) it.Search += " " + string.Join(" ", cs.ConvertAll(c => c.Item2)).ToLowerInvariant();
         }
 
         bool Pass(Item i)
@@ -417,25 +437,65 @@ namespace SelectOR
             g.SmoothingMode = SmoothingMode.None;
             // Franja de estado: azul en conducción, rojo con pérdidas, verde con ganancias
             g.FillRectangle(it.Open ? _bBlue : (it.Annulled || it.Net < 0 ? _bRed : _bGreen), rc.X, rc.Y + Theme.Px(12), Theme.Px(3), rc.Height - Theme.Px(24));
+            // (2026-11-09) la señal (como la de referencia): tres focos con aro blanco en su caja — verde arriba (beneficio), rojo
+            // en medio (anulado), amarillo abajo (en conducción) — y, bajo un mástil corto, el foco blanco aparte (en negativo)
+            SignalDraw.Service(g, rc.X + Theme.Px(13), rc.Y + rc.Height / 2,   // (separada del borde y del 2D)
+                               green: !it.Open && !it.Annulled && it.Valid && it.Net >= 0,
+                               red: !it.Open && (it.Annulled || !it.Valid || it.Net < 0),
+                               yellow: it.Open,
+                               white: !it.Open && !it.Annulled && it.Valid && it.Net < 0);   // (anulado: solo el rojo; con pérdidas: rojo y blanco)
 
-            int pad = Theme.Px(14), moneyW = Theme.Px(170);
+            int pad = Theme.Px(14) + Theme.Px(30), moneyW = Theme.Px(170);
             int x0 = rc.X + pad + Theme.Px(2), right = rc.Right - moneyW;
             int y = rc.Y + Theme.Px(10);
 
             // 1) maquinista y viaje
-            int av = Theme.Px(24), lineH = Theme.Px(24);
-            var avr = new Rectangle(x0, y, av, av);
+            int av = Theme.Px(24), lineH = Theme.Px(24), xa = x0;
+            if (it.Start != DateTime.MinValue)
+            {
+                string hh = it.Start.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+                int tw = TextRenderer.MeasureText(g, hh, _fMono, Size.Empty, Measure).Width + Theme.Px(14);
+                var tr = new Rectangle(xa, y + Theme.Px(2), tw, lineH - Theme.Px(4));
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = Theme.Round(tr, Theme.Px(4))) using (var b = new SolidBrush(Color.FromArgb(14, 16, 19))) g.FillPath(b, path);
+                g.SmoothingMode = SmoothingMode.None;
+                TextRenderer.DrawText(g, hh, _fMono, tr, Amber, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                xa = tr.Right + Theme.Px(10);
+            }
+            var avr = new Rectangle(xa, y, av, av);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.FillEllipse(_bAvatar, avr);
+            Image photo = null; try { photo = PhotoOf?.Invoke(it.Driver); } catch { }
+            if (photo != null) DrawRoundPhoto(g, avr, photo);
             g.SmoothingMode = SmoothingMode.None;
-            ColorText.Text(g, it.Initials, _fAvatar, avr, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            if (photo == null) ColorText.Text(g, it.Initials, _fAvatar, avr, Theme.AccentHi, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             int x = avr.Right + Theme.Px(9);
             if (it.DriverW < 0) it.DriverW = TextRenderer.MeasureText(g, it.Driver, _fName, Size.Empty, Measure).Width;
             int nw = Math.Min(it.DriverW, Math.Max(0, right - x - Theme.Px(20)));
             ColorText.Text(g, it.Driver, _fName, new Rectangle(x, y, nw, lineH), Theme.Text, Line);
             x += nw + Theme.Px(10);
-            if (x < right - Theme.Px(30))
-                ColorText.Text(g, it.Meta, _fMeta, new Rectangle(x, y, right - x - Theme.Px(12), lineH), Theme.Subtle, Line);
+            // (2026-11-10, petición) a la derecha, la hora, la estación y el clima con que se lanzó el simulador, en sus fichas con icono
+            int metaRight = right - Theme.Px(12);
+            if (it.Conds != null && it.Conds.Length > 0)
+            {
+                if (it.CondW == null) { it.CondW = new int[it.Conds.Length]; for (int k = 0; k < it.Conds.Length; k++) it.CondW[k] = TextRenderer.MeasureText(g, it.Conds[k].text, _fSmall, Size.Empty, Measure).Width; }
+                int cx = right - Theme.Px(12), ic = Theme.Px(14);
+                for (int k = it.Conds.Length - 1; k >= 0; k--)
+                {
+                    int w = it.CondW[k] + ic + Theme.Px(16);
+                    if (cx - w < x + Theme.Px(90)) break;   // (sin sitio: las que quepan)
+                    var cr = new Rectangle(cx - w, y + Theme.Px(2), w, lineH - Theme.Px(4));
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    using (var path = Theme.Round(cr, Theme.Px(4))) using (var b = new SolidBrush(Color.FromArgb(14, 16, 19))) g.FillPath(b, path);
+                    Glyphs.Draw(g, it.Conds[k].glyph, new Rectangle(cr.X + Theme.Px(6), cr.Y + (cr.Height - ic) / 2, ic, ic), Theme.Subtle);
+                    g.SmoothingMode = SmoothingMode.None;
+                    TextRenderer.DrawText(g, it.Conds[k].text, _fSmall, new Rectangle(cr.X + Theme.Px(6) + ic + Theme.Px(4), cr.Y, it.CondW[k] + Theme.Px(4), cr.Height), Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                    cx = cr.X - Theme.Px(6);
+                    metaRight = cx - Theme.Px(6);
+                }
+            }
+            if (x < metaRight - Theme.Px(18))
+                ColorText.Text(g, it.Meta, _fMeta, new Rectangle(x, y, metaRight - x, lineH), Theme.Subtle, Line);
             y += lineH + Theme.Px(6);
 
             // 2) composición 2D
@@ -461,7 +521,7 @@ namespace SelectOR
             {
                 it.FactW = new int[it.Facts.Length];
                 for (int k = 0; k < it.Facts.Length; k++)
-                    it.FactW[k] = TextRenderer.MeasureText(g, it.Facts[k].text, it.Facts[k].bold ? _fFactB : _fFact, Size.Empty, Measure).Width;
+                    it.FactW[k] = ColorText.LineWidth(it.Facts[k].text, it.Facts[k].bold ? _fFactB : _fFact);   // (2026-11-09) con el icono como se dibuja
             }
             int fx = x0 - Theme.Px(2), fh = Theme.Px(20);
             for (int k = 0; k < it.Facts.Length && fx < right - Theme.Px(14); k++)
@@ -478,10 +538,10 @@ namespace SelectOR
             int my = mr.Y + (mr.Height - Theme.Px(70)) / 2;
             if (it.Open)
             {
-                ColorText.Text(g, I18n.T("En conducción"), _fFactB, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), Blue, LineR);
+                ColorText.Text(g, I18n.T("En conducción").ToUpper(I18n.Culture), _fFactB, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), Blue, LineR);
                 if (it.Start != DateTime.MinValue)
                     ColorText.Text(g, Ago(DateTime.Now - it.Start), _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
-                ColorText.Text(g, "●  " + I18n.T("en directo"), _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), Blue, LineR);
+                Pill(g, I18n.T("en directo"), new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), Blue);
             }
             else if (it.Annulled)
             {
@@ -491,10 +551,25 @@ namespace SelectOR
             }
             else
             {
+                int extra = it.PlusText != null ? Theme.Px(16) : 0;   // (con pluses: una línea más, todo un poco más arriba)
+                my -= extra / 2;
                 ColorText.Text(g, it.NetText, _fNet, new Rectangle(mr.X, my, mr.Width, Theme.Px(30)), it.Net < 0 ? Red : Theme.AccentHi, LineR);
                 ColorText.Text(g, it.IncomeText, _fSmall, new Rectangle(mr.X, my + Theme.Px(30), mr.Width, Theme.Px(18)), Theme.Subtle, LineR);
-                ColorText.Text(g, it.StatusText, _fSmall, new Rectangle(mr.X, my + Theme.Px(50), mr.Width, Theme.Px(18)), it.Valid ? Theme.AccentHi : Red, LineR);
+                if (it.PlusText != null) ColorText.Text(g, it.PlusText, _fSmall, new Rectangle(mr.X, my + Theme.Px(46), mr.Width, Theme.Px(18)), Color.FromArgb(240, 196, 90), LineR);
+                Pill(g, it.StatusText, new Rectangle(mr.X, my + Theme.Px(50) + extra, mr.Width, Theme.Px(18)), it.Valid ? Theme.AccentHi : Red);
             }
+        }
+
+        // (2026-11-09) el estado en una pastilla de su color, a la derecha
+        void Pill(Graphics g, string text, Rectangle r, Color col)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            int tw = TextRenderer.MeasureText(g, text, _fSmall, Size.Empty, Measure).Width + Theme.Px(18);
+            var pr = new Rectangle(r.Right - Math.Min(tw, r.Width), r.Y, Math.Min(tw, r.Width), r.Height);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(pr, Theme.Px(4))) using (var b = new SolidBrush(Color.FromArgb(48, col))) g.FillPath(b, path);
+            g.SmoothingMode = SmoothingMode.None;
+            ColorText.Text(g, text, _fSmall, pr, col, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
         // Sello girado, como el «SUSPENDIDO» de Socios.
@@ -566,6 +641,22 @@ namespace SelectOR
             x += dw + Theme.Px(10);
             if (x < right - Theme.Px(20))
                 ColorText.Text(g, it.Line2, _fFact, new Rectangle(x, y, right - x, h), Theme.Subtle, Line);
+        }
+
+        // la foto en un círculo: el cuadrado de arriba (es de carnet, vertical), recortado
+        static void DrawRoundPhoto(Graphics g, Rectangle r, Image img)
+        {
+            try
+            {
+                int side = Math.Min(img.Width, img.Height);
+                var src = new Rectangle((img.Width - side) / 2, img.Height > img.Width ? Math.Max(0, (img.Height - side) / 6) : 0, side, side);
+                var st = g.Save();
+                using (var path = new GraphicsPath()) { path.AddEllipse(r); g.SetClip(path); }
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(img, r, src, GraphicsUnit.Pixel);
+                g.Restore(st);
+            }
+            catch { }
         }
 
         static string Initials(string name)

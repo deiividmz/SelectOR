@@ -44,6 +44,23 @@ namespace SelectOR
         }
 
         // el plus de sala de un servicio (resultado al registrarlo y detalle desde la lista)
+        // (2026-11-09) el plus nocturno que ha cobrado la empresa por este servicio (plus-nocturno.sql), para el informe
+        async Task NightBonusInto(ServiceResultDialog.Data r, string serviceId)
+        {
+            try
+            {
+                var (json, err) = await Supa.RpcAsync("night_bonus_of", new { p_service = serviceId });
+                if (err != null || string.IsNullOrWhiteSpace(json) || json.Trim() == "null") return;
+                using var d = JsonDocument.Parse(json);
+                var e = d.RootElement; if (e.ValueKind != JsonValueKind.Object) return;
+                double amount = Num(e, "amount"), frac = Num(e, "frac");
+                if (amount <= 0) return;
+                r.NightNote = "🌙  " + string.Format(Tr("Plus nocturno: {0} para la empresa ({1} % del servicio de noche)."),
+                              amount.ToString("+#,##0.00 €", EsEs), Math.Round(frac * 100).ToString("0", EsEs));
+            }
+            catch { }
+        }
+
         async Task RoomBonusInto(ServiceResultDialog.Data r, string serviceId)
         {
             try

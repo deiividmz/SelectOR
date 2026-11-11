@@ -134,6 +134,7 @@ namespace SelectOR
             HudScale.Set(int.TryParse(Environment.GetEnvironmentVariable("SELECTOR_HUDSCALE"), out int hsEnv) ? hsEnv : _prefs.HudScalePct);   // (1.2.82) tamaño del HUD (SELECTOR_HUDSCALE: pruebas)
             NotifySound.Enabled = () => _prefs?.NotifySound != false;
             VehicleThumbs.ConsistFile = ConsistStripFileAsync;   // vistas 2D de un tren entero (Compra y Flota)
+            PathMapDialog.FreightFor = FreightLatLonAsync;   // (2026-11-09) y los sitios de mercancías
             PathMapDialog.DetailFor = RouteTrackAsync;           // la vía del HUD en «Mapa» (Conducción libre, Actividad, Horarios)
             try { _settings = new UserSettings(new string[0]); DetectLanguage(); } catch { }
             // Escala de la interfaz según la pantalla, ANTES de montar nada: las fuentes ya se crean
@@ -671,6 +672,7 @@ namespace SelectOR
                 ImageOf = o => RouteCardImage((Route)o),
                 BadgeOf = o => RouteCardBadge((Route)o),
                 Badge2Of = o => SalaRouteBadge((Route)o),   // la ruta de la sala compartida (MainMenuForm.SalaCgl.cs)
+                PinnedOf = o => SalaRouteBadge((Route)o) != null,   // (2026-11-10) y fijada arriba, con marco resaltado
             };
             _lstRoutes.SelectedIndexChanged += (s, e) => OnRouteChanged();
             // La portada de bienvenida se quita en cuanto el usuario elige una ruta (aunque sea la ya cargada).
@@ -1956,6 +1958,8 @@ namespace SelectOR
             page.VisibleChanged += (s, e) => { if (page.Visible) { _mpStatusTimer.Start(); ageTimer.Start(); LayoutMpTop(); if (_serversAll == null || _serversAll.Count == 0) LoadServers(); } else { _mpStatusTimer.Stop(); ageTimer.Stop(); } };
             page.Controls.Add(listHost);
             page.Controls.Add(bar);
+            // (2026-11-09) aviso: los servidores públicos son los de Open Rails, no de SelectOR
+            page.Controls.Add(new MpNotice { Dock = DockStyle.Top, Text = Tr("Estos servidores son los públicos de Open Rails (tsimserver.com), no de SelectOR: SelectOR solo te los enseña y no responde de ellos. La sala compartida de SelectOR está en Conducción libre, con la ruta CGL_V22N_RE.") });
             page.Controls.Add(top);
             return page;
         }
@@ -2633,9 +2637,12 @@ namespace SelectOR
             var prev = _lstRoutes.SelectedItem as Route;
             _lstRoutes.BeginUpdate();
             _lstRoutes.Items.Clear();
-            foreach (var r in _routesAll)
+            // (2026-11-10, petición) la de la sala compartida (CGL_V22N_RE), fijada la primera (también con «solo favoritas»; la
+            // búsqueda sí la deja fuera si no coincide)
+            foreach (var r in _routesAll.Where(x => SalaRouteBadge(x) != null).Concat(_routesAll.Where(x => SalaRouteBadge(x) == null)))
             {
-                if (favOnly && !_prefs.Favorites.Contains(r.Path)) continue;
+                bool pinned = SalaRouteBadge(r) != null;
+                if (favOnly && !pinned && !_prefs.Favorites.Contains(r.Path)) continue;
                 if (q.Length > 0 && (r.Name == null || r.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0)) continue;
                 _lstRoutes.Items.Add(r);
             }
@@ -3391,6 +3398,7 @@ namespace SelectOR
         {
             var exe = SysPath.Combine(AppContext.BaseDirectory, "RunActivity.exe");
             if (!File.Exists(exe)) { Warn(Tr("No se encuentra RunActivity.exe junto al selector.")); return; }
+            CaptureLaunchConditions(args);   // (2026-11-10) hora, estación y clima, para la tarjeta del servicio (MainMenuForm.CondicionesServicio.cs)
             _prefs.Save();
             _schedDriving = false;   // (si es un turno, lo dice SchedBeforeLaunchAsync)
             EnsureOrWebServer();   // el HUD, el pupitre, los viajeros y el carné lo necesitan desde el arranque
@@ -3414,6 +3422,7 @@ namespace SelectOR
                 serviceId = await EmpStartService();
                 SetIdle();
                 if (serviceId != null) PublishServiceStrip(serviceId, _empOnDutyCompany?.Id, CurrentDrivenConsist());   // composición 2D del servicio
+                if (serviceId != null) SaveServiceConditions(serviceId);   // (2026-11-10) hora, estación y clima del simulador
                 if (serviceId == null)
                 {
                     string why = _empStartFailReason;

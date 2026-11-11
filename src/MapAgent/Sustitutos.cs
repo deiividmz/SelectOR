@@ -90,9 +90,14 @@ namespace SelectOR.MapAgent
                 int num = tr.Field("TrainNum").GetValue<int>();
                 // UPDATETRAIN de un tren que ya está (el tuyo, al desacoplar): sus coches siguen como estaban
                 bool exists = __instance is MSGUpdateTrain && MPManager.Simulator?.Trains?.Any(t => t != null && t.Number == num) == true;
-                // (1.2.91) un tren IA de la sala con la composición que ha elegido el usuario para su servicio
-                var mine = __instance is MSGTrain ? IaComposiciones.For(tr.Field("name").GetValue<string>()) : null;
-                if (!exists && mine != null) Force(_cars, tr.Field("flipped").GetValue<int[]>(), mine, num, tr.Field("name").GetValue<string>());
+                // (1.2.91) un tren IA de la sala con la composición que ha elegido el usuario para su servicio. (2026-11-11) También
+                // si llega con UPDATETRAIN (ya estaba en la vía al entrar, o lo pide otra vez tu Open Rails), que no trae su nombre:
+                // el que SelectOR ha dicho para ese número (IaComposiciones.NameOf)
+                string iaName = null;
+                if (__instance is MSGTrain) { iaName = tr.Field("name").GetValue<string>(); IaComposiciones.Seen(num, iaName); }
+                else if (!exists) iaName = IaComposiciones.NameOf(num);
+                var mine = !exists && iaName != null ? IaComposiciones.For(iaName) : null;
+                if (!exists && mine != null) Force(_cars, tr.Field("flipped").GetValue<int[]>(), mine, num, iaName);
                 else if (!exists) Whole(_cars, tr.Field("flipped").GetValue<int[]>(), _lens, null, num, null);
             }
             catch { _cars = null; }

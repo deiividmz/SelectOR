@@ -33,10 +33,13 @@ namespace SelectOR
         void OnChanged() { if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)Invalidate); }
 
         Rectangle GripRect => Grip ? new Rectangle(0, 0, Theme.Px(16), Height) : Rectangle.Empty;
+        // (2026-11-10) el canal por el que se habla, a la derecha; con más de uno para elegir, se elige ahí
+        Rectangle ChipRect => Radio == null ? Rectangle.Empty : new Rectangle(Width - Theme.Px(96), (Height - Theme.Px(24)) / 2, Theme.Px(88), Theme.Px(24));
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left && Grip && GripRect.Contains(e.Location)) { _gripDown = true; _gripAt = e.Location; return; }
+            if (e.Button == MouseButtons.Left && ChipRect.Contains(e.Location) && Radio != null && Radio.ChoiceList.Count > 1) { ShowChannels(); return; }
             if (e.Button == MouseButtons.Left && Radio != null) { _down = true; Radio.SetButton(true); Invalidate(); }
             if (e.Button == MouseButtons.Right) ShowMenu(e.Location);
             base.OnMouseDown(e);
@@ -92,6 +95,23 @@ namespace SelectOR
             m.Show(this, at);
         }
 
+        void ShowChannels()
+        {
+            var r = Radio; if (r == null) return;
+            var m = new ContextMenuStrip { ShowImageMargin = false, BackColor = Theme.Surface, ForeColor = Theme.Text, Font = Theme.Font(9.5f) };
+            m.Items.Add(new ToolStripLabel(I18n.T("Hablar por")) { ForeColor = Theme.Subtle });
+            string cur = r.TalkChannel;
+            foreach (var ch in r.ChoiceList)
+            {
+                string c = ch;
+                var it = new ToolStripMenuItem(RoomRadio.ChannelLabel(c) + (c == "jefes" ? "  · " + I18n.T("sin maquinistas") : c == "todas" ? "  · " + I18n.T("toda la sala") : "")) { Checked = c == cur, ForeColor = Theme.Text };
+                it.Click += (s, e) => r.Choose(c);
+                m.Items.Add(it);
+            }
+            m.Closed += (s, e) => BeginInvoke((Action)(() => m.Dispose()));
+            m.Show(this, new Point(ChipRect.Left, ChipRect.Bottom + 2));
+        }
+
         public static string KeyLabel()
         {
             string id = RoomRadio.Prefs?.RadioKey ?? "RControl";
@@ -123,9 +143,22 @@ namespace SelectOR
             x = led.Right + Theme.Px(8);
             using var f1 = Theme.Font(9.5f, FontStyle.Bold); using var f2 = Theme.Font(8f);
             string top = "📻  " + (mine ? I18n.T("Hablando…") : someone ? (r.TalkingJefe ? string.Format(I18n.T("{0} (jefe de circulación)"), r.Talking + CertBadges.Tag(r.Talking)) : r.Talking + CertBadges.Tag(r.Talking)) : I18n.T("Radio de la sala"));
+            if (someone && r.TalkingCount > 1) top += "  +" + (r.TalkingCount - 1);   // (2026-11-10) hablan varios, cada uno en su canal
             string sub = r == null ? I18n.T("Sin conexión con la sala")
-                       : r.FreshNote ?? (someone ? I18n.T("está hablando") : string.Format(I18n.T("Mantén pulsado para hablar · «{0}»"), KeyLabel()));
-            int w = Width - x - Theme.Px(8);
+                       : r.FreshNote ?? (someone ? (r.TalkingCh != null && r.TalkingCh != "*" ? string.Format(I18n.T("está hablando · {0}"), RoomRadio.ChannelLabel(r.TalkingCh)) : I18n.T("está hablando"))
+                                                 : string.Format(I18n.T("Mantén pulsado para hablar · «{0}»"), KeyLabel()));
+            // (2026-11-10) el canal por el que hablas
+            var chip = ChipRect;
+            if (r != null)
+            {
+                bool more = r.ChoiceList.Count > 1; string ch = r.TalkChannel;
+                Color cc = ch == "jefes" ? Amber : ch == "todas" ? Red : Theme.AccentHi;
+                Theme.FillRound(g, chip, Theme.Px(6), Color.FromArgb(44, 50, 58));
+                using (var cp = new Pen(Color.FromArgb(150, cc))) using (var path = Theme.Round(chip, Theme.Px(6))) g.DrawPath(cp, path);
+                using var fc = Theme.Font(8.2f, FontStyle.Bold);
+                TextRenderer.DrawText(g, RoomRadio.ChannelLabel(ch) + (more ? " ▾" : ""), fc, chip, Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            }
+            int w = (r != null ? chip.Left - Theme.Px(6) : Width - Theme.Px(8)) - x;
             ColorText.Text(g, top, f1, new Rectangle(x, Theme.Px(5), w, Theme.Px(18)), mine ? Color.White : Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             TextRenderer.DrawText(g, sub, f2, new Rectangle(x, Theme.Px(23), w, Theme.Px(16)), r?.FreshNote != null ? Amber : Theme.Subtle, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
@@ -147,7 +180,7 @@ namespace SelectOR
             _prefs = prefs;
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
             BackColor = Color.FromArgb(32, 36, 40);
-            Size = new Size(Theme.Px(360), Theme.Px(44));   // (300 cortaba «Mantén pulsado para hablar · «Control derecho»»)
+            Size = new Size(Theme.Px(450), Theme.Px(44));   // (300 cortaba «Mantén pulsado para hablar · «Control derecho»»; 2026-11-10: y el canal a la derecha)
             Panel = new RadioPanel { Dock = DockStyle.Fill, Radio = radio, Grip = true, BackColor = BackColor };
             Panel.GripDrag += dp => { Location = new Point(Left + dp.X, Top + dp.Y); };
             Panel.MouseUp += (s, e) => { _prefs.RadioHudX = Left; _prefs.RadioHudY = Top; try { _prefs.Save(); } catch { } };

@@ -41,7 +41,7 @@ namespace SelectOR
         public const string SalaDownloadUrl = "https://www.spaintrainzrutas.com/descargas/descarga.php?dlid=1214";
         string _salaOrVersion;               // la versión de Open Rails del despachador de la sala (la dice el servidor)
         DateTime _salaVersionAt = DateTime.MinValue; bool _salaVersionAsking;
-        Label _salaSub, _salaPromoVer; Panel _salaPromo;
+        Label _salaSub, _salaPromoVer; Panel _salaPromo; ToolTip _salaSubTip;
 
         string _roomPending, _roomJoined;    // «cgl» al ir a entrar · mientras se juega en la sala
         string _roomHost; int _roomPort;     // a dónde conecta la sala (no pasa por «Servidor» ni «Puerto» de Multijugador)
@@ -61,7 +61,7 @@ namespace SelectOR
         {
             _salaHost = new Panel { Dock = DockStyle.Right, Width = SalaHostBase, BackColor = Theme.Surface, Visible = false };
             _chkSala = new ThemeCheck { Text = Tr("Conducir en la sala compartida"), ForeColor = Theme.Text, BackColor = Theme.Surface, Size = new Size(280, 28), Checked = true };
-            var sub = new Label { Text = SalaSubText(), AutoSize = false, Size = new Size(290, 48), AutoEllipsis = true,
+            var sub = new Label { Text = SalaSubText(), AutoSize = false, Size = new Size(300, 48), AutoEllipsis = true,
                                   ForeColor = Theme.Subtle, BackColor = Theme.Surface, Font = Theme.Font(8.25f) };
             _salaSub = sub;
             _chkSala.CheckedChanged += (s, e) =>
@@ -117,7 +117,18 @@ namespace SelectOR
             string jefe = _salaJefes == null ? null
                         : _salaJefes.Count == 0 ? Tr("Sin jefe de circulación")
                         : string.Format(Tr(_salaJefes.Select(z => z.Name).Distinct().Count() == 1 ? "Jefe de circulación: {0}" : "Jefes de circulación: {0}"), SwitchPilot.JefesText(_salaJefes));
-            return Tr("Con los demás jugadores") + " · " + SalaClockText() + (second.Length > 0 ? "\n" + second : "") + (jefe != null ? "\n" + jefe : "");
+            // (2026-11-09) en dos líneas (con tres no cabía en la barra): el tiempo y el jefe, juntos en la segunda
+            // (2026-11-09) en la barra, solo los nombres (como mucho dos y «+N»); la lista entera, al pasar el ratón
+            string jefeCorto = jefe;
+            if (_salaJefes != null && _salaJefes.Count > 0)
+            {
+                var names = _salaJefes.Select(z => z.Name).Distinct().ToList();
+                jefeCorto = string.Format(Tr(names.Count == 1 ? "Jefe de circulación: {0}" : "Jefes de circulación: {0}"),
+                                          string.Join(", ", names.Take(2)) + (names.Count > 2 ? " +" + (names.Count - 2) : ""));
+            }
+            try { if (_salaSub != null) (_salaSubTip ??= new ToolTip()).SetToolTip(_salaSub, jefe ?? ""); } catch { }
+            string l2 = string.Join(" · ", new[] { second, jefeCorto }.Where(x => !string.IsNullOrEmpty(x)));
+            return Tr("Con los demás jugadores") + " · " + SalaClockText() + (l2.Length > 0 ? "\n" + l2 : "");
         }
         List<SwitchPilot.JefeZone> _salaJefes;   // (SalaVersionRefresh) los jefes de la sala, de «SELECTOR JEFES»
 
@@ -211,6 +222,13 @@ namespace SelectOR
                 if (SalaSolo(Tr("No se puede conectar con la sala compartida de CGL ahora mismo."))) LaunchSolo();
                 return;
             }
+            // (2026-11-09) ¿puede entrar? (prohibición del administrador o requisitos de la sala; el servidor lo vuelve a mirar)
+            string deny = await SalaAccessDenied();
+            if (deny != null)
+            {
+                if (SalaSolo(deny)) LaunchSolo();
+                return;
+            }
             if (info.Tdb != null && mine != null && info.Tdb != mine)
             {
                 if (SalaSolo(Tr("Tu ruta CGL_V22N_RE no es la misma versión que la de la sala, y Open Rails no te dejaría entrar. Actualiza la ruta para conducir con los demás."))) LaunchSolo();
@@ -232,6 +250,9 @@ namespace SelectOR
             }
             // (desde la 1.2.72 no se mira si hay otro tren en la vía de salida: se entra igualmente)
 
+            // (2026-11-09) tipo de servicio, destino y número de tren (MainMenuForm.TrenSala.cs)
+            if (!await SalaTrainDialog(_curRoute.Path, p.FilePath)) return;
+            if (_salaTrain != null) _salaTrain.Con = System.IO.Path.GetFileNameWithoutExtension(c.FilePath);   // (su 2D en el puesto de mando)
             var (time, season) = SpainNow(info.Offset);   // con el adelanto o retraso de la sala
             int weather = 0;
             if (info.Season >= 0) { season = info.Season; weather = info.Weather; }   // el clima de la sala (Open Rails carga la estación al empezar)
@@ -253,9 +274,38 @@ namespace SelectOR
         // Conducir solo esta vez (como sin la casilla).
         void LaunchSolo()
         {
+            _salaTrain = null;
             var args = BuildArguments(out string err);
             if (args == null) { Warn(err); return; }
             Launch(args);
+        }
+
+        // (2026-11-09) El motivo por el que no puedes entrar en la sala (sql/sala-acceso.sql: room_access_me), o null.
+        // Sin sesión, sin el SQL o sin conexión: null (decide el servidor de la sala).
+        async Task<string> SalaAccessDenied()
+        {
+            if (!Supa.IsLoggedIn) return null;
+            var (json, err) = await Supa.RpcAsync("room_access_me", new { });
+            if (err != null || string.IsNullOrWhiteSpace(json)) return null;
+            try
+            {
+                using var d = System.Text.Json.JsonDocument.Parse(json); var r = d.RootElement;
+                if (r.TryGetProperty("ok", out var ok) && ok.ValueKind == System.Text.Json.JsonValueKind.True) return null;
+                string S(string k) => r.TryGetProperty(k, out var v) && v.ValueKind != System.Text.Json.JsonValueKind.Null ? (v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : v.ToString()) : "";
+                string D(string iso) => DateTime.TryParse(iso, out var t) ? t.ToLocalTime().ToString("g", I18n.Culture) : iso;
+                switch (S("why"))
+                {
+                    case "ban":
+                        return S("until").Length > 0 ? string.Format(Tr("No puedes entrar en la sala compartida hasta el {0}: {1}"), D(S("until")), S("reason"))
+                                                    : string.Format(Tr("No puedes entrar en la sala compartida: {0}"), S("reason"));
+                    case "suspended": return string.Format(Tr("Tu carné está suspendido hasta el {0}: no puedes entrar en la sala compartida."), D(S("until")));
+                    case "points": return string.Format(Tr("Para entrar en la sala compartida hacen falta {0} puntos en el carné (tienes {1})."), S("need"), S("have"));
+                    case "cert": return string.Format(Tr("Para entrar en la sala compartida hace falta el título de maquinista {0} (Mi perfil → Títulos)."), S("need"));
+                    case "services": return string.Format(Tr("Para entrar en la sala compartida hacen falta {0} servicios hechos (llevas {1})."), S("need"), S("have"));
+                    default: return null;
+                }
+            }
+            catch { return null; }
         }
 
         bool SalaSolo(string why)

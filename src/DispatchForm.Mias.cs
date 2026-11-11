@@ -45,7 +45,7 @@ namespace SelectOR
             if (_mineBtn == null || _zones == null) return;
             if (!_mineLoaded) { _mineLoaded = true; try { _mineOnly = MineOnlyGet?.Invoke() ?? false; } catch { } }   // (MainMenuForm lo pone después de crear la ventana)
             var mine = MyZones();
-            _mineBtn.Visible = mine.Count > 0;
+            _mineBtn.Visible = mine.Count > 0 && !_folded;
             bool on = _mineOnly && mine.Count > 0;
             _mineBtn.Text = on ? "✓ " + Tr("Solo las mías") + " (" + mine.Count + ")" : Tr("Solo las mías");
             _mineBtn.BackColor = on ? Color.FromArgb(30, 90, 45) : Theme.Surface2;
@@ -55,12 +55,8 @@ namespace SelectOR
             bool first = _mineShown == null || _mineShown == "";
             _mineShown = key;
             string sel = _list.SelectedItem as string;
-            _list.BeginUpdate();
-            _list.Items.Clear(); _list.Items.Add(General);
-            foreach (var z in _zones.Where(z => !z.Line && (!on || mine.Contains(z.Name))).OrderBy(z => z.Name, StringComparer.CurrentCulture)) _list.Items.Add(z.Name);
-            foreach (var z in _zones.Where(z => z.Line && (!on || mine.Contains(z.Name))).OrderBy(z => z.Name, StringComparer.CurrentCulture)) _list.Items.Add(z.Name);
-            _list.EndUpdate();
-            if (sel != null && _list.Items.Contains(sel)) { int i = _list.Items.IndexOf(sel); if (_list.SelectedIndex != i) _list.SelectedIndex = i; }
+            FillList(on, mine);   // (2026-11-09) con las bandas (DispatchForm.Bandas.cs)
+            if (sel != null && _list.Items.Contains(sel)) { int i = _list.Items.IndexOf(sel); if (_list.SelectedIndex != i) { _filling = true; try { _list.SelectedIndex = i; } finally { _filling = false; } } }
             else if (sel != null) Select(General);
             if (on && Overview && !first) FitMine();
         }

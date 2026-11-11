@@ -13,10 +13,11 @@ namespace SelectOR
     public partial class MainMenuForm
     {
         const int RevTabKicks = 7;
-        const string RevIntroKicks = "Las expulsiones de la sala compartida hechas desde el Puesto de Mando: quién desconectó a quién, cuándo y por qué, y los vagones sueltos retirados.";
+        const string RevIntroKicks = "Las expulsiones de la sala compartida hechas desde el Puesto de Mando: quién desconectó a quién, cuándo y por qué, y los vagones sueltos retirados. Desde aquí puedes sancionar y prohibir la sala (sus requisitos están en Empresas → Ajustes → Sala compartida).";
         Panel _kickPanel;
         CardTable _kickList;
         readonly List<(string when, string kind, string jefe, string target, string reason, string zone)> _kickRows = new();
+        readonly List<string> _kickShown = new();   // (2026-11-09) el usuario de cada fila a la vista (para sancionar o prohibir)
 
         Panel BuildKicksPanel()
         {
@@ -27,6 +28,7 @@ namespace SelectOR
                 TitleCol = 0, SubCols = new[] { 1 }, QuoteCol = 2, PillCol = 3, QuoteMarks = true, AutoHeight = true
             };
             _kickPanel.Controls.Add(_kickList);
+            _kickPanel.Controls.Add(BuildKickActions());   // (2026-11-09) sancionar, prohibir y requisitos (MainMenuForm.SalaAcceso.cs)
             return _kickPanel;
         }
 
@@ -54,7 +56,7 @@ namespace SelectOR
         {
             if (_kickList == null) return;
             var words = _revQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            _kickList.ClearRows();
+            _kickList.ClearRows(); _kickShown.Clear();
             int n = 0;
             foreach (var r in _kickRows)
             {
@@ -65,6 +67,7 @@ namespace SelectOR
                 string quote = loose ? r.zone : r.reason;
                 _kickList.AddRow(new[] { title, r.when, quote, loose ? Tr("Vagones sueltos") : Tr("Desconectado") },
                                  new Color?[] { null, null, null, loose ? Theme.Subtle : Carne.Red }, null, null);
+                _kickShown.Add(r.target);
                 n++;
             }
             if (n == 0) _kickList.SetEmpty(Tr("No hay expulsiones."));

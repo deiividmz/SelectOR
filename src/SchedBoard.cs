@@ -94,7 +94,7 @@ namespace SelectOR
         }
 
         // SALIDA · DESTINO/RECORRIDO · TREN (2D) · ESTADO · PRIMA
-        static int TW(string s, Font f) => string.IsNullOrEmpty(s) ? 0 : TextRenderer.MeasureText(s, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+        static int TW(string s, Font f) => string.IsNullOrEmpty(s) ? 0 : ColorText.LineWidth(s, f);
         int UntilW(Row r) => TW(r.UntilLabel, _fUntil) + Theme.Px(5) + TW(r.UntilTime, _fSmallMono) + (r.NextDay ? Theme.Px(5) + TW("+1", _fH) + Theme.Px(8) : 0);
         void DropFit(string id) { if (_fit.TryGetValue(id, out var f)) { f.bmp?.Dispose(); _fit.Remove(id); } }
 

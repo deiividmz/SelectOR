@@ -453,7 +453,7 @@ namespace SelectOR
             bCancel.Click += (s, e) => f.Close();
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
             ShowKind();
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); CenterOnScreen(f); };
+            f.Load += (s, e) => FitDialogToScreen(f, stack, crownH, true);   // (2026-11-09) sin salirse de la pantalla
             _seatsOpen = f;
             DialogResult res;
             try { res = f.ShowDialog(this); } finally { _seatsOpen = null; }
@@ -698,12 +698,39 @@ namespace SelectOR
             bRent.Click += (s, e) => { result = 2; f.Close(); };
             bCancel.Click += (s, e) => f.Close();
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); CenterOnScreen(f); };
+            f.Load += (s, e) => FitDialogToScreen(f, stack, crownH, true);   // (2026-11-09) sin salirse de la pantalla
             _trainBuyOpen = f;
             try { f.ShowDialog(this); } finally { _trainBuyOpen = null; }
             return result;
         }
         Form _trainBuyOpen;   // para las pruebas
+
+        // (2026-11-09) Las ventanas de compra crecen con la lista de vehículos: con una composición muy larga se salían de la
+        // pantalla y no se veían los botones. Si no cabe, lo más alto (la tabla del desglose) se acorta con su barra.
+        void FitDialogToScreen(Form f, TableLayoutPanel stack, int crownH, bool center)
+        {
+            var wa = Screen.FromControl(this).WorkingArea;
+            var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0));
+            int frame = f.Height - f.ClientSize.Height, max = wa.Height - frame - Theme.Px(24);
+            int h = ps.Height + 4 + crownH;
+            if (h > max)
+            {
+                Control tall = null;
+                foreach (Control c in stack.Controls) if (c is ScrollableControl && (tall == null || c.Height > tall.Height)) tall = c;
+                int excess = h - max;
+                if (tall is ScrollableControl sc && tall.Height - excess >= Theme.Px(120))
+                {
+                    tall.Height -= excess;
+                    sc.AutoScroll = false; sc.HorizontalScroll.Maximum = 0; sc.HorizontalScroll.Enabled = false; sc.HorizontalScroll.Visible = false; sc.AutoScroll = true;
+                    try { Native.UseDarkScrollBars(tall); } catch { }
+                    ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0));
+                    h = ps.Height + 4 + crownH;
+                }
+                h = Math.Min(h, max);
+            }
+            f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), h);
+            if (center) CenterOnScreen(f);
+        }
 
         // La tabla del desglose (ventana de compra y «Desglose del precio»): una fila por vehículo con cómo se tasa.
         Control BuildBreakdownTable(List<TrainVeh> vs, int width, out double total)
@@ -794,7 +821,7 @@ namespace SelectOR
                 }
                 f.DialogResult = DialogResult.OK; f.Close();
             };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); CenterOnScreen(f); };
+            f.Load += (s, e) => FitDialogToScreen(f, stack, crownH, true);   // (2026-11-09) sin salirse de la pantalla
             _trainReqOpen = f;
             DialogResult res;
             try { res = f.ShowDialog(this); } finally { _trainReqOpen = null; }

@@ -90,7 +90,15 @@ namespace SelectOR.MapAgent
                             {
                                 var r = new StreamReader(ns, new UTF8Encoding(false));
                                 string line;
-                                while ((line = r.ReadLine()) != null) if (line.Length > 0 && line.Length < 200) _in.Enqueue(line);
+                                while ((line = r.ReadLine()) != null)
+                                {
+                                    if (line.Length == 0) continue;
+                                    // (2026-11-11) los trenes IA con tu composición, al momento y no en la vuelta del simulador: los
+                                    // trenes que ya están en la sala llegan al entrar, antes de que el simulador dé vueltas (salían con
+                                    // la del horario); y con la ruta entera del .con, que puede pasar de 200 letras
+                                    if (line.StartsWith("AICON ", StringComparison.Ordinal)) { if (line.Length < 4000) { try { IaComposiciones.Cmd(line.Substring(6)); } catch { } } continue; }
+                                    if (line.Length < 200) _in.Enqueue(line);
+                                }
                             }
                             catch { }
                             _connected = false; _outReady.Set();
@@ -127,7 +135,8 @@ namespace SelectOR.MapAgent
                 {
                     if (cmd.StartsWith("TYPING ", StringComparison.Ordinal)) { if (int.TryParse(cmd.Substring(7), out int secs)) Teclado.Typing(secs); continue; }   // (también en la sala)
                     if (cmd.StartsWith("PAX ", StringComparison.Ordinal)) { Viajeros3D.Pax(cmd.Substring(4)); continue; }   // (el contador de viajeros: gente en los andenes)
-                    if (cmd.StartsWith("OBJ ", StringComparison.Ordinal)) { Viajeros3D.ObjCmd(cmd.Substring(4)); continue; }   // (los objetos de la sala: Viajeros3D.Objetos.cs)
+                    if (cmd.StartsWith("OBJ ", StringComparison.Ordinal)) { Viajeros3D.ObjCmd(cmd.Substring(4)); continue; }   
+                    if (cmd.StartsWith("OBJSTATE ", StringComparison.Ordinal)) { Viajeros3D.ObjState(cmd.Substring(9)); continue; }   // (2026-11-10) la indicación del responsable de circulación   // (los objetos de la sala: Viajeros3D.Objetos.cs)
                     if (cmd.StartsWith("AICON ", StringComparison.Ordinal)) { IaComposiciones.Cmd(cmd.Substring(6)); continue; }   // (1.2.91) los trenes IA de la sala con tu composición
                     if (Controls.Do(cmd, sim)) continue;
                     if (!mp && _mapOn && sim.Signals != null) Command(sim, cmd);

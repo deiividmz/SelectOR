@@ -195,6 +195,9 @@ namespace SelectOR
         public bool TabFill = false;      // pestaña de la barra superior: la activa lleva además un fondo verde suave
         public bool NavStyle = false;     // sección del menú lateral de Empresas: icono en su pastilla, barra verde y contador
         public Color NavTint = Theme.Accent;
+        // (2026-11-09) menú de Empresas como plano de líneas: la línea de su grupo (color) y una estación por sección.
+        // LinePos: 0 en medio · 1 la primera · 2 la última · 3 la única
+        public Color? LineColor; public int LinePos;
         bool _hover, _down;
 
         public RoundButton()
@@ -221,16 +224,16 @@ namespace SelectOR
             var bg = Theme.ResolveBg(this);
             using (var b = new SolidBrush(bg)) g.FillRectangle(b, r);
             var box = new Rectangle(r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3);
-            if (Active) Theme.FillRound(g, box, 9, Blend(bg, Theme.Accent, 0.17f));
+            if (Active) Theme.FillRound(g, box, 9, Blend(bg, LineColor ?? Theme.Accent, 0.17f));
             else if (_hover && Enabled) Theme.FillRound(g, box, 9, Blend(bg, Color.White, 0.06f));
-            if (Active) Theme.FillRound(g, new Rectangle(box.X, box.Y + 6, 3, Math.Max(4, box.Height - 12)), 1, Theme.Accent);
+            if (Active && LineColor == null) Theme.FillRound(g, new Rectangle(box.X, box.Y + 6, 3, Math.Max(4, box.Height - 12)), 1, Theme.Accent);
             if (Focused && ShowFocusCues) Theme.DrawRoundBorder(g, box, 9, Theme.AccentHi, 1.5f);
             string text = Text ?? "", count = null;
             var m = CountRx.Match(text);
             if (m.Success) { text = m.Groups[1].Value; count = m.Groups[2].Value; }
             int ts = Math.Max(Math.Min(16, r.Height - 2), Math.Min(r.Height - 8, 26));   // (1.2.82: filas bajas del menú, el icono no desaparece)
             var tile = new Rectangle(r.X + 10, r.Y + (r.Height - ts) / 2, ts, ts);
-            if (!string.IsNullOrEmpty(GlyphKind) && ShowGlyph)
+            if (!string.IsNullOrEmpty(GlyphKind) && ShowGlyph && LineColor == null)
             {
                 Theme.FillRound(g, tile, 7, Active ? Blend(bg, NavTint, 0.40f) : Blend(bg, NavTint, 0.16f));
                 int pad = ts < 20 ? 3 : 4, gs = ts - 2 * pad;
@@ -238,6 +241,7 @@ namespace SelectOR
             }
             int x = tile.Right + 10, right = r.Right - 8;
             using var f = Theme.Font(FontSize, Active ? FontStyle.Bold : FontStyle);
+            if (LineColor is Color lc) { x = PaintLineStop(g, r, bg, lc); }
             if (count != null)
             {
                 using var fb = Theme.Font(Math.Max(7f, FontSize - 1.75f), FontStyle.Bold);
@@ -250,6 +254,24 @@ namespace SelectOR
             var tc = !Enabled ? Color.FromArgb(120, 125, 130) : Active ? Theme.AccentHi : TextColor;
             ColorText.Text(g, text, f, new Rectangle(x, r.Y, Math.Max(10, right - x), r.Height), tc,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+        }
+
+        // (2026-11-09) la línea del grupo y la estación de la sección (la elegida, más grande y con el centro blanco).
+        // Devuelve dónde empieza el texto.
+        int PaintLineStop(Graphics g, Rectangle r, Color bg, Color lc)
+        {
+            int cx = r.X + 16, cy = r.Y + r.Height / 2;
+            var sm = g.SmoothingMode; g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(lc, 3f))
+            {
+                int y0 = LinePos == 1 || LinePos == 3 ? cy : r.Y, y1 = LinePos == 2 || LinePos == 3 ? cy : r.Bottom;
+                if (y1 > y0) g.DrawLine(pen, cx, y0, cx, y1);
+            }
+            float rad = Active ? 7.5f : 5f;
+            using (var b = new SolidBrush(Active ? Color.White : bg)) g.FillEllipse(b, cx - rad, cy - rad, 2 * rad, 2 * rad);
+            using (var pen = new Pen(lc, Active ? 3.2f : 2.4f)) g.DrawEllipse(pen, cx - rad, cy - rad, 2 * rad, 2 * rad);
+            g.SmoothingMode = sm;
+            return cx + 16;
         }
 
         // Pestaña moderna: sin relleno; hover con un tinte suave; activa = texto verde + barra inferior.
@@ -329,6 +351,8 @@ namespace SelectOR
                 using (var fr = Theme.Round(new Rectangle(r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3), Math.Max(2, Radius - 1)))
                 using (var fp = new Pen(Theme.AccentHi, 2f)) g.DrawPath(fp, fr);
             var tc = off ? Color.FromArgb(135, 140, 146) : (Active ? ActiveTextColor : TextColor);
+            ColorText.IconBg = off ? Blend(BaseColor, Theme.Bg, 0.5f) : Active ? ActiveColor : fill;   // (2026-11-09) iconos que se lean sobre el botón
+            try {
             using (var f = Theme.Font(FontSize, FontStyle))
             {
                 if (!string.IsNullOrEmpty(GlyphKind) && ShowGlyph)
@@ -354,6 +378,7 @@ namespace SelectOR
                     ColorText.Text(g, txt, f, trect, tc, align);
                 }
             }
+            } finally { ColorText.IconBg = null; }
         }
 
         static Color Blend(Color a, Color b, float t) =>

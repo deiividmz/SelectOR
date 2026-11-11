@@ -10,6 +10,7 @@
 //        vigi_ (vigilantes) + postura (trabaja · agachado · espera · saluda · indica/habla: gesticula · telefono); sus
 //        figuras llevan el mismo prefijo («bomb_h05»).
 //      fijos: derrumbe · derrumbe_grande · roca · piedras (tierra y rocas escaneadas: «obj_<tipo>» en gente.txt).
+//      responsable (2026-11-10): el responsable de circulación con sus indicaciones (Viajeros3D.Responsable.cs).
 //      cartel_parada (1.2.91): el cartel de parada absoluta de la propia ruta (SHAPES\Cartel_Parada_Absoluta.s), en medio
 //        de la vía y mirando a lo largo de ella; si la ruta no lo trae, no se pone.
 //      fuego · incendio: llamas animadas (16 fotogramas, «obj_<tipo>_NN»; se suman a la imagen: se ven igual de noche), de
@@ -234,6 +235,58 @@ namespace SelectOR.MapAgent
             return fig;
         }
 
+        // ---- (2026-11-09) la altura de la vía en un punto: el tramo de vía más cercano del .tdb (a menos de 15 m), interpolado ----
+        const float CartelLift = 0.85f;
+        static List<(int tx, int tz, float x, float y, float z)[]> _trackNodes;   // los puntos de cada tramo, en orden
+        static float TrackY(int tx, int tz, float x, float z)
+        {
+            try
+            {
+                if (_trackNodes == null)
+                {
+                    var list = new List<(int, int, float, float, float)[]>();
+                    var sim = MPManager.Simulator;
+                    if (_tdb == null) _tdb = Member(sim.GetType(), "TDB");
+                    var tdb = _tdb?.Invoke(sim); if (tdb == null) return float.NaN;
+                    if (_trackDB == null) _trackDB = Member(tdb.GetType(), "TrackDB");
+                    var db = _trackDB?.Invoke(tdb); if (db == null) return float.NaN;
+                    if (!(Member(db.GetType(), "TrackNodes")?.Invoke(db) is Array nodes)) return float.NaN;
+                    Func<object, object> vnF = null, secF = null, sx = null, sy = null, sz = null, stx = null, stz = null;
+                    foreach (var n in nodes)
+                    {
+                        if (n == null) continue;
+                        if (vnF == null) vnF = Member(n.GetType(), "TrVectorNode");
+                        var vn = vnF?.Invoke(n); if (vn == null) continue;
+                        if (secF == null) secF = Member(vn.GetType(), "TrVectorSections");
+                        if (!(secF?.Invoke(vn) is Array secs) || secs.Length == 0) continue;
+                        var pts = new (int, int, float, float, float)[secs.Length];
+                        for (int i = 0; i < secs.Length; i++)
+                        {
+                            var q = secs.GetValue(i);
+                            if (sx == null) { var t = q.GetType(); sx = Member(t, "X"); sy = Member(t, "Y"); sz = Member(t, "Z"); stx = Member(t, "TileX"); stz = Member(t, "TileZ"); }
+                            pts[i] = (Convert.ToInt32(stx(q)), Convert.ToInt32(stz(q)), Convert.ToSingle(sx(q)), Convert.ToSingle(sy(q)), Convert.ToSingle(sz(q)));
+                        }
+                        list.Add(pts);
+                    }
+                    _trackNodes = list;
+                }
+                float best = 15f * 15f, y = float.NaN;
+                foreach (var pts in _trackNodes)
+                    for (int i = 0; i < pts.Length; i++)
+                    {
+                        var a = pts[i]; var b = i + 1 < pts.Length ? pts[i + 1] : a;
+                        if (Math.Abs(a.tx - tx) > 1 || Math.Abs(a.tz - tz) > 1) continue;
+                        float ax = a.x + (a.tx - tx) * 2048, az = a.z + (a.tz - tz) * 2048, bx = b.x + (b.tx - tx) * 2048, bz = b.z + (b.tz - tz) * 2048;
+                        float dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+                        float t = l2 < 0.01f ? 0 : Math.Max(0, Math.Min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+                        float px = ax + dx * t, pz = az + dz * t, d2 = (x - px) * (x - px) + (z - pz) * (z - pz);
+                        if (d2 < best) { best = d2; y = a.y + (b.y - a.y) * t; }
+                    }
+                return y;
+            }
+            catch { return float.NaN; }
+        }
+
         // (hilo de carga, Viewer.Mark) que Open Rails no descargue lo que se usa
         static void MarkFigs()
         {
@@ -275,6 +328,13 @@ namespace SelectOR.MapAgent
                 catch { }
                 if (float.IsNaN(ground)) ground = lead.XNAMatrix.Translation.Y;
                 o.Ground = ground;
+                // (2026-11-09) en la vía (el cartel de parada absoluta): a la altura del carril, no del terreno (que queda bajo
+                // el balasto: se veía hundido). Su forma tiene el centro en medio de la placa (±0,45 m): placa de 0,4 a 1,3 m.
+                if (o.Kind == "cartel_parada")
+                {
+                    float ty = TrackY(o.TileX, o.TileZ, o.X, o.Z);
+                    if (!float.IsNaN(ty)) { o.Y = ty + CartelLift; o.Tries = Math.Max(o.Tries, 3); continue; }
+                }
                 if (float.IsNaN(o.Y)) o.Y = ground;
                 // un suelo de un modelo encima (el más bajo, hasta 30 m por encima del terreno): se mira aparte
                 var oo = o; var pos = new Vector3(o.X, 0, -o.Z);
@@ -413,6 +473,7 @@ namespace SelectOR.MapAgent
                 var objs = _objs; if (objs.Count == 0) return;
                 var sim = MPManager.Simulator; var lead = sim?.PlayerLocomotive?.Train?.Cars.FirstOrDefault()?.WorldPosition;
                 if (lead == null) return;
+                if (!_btWhistle.IsEmpty) BtWhistles(objs, lead);   // (2026-11-10) el silbato del responsable de circulación
                 double now = _clock.Elapsed.TotalSeconds;
                 _trainsNow.Clear();
                 bool anyWave = false; foreach (var o in objs) if (IsPerson(o.Kind) && o.Kind.EndsWith("_saluda")) { anyWave = true; break; }
@@ -451,7 +512,7 @@ namespace SelectOR.MapAgent
                         continue;
                     }
                     // qué hace
-                    string want = PostureAnim(o.Kind);
+                    string want = o.Kind == "responsable" ? BtAnim(o, ref night) : PostureAnim(o.Kind);   // (2026-11-10: su indicación, de día o de noche)
                     float face = -o.Bearing * (float)Math.PI / 180f;   // (su rumbo; saludando, hacia el tren)
                     if (IsPerson(o.Kind) && o.Kind.EndsWith("_saluda"))
                     {
@@ -475,7 +536,7 @@ namespace SelectOR.MapAgent
                     int n = frames.Length; object shape;
                     if (n == 1 || dist > 300) shape = frames[0];   // (lejos, quieto: no se nota y ahorra)
                     else { double u = ((now * o.Rate + o.Clock) % (2 * secs)) / secs; double k = u <= 1 ? u : 2 - u; shape = frames[Math.Min(n - 1, (int)(k * (n - 1) + 0.5))]; }
-                    Prep(shape, frame, o.Wp, dist < 80 && IsPerson(o.Kind) ? _flags : _noShadow);
+                    Prep(shape, frame, o.Wp, dist < 80 && (IsPerson(o.Kind) || o.Kind == "responsable") ? _flags : _noShadow);
                 }
             }
             catch (Exception ex) { ObjFailed("dibujo", ex); }

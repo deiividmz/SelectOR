@@ -32,9 +32,12 @@ namespace SelectOR
             var cuts = new Dictionary<int, List<double>>();
             foreach (var sg in s.Signals) if (sg.Sig != null && sg.Sig.Edge >= 0) { if (!cuts.TryGetValue(sg.Sig.Edge, out var l)) cuts[sg.Sig.Edge] = l = new(); l.Add(sg.Sig.Off); }
             var res = new List<(int, double, double)>();
-            foreach (int e in s.DrawnEdges)
+            // (2026-11-10, ruta entera) un tramo que dibujan a trozos varias piezas: partido también donde acaba cada trozo
+            var ranges = new List<(int e, double a, double b)>();
+            if (s.Parts != null) { foreach (var p in s.Parts) foreach (int e in p.DrawnEdges) if (p.DrawnRange(e, out double a0, out double b0)) ranges.Add((e, a0, b0)); }
+            else foreach (int e in s.DrawnEdges) if (s.DrawnRange(e, out double a0, out double b0)) ranges.Add((e, a0, b0));
+            foreach (var (e, a, b) in ranges)
             {
-                if (!s.DrawnRange(e, out double a, out double b)) continue;
                 var pts = new List<double> { a, b };
                 if (cuts.TryGetValue(e, out var c)) pts.AddRange(c.Where(o => o > a + 1 && o < b - 1));
                 pts.Sort();

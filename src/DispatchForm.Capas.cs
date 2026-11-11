@@ -34,6 +34,7 @@ namespace SelectOR
         };
         Color ZoneColor(string name)
         {
+            int bz = BandOfZone(name); if (bz > 0) return Bandas.Colors[bz];   // (2026-11-09) con bandas: el color de su banda
             int i = _zones?.FindIndex(z => z.Name == name) ?? -1;
             return ZonePalette[(i < 0 ? 0 : i) % ZonePalette.Length];
         }
@@ -55,8 +56,11 @@ namespace SelectOR
                     m.Items.Add(it);
                 }
                 Item(Tr("Tramo de cada dependencia"), () => _showZones, v => _showZones = v);
-                Item(Tr("Puntos kilométricos (PK)"), () => _showPk, v => _showPk = v);
+                Item(Tr("Puntos kilométricos (PK)"), () => _showPk, v => { _showPk = v; SchematicDraw.ShowPk = v; });   // (2026-11-10: también en el esquema)
                 Item(Tr("Objetos de la sala"), () => _showObjs, v => _showObjs = v);
+                Item(Tr("Túneles"), () => _showTunnels, v => _showTunnels = v);   // (2026-11-09) DispatchForm.Tuneles.cs
+                Item(Tr("Notas del administrador"), () => _showNotes, v => _showNotes = v);   // (2026-11-09) DispatchForm.Notas.cs
+                Item(Tr("Sentido de bloqueo"), () => _showBlocks, v => _showBlocks = v);   // (2026-11-10) DispatchForm.Bloqueo.cs
                 m.Show(_layersBtn, new Point(0, _layersBtn.Height));
             };
             new ToolTip().SetToolTip(_layersBtn, Tr("Lo que se ve encima del trazado: el tramo de cada dependencia, los PK y los objetos de la sala"));
@@ -100,6 +104,9 @@ namespace SelectOR
                     catch { _zoneSpansBusy = false; }
                 });
             }
+            NotesTick();   // (2026-11-09) notas del administrador, cada 20 s
+            AlertsTick();  // (2026-11-09) avisos de incidencias, cada 15 s (DispatchForm.Incidencias.cs)
+            TunnelsTick(); // (2026-11-09) los túneles, una vez (DispatchForm.Tuneles.cs)
             if (!_objBusy && DateTime.UtcNow >= _objNext)
             {
                 _objBusy = true; _objNext = DateTime.UtcNow.AddSeconds(15);
@@ -167,7 +174,8 @@ namespace SelectOR
             {
                 var col = ZoneColor(kv.Key);
                 bool line = IsLineZone(kv.Key);
-                using var pen = new Pen(Color.FromArgb(line ? 30 : 64, col), w) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+                int alpha = _curBand > 0 ? (BandOfZone(kv.Key) == _curBand ? 120 : 14) : line ? 30 : 64;   // (2026-11-09) viendo una banda: ella, resaltada
+                using var pen = new Pen(Color.FromArgb(alpha, col), w) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
                 PointF[] longest = null; float longLen = 0;
                 foreach (var (e, a, b) in kv.Value)
                 {
@@ -276,6 +284,7 @@ namespace SelectOR
         {
             using var fe = Theme.Font(9.5f);
             using var fl = Theme.Font(7.4f, FontStyle.Bold);
+            _btHits.Clear();
             float r = Theme.Px(10);
             var taken = new List<RectangleF>();   // (los rótulos no se pisan: el siguiente, debajo; si no cabe, sin rótulo)
             foreach (var o in _roomObjs)
@@ -283,14 +292,15 @@ namespace SelectOR
                 PointF? at0; try { at0 = where(o); } catch { at0 = null; }
                 if (at0 == null || !view.Contains(at0.Value)) continue;
                 var p = at0.Value;
-                bool fire = o.Kind == "fuego" || o.Kind == "incendio", worker = ObjetosSalaForm.IsWorker(o.Kind), sign = o.Kind == "cartel_parada";
-                var col = fire ? Color.FromArgb(255, 110, 40) : worker ? (o.Kind.StartsWith("obra_") ? Color.FromArgb(255, 170, 40) : ObjetosSalaForm.PersonColor(o.Kind)) : sign ? Color.FromArgb(230, 60, 60) : Color.FromArgb(190, 140, 90);
+                bool fire = o.Kind == "fuego" || o.Kind == "incendio", worker = ObjetosSalaForm.IsWorker(o.Kind), sign = o.Kind == "cartel_parada", bt = ObjetosSalaForm.IsBt(o.Kind);
+                var col = bt ? BtColor(o.Id) : fire ? Color.FromArgb(255, 110, 40) : worker ? (o.Kind.StartsWith("obra_") ? Color.FromArgb(255, 170, 40) : ObjetosSalaForm.PersonColor(o.Kind)) : sign ? Color.FromArgb(230, 60, 60) : Color.FromArgb(190, 140, 90);
                 using (var b = new SolidBrush(Color.FromArgb(235, 22, 26, 32))) g.FillEllipse(b, p.X - r, p.Y - r, 2 * r, 2 * r);
                 using (var pen = new Pen(col, 2f)) g.DrawEllipse(pen, p.X - r, p.Y - r, 2 * r, 2 * r);
-                string emo = fire ? "🔥" : worker ? (o.Kind.StartsWith("obra_") ? "👷" : ObjetosSalaForm.PersonIcon(o.Kind).Trim()) : sign ? "🛑" : "⛰";
+                if (bt) _btHits.Add((new RectangleF(p.X - r - 3, p.Y - r - 3, 2 * r + 6, 2 * r + 6), o, p));   // (2026-11-10: clic derecho, su indicación)
+                string emo = bt ? "🚩" : fire ? "🔥" : worker ? (o.Kind.StartsWith("obra_") ? "👷" : ObjetosSalaForm.PersonIcon(o.Kind).Trim()) : sign ? "🛑" : "⛰";
                 ColorText.Text(g, emo, fe, Rectangle.Round(new RectangleF(p.X - r, p.Y - r, 2 * r, 2 * r)), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
                 if (!labels) continue;
-                string t = Tr(ObjetosSalaForm.Kinds.FirstOrDefault(k => k.kind == o.Kind).label ?? o.Kind);
+                string t = bt ? BtLabel(o.Id) : Tr(ObjetosSalaForm.Kinds.FirstOrDefault(k => k.kind == o.Kind).label ?? o.Kind);
                 var sz = g.MeasureString(t, fl);
                 var box = new RectangleF(p.X - sz.Width / 2 - 3, p.Y + r + 2, sz.Width + 6, sz.Height);
                 int tries = 0; while (taken.Any(t => t.IntersectsWith(box)) && tries++ < 3) box.Y += box.Height + 1;

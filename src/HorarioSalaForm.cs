@@ -51,6 +51,7 @@ namespace SelectOR
         readonly Label _status;
         List<Service> _services = new();
         List<string> _stations, _consists;
+        List<HorarioServicioForm.Place> _places;   // (2026-11-11) estaciones, terminales de mercancías y apartaderos (con su sitio)
         RouteGraph _g;
         public Func<string, object, Task<(string json, string err)>> Rpc = Supa.RpcAsync;   // (las pruebas la cambian)
         public Func<string, Task<string>> RetireAi;   // (1.2.78) retirar ya los trenes IA (null = todos; o un servicio): null si fue bien
@@ -109,12 +110,14 @@ namespace SelectOR
 
             var foot = new DialogKit.Footer();
             var add = DialogKit.Primary(Tr("Añadir servicio"), 160);
-            var edit = DialogKit.Secondary(Tr("Editar"), 110);
+            var edit = DialogKit.Secondary(Tr("Itinerario…"), 120);   // (2026-11-11) datos e itinerario en una sola ventana
             var del = DialogKit.Danger(Tr("Quitar"), 110);
             var test = DialogKit.Secondary(Tr("Probar camino"), 140);
+            var check = DialogKit.Primary(Tr("Comprobar horario"), 180);   // (2026-11-11) atascos y problemas antes de publicarlo (HorarioSalaForm.Comprobar.cs)
+            check.Click += async (s, e) => { check.Enabled = false; try { await CheckAll(); } finally { if (!IsDisposed) check.Enabled = true; } };
             var retire = DialogKit.Danger(Tr("Retirar trenes IA…"), 170);   // (1.2.78)
-            var routeBtn = DialogKit.Secondary(Tr("Recorrido…"), 120);       // (1.2.79) vías de salida, de llegada y de paso, en el mapa
-            routeBtn.Click += async (s, e) => await EditRoute(_cards.Selected);
+            // (2026-11-11) el «Recorrido…» (vías de salida, de llegada y de paso) va ahora dentro del itinerario de cada servicio
+            // (HorarioServicioForm): «Editar» o doble clic en la tarjeta
             retire.Click += (s, e) => RetireMenu(retire);
             var close = DialogKit.Secondary(Tr("Cerrar"), 110);
             add.Click += async (s, e) => await Edit(null);
@@ -124,8 +127,8 @@ namespace SelectOR
             close.Click += (s, e) => Close();
             var editors = DialogKit.Secondary(Tr("Gestores…"), 120);   // (1.2.81) quién más puede cambiar los servicios
             editors.Click += async (s, e) => await EditEditors();
-            if (admin) foot.AddRight(close, test, routeBtn, del, edit, add, retire, editors);
-            else foot.AddRight(close, test, routeBtn, del, edit, add);
+            if (admin) foot.AddRight(close, test, check, del, edit, add, retire, editors);
+            else foot.AddRight(close, test, check, del, edit, add);
             _status = new Label { AutoSize = false, Width = Theme.Px(160), ForeColor = Theme.Subtle, BackColor = foot.BackColor, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(Theme.Px(16), 0, 0, 0) };
             foot.AddLeft(_status);
 
@@ -271,6 +274,7 @@ namespace SelectOR
                     foreach (var (_, n) in E.Sidings) if (!string.IsNullOrWhiteSpace(n)) names.Add(n.Trim());
                 }
             _stations = names.ToList();
+            _places = BuildPlaces(_g);
             var cons = new SortedSet<string>(StringComparer.CurrentCultureIgnoreCase);
             try
             {
@@ -283,72 +287,49 @@ namespace SelectOR
 
         static readonly Regex Hm = new Regex(@"^([01]\d|2[0-3]):[0-5]\d$");
 
-        // (1.2.78) por el servicio mismo (null = nuevo), no por su posición en la lista
+        // (1.2.78) por el servicio mismo (null = nuevo), no por su posición en la lista. (2026-11-11) Datos e itinerario en una
+        // sola ventana (HorarioServicioForm): origen, paradas y destino con el mapa del camino y las vías marcadas
         async Task Edit(Service sv)
         {
-            bool isNew = sv == null;
             await EnsureLists();
-            var s = sv ?? new Service();
-            var stations = new List<string>(_stations);
-            // (1.2.78) su origen y su destino aunque ya no salgan en la ruta (antes se enseñaba la primera estación de la lista)
-            foreach (var st in new[] { s.Destination, s.Origin })
-                if (st != "" && !stations.Any(x => string.Equals(x, st, StringComparison.CurrentCultureIgnoreCase))) stations.Insert(0, st);
-            var cons = _consists.Count > 0 ? new List<string>(_consists) : new List<string>();
-            if (s.Consist != "" && !cons.Contains(s.Consist)) cons.Insert(0, s.Consist);
-            var stopList = s.Stops == "todas" || s.Stops == "ninguna" ? new List<string>() : s.Stops.Split(',').Select(x => x.Trim()).Where(x => x != "").ToList();
-            using var dlg = new FormDialog(!isNew ? Tr("Editar servicio") : Tr("Nuevo servicio"), Tr("Guardar"), 560, "🚆", Tr("Trenes IA de la sala compartida de CGL"));
-            dlg.AddText("name", Tr("Nombre (p. ej. C1)"), s.Name);
-            dlg.AddCombo("kind", Tr("Tipo"), Kinds.Select(KindName), Math.Max(0, Array.IndexOf(Kinds, s.Kind)));
-            int StIdx(string n) => Math.Max(0, stations.FindIndex(x => string.Equals(x, n, StringComparison.CurrentCultureIgnoreCase)));
-            dlg.AddCombo("origin", Tr("Origen"), stations, StIdx(s.Origin));
-            dlg.AddCombo("dest", Tr("Destino (en circular: por dónde da la vuelta)"), stations, StIdx(s.Destination));
-            // (1.2.81) solo ida, ida y vuelta o circular
-            string[] trips = { Tr("Solo ida"), Tr("Ida y vuelta (cambia de cabina en el destino y vuelve al origen)"), Tr("Circular (pasa por el destino sin cambiar de cabina y acaba en el origen)") };
-            dlg.AddCombo("trip", Tr("Recorrido"), trips, Math.Max(0, Array.IndexOf(Trips, s.Trip ?? "")));
-            dlg.AddCombo("con", Tr("Composición"), cons, Math.Max(0, cons.IndexOf(s.Consist)));
-            dlg.AddText("first", Tr("Primera salida (HH:MM, hora de la sala)"), s.First);
-            dlg.AddText("every", Tr("Cada cuántos minutos (0 = una sola salida)"), s.Every.ToString(CultureInfo.InvariantCulture));
-            dlg.AddText("last", Tr("Última salida (HH:MM)"), s.Last);
-            string[] modes = { Tr("En todas las estaciones"), Tr("Sin paradas"), Tr("Solo en las marcadas") };
-            int mode = s.Stops == "todas" ? 0 : s.Stops == "ninguna" ? 1 : 2;
-            dlg.AddCombo("mode", Tr("Paradas"), modes, mode);
-            var marked = stopList.Select(x => stations.FindIndex(y => string.Equals(y, x, StringComparison.CurrentCultureIgnoreCase))).Where(i => i >= 0).ToList();
-            dlg.AddChecklist("stops", Tr("Estaciones en las que para"), stations, marked, 120);
-            dlg.AddCombo("active", Tr("Activo"), new[] { Tr("Sí"), Tr("No") }, s.Active ? 0 : 1);
-            if (dlg.Field("mode") is ComboBox mb && dlg.Field("stops") is Control sl)
-            {
-                sl.Enabled = mb.SelectedIndex == 2;
-                mb.SelectedIndexChanged += (o, e) => sl.Enabled = mb.SelectedIndex == 2;
-            }
-            dlg.Validate = async d =>
-            {
-                string name = d.Get("name"), first = d.Get("first"), last = d.Get("last"), every = d.Get("every");
-                if (name.Length == 0 || name.Length > 24 || name.Contains('|')) return Tr("El nombre: de 1 a 24 letras, sin «|».");
-                if (!Hm.IsMatch(first) || !Hm.IsMatch(last)) return Tr("Las horas, como 07:30.");
-                if (!int.TryParse(every, NumberStyles.Integer, CultureInfo.InvariantCulture, out int ev) || ev < 0 || ev > 1440) return Tr("Cada cuántos minutos: de 0 a 1440.");
-                int oi = d.Index("origin"), di = d.Index("dest"), ci = d.Index("con");
-                if (oi < 0 || di < 0 || oi >= stations.Count || di >= stations.Count) return Tr("Elige el origen y el destino.");
-                if (oi == di) return Tr("El origen y el destino son la misma estación.");
-                if (ci < 0 || ci >= cons.Count) return Tr("Elige la composición.");
-                int md = d.Index("mode");
-                string stops = md == 0 ? "todas" : md == 1 ? "ninguna" : string.Join(", ", d.Checked("stops").Select(i => stations[i]));
-                if (md == 2 && stops.Length == 0) return Tr("Marca alguna estación, o elige «En todas las estaciones» o «Sin paradas».");
-                // (1.2.77) su composición descrita: el despachador de la sala no tiene las composiciones de cada uno (AiConsistSpec.cs)
-                string baseDir = Path.GetDirectoryName(Path.GetDirectoryName(_routeDir.TrimEnd('\\', '/'))) ?? "";
-                string spec = AiConsistSpec.Build(baseDir, cons[ci]);
-                if (spec == null) return string.Format(Tr("No se puede leer la composición «{0}» en tu Open Rails."), cons[ci]);
-                string trip = Trips[Math.Max(0, Math.Min(Trips.Length - 1, d.Index("trip")))];
-                var (json, err) = await Rpc("room_ai_service_save_trip", new
+            using var f = new HorarioServicioForm(sv, _places, _consists, _g, _map?.Data, Rpc, _route, _routeDir) { Precheck = Precheck };
+            if (f.ShowDialog(this) == DialogResult.OK) { _status.Text = Tr("Servicio guardado: la sala lo aplica en un minuto."); await Reload(); }
+        }
+
+        // (2026-11-11) los sitios de la ruta para el itinerario: las estaciones (los nombres de sus andenes, como siempre: los que
+        // entiende el despachador), las terminales de mercancías y los apartaderos con nombre (agrupadas sus vías: los mismos
+        // que «Tu tren en la sala»), cada uno en su sitio del mapa
+        public static List<HorarioServicioForm.Place> BuildPlaces(RouteGraph g)
+        {
+            var res = new List<HorarioServicioForm.Place>();
+            if (g == null) return res;
+            var st = new Dictionary<string, List<(double x, double y)>>(StringComparer.CurrentCultureIgnoreCase);
+            for (int e = 0; e < g.Edges.Length; e++)
+                foreach (var (off, n) in g.Edges[e].Platforms)
                 {
-                    p_id = !isNew ? (long?)s.Id : null, p_name = name, p_kind = Kinds[Math.Max(0, d.Index("kind"))], p_origin = stations[oi], p_destination = stations[di],
-                    p_consist = cons[ci], p_first_time = first, p_every_min = ev, p_last_time = last, p_stops = stops, p_active = d.Index("active") == 0, p_route = _route,
-                    p_consist_spec = spec, p_trip = trip
-                });
-                if (err != null && (err.IndexOf("PGRST202", StringComparison.OrdinalIgnoreCase) >= 0 || err.IndexOf("room_ai_service_save_trip", StringComparison.OrdinalIgnoreCase) >= 0))
-                    return Tr("El servidor aún no guarda el recorrido de ida y vuelta (falta horario-gestores-vueltas.sql).");
-                return err;
-            };
-            if (dlg.ShowDialog(this) == DialogResult.OK) await Reload();
+                    if (string.IsNullOrWhiteSpace(n)) continue;
+                    if (!st.TryGetValue(n.Trim(), out var l)) st[n.Trim()] = l = new();
+                    l.Add(g.PointAt(e, off));
+                }
+            foreach (var kv in st.OrderBy(k => k.Key, StringComparer.CurrentCultureIgnoreCase))
+            {
+                var (la, lo) = g.Unproj(kv.Value.Average(p => p.x), kv.Value.Average(p => p.y));
+                res.Add(new HorarioServicioForm.Place { Name = kv.Key, Kind = 0, Lat = la, Lon = lo, HasPos = true });
+            }
+            var fr = MainMenuForm.FreightPlaces(g, st.Keys);
+            foreach (var (name, x, y) in fr)
+            {
+                if (res.Any(p => MainMenuForm.SamePlace(p.Name, name, exact: true))) continue;
+                var (la, lo) = g.Unproj(x, y);
+                res.Add(new HorarioServicioForm.Place { Name = name, Kind = 1, Lat = la, Lon = lo, HasPos = true });
+            }
+            foreach (var (name, x, y) in MainMenuForm.SidingPlaces(g, st.Keys.Concat(fr.Select(f => f.name))))
+            {
+                if (res.Any(p => MainMenuForm.SamePlace(p.Name, name, exact: true))) continue;
+                var (la, lo) = g.Unproj(x, y);
+                res.Add(new HorarioServicioForm.Place { Name = name, Kind = 2, Lat = la, Lon = lo, HasPos = true });
+            }
+            return res;
         }
 
         async Task Delete(Service s)
@@ -376,26 +357,15 @@ namespace SelectOR
         // (Aproximado: no mira por qué lado se puede pasar cada aguja.)
         public static double PathKm(RouteGraph g, string from, string to)
         {
-            bool Is(string n, string want) => n != null && string.Equals(n.Trim(), want?.Trim(), StringComparison.CurrentCultureIgnoreCase);
             var dist = new Dictionary<int, double>(); var pq = new PriorityQueue<int, double>();
             double best = double.MaxValue;
             void Seed(int n, double d) { if (n < 0) return; if (!dist.TryGetValue(n, out double o) || d < o) { dist[n] = d; pq.Enqueue(n, d); } }
-            var targets = new List<(int e, double off)>();
-            for (int e = 0; e < g.Edges.Length; e++)
-            {
-                var E = g.Edges[e];
-                foreach (var (off, n) in E.Platforms.Concat(E.Sidings))
-                {
-                    if (Is(n, from)) { Seed(E.A, off); Seed(E.B, E.Len - off); }
-                    if (Is(n, to)) targets.Add((e, off));
-                }
-            }
+            // (2026-11-11) también terminales y apartaderos agrupados (HorarioSalaForm.PlaceSpots)
+            var starts = PlaceSpots(g, from);
+            var targets = PlaceSpots(g, to);
+            foreach (var (e, off) in starts) { var E = g.Edges[e]; Seed(E.A, off); Seed(E.B, E.Len - off); }
             // origen y destino en el mismo tramo
-            for (int e = 0; e < g.Edges.Length; e++)
-            {
-                var E = g.Edges[e];
-                foreach (var (o1, n1) in E.Platforms.Concat(E.Sidings)) if (Is(n1, from)) foreach (var (o2, _) in targets.Where(t => t.e == e)) best = Math.Min(best, Math.Abs(o2 - o1));
-            }
+            foreach (var (e, o1) in starts) foreach (var (_, o2) in targets.Where(t => t.e == e)) best = Math.Min(best, Math.Abs(o2 - o1));
             while (pq.TryDequeue(out int n, out double dn))
             {
                 if (dn > dist[n] + 1e-6 || dn > best) continue;

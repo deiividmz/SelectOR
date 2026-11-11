@@ -89,7 +89,7 @@ namespace SelectOR
         protected static void Round(Graphics g, Rectangle r, int radius, Color c) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.FillRound(g, r, radius, c); g.SmoothingMode = SmoothingMode.None; }
         protected static void Border(Graphics g, Rectangle r, int radius, Color c, float w = 1f) { g.SmoothingMode = SmoothingMode.AntiAlias; Theme.DrawRoundBorder(g, r, radius, c, w); g.SmoothingMode = SmoothingMode.None; }
         protected static void Text(Graphics g, string s, Font f, Rectangle r, Color c, TextFormatFlags fl) { if (!string.IsNullOrEmpty(s) && r.Width > 0) ColorText.Text(g, s, f, r, c, fl); }
-        protected static int TW(string s, Font f) => string.IsNullOrEmpty(s) ? 0 : TextRenderer.MeasureText(s, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+        protected static int TW(string s, Font f) => string.IsNullOrEmpty(s) ? 0 : ColorText.LineWidth(s, f);
         protected static string Initials(string name)
         {
             var p = (name ?? "").Split(new[] { ' ', '_', '.', '-' }, StringSplitOptions.RemoveEmptyEntries);
@@ -436,12 +436,14 @@ namespace SelectOR
             public string PointsText = ""; public Color PointsColor = Theme.Subtle; public bool Suspended;
             public string Services = "—", Km = "—", Net = "—"; public bool NetNeg;
             public Image Photo;                         // foto de carnet (null = iniciales)
+            public string CertDriver = ""; public bool CertJefe;   // (2026-11-09) títulos: nivel de maquinista (B, A, A+) y jefe titulado
         }
         public List<Member> Members = new List<Member>();
         public string CompanyName = ""; public Image CompanyLogo;
         public string SelectedId { get; private set; }
         public event Action SelectionChanged;
         public string LblLicense = "Carné", LblServices = "servicios", LblKm = "en la empresa", LblNet = "neto", LblSuspended = "SUSPENDIDO";
+        public string LblDriver = "Maquinista nivel {0}", LblJefe = "Jefe de circulación", LblNoCert = "Sin título";
         Font _fHead, _fRole, _fName, _fMeta, _fPts, _fFootB, _fFoot, _fPhoto, _fStamp, _fLogo;
         readonly List<(Member m, Rectangle r)> _cards = new();
         string _hover;
@@ -456,7 +458,7 @@ namespace SelectOR
         {
             _cards.Clear();
             int gap = Theme.Px(14), cols = Math.Max(1, (w + gap) / (Theme.Px(300) + gap));
-            int cw = (w - gap * (cols - 1)) / cols, ch = Theme.Px(176), y = Theme.Px(2);
+            int cw = (w - gap * (cols - 1)) / cols, ch = Theme.Px(198), y = Theme.Px(2);   // (2026-11-09: +22 para los títulos)
             for (int i = 0; i < Members.Count; i++)
             {
                 int c = i % cols; if (c == 0 && i > 0) y += ch + gap;
@@ -522,6 +524,22 @@ namespace SelectOR
             }
             Text(g, LblLicense, _fMeta, new Rectangle(tx, py + Theme.Px(9), tw / 2, Theme.Px(16)), Theme.Subtle, L1);
             Text(g, m.PointsText, _fPts, new Rectangle(tx + tw / 3, py + Theme.Px(9), tw - tw / 3, Theme.Px(16)), m.PointsColor, R1);
+            // (2026-11-09) títulos, con iconos (como junto al nombre en la sala): 🎓 y su nivel el de maquinista, 👮 el de jefe
+            {
+                int cy = py + Theme.Px(30), cx = tx, chH = Theme.Px(20);
+                var chips = new List<(string t, Color fg, Color bg)>();
+                if (!string.IsNullOrEmpty(m.CertDriver)) chips.Add(("🎓 " + m.CertDriver, Gold, Color.FromArgb(70, 62, 38)));
+                if (m.CertJefe) chips.Add(("👮", Blue, Color.FromArgb(48, 56, 82)));
+                foreach (var (t, fg, bg) in chips)
+                {
+                    int cw2 = Math.Min(TW(t, _fRole) + Theme.Px(14), r.Right - Theme.Px(12) - cx);
+                    if (cw2 < Theme.Px(30)) break;
+                    var cr = new Rectangle(cx, cy, cw2, chH);
+                    Round(g, cr, Theme.Px(6), bg);
+                    Text(g, t, _fRole, cr, fg, C1);
+                    cx += cw2 + Theme.Px(6);
+                }
+            }
             // pie: servicios · km · neto
             int fy = r.Bottom - Theme.Px(44);
             using (var p = new Pen(Color.FromArgb(18, 255, 255, 255))) { g.DrawLine(p, r.X, fy, r.Right, fy); g.DrawLine(p, r.X + r.Width / 3, fy, r.X + r.Width / 3, r.Bottom - 4); g.DrawLine(p, r.X + 2 * r.Width / 3, fy, r.X + 2 * r.Width / 3, r.Bottom - 4); }
@@ -610,7 +628,10 @@ namespace SelectOR
             }
             g.SmoothingMode = SmoothingMode.None;
             // marca de agua
-            ColorText.Text(g, "🚆", _fTrain, new Rectangle(r.Right - Theme.Px(150), r.Bottom - Theme.Px(120), Theme.Px(160), Theme.Px(130)), Color.FromArgb(52, 78, 60), TextFormatFlags.NoPadding);
+            // (2026-11-09) el icono de línea, muy tenue (difuminado: no tapa los datos)
+            var wm = new RectangleF(r.Right - Theme.Px(138), r.Bottom - Theme.Px(126), Theme.Px(120), Theme.Px(120));
+            if (LineIcons.Has("🚆")) LineIcons.Draw(g, "🚆", wm, Color.FromArgb(34, 150, 210, 160));
+            else ColorText.Text(g, "🚆", _fTrain, Rectangle.Round(wm), Color.FromArgb(52, 78, 60), TextFormatFlags.NoPadding);
             int x = Theme.Px(16), y = Theme.Px(12);
             Text(g, Caption, _fCap, new Rectangle(x, y, r.Width - 2 * x, Theme.Px(16)), Theme.AccentHi, L1);
             y += Theme.Px(24);

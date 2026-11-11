@@ -494,7 +494,7 @@ namespace SelectOR
             f.Controls.Add(stack);
             int crownH = DialogKit.Crown(f, Tr("Desglose del precio"), title, "💶").Height + 3;   // franja y cabecera (como las demás ventanas)
             f.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter) f.Close(); };
-            f.Load += (s, e) => { var ps = stack.GetPreferredSize(new Size(f.ClientSize.Width, 0)); f.ClientSize = new Size(Math.Max(f.ClientSize.Width, ps.Width), ps.Height + 4 + crownH); };
+            f.Load += (s, e) => FitDialogToScreen(f, stack, crownH, false);   // (2026-11-09) sin salirse de la pantalla
             _breakdownOpen = f;
             try { f.ShowDialog(this); } finally { _breakdownOpen = null; }
         }

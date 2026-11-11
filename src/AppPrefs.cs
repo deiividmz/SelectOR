@@ -56,6 +56,7 @@ namespace SelectOR
         // HUD de servicio (overlay pequeño sobre Open Rails mientras conduces un servicio de empresa).
         public bool ServiceHud { get; set; } = true;
         public bool HudCollapsed { get; set; }
+        public bool PuestoPlegada { get; set; }   // (2026-11-10) Puesto de Mando: la columna de dependencias, plegada
         public bool PuestoSoloMias { get; set; }   // (2026-11-08) Puesto de Mando: la lista solo con tus dependencias
         public bool HudMapOpen { get; set; } = true;   // mini-mapa desplegado por defecto
         public int HudX { get; set; } = -1;
@@ -138,6 +139,11 @@ namespace SelectOR
         // (1.2.90) radio de la sala (RoomRadio.cs): tecla de hablar, volumen (%), a quién no quiero oír y dónde va su mando
         public string RadioKey { get; set; } = "RControl";
         public int RadioVolume { get; set; } = 100;
+        public string SalaTipo { get; set; }      // (2026-11-09) sala compartida: el último tipo de servicio (C · MD · LD · AV · M)
+        public string SalaDestino { get; set; }   // … y la última dependencia de destino
+        public string SalaParadas { get; set; }   // (2026-11-10) … y sus paradas intermedias («A|B|C»)
+        public string RadioMic { get; set; }   // (2026-11-09) micrófono de la radio por su nombre de Windows; null = el predeterminado
+        public string RadioOut { get; set; }   // (2026-11-09) salida de la radio por su nombre de Windows; null = la predeterminada
         public List<string> RadioMuted { get; set; } = new List<string>();
         public int RadioHudX { get; set; } = int.MinValue;
         public int RadioHudY { get; set; } = int.MinValue;

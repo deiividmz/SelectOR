@@ -546,7 +546,7 @@ namespace SelectOR
                     if (dwell) Text(g, s.Dep, _fTime2, new Rectangle(tx, cy + Theme.Px(2), tw, Theme.Px(14)), Theme.Subtle, R1);
                     int d = Theme.Px(12);
                     g.SmoothingMode = SmoothingMode.AntiAlias;
-                    using (var b = new SolidBrush(end ? Theme.AccentHi : Theme.Surface)) g.FillEllipse(b, lx - d / 2, cy - d / 2, d, d);
+                    using (var b = new SolidBrush(Theme.AccentHi)) g.FillEllipse(b, lx - d / 2, cy - d / 2, d, d);   // (2026-11-09) punto lleno también en las paradas intermedias
                     using (var p = new Pen(Theme.AccentHi, Theme.Px(3))) g.DrawEllipse(p, lx - d / 2, cy - d / 2, d, d);
                     g.SmoothingMode = SmoothingMode.None;
                     string sub = i == 0 ? LblOrigin : i == Stops.Count - 1 ? LblDest : "";

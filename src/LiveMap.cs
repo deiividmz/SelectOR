@@ -566,6 +566,34 @@ namespace SelectOR
             }
         }
 
+        // (2026-11-09) Tu número de tren en la sala (arriba a la izquierda del minimapa): el número en ámbar, como un
+        // teleindicador, y debajo el tipo de servicio y el destino.
+        // editable: con el ratón encima, un ✎ (un clic lo cambia). Devuelve dónde está (para el clic).
+        public static Rectangle TrainNoChip(Graphics g, Rectangle area, string no, string sub, bool editable = false)
+        {
+            if (string.IsNullOrEmpty(no)) return Rectangle.Empty;
+            using var fN = Theme.Font(11f, FontStyle.Bold);
+            using var fS = Theme.Font(7f);
+            var szN = TextRenderer.MeasureText(g, no, fN, Size.Empty, TF);
+            var szS = string.IsNullOrEmpty(sub) ? Size.Empty : TextRenderer.MeasureText(g, sub, fS, Size.Empty, TF);
+            int w = Math.Min(area.Width / 2 + 40, Math.Max(szN.Width + (editable ? 18 : 0), szS.Width) + 14), h = szN.Height + (szS.Height > 0 ? szS.Height : 0) + 6;
+            var rc = new Rectangle(area.Left + 4, area.Top + 4, w, h);
+            var st = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = Theme.Round(rc, 6))
+            {
+                using (var b = new SolidBrush(Color.FromArgb(235, 18, 20, 22))) g.FillPath(b, path);
+                using (var pen = new Pen(Color.FromArgb(150, 255, 176, 32))) g.DrawPath(pen, path);
+            }
+            g.Restore(st);
+            TextRenderer.DrawText(g, no, fN, new Point(rc.X + 7, rc.Y + 2), Color.FromArgb(255, 186, 48), TF);
+            if (editable) TextRenderer.DrawText(g, "✎", fS, new Point(rc.Right - 15, rc.Y + 4), Color.FromArgb(220, 255, 186, 48), TF);
+            if (szS.Height > 0)
+                TextRenderer.DrawText(g, sub, fS, new Rectangle(rc.X + 7, rc.Y + 2 + szN.Height, rc.Width - 10, szS.Height), Color.FromArgb(200, 204, 208),
+                                      TF | TextFormatFlags.EndEllipsis);
+            return rc;
+        }
+
         // Aviso del minimapa: «N maquinistas en la ruta» (cuenta también a los que quedan fuera de la vista).
         public static void Chip(Graphics g, Rectangle area, int count)
         {

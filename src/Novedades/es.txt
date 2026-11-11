@@ -1,13 +1,17 @@
-﻿1.2.92
-Títulos de maquinista y de jefe de circulación|En Mi perfil → Títulos haces el examen y subes de nivel (B, A y A+) con tus servicios. Para tomar el mando como jefe de circulación hay que aprobar su examen. Los titulados llevan su distintivo en la sala, el chat y la radio, y las empresas pueden pedir un título en sus ofertas del Tablón.
-Consejos en el Tablón|Una sección nueva con consejos para sacar más beneficio en cada viaje: tarifas, viajeros según la hora y el clima, y más, con las cifras del momento.
-Itinerarios más rápidos|En el Puesto de mando, clic en la señal y clic en el destino: el camino se dibuja al momento. Con el botón derecho tienes más opciones y «Repetir» vuelve a poner los últimos.
-Solo tus dependencias|El botón «Solo las mías» del Puesto de mando enseña solo las dependencias que llevas, y se recuerda.
-Desconectar desde el puesto|El jefe de circulación puede desconectar a un usuario o retirar vagones sueltos dentro de sus dependencias, siempre con un motivo que se le enseña.
-Perfil de quien pide entrar|Los gerentes ven el perfil de quien pide entrar en su empresa antes de aceptarlo.
-Todos los viajeros en la liga|La liga y el registro de tus servicios cuentan todos los viajeros que llevas, aunque el cobro tenga su límite.
-Más mandos compatibles|Ajustes → Mandos: palanca de regulador + freno de tren, palanca combinada que se adapta a cada tren (con su punto de reposo, automático o a mano) y botones que se quedan activos hasta la siguiente pulsación.
-Velocidad prefijada más ágil|En Estable, Testing y CYZYRails la velocidad prefijada del control de crucero se mueve tan deprisa como en New Year.
-Luces en Breclav - Praha|Con CYZYRails, las estaciones de la ruta Breclav - Praha se iluminan con luz amarilla.
-Trenes de la sala más estables|Tu Open Rails ya no se atasca con los trenes de otros que se salen de su camino, y un tren IA ya no se engancha al tuyo.
-Sin Ctrl+9 en la sala|En la sala compartida la ventana de Ctrl+9 ya no se abre con ninguna versión de Open Rails.
+﻿1.3.0
+Sentido de bloqueo|En la sala compartida cada trayecto entre estaciones tiene su sentido de bloqueo: dos trenes ya no pueden entrar de frente en la misma vía. Sin jefe de circulación lo pone el primer tren que entra; con jefe, lo cambia él desde el Puesto de Mando, donde se ve con una flecha en cada vía.
+Señales como en Conducción libre|En la sala las señales se comportan como cuando conduces solo: las de detrás de tu tren solo se abren si inviertes la marcha, una señal abierta ya no se cierra cuando no te da tiempo a parar, y las banderas y la indicación de vía desviada siguen a las agujas.
+Órdenes a las señales|En la sala ya no se fuerzan señales en anuncio ni en vía libre: se abren solas. El rebase autorizado lo da el jefe de circulación de esa estación o el administrador, y en las estaciones de un jefe sus órdenes ya no caducan solas.
+Puesto de Mando renovado|Esquema de toda la ruta estación a estación, agrupado en bandas de regulación, con puntos kilométricos, pasos a nivel con su PK, túneles, apartaderos con su nombre y el triángulo de Parque Grande. Las señales ya no se pisan y, donde hay muchas juntas, cuelgan de un pórtico.
+Dependencias y trenes en el Puesto|La columna de Dependencias se pliega y cada estación lleva sus tramos de línea. A la derecha, los trenes de lo que ves con su número, tipo, destino, paradas y su composición 2D: clic para localizarlo y doble clic para seguirlo.
+Tu tren en la sala|Antes de entrar eliges en un mapa el tipo de servicio, el destino y tus paradas intermedias (estaciones, mercancías o apartaderos), y te sale tu número de tren. Lo ves en el HUD, el jefe de circulación en el Puesto, y lo cambias conduciendo con un clic en tu número.
+Radio por bandas|Conduciendo oyes la radio de tu banda de regulación; los jefes de circulación tienen su propio canal y el administrador puede hablar a todas a la vez. Puedes elegir el micrófono y la salida de sonido.
+Responsable de circulación|En algunas estaciones un responsable de circulación da la salida desde el andén: señal de parada, de paso o «marche el tren», con banderín de día, linterna verde o roja de noche y silbato. Su indicación la cambia el jefe de circulación desde el Puesto.
+Trenes IA más fluidos|Los trenes IA de la sala ya no se atascan entre ellos, los de viajeros pasan antes que los de mercancías en vía única y pueden parar en terminales de mercancías y apartaderos. Tus composiciones elegidas para ellos se aplican también a los que ya circulan cuando entras.
+Avisos de incidencias|El Puesto de Mando avisa de las incidencias de la sala con su sonido y las marca en su sitio del plano.
+Empresas con otra cara|Empresas como un plano de líneas: cifras en billetes, fichas de servicio con su señal de estado, sus pluses y su foto, y los títulos de cada socio.
+Requisitos de empresa|Las empresas pueden exigir km o minutos mínimos por servicio y estar en su Discord; el servicio que no los cumple se anula solo, y se puede alegar.
+Plus nocturno|Los servicios de viajeros hechos de noche cobran un plus por cada kilómetro nocturno.
+Hora, estación y clima del servicio|La tarjeta de cada servicio guarda la hora del simulador a la que saliste, la estación del año y el clima.
+La ruta de la sala, la primera|Si tienes instalada la ruta de la sala compartida (CGL_V22N_RE), sale fijada arriba en Rutas con un marco dorado.
+Mercancías en los mapas|Las terminales y apartaderos de mercancías salen con su nombre en todos los mapas.

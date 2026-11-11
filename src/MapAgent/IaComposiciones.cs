@@ -6,7 +6,11 @@
 //    servicio está en la lista, su lista de vehículos se cambia ENTERA por la del .con (como cuando falta algún vehículo:
 //    mismo número de vehículos, identificadores y largos, para que no se descuadre el multijugador; si el tren tiene más
 //    vehículos, la composición se repite), y cada coche guarda el vehículo que era de verdad.
-//  · Vale para los trenes IA que aparezcan desde que llega la lista (los que ya están, siguen como estaban).
+//  · (2026-11-11, revisión) Los trenes IA que ya estaban en la vía al entrar en la sala (o que tu Open Rails vuelve a pedir)
+//    no llegan con TRAIN sino con UPDATETRAIN, que no lleva el nombre del tren: SelectOR manda también qué número de tren es
+//    cada tren IA («AICON NUM <número>\t<nombre del tren>», de la lista de trenes de la sala: «IA-nombre-número») y así se
+//    les pone también tu composición.
+//  · Vale para los trenes IA que aparezcan desde que llega la lista (los que ya están en tu Open Rails, siguen como estaban).
 
 using System;
 using System.Collections.Concurrent;
@@ -24,11 +28,22 @@ namespace SelectOR.MapAgent
         static Dictionary<string, string> _new;
         static readonly ConcurrentDictionary<string, VehiculosCache.Con> _cons = new ConcurrentDictionary<string, VehiculosCache.Con>(StringComparer.OrdinalIgnoreCase);
         static readonly ConcurrentDictionary<string, bool> _said = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        static readonly ConcurrentDictionary<int, string> _byNum = new ConcurrentDictionary<int, string>();   // número de tren → su nombre
         static readonly Regex Hour = new Regex(@"\s+\d{1,2}:\d{2}$", RegexOptions.Compiled);
+
+        // (los «_» de la lista de trenes de la sala son espacios: se comparan igual)
+        static string Key(string s) => (s ?? "").Replace('_', ' ').Trim();
 
         // (hilo del enlace) la lista de SelectOR
         public static void Cmd(string s)
         {
+            if (s == null) return;
+            if (s.StartsWith("NUM ", StringComparison.Ordinal))
+            {
+                int t = s.IndexOf('\t');
+                if (t > 4 && int.TryParse(s.Substring(4, t - 4).Trim(), out int num) && t + 1 < s.Length) _byNum[num] = s.Substring(t + 1).Trim();
+                return;
+            }
             if (s == "BEGIN") { _new = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); return; }
             if (s == "END")
             {
@@ -39,16 +54,21 @@ namespace SelectOR.MapAgent
             }
             int k = s.IndexOf('\t');
             if (_new == null || k <= 0) return;
-            string name = s.Substring(0, k).Trim(), con = s.Substring(k + 1).Trim();
+            string name = Key(s.Substring(0, k)), con = s.Substring(k + 1).Trim();
             if (name.Length > 0 && con.Length > 0) _new[name] = con;
         }
+
+        // el nombre del tren IA de ese número, si SelectOR lo ha dicho (o null)
+        public static string NameOf(int num) => _byNum.TryGetValue(num, out var n) ? n : null;
+        // (al llegar su TRAIN, que sí lo trae)
+        public static void Seen(int num, string name) { if (num >= 0 && !string.IsNullOrWhiteSpace(name)) _byNum[num] = name.Trim(); }
 
         // la composición elegida para el tren de ese nombre («<servicio> HH:MM»), o null
         public static VehiculosCache.Con For(string trainName)
         {
             var map = _map;
             if (map.Count == 0 || string.IsNullOrEmpty(trainName)) return null;
-            string service = Hour.Replace(trainName.Trim(), "");
+            string service = Key(Hour.Replace(Key(trainName), ""));
             if (!map.TryGetValue(service, out var path)) return null;
             if (_cons.TryGetValue(path, out var c)) return c;
             c = Load(path);

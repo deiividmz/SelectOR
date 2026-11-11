@@ -69,6 +69,10 @@ namespace SelectOR
             pax.Add(("⚡", Tr("**Rápido y cómodo.** La velocidad media y el confort del tren suben el billete.")));
             double occ = S("pax_occ_full", 0.8), over = S("pax_occ_over", 0.3);
             pax.Add(("🧍", string.Format(Tr("**Sin ir a reventar.** Con el tren por encima del {0} de ocupación, los viajeros de pie cuentan al {1}."), Pct(occ), Pct(over))));
+            // (2026-11-09) el plus nocturno (sql/plus-nocturno.sql; sus cifras, del modelo de viajeros: Ajustes → Viajeros)
+            if (PaxCfg.NightBonusKm > 0)
+                pax.Add(("🌙", string.Format(Tr("**De noche, con plus.** Entre las {0}:00 y las {1}:00 (hora del juego) espera poca gente, pero la empresa cobra {2}/km de plus en proporción a las paradas hechas de noche."),
+                                             PaxCfg.NightFrom.ToString("00", c), PaxCfg.NightTo.ToString("00", c), Eur(PaxCfg.NightBonusKm))));
             AddTipCard(Tr("VIAJEROS"), Theme.AccentHi, pax, 0);
 
             // ── costes

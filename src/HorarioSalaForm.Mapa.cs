@@ -266,25 +266,41 @@ namespace SelectOR
         // Los andenes (o apartaderos) de salida y de llegada; si se marcó una vía (nodo vectorial), solo los de esa vía
         static (List<(int e, double off)> starts, List<(int e, double off)> targets) Ends(RouteGraph g, string from, string to, int o, int d)
         {
-            bool Is(string n, string want) => n != null && string.Equals(n.Trim(), want?.Trim(), StringComparison.CurrentCultureIgnoreCase);
-            var s = new List<(int, double)>(); var t = new List<(int, double)>();
-            for (int e = 0; e < g.Edges.Length; e++)
-            {
-                var E = g.Edges[e];
-                foreach (var (off, n) in E.Platforms.Concat(E.Sidings))
-                {
-                    if (Is(n, from)) s.Add((e, off));
-                    if (Is(n, to)) t.Add((e, off));
-                }
-            }
-            if (o >= 0 && s.Any(x => g.Edges[x.Item1].Vec == o)) s = s.Where(x => g.Edges[x.Item1].Vec == o).ToList();
-            if (d >= 0 && t.Any(x => g.Edges[x.Item1].Vec == d)) t = t.Where(x => g.Edges[x.Item1].Vec == d).ToList();
+            var s = PlaceSpots(g, from); var t = PlaceSpots(g, to);
+            if (o >= 0 && s.Any(x => g.Edges[x.e].Vec == o)) s = s.Where(x => g.Edges[x.e].Vec == o).ToList();
+            if (d >= 0 && t.Any(x => g.Edges[x.e].Vec == d)) t = t.Where(x => g.Edges[x.e].Vec == d).ToList();
             return (s, t);
+        }
+
+        // (2026-11-11) los andenes y vías de apartadero de un sitio (tramo, metro): los de su nombre exacto; si no hay, los de
+        // todas las vías de una terminal o un apartadero agrupado («Cereales Paco S.A.» → sus «… Vía 1», «… Vía 2»)
+        public static List<(int e, double off)> PlaceSpots(RouteGraph g, string place)
+        {
+            var exact = new List<(int, double)>(); var group = new List<(int, double)>();
+            if (g == null || string.IsNullOrWhiteSpace(place)) return exact;
+            for (int e = 0; e < g.Edges.Length; e++)
+                foreach (var (off, n) in g.Edges[e].Platforms.Concat(g.Edges[e].Sidings))
+                {
+                    if (MainMenuForm.SamePlace(n, place, exact: true)) exact.Add((e, off));
+                    else if (MainMenuForm.SamePlace(n, place)) group.Add((e, off));
+                }
+            return exact.Count > 0 ? exact : group;
         }
 
         // Dijkstra por la red de la ruta de cualquiera de «starts» al más cercano de «targets» (tramo y distancia desde su
         // principio); «reached», el punto al que llega. null si no hay vía.
         static List<(double lat, double lon)> Core(RouteGraph g, List<(int e, double off)> starts, List<(int e, double off)> targets, out (int e, double off) reached)
+        {
+            var parts = CoreParts(g, starts, targets, out reached);
+            if (parts == null) return null;
+            var outPts = new List<(double lat, double lon)>();
+            foreach (var (e, a, b) in parts) foreach (var (x, y) in Slice(g.Edges[e], a, b)) outPts.Add(g.Unproj(x, y));
+            return outPts.Count > 1 ? outPts : null;
+        }
+
+        // (2026-11-11) lo mismo, en trozos de tramo (tramo, desde, hasta: metros, en el sentido de la marcha): para la comprobación
+        // del horario (HorarioCheck: tiempos, andenes, vía única)
+        static List<(int e, double a, double b)> CoreParts(RouteGraph g, List<(int e, double off)> starts, List<(int e, double off)> targets, out (int e, double off) reached)
         {
             reached = (-1, 0);
             if (starts.Count == 0 || targets.Count == 0) return null;
@@ -320,9 +336,7 @@ namespace SelectOR
                 }
             }
             if (best == double.MaxValue) return null;
-            var outPts = new List<(double lat, double lon)>();
-            void Add(int e, double a, double b) { foreach (var (x, y) in Slice(g.Edges[e], a, b)) outPts.Add(g.Unproj(x, y)); }
-            if (same != null) { Add(same.Value.e, same.Value.o1, same.Value.o2); reached = (same.Value.e, same.Value.o2); return outPts.Count > 1 ? outPts : null; }
+            if (same != null) { reached = (same.Value.e, same.Value.o2); return new List<(int, double, double)> { (same.Value.e, same.Value.o1, same.Value.o2) }; }
             reached = (bestEdge, bestOff);
             // de atrás hacia delante: el último tramo, los enteros y el primero
             var parts = new List<(int e, double a, double b)>();
@@ -341,8 +355,52 @@ namespace SelectOR
                 parts.Add((sd.edge, sd.off, E.A == cur ? 0 : E.Len));
             }
             parts.Reverse();
-            foreach (var (e, a, b) in parts) Add(e, a, b);
-            return outPts.Count > 1 ? outPts : null;
+            return parts;
+        }
+
+        // (2026-11-11) El recorrido de un servicio en trozos de tramo, como PathPoints (con las vías marcadas y la vuelta): Parts
+        // en orden de marcha; TurnAt, el primer trozo de la vuelta (−1 si no hay); null si no hay camino.
+        public sealed class RoutePlan
+        {
+            public List<(int e, double a, double b)> Parts = new();
+            public int TurnAt = -1;
+            public List<int> MissingVias = new();   // vías marcadas que no están en la ruta
+            public double Length => Parts.Sum(p => Math.Abs(p.b - p.a));
+        }
+        public static RoutePlan PlanRoute(RouteGraph g, string from, string to, string hint, string trip)
+        {
+            if (g == null) return null;
+            int o = -1, d = -1; var vias = new List<int>();
+            foreach (var part in (hint ?? "").Split(';'))
+            {
+                var kv = part.Split('='); if (kv.Length != 2) continue;
+                if (kv[0] == "o" && int.TryParse(kv[1], out int x)) o = x;
+                else if (kv[0] == "d" && int.TryParse(kv[1], out int y)) d = y;
+                else if (kv[0] == "v") foreach (var z in kv[1].Split(',')) if (int.TryParse(z, out int v)) vias.Add(v);
+            }
+            var plan = new RoutePlan();
+            var (starts, targets) = Ends(g, from, to, o, d);
+            if (starts.Count == 0 || targets.Count == 0) return null;
+            foreach (int v in vias)
+            {
+                var mid = new List<(int e, double off)>();
+                for (int e = 0; e < g.Edges.Length; e++) if (g.Edges[e].Vec == v) mid.Add((e, g.Edges[e].Len / 2));
+                if (mid.Count == 0) { plan.MissingVias.Add(v); continue; }
+                var seg = CoreParts(g, starts, mid, out var reached);
+                if (seg == null) continue;
+                plan.Parts.AddRange(seg);
+                starts = new List<(int, double)> { reached };
+            }
+            var last = CoreParts(g, starts, targets, out var arrived);
+            if (last == null) return plan.Parts.Count > 0 ? plan : null;
+            plan.Parts.AddRange(last);
+            if (trip == "vuelta" || trip == "circular")
+            {
+                var (_, home) = Ends(g, to, from, -1, o);
+                var back = CoreParts(g, new List<(int, double)> { arrived }, home, out _);
+                if (back != null) { plan.TurnAt = plan.Parts.Count; plan.Parts.AddRange(back); }
+            }
+            return plan.Parts.Count > 0 ? plan : null;
         }
 
         // Los vértices de un tramo entre dos distancias desde su inicio (en el sentido de a hacia b).

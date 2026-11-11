@@ -4,6 +4,10 @@
 //   · Pulsar → «RADIO ON»; el servidor da el canal («OK») o dice que está ocupado; soltar → «RADIO OFF».
 //   · Un jefe de circulación con mando corta a quien hable (servidor). Cada uno silencia a quien quiera (se recuerda) y el
 //     administrador puede silenciar a alguien para todos.
+//   · (2026-11-10, petición) CANALES: cada banda de regulación el suyo («b3»). Conduciendo, el de la banda por la que va tu tren
+//     (Bands, lo calcula MainMenuForm.Radio.cs); en el puesto, los de tus dependencias y el de la banda que ves. Los jefes de
+//     circulación tienen además el suyo («jefes», sin maquinistas) y el administrador puede hablar a todas («todas»). Se oye a
+//     la vez a quien hable en cada canal (RadioAudio mezcla). Sin banda aún: todo, como antes («*»).
 
 using System;
 using System.Collections.Generic;
@@ -25,8 +29,18 @@ namespace SelectOR
 
         readonly SwitchPilot _p; readonly Control _ui;
         public string Me;
-        public string Talking { get; private set; }   // quién habla ahora (null: nadie)
+        public string Talking { get; private set; }   // quién habla ahora (null: nadie; si hablan varios, el último que empezó)
         public bool TalkingJefe { get; private set; }
+        public string TalkingCh { get; private set; }  // (2026-11-10) en qué canal
+        readonly List<(string who, bool jefe, string ch)> _talkers = new();   // todos los que hablan ahora (uno por canal)
+        public int TalkingCount => _talkers.Count;
+        // (2026-11-10) los canales: los de banda que oye (null o vacío: aún no se sabe, todo), los que puede elegir para hablar (el
+        // primero, el de siempre) y el elegido (null: el de siempre)
+        public Func<IReadOnlyList<string>> Bands;
+        public Func<IReadOnlyList<string>> Choices;
+        public string Chosen;
+        string _chSent;
+        readonly Timer _chTimer;
         public bool Mine { get; private set; }        // tengo el canal
         bool _pending, _released, _btn, _joy, _key;
         public string Note { get; private set; }      // lo último que ha pasado (canal ocupado, te han cortado…)
@@ -38,10 +52,11 @@ namespace SelectOR
         public RoomRadio(SwitchPilot p, Control ui, string me)
         {
             _p = p; _ui = ui; Me = me;
+            RadioAudio.InDevice = Prefs?.RadioMic; RadioAudio.OutDevice = Prefs?.RadioOut;   // (2026-11-09) los de Ajustes
             if (_audio == null) { _audio = new RadioAudio(); _audio.MicError += () => Ui(() => SetNote(I18n.T("No se puede usar el micrófono: mira si está conectado y si Windows deja usarlo a SelectOR."))); }
             ApplyVolume();
             _audio.Captured += OnCaptured;
-            p.RadioStart += (who, jefe) => Ui(() => OnStart(who, jefe));
+            p.RadioStart += (who, jefe, ch) => Ui(() => OnStart(who, jefe, ch));
             p.RadioVoice += (who, b) => { if (Active == this && !IsMuted(who) && who != Me) _audio.Receive(who, b); };
             p.RadioEnd += who => Ui(() => OnEnd(who));
             p.RadioCut += by => Ui(() => OnCut(by));
@@ -54,6 +69,9 @@ namespace SelectOR
             foreach (var o in _all) if (o != this) o.Listening = false;
             Hello();
             StartKeys();
+            _chTimer = new Timer { Interval = 1000 };
+            _chTimer.Tick += (s, e) => SendChannels();
+            _chTimer.Start();
         }
 
         void Ui(Action a) { try { if (_ui != null && !_ui.IsDisposed && _ui.IsHandleCreated) _ui.BeginInvoke(a); else a(); } catch { } }
@@ -66,7 +84,39 @@ namespace SelectOR
             _p.RadioListen();
             foreach (var n in MutedList()) _p.RadioMute(n, true);
             Listening = true;
+            _chSent = null; SendChannels();
         }
+
+        // ---------------------------------------------------------------- canales
+        // (cada segundo, y al conectar) los de banda que oye, si han cambiado
+        void SendChannels()
+        {
+            if (!Listening || Active != this || !_p.Ready || !_p.ChatOk) return;
+            IReadOnlyList<string> b = null; try { b = Bands?.Invoke(); } catch { }
+            string s = b == null || b.Count == 0 ? "*" : string.Join(",", b.Distinct().OrderBy(x => x, StringComparer.Ordinal));
+            if (s == _chSent) return;
+            _chSent = s;
+            _p.RadioChannels(s == "*" ? null : s.Split(','));
+            Changed();
+        }
+
+        // por dónde se habla: el elegido si se puede; si no, el primero de los que se puede (o el de siempre)
+        public string TalkChannel
+        {
+            get
+            {
+                IReadOnlyList<string> c = null; try { c = Choices?.Invoke(); } catch { }
+                if (c == null || c.Count == 0) { IReadOnlyList<string> b = null; try { b = Bands?.Invoke(); } catch { } return b != null && b.Count > 0 ? b[0] : "*"; }
+                return Chosen != null && c.Contains(Chosen) ? Chosen : c[0];
+            }
+        }
+        public IReadOnlyList<string> ChoiceList { get { try { return Choices?.Invoke() ?? Array.Empty<string>(); } catch { return Array.Empty<string>(); } } }
+        public void Choose(string ch) { Chosen = ch; Changed(); }
+
+        // el nombre de un canal para la pantalla
+        public static string ChannelLabel(string ch) => ch == null || ch == "*" ? I18n.T("Toda la sala")
+            : ch == "jefes" ? I18n.T("Jefes de circulación") : ch == "todas" ? I18n.T("Todas las bandas")
+            : ch.Length > 1 && ch[0] == 'b' ? "BR" + ch.Substring(1) : ch;
 
         // ---------------------------------------------------------------- hablar
         public void SetButton(bool down) { _btn = down; Apply(); }
@@ -84,7 +134,7 @@ namespace SelectOR
             Hello();
             if (!_p.Ready || !_p.ChatOk) { SetNote(I18n.T("La radio no está conectada con la sala.")); return; }
             _pending = true; _released = false;
-            _p.RadioOn();
+            _p.RadioOn(TalkChannel);
             Changed();
         }
 
@@ -119,6 +169,7 @@ namespace SelectOR
             else if (code == "muted") { _audio.Busy(); SetNote(I18n.T("El administrador te ha silenciado en la radio.")); }
             else if (code == "notin") SetNote(I18n.T("Para hablar por la radio tienes que estar en la sala (conduciendo) o en tu puesto de jefe de circulación."));
             else if (code == "admin") SetNote(I18n.T("Solo el administrador puede silenciar a alguien para todos."));
+            else if (code == "nochan") SetNote(I18n.T("No puedes hablar por ese canal."));
             Changed();
         }
 
@@ -131,18 +182,21 @@ namespace SelectOR
             Changed();
         }
 
-        void OnStart(string who, bool jefe)
+        void OnStart(string who, bool jefe, string ch)
         {
-            Talking = who; TalkingJefe = jefe;
-            if (Active == this && who != Me && !IsMuted(who)) _audio.Squelch(true);
+            _talkers.RemoveAll(t => t.who == who || t.ch == ch);
+            _talkers.Add((who, jefe, ch));
+            Talking = who; TalkingJefe = jefe; TalkingCh = ch;
+            if (Active == this && who != Me && !IsMuted(who)) _audio.Squelch(true, who);
             Changed();
         }
 
         void OnEnd(string who)
         {
-            if (Talking != who) return;
-            Talking = null; TalkingJefe = false;
-            if (Active == this && who != Me && !IsMuted(who)) _audio.Squelch(false);
+            if (_talkers.RemoveAll(t => t.who == who) == 0 && Talking != who) return;
+            if (_talkers.Count > 0) { var l = _talkers[^1]; Talking = l.who; TalkingJefe = l.jefe; TalkingCh = l.ch; }
+            else { Talking = null; TalkingJefe = false; TalkingCh = null; }
+            if (Active == this && who != Me && !IsMuted(who)) _audio.Squelch(false, who);
             Changed();
         }
 
@@ -200,6 +254,7 @@ namespace SelectOR
         public void Dispose()
         {
             if (Mine) { try { _audio.Talk(false); _p.RadioOff(); } catch { } }
+            try { _chTimer.Stop(); _chTimer.Dispose(); } catch { }
             _audio.Captured -= OnCaptured;
             _all.Remove(this);
             var a = Active; if (a != null) { a.Listening = false; a.Hello(); }

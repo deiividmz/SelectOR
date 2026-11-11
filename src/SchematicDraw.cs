@@ -91,6 +91,7 @@ namespace SelectOR
         // (1.2.75) dónde ha quedado cada señal en el último dibujo (mástil, figura, preanuncio y número), para el clic: antes
         // solo valía el pie del mástil, sobre la vía, y la señal se pinta apartada
         static readonly ConditionalWeakTable<Schematic, List<(Schematic.Signal sg, RectangleF box)>> _sigBoxes = new();
+        static readonly ConditionalWeakTable<Schematic, Dictionary<(int, double, double), RectangleF>> _circBox = new();
         // (1.2.81) y cada número de aguja (su texto y su recuadro), y cada símbolo de tijera: para la auditoría de diseño
         static readonly ConditionalWeakTable<Schematic, List<(string t, RectangleF box)>> _numDrawn = new();
         public static List<(string t, RectangleF box)> NumbersDrawn(Schematic s) => s != null && _numDrawn.TryGetValue(s, out var l) ? l : new();
@@ -108,8 +109,12 @@ namespace SelectOR
             return best;
         }
 
+        public static Action<string> Prof;   // (medidas: auditoría)
         public static Color RouteColor => RouteCol;
         public static readonly Color QueueColor = Color.FromArgb(100, 181, 246);   // (1.2.75) itinerarios en cola
+        static readonly Color SidingCol = Color.FromArgb(150, 168, 186);   // (2026-11-10) el nombre de los apartaderos
+        static readonly Color PkCol = Color.FromArgb(196, 186, 140);       // (2026-11-10) los PK
+        public static bool ShowPk = true;                                   // (2026-11-10) los PK en el esquema (Capas del puesto)
 
         public static void Draw(Graphics g, Schematic s, SchematicLive live, PointF origin, float zoom, Rectangle area)
         {
@@ -119,6 +124,16 @@ namespace SelectOR
             if (s == null) return;
             PointF P(PointF q) => new PointF(origin.X + q.X * zoom, origin.Y + q.Y * zoom);
             float lw = Math.Max(2.6f, Math.Min(6f, 3.4f * zoom));
+            // (2026-11-10) solo lo que se ve (con margen): con la ruta entera en un esquema se dibujaba todo en cada repintado
+            var vis = RectangleF.Inflate(new RectangleF((area.Left - origin.X) / zoom, (area.Top - origin.Y) / zoom, area.Width / zoom, area.Height / zoom), 160 / zoom, 160 / zoom);
+            bool VisP(PointF q) => vis.Contains(q);
+            bool VisA(PointF[] a)
+            {
+                if (a == null || a.Length == 0) return false;
+                float x0 = a[0].X, x1 = x0, y0 = a[0].Y, y1 = y0;
+                for (int i = 1; i < a.Length; i++) { if (a[i].X < x0) x0 = a[i].X; else if (a[i].X > x1) x1 = a[i].X; if (a[i].Y < y0) y0 = a[i].Y; else if (a[i].Y > y1) y1 = a[i].Y; }
+                return x1 >= vis.Left && x0 <= vis.Right && y1 >= vis.Top && y0 <= vis.Bottom;
+            }
 
             // andenes (1.2.75, como en los esquemas de ADIF): una barra junto a su vía y el número de la vía a cada extremo
             float ph = Math.Max(3.5f, Math.Min(9f, 7f * zoom));
@@ -127,23 +142,31 @@ namespace SelectOR
             using (var pe = new Pen(PlatEdge, 1f))
                 foreach (var p in s.Platforms)
                 {
+                    if (!vis.IntersectsWith(RectangleF.Inflate(p.Bar, 2, 20))) continue;
                     var a = P(new PointF(p.Bar.Left, p.Bar.Top)); var b = P(new PointF(p.Bar.Right, p.Bar.Top));
                     var r = new RectangleF(a.X, p.Above ? a.Y - lw / 2 - 1.5f - ph : a.Y + lw / 2 + 1.5f, b.X - a.X, ph);
                     g.FillRectangle(pb, r); g.DrawRectangle(pe, r.X, r.Y, r.Width, r.Height);
                     platBars.Add(r);
                 }
 
+            Prof?.Invoke("circ");
             // vías: cada cantón aparte, de su color
             var circ = _circ.GetValue(s, SchematicCircuits.Circuits);
+            // (2026-11-10) el recuadro de cada cantón, una vez: para no calcular su trazado si no se ve
+            var cbox = _circBox.GetValue(s, ss => new Dictionary<(int, double, double), RectangleF>());
             float gap = Math.Max(1.2f, Math.Min(2.5f, 1.6f * zoom));
             bool Over(List<(double a, double b)> l, double a, double b) => l != null && l.Any(q => q.a < b - 0.5 && a + 0.5 < q.b);
             var lines = new List<PointF[]>();   // (1.2.81) lo dibujado, para colocar las señales
             // (1.2.81) la vía de un paso superior, la última y con un borde del color del fondo: corta las que pasan por debajo
             var overE = new HashSet<int>(s.Bridges.Select(q => q.Edge));
-            foreach (var (e, a, b) in circ.OrderBy(c => overE.Contains(c.e) ? 1 : 0))
+            var pens = new Dictionary<Color, Pen>();   // (un lápiz por color, no uno por cantón)
+            foreach (var (e, a, b) in overE.Count == 0 ? (IEnumerable<(int e, double a, double b)>)circ : circ.OrderBy(c => overE.Contains(c.e) ? 1 : 0))
             {
                 if (s.HiddenEdges.Contains(e)) continue;   // (1.2.81: los de una tijera van en su símbolo)
-                var pc = s.Piece(e, a, b); if (pc == null) continue;
+                if (cbox.TryGetValue((e, a, b), out var cb0) && !vis.IntersectsWith(cb0)) continue;
+                var pc = s.Piece(e, a, b);
+                if (pc != null && pc.Length > 0 && !cbox.ContainsKey((e, a, b))) cbox[(e, a, b)] = RectangleF.FromLTRB(pc.Min(q => q.X) - 1, pc.Min(q => q.Y) - 1, pc.Max(q => q.X) + 1, pc.Max(q => q.Y) + 1);
+                if (pc == null || !VisA(pc)) continue;
                 var pts = Trim(pc.Select(P).ToArray(), gap);
                 if (pts == null) continue;
                 Color col = TrackCol;
@@ -161,9 +184,29 @@ namespace SelectOR
                 if (overE.Contains(e))
                     using (var halo = new Pen(Bg, lw + Math.Max(4f, 3f * zoom)) { LineJoin = LineJoin.Round, StartCap = LineCap.Flat, EndCap = LineCap.Flat })
                         g.DrawLines(halo, Trim(pts, Math.Max(6f, 5f * zoom)) ?? pts);
-                using var pen = new Pen(col, lw) { LineJoin = LineJoin.Miter, StartCap = LineCap.Flat, EndCap = LineCap.Flat };
+                if (!pens.TryGetValue(col, out var pen)) pens[col] = pen = new Pen(col, lw) { LineJoin = LineJoin.Miter, StartCap = LineCap.Flat, EndCap = LineCap.Flat };
                 g.DrawLines(pen, pts);
                 lines.Add(pts);
+            }
+            foreach (var pn in pens.Values) pn.Dispose();
+            Prof?.Invoke("links");
+            // (2026-11-09) esquema de la ruta: las vías que unen una banda con la siguiente
+            if (s.Links.Count > 0)
+            {
+                // (2026-11-10) donde pasa por encima de otra vía (paso superior, Edge = −1 − su número): antes, un borde del color del
+                // fondo que corta la de abajo
+                var over = new Dictionary<int, List<(PointF at, PointF d)>>();
+                foreach (var (at, d, e) in s.Bridges) if (e < 0) { if (!over.TryGetValue(-1 - e, out var ol)) over[-1 - e] = ol = new(); ol.Add((at, d)); }
+                using var lp = new Pen(TrackCol, lw) { LineJoin = LineJoin.Miter, StartCap = LineCap.Flat, EndCap = LineCap.Flat };
+                using var halo = new Pen(Bg, lw + Math.Max(4f, 3f * zoom)) { StartCap = LineCap.Flat, EndCap = LineCap.Flat };
+                float hh = Math.Max(7f, Math.Min(16f, 8f * zoom));
+                for (int li = 0; li < s.Links.Count; li++)
+                {
+                    var l = s.Links[li]; if (!VisA(l)) continue;
+                    if (over.TryGetValue(li, out var ol))
+                        foreach (var (at, d) in ol) { var q = P(at); g.DrawLine(halo, q.X - d.X * hh, q.Y - d.Y * hh, q.X + d.X * hh, q.Y + d.Y * hh); }
+                    g.DrawLines(lp, l.Select(P).ToArray());
+                }
             }
             // (1.2.75) itinerarios en cola: encima, en discontinuo azul
             if (live != null && live.Queued.Count > 0)
@@ -173,14 +216,15 @@ namespace SelectOR
                         {
                             if (s.HiddenEdges.Contains(kv.Key)) continue;   // (1.2.81: las de una tijera, en su símbolo)
                             var pc = s.Piece(kv.Key, a, b);
-                            if (pc != null && pc.Length >= 2) g.DrawLines(qp, pc.Select(P).ToArray());
+                            if (pc != null && pc.Length >= 2 && VisA(pc)) g.DrawLines(qp, pc.Select(P).ToArray());
                         }
+            Prof?.Invoke("agujas");
             // agujas: (1.2.81) la rama puesta, marcada; la otra, cortada junto a la aguja (DrawSwitchState)
             var tijN = new HashSet<int>(s.ScissorGroups.SelectMany(q => q.Nodes));
             if (live?.SwitchPos != null)
                 foreach (var sw in s.Switches)
                 {
-                    if (tijN.Contains(sw.Node)) continue;   // (1.2.81: van en el símbolo de su tijera)
+                    if (tijN.Contains(sw.Node) || !VisP(sw.At)) continue;   // (1.2.81: van en el símbolo de su tijera)
                     int pos = sw.Order >= 0 ? live.SwitchPos(sw.Order) : -1;
                     bool locked = live.Locked != null && sw.Order >= 0 && live.Locked(sw.Order);
                     var l0 = sw.Legs[0]?.Select(P).ToArray(); var l1 = sw.Legs[1]?.Select(P).ToArray();
@@ -196,7 +240,7 @@ namespace SelectOR
                 using (var nf = Theme.Font(6.6f))
                     foreach (var sw in s.Switches)
                     {
-                        if (tijN.Contains(sw.Node)) continue;
+                        if (tijN.Contains(sw.Node) || !VisP(sw.At)) continue;
                         int n = SwitchNumber(s, sw.Node); if (n <= 0) continue;
                         bool locked = live?.Locked != null && sw.Order >= 0 && live.Locked(sw.Order);
                         // del lado contrario al que sale la desviada (para no taparla)
@@ -207,12 +251,14 @@ namespace SelectOR
                         var box = new RectangleF(q.X - sz.Width / 2 - 1, side > 0 ? q.Y + lw / 2 + 3 : q.Y - lw / 2 - 3 - sz.Height, sz.Width + 2, sz.Height);
                         numBoxes.Add(box); numItems.Add((sw, box, t, locked, side, q, sz));
                     }
+            Prof?.Invoke("cruces");
             // travesías y cruces
             // (1.2.81, petición) cada escape en tijera, un símbolo: un recuadro con sus dos paralelas y sus dos diagonales en X,
             // unido a sus cuatro agujas; lo que está puesto, iluminado (paralela a directa en blanco, diagonal en amarillo; con
             // un tren, en rojo; con un itinerario, de su color); lo demás, apagado. Su número (T1, T2…) encima
             foreach (var tg in s.ScissorGroups)
             {
+                if (!VisP(tg.At[0])) continue;
                 var box = ScissorBox(tg, origin, zoom);
                 bool Has(Dictionary<int, List<(double a, double b)>> d, int e) => d != null && d.TryGetValue(e, out var l) && l.Count > 0;
                 int[] pos = tg.Orders.Select(o => live?.SwitchPos != null && o >= 0 ? live.SwitchPos(o) : -1).ToArray();
@@ -287,6 +333,7 @@ namespace SelectOR
             // azul enclavada, naranja sin dato), y su número como el de una aguja
             foreach (var sg in s.SlipGroups)
             {
+                if (!VisP(sg.At)) continue;
                 var q = P(sg.At); float r = 5f * Math.Min(1.6f, zoom);
                 Color col = TrackCol;
                 if (live?.SwitchPos != null)
@@ -311,11 +358,12 @@ namespace SelectOR
             // (las de las diagonales de una tijera van en su símbolo: dentro de lo que ocupan sus cuatro agujas, no)
             var tBoxes = s.ScissorGroups.Select(q => { var ps = q.At.Select(P).ToArray(); return RectangleF.FromLTRB(ps.Min(t => t.X) - 4, ps.Min(t => t.Y) - 4, ps.Max(t => t.X) + 4, ps.Max(t => t.Y) + 4); }).ToList();
             using (var xp = new Pen(TrackCol, 1.4f))
-                foreach (var c in s.Crossings) { var q = P(c); if (tBoxes.Any(b => b.Contains(q))) continue; float r = 4f; g.DrawLine(xp, q.X - r, q.Y - r, q.X + r, q.Y + r); g.DrawLine(xp, q.X - r, q.Y + r, q.X + r, q.Y - r); }
+                foreach (var c in s.Crossings) { if (!VisP(c)) continue; var q = P(c); if (tBoxes.Any(b => b.Contains(q))) continue; float r = 4f; g.DrawLine(xp, q.X - r, q.Y - r, q.X + r, q.Y + r); g.DrawLine(xp, q.X - r, q.Y + r, q.X + r, q.Y - r); }
             // (1.2.81) pasos superiores: los pretiles del puente a los dos lados de la vía de arriba
             using (var bp = new Pen(Color.FromArgb(170, 180, 190), Math.Max(1.2f, lw * 0.4f)))
                 foreach (var (at, d, _) in s.Bridges)
                 {
+                    if (!VisP(at)) continue;
                     var q = P(at); var n = new PointF(-d.Y, d.X);
                     float h = Math.Max(6f, Math.Min(14f, 7f * zoom)), o = lw / 2 + Math.Max(2.5f, 2f * zoom), fl = Math.Max(2.5f, 2.2f * zoom);
                     foreach (int side in new[] { -1, 1 })
@@ -326,7 +374,7 @@ namespace SelectOR
                 }
             // toperas
             using (var bp = new Pen(TrackCol, lw))
-                foreach (var b in s.Buffers) { var q = P(b); g.DrawLine(bp, q.X, q.Y - 5, q.X, q.Y + 5); }
+                foreach (var b in s.Buffers) { if (!VisP(b)) continue; var q = P(b); g.DrawLine(bp, q.X, q.Y - 5, q.X, q.Y + 5); }
             // (1.2.84) pasos a nivel: la carretera cruzando la vía (un rectángulo; las vías de un mismo paso, en uno solo): rojo
             // con las barreras bajadas, oscuro con el paso abierto, solo el borde si no se sabe. «PN» encima al acercar.
             var pnBoxes = new List<RectangleF>();
@@ -336,7 +384,7 @@ namespace SelectOR
                 var used = new HashSet<Schematic.LevelX>();
                 foreach (var lx in s.LevelXs)
                 {
-                    if (!used.Add(lx)) continue;
+                    if (!VisP(lx.At) || !used.Add(lx)) continue;
                     var grp = new List<Schematic.LevelX> { lx };
                     var q0 = P(lx.At);
                     foreach (var o in s.LevelXs)
@@ -352,18 +400,20 @@ namespace SelectOR
                     using (var tp = new Pen(closed == true ? Color.FromArgb(255, 225, 220) : TrackCol, Math.Max(1f, lw * 0.6f)))
                         foreach (var q in pts) g.DrawLine(tp, rect.Left + 1, q.Y, rect.Right - 1, q.Y);
                     var box = RectangleF.Inflate(rect, 1.5f, 1.5f);
-                    if (zoom >= 1.0f)
+                    if (zoom >= 0.6f)
                     {
-                        using var pf = Theme.Font(6.4f * Math.Min(1.8f, zoom / 1.2f), FontStyle.Bold);
-                        var sz = g.MeasureString(I18n.T("PN"), pf);
+                        using var pf = Theme.Font(Math.Max(6.4f, 6.4f * Math.Min(1.8f, zoom / 1.2f)), FontStyle.Bold);
+                        string pnt = PnLabel(grp.Select(o => o.Cr));   // (2026-11-10) con su PK exacto
+                        var sz = g.MeasureString(pnt, pf);
                         var tr = new RectangleF(cx - sz.Width / 2, y0 - sz.Height, sz.Width, sz.Height);
-                        using (var tb = new SolidBrush(closed == true ? Color.FromArgb(255, 120, 105) : Color.FromArgb(170, 178, 186))) g.DrawString(I18n.T("PN"), pf, tb, tr.X, tr.Y);
+                        using (var tb = new SolidBrush(closed == true ? Color.FromArgb(255, 120, 105) : Color.FromArgb(170, 178, 186))) g.DrawString(pnt, pf, tb, tr.X, tr.Y);
                         box = RectangleF.Union(box, tr);
                     }
                     numBoxes.Add(box); pnBoxes.Add(box);
                 }
             }
 
+            Prof?.Invoke("senales0");
             // señales: mástil y luz del lado al que miran. (1.2.75) Al acercar, crecen con el esquema (sk: hasta 3,5 veces)
             // (1.2.81) cada una colocada donde no pise a otra señal, un número de aguja, otra vía ni el rótulo de una salida
             // (PlaceSignals): con las filas juntas, dos señales a la misma altura en vías vecinas se montaban
@@ -373,18 +423,28 @@ namespace SelectOR
             _sigBoxes.AddOrUpdate(s, boxes);
             void Box(Schematic.Signal sg, PointF foot, RectangleF r) => boxes.Add((sg, RectangleF.Union(r, new RectangleF(foot.X - 3, Math.Min(foot.Y, r.Y), 6, Math.Abs(foot.Y - r.Y) + 1))));
             float idSize = 6.6f * Math.Min(1.8f, sk), papSize = 6.8f * Math.Min(2.2f, sk);
-            var places = PlaceSignals(g, s, live, P, zoom, sk, lr0, lw, idSize, papSize, lines, numBoxes, platBars);
+            var sigsVis = s.Signals.Where(q => VisP(q.At)).ToList();
+            Prof?.Invoke("place");
+            var places = PlaceSignals(g, s, sigsVis, live, P, zoom, sk, lr0, lw, idSize, papSize, lines, numBoxes, platBars);
+            var beamsDone = new HashSet<(double, double, double)>();   // (2026-11-10) cada viga de pórtico, una vez
             using (var mp = new Pen(Color.FromArgb(150, 160, 170), 1.1f * Math.Min(2f, sk)))
             using (var op = new Pen(Color.FromArgb(220, 15, 17, 19), 1.2f * Math.Min(2f, sk)))
-                foreach (var sg in s.Signals)
+                foreach (var sg in sigsVis)
                 {
                     var q = P(sg.At);
                     var pl = places.TryGetValue(sg, out var pp) ? pp : new SigPlace { Side = sg.Face < 0 ? -1 : 1, Mast = 8f * sk, Dir = sg.Face, Arm = 4.5f * sk };
                     int dir = pl.Dir; float dy = pl.Side * pl.Mast, arm = pl.Arm;
                     // (1.2.84) el pie del mástil, un poco hacia donde mira la señal: las dos de un mismo punto (una en cada
                     // sentido, entre dos vías) ya no salen del mismo sitio y no parecen un mástil con dos brazos
-                    q = new PointF(q.X + dir * FootOff(sk), q.Y);
-                    g.DrawLine(mp, q.X, q.Y + pl.Side * lw / 2, q.X, q.Y + dy);
+                    // (2026-11-10) en un pórtico, de la viga
+                    q = pl.G ? new PointF(q.X + pl.Gx, q.Y) : new PointF(q.X + dir * (pl.Fo != 0 ? pl.Fo : FootOff(sk)), q.Y);
+                    if (pl.G)
+                    {
+                        var key = (Math.Round(q.X), Math.Round(q.Y + pl.B0), Math.Round(q.Y + pl.B1));
+                        if (beamsDone.Add(key)) DrawGantry(g, q.X, q.Y + pl.B0, q.Y + pl.B1, sk);
+                        using (var tk = new SolidBrush(Color.FromArgb(150, 160, 170))) g.FillRectangle(tk, q.X - 1.6f * Math.Min(2f, sk), q.Y - 0.8f, 3.2f * Math.Min(2f, sk), 1.6f);   // (dónde cruza su vía)
+                    }
+                    else g.DrawLine(mp, q.X, q.Y + pl.Side * lw / 2, q.X, q.Y + dy);
                     g.DrawLine(mp, q.X, q.Y + dy, q.X + arm * dir, q.Y + dy);
                     int asp = live?.Aspect?.Invoke(sg.Sig) ?? -1;
                     float r = 3.2f * sk, lx = q.X + (arm + r) * dir, ly = q.Y + dy;
@@ -435,6 +495,7 @@ namespace SelectOR
                     Box(sg, q, RectangleF.FromLTRB(Math.Min(q.X, lx - r), ly - r, Math.Max(q.X, lx + r), ly + r));
                 }
 
+            Prof?.Invoke("nums");
             // (1.2.81) los números de las agujas, sin pisar otro número ni una señal (dos agujas a la misma altura en vías vecinas,
             // como en Dos Hermanos): en su sitio; si no, corrido hacia el tronco (las ramas salen hacia el otro lado) o al otro lado
             numBoxes.Clear(); numBoxes.AddRange(pnBoxes);   // (1.2.84: sin pisar un paso a nivel)
@@ -476,6 +537,7 @@ namespace SelectOR
                         using (var tbb = new SolidBrush(locked ? LockCol : Color.FromArgb(190, 196, 204))) g.DrawString(t, nf, tbb, box.X + 1, box.Y);
                     }
 
+            Prof?.Invoke("tags");
             // (1.2.75) número de cada vía de andén: encima de todo (antes iba debajo de la vía, que lo cruzaba como tachado),
             // a la altura de la barra del andén, a la izquierda, con un borde del color del fondo
             // (1.2.81) del alto de una fila como mucho (con las filas juntas, el número tapaba la vía de al lado) y sin pisar
@@ -492,6 +554,7 @@ namespace SelectOR
                     var taken = tagBoxes;
                     foreach (var p in s.Platforms)
                     {
+                        if (!vis.IntersectsWith(RectangleF.Inflate(p.Bar, 2, 20))) continue;
                         if (p.Label == null || !done.Add(p.Label + "@" + p.Bar.Top.ToString("0"))) continue;
                         var a = P(new PointF(p.Bar.Left, p.Bar.Top));
                         var sz = g.MeasureString(p.Label, f);
@@ -519,6 +582,7 @@ namespace SelectOR
                     }
                 }
 
+            Prof?.Invoke("trenes");
             // trenes: el rótulo con el nombre (su cantón ya va en rojo)
             if (live != null)
                 using (var f = Theme.Font(7.4f, FontStyle.Bold))
@@ -545,6 +609,7 @@ namespace SelectOR
                         }
                     }
 
+            Prof?.Invoke("salidas");
             // salidas (1.2.75): todas las de un lado en la misma columna, con una línea de puntos hasta ella, una flecha y
             // la estación a la que se va. (1.2.81) La columna, pasadas también las señales y los números de andén (una señal
             // al final de la vía quedaba debajo del nombre de la estación)
@@ -559,17 +624,142 @@ namespace SelectOR
                 foreach (bool right in new[] { false, true })
                 {
                     float col = right ? colR : colL;
-                    foreach (var x in s.Exits.Where(q => q.Right == right))
+                    foreach (var x in s.Exits.Where(q => q.Right == right && VisP(q.At)))
                     {
                         var q = P(x.At);
+                        if (s.Parts != null) col = q.X + (right ? 8 : -8);   // (2026-11-10, ruta entera) cada salida junto a su vía: el borde del esquema está a kilómetros
                         if (Math.Abs(col - q.X) > 3) g.DrawLine(dp, q.X, q.Y, col, q.Y);
                         float d = right ? 1 : -1, ah = 5f;
                         g.FillPolygon(ab, new[] { new PointF(col, q.Y - ah), new PointF(col + d * 7, q.Y), new PointF(col, q.Y + ah) });
                         string t = x.Station ?? "";
                         var sz = g.MeasureString(t, f);
-                        g.DrawString(t, f, tb, right ? col + 10 : col - 10 - sz.Width, q.Y - sz.Height / 2);
+                        float tx = right ? col + 10 : col - 10 - sz.Width;
+                        if (s.Parts != null) using (var eb = new SolidBrush(Color.FromArgb(225, Bg))) g.FillRectangle(eb, tx - 2, q.Y - sz.Height / 2 + 1, sz.Width + 4, sz.Height - 2);   // (ruta entera: junto a su vía puede caer sobre otra; que se lea)
+                        g.DrawString(t, f, tb, tx, q.Y - sz.Height / 2);
                     }
                 }
+            // (2026-11-10, petición) los rótulos pequeños junto a la vía, sin pisar vías, señales, andenes ni otros rótulos (debajo; si
+            // no cabe, encima; si tampoco, no sale: más cerca se ve): primero los PK (una marquita en la vía y «PK 12»; el mismo PK en
+            // las vías de al lado, una vez), luego el nombre de los apartaderos. De lejos no: serían una mancha
+            bool pkOn = ShowPk && s.KmPosts.Count > 0 && zoom >= 0.12f, sidOn = s.SidingLabels.Count > 0 && zoom >= 0.25f;
+            if (pkOn || sidOn)
+            {
+                var taken = new List<RectangleF>(numBoxes);
+                taken.AddRange(tagBoxes); taken.AddRange(boxes.Select(b => b.box));
+                foreach (var pf in s.Platforms) { var a0 = P(new PointF(pf.Bar.Left, pf.Bar.Top)); var a1 = P(new PointF(pf.Bar.Right, pf.Bar.Bottom)); taken.Add(RectangleF.FromLTRB(a0.X, a0.Y - 2, a1.X, a1.Y + 2)); }
+                // (ni encima de otra vía: con las vías juntas tapaba la de al lado)
+                var tsegs = new List<(PointF a, PointF b)>();
+                foreach (var ln in lines) for (int k = 1; k < ln.Length; k++) tsegs.Add((ln[k - 1], ln[k]));
+                foreach (var l in s.Links) if (VisA(l)) for (int k = 1; k < l.Length; k++) tsegs.Add((P(l[k - 1]), P(l[k])));
+                bool Free(RectangleF bx) => !taken.Any(o => o.IntersectsWith(bx)) && !tsegs.Any(sg => SegHitsRect(sg.a, sg.b, bx));
+                using var sbg = new SolidBrush(Color.FromArgb(200, Bg));
+                if (pkOn)
+                {
+                    using var kf = Theme.Font(Math.Max(6.6f, Math.Min(8.4f, 6.4f * zoom + 2.6f)), FontStyle.Bold);
+                    using var kb = new SolidBrush(PkCol);
+                    using var kpen = new Pen(PkCol, 1.3f);
+                    var done = new List<(double v, PointF q)>();
+                    var ci = I18n.Culture ?? System.Globalization.CultureInfo.CurrentCulture;
+                    foreach (var kp in s.KmPosts.OrderBy(k => k.At.Y))
+                    {
+                        if (!VisP(kp.At)) continue;
+                        var q = P(kp.At);
+                        if (done.Any(d => Math.Abs(d.v - kp.V) < 0.05 && Math.Abs(d.q.X - q.X) < 300 && Math.Abs(d.q.Y - q.Y) < 160)) continue;   // (el mismo, en la vía de al lado)
+                        string t = "PK " + kp.V.ToString(Math.Abs(kp.V - Math.Round(kp.V)) < 0.05 ? "0" : "0.#", ci);
+                        var sz = g.MeasureString(t, kf);
+                        float tk = lw / 2 + 3;
+                        var below = new RectangleF(q.X - sz.Width / 2, q.Y + tk + 1, sz.Width, sz.Height - 2);
+                        var above = new RectangleF(q.X - sz.Width / 2, q.Y - tk - 1 - (sz.Height - 2), sz.Width, sz.Height - 2);
+                        RectangleF? box = Free(below) ? below : Free(above) ? above : null;
+                        if (box is not RectangleF bx) continue;
+                        taken.Add(bx); done.Add((kp.V, q));
+                        g.DrawLine(kpen, q.X, q.Y - tk, q.X, q.Y + tk);
+                        g.FillRectangle(sbg, bx); g.DrawString(t, kf, kb, bx.X, bx.Y - 1);
+                    }
+                }
+                if (sidOn)
+                {
+                    using var sf = Theme.Font(Math.Max(6.4f, Math.Min(8.2f, 6.2f * zoom + 2.4f)));
+                    using var stb = new SolidBrush(SidingCol);
+                    foreach (var sl in s.SidingLabels)
+                    {
+                        if (!VisP(sl.At)) continue;
+                        var q = P(sl.At); var sz = g.MeasureString(sl.Name, sf);
+                        var below = new RectangleF(q.X - sz.Width / 2, q.Y + lw / 2 + 2, sz.Width, sz.Height - 2);
+                        var above = new RectangleF(q.X - sz.Width / 2, q.Y - lw / 2 - 2 - (sz.Height - 2), sz.Width, sz.Height - 2);
+                        RectangleF? box = Free(below) ? below : Free(above) ? above : null;
+                        if (box is not RectangleF bx) continue;
+                        taken.Add(bx);
+                        g.FillRectangle(sbg, bx); g.DrawString(sl.Name, sf, stb, bx.X, bx.Y - 1);
+                    }
+                }
+            }
+            Prof?.Invoke("rotulos");
+            // (2026-11-09) en una banda: el nombre de cada estación encima de sus andenes
+            if (s.IsBand)
+            {
+                using var f = Theme.Font(10.5f, FontStyle.Bold);
+                using var sb = new SolidBrush(StationCol);
+                using var fr = new Pen(Color.FromArgb(120, StationCol), 1.2f);
+                using var bb = new SolidBrush(Color.FromArgb(235, 18, 21, 26));
+                var taken = new List<RectangleF>();
+                // (esquema de la ruta) un rótulo por estación y banda; los de la banda elegida, primero; los de las demás, tenues y
+                // solo si caben
+                var visTracks = s.Tracks.Where(t => t.Pts != null && VisA(t.Pts)).ToList();
+                List<(PointF a, PointF b)> segsScr = null;
+                if (s.Parts != null)
+                {
+                    segsScr = new List<(PointF a, PointF b)>();
+                    foreach (var tk in visTracks) { if (s.HiddenEdges.Contains(tk.Edge)) continue; for (int k = 1; k < tk.Pts.Length; k++) segsScr.Add((P(tk.Pts[k - 1]), P(tk.Pts[k]))); }
+                    foreach (var l in s.Links) if (VisA(l)) for (int k = 1; k < l.Length; k++) segsScr.Add((P(l[k - 1]), P(l[k])));
+                    var clipR = RectangleF.Inflate(g.VisibleClipBounds, 200, 200);
+                    segsScr.RemoveAll(sg => !clipR.Contains(sg.a) && !clipR.Contains(sg.b) && !SegHitsRect(sg.a, sg.b, clipR));
+                }
+                var focusB = s.Focus?.Bounds;
+                bool InFocus(RectangleF pb) => s.FocusSet != null ? s.FocusSet.Any(p => p.Bounds == pb) : focusB == null || pb == focusB.Value;
+                var groups = s.Platforms.Where(p => !string.IsNullOrEmpty(p.Station) && vis.IntersectsWith(RectangleF.Inflate(p.Bar, 600 / zoom, 600 / zoom)))
+                              .GroupBy(p => (p.Station, part: s.PartBounds(new PointF(p.Bar.Left, p.Bar.Top))))
+                              .OrderBy(q => InFocus(q.Key.part) ? 0 : 1).ToList();
+                using var sbDim = new SolidBrush(Color.FromArgb(110, StationCol));
+                using var frDim = new Pen(Color.FromArgb(45, StationCol), 1.2f);
+                foreach (var grp in groups)
+                {
+                    float x0 = grp.Min(p => p.Bar.Left), x1 = grp.Max(p => p.Bar.Right), top = grp.Min(p => p.Bar.Top);
+                    var pb = grp.Key.part;   // (en el esquema de la ruta: solo las vías de su banda)
+                    bool focus = InFocus(pb);
+                    float yTop = visTracks.Count > 0 ? Math.Min(top, visTracks.Where(t => t.Pts.Any(q => q.X >= x0 && q.X <= x1)).SelectMany(t => t.Pts).Select(q => q.Y).Where(y => y >= top - 10 * Schematic.Row && y >= pb.Top - 1).DefaultIfEmpty(top).Min()) : top;
+                    var a = P(new PointF((x0 + x1) / 2, yTop));
+                    string t = grp.Key.Station.ToUpperInvariant();
+                    var sz = g.MeasureString(t, f);
+                    var box = new RectangleF(a.X - sz.Width / 2 - 8, a.Y - 34 - sz.Height, sz.Width + 16, sz.Height + 6);
+                    // (2026-11-10, ruta por estaciones) encima de las vías de otras piezas que pasan por encima, no entre ellas
+                    // (si no hay hueco cerca, donde estaba: lejos parecería de otra estación)
+                    if (segsScr != null && segsScr.Any(sg => SegHitsRect(sg.a, sg.b, box)))
+                    {
+                        float step = Math.Max(8f, Schematic.Row * zoom), y0 = box.Y;
+                        int k = 1; for (; k <= 2; k++) { box.Y = y0 - k * step; if (!segsScr.Any(sg => SegHitsRect(sg.a, sg.b, box))) break; }
+                        if (k > 2)
+                        {
+                            // (2026-11-10) debajo de sus vías (una línea que va por debajo de otra: encima quedaba sobre la otra)
+                            float bot = grp.Max(p => p.Bar.Bottom);
+                            float yBot = visTracks.Where(t => t.Pts.Any(q => q.X >= x0 && q.X <= x1)).SelectMany(t => t.Pts).Select(q => q.Y).Where(y => y <= bot + 10 * Schematic.Row && y <= pb.Bottom + 1).DefaultIfEmpty(bot).Max();
+                            var below = new RectangleF(box.X, P(new PointF(0, Math.Max(bot, yBot))).Y + 18, box.Width, box.Height);
+                            if (!segsScr.Any(sg => SegHitsRect(sg.a, sg.b, below))) box = below;
+                            else
+                            {
+                                for (k = 3; k <= 4; k++) { box.Y = y0 - k * step; if (!segsScr.Any(sg => SegHitsRect(sg.a, sg.b, box))) break; }
+                                if (k > 4) box.Y = y0;
+                            }
+                        }
+                    }
+                    if (focus) for (int k = 0; k < 4 && taken.Any(o => o.IntersectsWith(box)); k++) box.Y -= box.Height + 4;
+                    else if (taken.Any(o => o.IntersectsWith(box))) continue;
+                    taken.Add(box);
+                    g.FillRectangle(bb, box); g.DrawRectangle(focus ? fr : frDim, box.X, box.Y, box.Width, box.Height);
+                    g.DrawString(t, f, focus ? sb : sbDim, box.X + 8, box.Y + 3);
+                }
+                return;
+            }
             // el nombre de la dependencia, centrado encima, en su recuadro (como el rótulo de un esquema de ADIF)
             using (var f = Theme.Font(12f, FontStyle.Bold))
             using (var sb = new SolidBrush(StationCol))
@@ -585,6 +775,30 @@ namespace SelectOR
             }
         }
 
+        // (2026-11-10) el rótulo de un paso a nivel: «PN · PK 12,345» (el PK de la primera de sus vías que lo tenga)
+        public static string PnLabel(IEnumerable<PasosNivel.Cr> crs)
+        {
+            string pk = null;
+            foreach (var c in crs) { if (c.PkDone && !double.IsNaN(c.Pk)) { pk = PuntoKm.Text(c.Pk); break; } }
+            return pk == null ? I18n.T("PN") : I18n.T("PN") + " · PK " + pk;
+        }
+
+        // ¿el segmento a–b pasa por el rectángulo r?
+        static bool SegHitsRect(PointF a, PointF b, RectangleF r)
+        {
+            if (r.Contains(a) || r.Contains(b)) return true;
+            if (Math.Max(a.X, b.X) < r.Left || Math.Min(a.X, b.X) > r.Right || Math.Max(a.Y, b.Y) < r.Top || Math.Min(a.Y, b.Y) > r.Bottom) return false;
+            static bool X(PointF p1, PointF p2, PointF p3, PointF p4)
+            {
+                float d = (p2.X - p1.X) * (p4.Y - p3.Y) - (p2.Y - p1.Y) * (p4.X - p3.X);
+                if (Math.Abs(d) < 1e-6) return false;
+                float t = ((p3.X - p1.X) * (p4.Y - p3.Y) - (p3.Y - p1.Y) * (p4.X - p3.X)) / d, u = ((p3.X - p1.X) * (p2.Y - p1.Y) - (p3.Y - p1.Y) * (p2.X - p1.X)) / d;
+                return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+            }
+            PointF tl = new(r.Left, r.Top), tr = new(r.Right, r.Top), bl = new(r.Left, r.Bottom), br = new(r.Right, r.Bottom);
+            return X(a, b, tl, tr) || X(a, b, bl, br) || X(a, b, tl, bl) || X(a, b, tr, br);
+        }
+
         // rótulo de salida bajo el ratón (para saltar a esa estación)
         public static Schematic.Exit ExitAt(Schematic s, PointF origin, float zoom, Point mouse, Graphics g)
         {
@@ -596,6 +810,7 @@ namespace SelectOR
                 var q = new PointF(origin.X + x.At.X * zoom, origin.Y + x.At.Y * zoom);
                 float col = _exitCols.TryGetValue(s, out var ec) ? origin.X + ec[x.Right ? 1 : 0] * zoom
                     : x.Right ? origin.X + s.Bounds.Right * zoom + 14 : origin.X + s.Bounds.Left * zoom - 14;
+                if (s.Parts != null) col = q.X + (x.Right ? 8 : -8);   // (ruta entera: junto a su vía)
                 var sz = g.MeasureString(x.Station ?? "", f);
                 var r = new RectangleF(x.Right ? col : col - 10 - sz.Width, q.Y - sz.Height / 2, sz.Width + 10, sz.Height);
                 if (r.Contains(mouse)) return x;
@@ -606,8 +821,22 @@ namespace SelectOR
         // (1.2.81) dónde va cada señal: lado de la vía (Side ±1), largo del mástil, hacia dónde sale la figura (Dir ±1) y largo
         // del brazo. Primero la de siempre (del lado al que mira, figura hacia delante); si pisa algo, la alternativa que menos
         // pise y menos se aparte de lo normal. Se recuerda para el mismo zoom (al mover el esquema no cambia nada).
-        public struct SigPlace { public int Side, Dir; public float Mast, Arm; }
+        // (2026-11-10, petición) G: en un PÓRTICO (varias señales juntas de vías vecinas, mismo sentido): cuelga de una viga
+        // vertical que cruza las vías en Gx (respecto del pie, en píxeles) de B0 a B1 (respecto de la vía de la señal); el brazo
+        // sale de la viga. Fo: lo que se aparta el pie hacia donde mira (más si tiene otra señal de espaldas en el mismo punto).
+        public struct SigPlace { public int Side, Dir; public float Mast, Arm; public bool G; public float Gx, B0, B1, Fo; }
         static float FootOff(float sk) => Math.Max(2.5f, 1.8f * sk);   // (1.2.84) el pie del mástil, apartado hacia donde mira la señal
+        // (2026-11-10) la viga de un pórtico: de y0 a y1 en x, de celosía (dos largueros y diagonales), con sus dos pies
+        static void DrawGantry(Graphics g, float x, float y0, float y1, float sk)
+        {
+            float k = Math.Min(2f, sk), h = 1.5f * k, f = 3.6f * k;
+            using var bp = new Pen(Color.FromArgb(175, 184, 194), Math.Max(1f, 0.9f * k));
+            g.DrawLine(bp, x - h, y0, x - h, y1); g.DrawLine(bp, x + h, y0, x + h, y1);
+            using (var lp = new Pen(Color.FromArgb(120, 175, 184, 194), Math.Max(0.8f, 0.6f * k)))
+                for (float y = y0, st = 3 * h; y + st <= y1; y += st) g.DrawLine(lp, x - h, y, x + h, y + st);
+            using var fp = new Pen(Color.FromArgb(175, 184, 194), Math.Max(1.2f, 1.2f * k));
+            g.DrawLine(fp, x - f, y0, x + f, y0); g.DrawLine(fp, x - f, y1, x + f, y1);
+        }
         sealed class PlaceCache { public float Zoom; public string Key; public Dictionary<Schematic.Signal, SigPlace> Map; }
         static readonly ConditionalWeakTable<Schematic, PlaceCache> _places = new();
         static readonly ConditionalWeakTable<Schematic, float[]> _exitCols = new();   // columnas de las salidas (izquierda, derecha), en metros del esquema
@@ -655,7 +884,7 @@ namespace SelectOR
             return Clip(-dx, a.X - r.Left) && Clip(dx, r.Right - a.X) && Clip(-dy, a.Y - r.Top) && Clip(dy, r.Bottom - a.Y);
         }
 
-        static Dictionary<Schematic.Signal, SigPlace> PlaceSignals(Graphics g, Schematic s, SchematicLive live, Func<PointF, PointF> P, float zoom,
+        static Dictionary<Schematic.Signal, SigPlace> PlaceSignals(Graphics g, Schematic s, List<Schematic.Signal> sigs, SchematicLive live, Func<PointF, PointF> P, float zoom,
             float sk, float lr0, float lw, float idSize, float papSize, List<PointF[]> lines, List<RectangleF> nums, List<RectangleF> plats)
         {
             bool compact = zoom < 0.7f;
@@ -664,7 +893,7 @@ namespace SelectOR
             var key = new System.Text.StringBuilder();
             using (var pf = Theme.Font(papSize, FontStyle.Bold))
             using (var fi = Theme.Font(idSize))
-                foreach (var sg in s.Signals)
+                foreach (var sg in sigs)
                 {
                     var fig = live?.Figure?.Invoke(sg.Sig);
                     float along, across, extra = 0;
@@ -682,8 +911,22 @@ namespace SelectOR
                     if (zoom >= 1.0f && sg.Sig?.Obj >= 0) extra += 2 * sk + g.MeasureString(sg.Sig.Obj.ToString(System.Globalization.CultureInfo.InvariantCulture), fi).Width;
                     size[sg] = (along, across, extra);
                 }
+            key.Append('#').Append(sigs.Count).Append(':').Append(sigs.Sum(q => (long)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(q)));   // (solo las que se ven: otra vista, otra colocación)
             string k = key.ToString();
             if (_places.TryGetValue(s, out var pc) && Math.Abs(pc.Zoom - zoom) < 1e-4f && pc.Key == k) return pc.Map;
+            // (2026-11-10) de lejos, cada una en su sitio de siempre, sin buscarle hueco: las figuras son de un par de píxeles y
+            // buscarlo para cientos de señales a cada paso de la rueda hacía ir el puesto a tirones
+            if (zoom < 0.3f && sigs.Count > 40)
+            {
+                var quick = new Dictionary<Schematic.Signal, SigPlace>();
+                foreach (var sg in sigs)
+                {
+                    int side0 = sg.Side != 0 ? sg.Side : sg.Face < 0 ? -1 : 1; var (_, across, _) = size[sg];
+                    quick[sg] = new SigPlace { Side = side0, Dir = sg.Face, Mast = Math.Min(8f * sk, Math.Max(lw / 2 + across / 2 + 2f, 4f)), Arm = 4.5f * sk };
+                }
+                _places.AddOrUpdate(s, new PlaceCache { Zoom = zoom, Key = k, Map = quick });
+                return quick;
+            }
 
             // todo, relativo al primer punto (así vale al mover el esquema)
             var o = P(new PointF(0, 0));
@@ -692,13 +935,39 @@ namespace SelectOR
             var segs = new List<(PointF a, PointF b)>();
             foreach (var l in lines) for (int i = 1; i < l.Length; i++) segs.Add((Rel(l[i - 1]), Rel(l[i])));
             var numsR = nums.Select(RelR).ToList(); var platsR = plats.Select(RelR).ToList();
+            // (2026-11-10) el símbolo de cada tijera (una señal encima no se lee ni se sabe de qué vía es) y las vigas de los pórticos
+            foreach (var tg in s.ScissorGroups) numsR.Add(RelR(RectangleF.Inflate(ScissorBox(tg, P(PointF.Empty), zoom), 1, 1)));
+            var beamsR = new List<RectangleF>();
+            // (2026-11-10) dos señales de espaldas en el mismo punto y del mismo lado: los pies más apartados (si no, parecía un
+            // mástil con dos brazos)
+            var feet = sigs.ToDictionary(sg => sg, sg => Rel(P(sg.At)));
+            int SideOf(Schematic.Signal sg) => sg.Side != 0 ? sg.Side : sg.Face < 0 ? -1 : 1;
+            var backToBack = new Dictionary<Schematic.Signal, float>();   // (su Fo)
+            {
+                var byX = sigs.OrderBy(q => feet[q].X).ToList();
+                for (int i = 0; i < byX.Count; i++)
+                    for (int j = i + 1; j < byX.Count && feet[byX[j]].X - feet[byX[i]].X < 45f; j++)
+                    {
+                        var a = byX[i]; var b = byX[j];
+                        // (de espaldas, a menos de 12 px; de frente —la de la izquierda mira a la derecha—, mientras sus figuras se
+                        // pisarían: hasta 45 px)
+                        float gap = feet[b].X - feet[a].X; bool facing = a.Face > 0 && b.Face < 0;
+                        if (a.Face != b.Face && SideOf(a) == SideOf(b) && Math.Abs(feet[a].Y - feet[b].Y) < 2 && (gap < 12 || facing))
+                        {
+                            // las dos desde su punto medio, cada una hacia donde mira (si estaban «de frente», una figura encima de la
+                            // otra): pie = medio + mira·F2 → Fo = mira·(medio − pie) + F2
+                            float mid = (feet[a].X + feet[b].X) / 2, f2 = FootOff(sk) + Math.Max(3f, 2.2f * sk);
+                            foreach (var x in new[] { a, b }) { float fo = x.Face * (mid - feet[x].X) + f2; backToBack[x] = Math.Abs(fo) < 0.01f ? 0.01f : fo; }
+                        }
+                    }
+            }
 
             float m0 = 8f * sk, step2 = Math.Max(8f * sk, 3.3f * lr0 + 1), arm0 = 4.5f * sk;
             // la figura, el mástil (vertical) y el brazo (horizontal), por separado: juntos, su recuadro tapaba mucho más
             (RectangleF fig, RectangleF mast, RectangleF arm) Shape(Schematic.Signal sg, SigPlace p)
             {
                 var q = Rel(P(sg.At)); var (along, across, extra) = size[sg];
-                q = new PointF(q.X + p.Dir * FootOff(sk), q.Y);   // (1.2.84: el pie, un poco hacia donde mira)
+                q = p.G ? new PointF(q.X + p.Gx, q.Y) : new PointF(q.X + p.Dir * (p.Fo != 0 ? p.Fo : FootOff(sk)), q.Y);   // (1.2.84: el pie, un poco hacia donde mira; 2026-11-10: o la viga)
                 float ly = q.Y + p.Side * p.Mast, x0 = q.X + p.Dir * p.Arm, x1 = x0 + p.Dir * (along + extra);
                 var fig = RectangleF.FromLTRB(Math.Min(x0, x1), ly - across / 2, Math.Max(x0, x1), ly + across / 2);
                 float m1 = q.Y + p.Side * (lw / 2 + 1.5f);
@@ -720,6 +989,7 @@ namespace SelectOR
                 }
                 foreach (var r in numsR) { if (fi.IntersectsWith(r)) c += 300; else if (mast.IntersectsWith(r) || arm.IntersectsWith(r)) c += 80; }
                 foreach (var r in platsR) if (fig.IntersectsWith(r)) c += 15;
+                if (!p.G) foreach (var r in beamsR) if (fi.IntersectsWith(r) || mast.IntersectsWith(r)) c += 600;   // (la viga de un pórtico)
                 var fs = RectangleF.Inflate(fig, 0.5f, 0.5f); var fn = RectangleF.Inflate(fig, 3.5f, 3.5f); var foot = Rel(P(sg.At));
                 // la propia vía: lo que pasa junto al pie de la señal o va horizontal a su altura (la vía se corta en cada señal)
                 bool Own(PointF a, PointF b) => SegDist(foot, a, b) <= 6f || Math.Abs(a.Y - foot.Y) < 1.5f && Math.Abs(b.Y - foot.Y) < 1.5f;
@@ -750,16 +1020,68 @@ namespace SelectOR
                 float mast = Math.Min(m0, Math.Max(lw / 2 + across / 2 + 2f, 4f));
                 float stepA = Math.Max(4f, (along + extra + 4 * sk) / 2);
                 var l = new List<(SigPlace, float)>();
+                float fo = backToBack.TryGetValue(sg, out float bfo) ? bfo : FootOff(sk);
                 for (int k = 0; k < 6; k++)
-                    l.Add((new SigPlace { Side = side0, Dir = dir0, Mast = mast, Arm = arm0 + k * stepA }, k * (8 + k)));
+                    l.Add((new SigPlace { Side = side0, Dir = dir0, Mast = mast, Arm = arm0 + k * stepA, Fo = fo }, k * (8 + k)));
                 return l;
             }
             var map = new Dictionary<Schematic.Signal, SigPlace>();
             var pens = new Dictionary<Schematic.Signal, float>(); var idx = new Dictionary<Schematic.Signal, int>();
+            // (2026-11-10, petición) PÓRTICOS: tres o más señales del mismo sentido en vías vecinas, casi en el mismo punto (sus
+            // figuras se escalonarían o se pisarían): todas colgadas de una viga que cruza las vías, cada una junto a su vía
+            var gantry = new Dictionary<Schematic.Signal, SigPlace>();
+            if (zoom >= 0.7f)
+            {
+                float rowPx = Schematic.Row * zoom;
+                var grpOf = sigs.ToDictionary(q => q, q => q);
+                Schematic.Signal Find(Schematic.Signal x) { while (grpOf[x] != x) x = grpOf[x] = grpOf[grpOf[x]]; return x; }
+                var byX = sigs.Where(q => !backToBack.ContainsKey(q)).OrderBy(q => feet[q].X).ToList();
+                for (int i = 0; i < byX.Count; i++)
+                    for (int j = i + 1; j < byX.Count; j++)
+                    {
+                        var a = byX[i]; var b = byX[j];
+                        float dx = feet[b].X - feet[a].X;
+                        float reach = Math.Max(14f * sk, 0.75f * Math.Min(size[a].along + size[a].extra, size[b].along + size[b].extra));
+                        if (dx > reach) break;
+                        float dy = Math.Abs(feet[a].Y - feet[b].Y);
+                        if (a.Face != b.Face || dy < 0.6f * rowPx || dy > 1.6f * rowPx) continue;
+                        grpOf[Find(a)] = Find(b);
+                    }
+                foreach (var grp in byX.GroupBy(Find).Select(q => q.ToList()).Where(q => q.Count >= 3))
+                {
+                    // una por vía (fila)
+                    var mem = grp.GroupBy(q => (int)Math.Round(feet[q].Y)).Select(q => q.OrderBy(x => Math.Abs(feet[x].X - grp.Average(y => feet[y].X))).First()).ToList();
+                    for (int tries = 0; tries < 3 && mem.Count >= 3; tries++)
+                    {
+                        int dir = mem[0].Face;
+                        // la viga: donde está la primera señal del grupo según la marcha (la figura sale hacia delante: ninguna se
+                        // adelanta a donde está)
+                        float bx = dir > 0 ? mem.Min(q => feet[q].X) : mem.Max(q => feet[q].X);
+                        bx += dir * FootOff(sk);
+                        var tops = new List<float>(); var bots = new List<float>();
+                        var cand = new Dictionary<Schematic.Signal, SigPlace>();
+                        foreach (var sg in mem)
+                        {
+                            var (along, across, extra) = size[sg];
+                            float mast = Math.Min(m0, Math.Max(lw / 2 + across / 2 + 2f, 4f));
+                            int sd = SideOf(sg);
+                            float cy = sd * mast;
+                            tops.Add(feet[sg].Y + cy - across / 2 - 3); bots.Add(feet[sg].Y + cy + across / 2 + 3);
+                            cand[sg] = new SigPlace { Side = sd, Dir = dir, Mast = mast, Arm = Math.Max(3f, 2.5f * sk), G = true, Gx = bx - feet[sg].X };
+                        }
+                        float y0 = Math.Min(tops.Min(), mem.Min(q => feet[q].Y) - lw), y1 = Math.Max(bots.Max(), mem.Max(q => feet[q].Y) + lw);
+                        foreach (var sg in mem) { var c = cand[sg]; c.B0 = y0 - feet[sg].Y; c.B1 = y1 - feet[sg].Y; cand[sg] = c; }
+                        // ¿cabe? (ninguna figura encima de otra vía, de una tijera o de un número)
+                        var bad = mem.Where(sg => Cost(sg, cand[sg], 0) >= 150).ToList();
+                        if (bad.Count == 0) { foreach (var kv in cand) gantry[kv.Key] = kv.Value; beamsR.Add(RectangleF.FromLTRB(bx - 2, y0, bx + 2, y1)); break; }
+                        mem = mem.Except(bad).ToList();
+                    }
+                }
+            }
             // primero las que no tienen problema en su sitio de siempre; luego las demás, de la más apretada a la menos
-            var def = s.Signals.ToDictionary(sg => sg, sg => Options(sg)[0].p);   // (1.2.84: su sitio de siempre, el primero de las opciones)
-            var shapes = s.Signals.Select(sg => (sg, sh: Shape(sg, def[sg]))).ToList();
-            var order = s.Signals.Select(sg =>
+            var def = sigs.ToDictionary(sg => sg, sg => gantry.TryGetValue(sg, out var gp) ? gp : Options(sg)[0].p);   // (1.2.84: su sitio de siempre, el primero de las opciones; 2026-11-10: o su pórtico)
+            var shapes = sigs.Select(sg => (sg, sh: Shape(sg, def[sg]))).ToList();
+            var order = sigs.Select(sg =>
             {
                 float c = Cost(sg, def[sg], 0);
                 var (f, m, a) = Shape(sg, def[sg]); var fi = RectangleF.Inflate(f, 1.5f, 1.5f);
@@ -769,6 +1091,7 @@ namespace SelectOR
             foreach (var (sg, _) in order)
             {
                 var best = def[sg]; float bc = Cost(sg, best, 0);
+                if (gantry.ContainsKey(sg)) bc = 0;   // (2026-11-10: en su pórtico)
                 if (bc > 0)
                     foreach (var (p, pen) in Options(sg))
                     {
@@ -785,6 +1108,7 @@ namespace SelectOR
             for (int pass = 0; pass < 2; pass++)
                 foreach (var (sg, _) in order)
                 {
+                    if (gantry.ContainsKey(sg)) continue;   // (2026-11-10: en su pórtico)
                     int ix = idx[sg]; var keep = placed[ix]; placed[ix] = gone;
                     var best = map[sg]; float bc = Cost(sg, best, pens[sg]);
                     if (bc > pens[sg] + 0.5f)

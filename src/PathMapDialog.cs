@@ -24,6 +24,8 @@ namespace SelectOR
         Label _status;
         // La vía del HUD de una ruta (MainMenuForm.RouteDetailAsync); null: no hay.
         public static Func<string, Task<HudMapDetail>> DetailFor;
+        // (2026-11-09) los sitios de mercancías con nombre de una ruta (MainMenuForm.FreightLatLonAsync)
+        public static Func<string, Task<List<(string name, double lat, double lon)>>> FreightFor;
 
         // Mapa GENERAL de la ruta (toda la red), sin un Path concreto.
         public PathMapDialog(string routeDir) : this(null, routeDir, "", "") { _routeOnly = true; }
@@ -57,6 +59,12 @@ namespace SelectOR
             var patPath = _patPath; var routeDir = _routeDir;
             Task<HudMapDetail> detTask = null;
             try { if (!string.IsNullOrEmpty(routeDir)) detTask = DetailFor?.Invoke(routeDir); } catch { }
+            try
+            {
+                var frTask = string.IsNullOrEmpty(routeDir) ? null : FreightFor?.Invoke(routeDir);
+                frTask?.ContinueWith(t => { try { if (t.Status == TaskStatus.RanToCompletion && !IsDisposed) BeginInvoke((Action)(() => { _map.FreightList = t.Result; _map.Invalidate(); })); } catch { } });
+            }
+            catch { }
             Task.Run(() =>
             {
                 var network = new List<PointF[]>();
@@ -221,7 +229,21 @@ namespace SelectOR
 
             public void SetData(List<PointF[]> net, List<PointF> path, List<PointF> junc, List<KeyValuePair<PointF, string>> labels,
                                 HudMapDetail det = null, Func<double, double, PointF> frame = null)
-            { _net = net; _path = path; _junc = junc; _labels = labels; _det = frame != null ? det : null; _frame = frame; _fitted = false; Invalidate(); }
+            { _net = net; _path = path; _junc = junc; _labels = labels; _det = frame != null ? det : null; _frame = frame; _fitted = false; _freight = null; Invalidate(); }
+            // (2026-11-09) los sitios de mercancías con nombre (apartaderos), como en los demás mapas: cuadrado marrón y su nombre
+            List<(string name, double lat, double lon)> _freight;
+            public List<(string name, double lat, double lon)> FreightList;   // (del grafo de la ruta: la lista buena)
+            List<(string name, double lat, double lon)> Freight()
+            {
+                if (FreightList != null) return FreightList;
+                if (_freight != null || _det == null) return _freight;
+                var names = new HashSet<string>((_labels ?? new List<KeyValuePair<PointF, string>>()).Select(kv => kv.Value), StringComparer.OrdinalIgnoreCase);
+                var acc = new Dictionary<string, (double la, double lo, int n)>(StringComparer.OrdinalIgnoreCase);
+                void Add(string nm, double la, double lo) { string fn = MainMenuForm.FreightName(nm, names); if (fn == null) return; acc.TryGetValue(fn, out var a); acc[fn] = (a.la + la, a.lo + lo, a.n + 1); }
+                foreach (var l in _det.Sidings) if (l.Lat.Length > 0) Add(l.Name, l.Lat[l.Lat.Length / 2], l.Lon[l.Lon.Length / 2]);
+                foreach (var (la, lo, nm) in _det.SidingNames) Add(nm, la, lo);
+                return _freight = acc.Select(kv => (kv.Key, kv.Value.la / kv.Value.n, kv.Value.lo / kv.Value.n)).ToList();
+            }
 
             bool HasTrack => _det != null || (_net != null && _net.Count > 0);
 
@@ -342,6 +364,28 @@ namespace SelectOR
                                 TextRenderer.DrawText(g, kv.Value, f, tr, Color.FromArgb(255, 220, 130), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                             }
                         }
+                }
+
+                // (2026-11-09) los sitios de mercancías (cuadrado marrón; su nombre con zoom, como las estaciones)
+                if (_frame != null && Freight() is { Count: > 0 } fr)
+                {
+                    bool showText = _scale > 0.02f;
+                    var fcol = RouteLiveMap.FreightCol;
+                    using var f = Theme.Font(7.6f);
+                    using var fb = new SolidBrush(fcol);
+                    foreach (var (nm, la, lo) in fr)
+                    {
+                        var m = Map(_frame(la, lo));
+                        if (m.X < rect.X - 40 || m.X > rect.Right + 40 || m.Y < rect.Y - 20 || m.Y > rect.Bottom + 20) continue;
+                        g.FillRectangle(fb, m.X - 3, m.Y - 3, 6, 6);
+                        if (showText)
+                        {
+                            var sz = TextRenderer.MeasureText(g, nm, f);
+                            var tr = new Rectangle((int)m.X + 6, (int)m.Y - sz.Height / 2, sz.Width + 6, sz.Height + 2);
+                            Theme.FillRound(g, tr, 4, Color.FromArgb(180, 0, 0, 0));
+                            TextRenderer.DrawText(g, nm, f, tr, fcol, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                        }
+                    }
                 }
 
                 // etiquetas de ORIGEN (verde) y DESTINO (rojo) sobre sus puntos, siempre encima de todo

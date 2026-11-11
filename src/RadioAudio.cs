@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -57,15 +58,20 @@ namespace SelectOR
         volatile bool _talk;                    // pulsado: capturando
         IntPtr _in = IntPtr.Zero, _out = IntPtr.Zero;
         readonly List<Buf> _inBufs = new(), _outBufs = new();
-        readonly ConcurrentQueue<short[]> _play = new();
+        // (2026-11-10, canales) lo que se oye, por quién: cada voz en su cola y se mezclan (un jefe oye a la vez su banda y a los
+        // demás jefes); los chasquidos y pitidos, en la suya («~»)
+        readonly Dictionary<string, Queue<short[]>> _play = new();
+        sealed class Spk
+        {
+            public readonly AdpcmState St = new();
+            public readonly Biquad Hp = Biquad.HighPass(400, Rate, 0.707), Hp2 = Biquad.HighPass(400, Rate, 0.707), Lp = Biquad.LowPass(2800, Rate, 0.707), Lp2 = Biquad.LowPass(2800, Rate, 0.707);
+        }
+        void Play(string who, short[] pcm) { lock (_play) { if (!_play.TryGetValue(who, out var q)) _play[who] = q = new Queue<short[]>(); q.Enqueue(pcm); } }
         readonly ConcurrentQueue<Action> _todo = new();
         readonly AdpcmState _enc = new();
-        readonly Dictionary<string, AdpcmState> _dec = new();
+        readonly Dictionary<string, Spk> _dec = new();   // (cada voz, su descompresor y su filtro de radio: 400–2.800 Hz)
         readonly Random _rnd = new();
         float _agc = 1f;
-        // el filtro de radio (paso alto 300 Hz + paso bajo 3.000 Hz)
-        readonly Biquad _hp = Biquad.HighPass(400, Rate, 0.707), _hp2 = Biquad.HighPass(400, Rate, 0.707),
-                        _lp = Biquad.LowPass(2800, Rate, 0.707), _lp2 = Biquad.LowPass(2800, Rate, 0.707);
 
         public RadioAudio()
         {
@@ -80,18 +86,18 @@ namespace SelectOR
         public void Receive(string from, byte[] block)
         {
             if (block == null || block.Length < 4) return;
-            AdpcmState st;
-            lock (_dec) { if (!_dec.TryGetValue(from ?? "", out st)) _dec[from ?? ""] = st = new AdpcmState(); }
-            var pcm = Adpcm.Decode(block, st);
-            Radioize(pcm);
-            _play.Enqueue(pcm);
+            Spk sp;
+            lock (_dec) { if (!_dec.TryGetValue(from ?? "", out sp)) _dec[from ?? ""] = sp = new Spk(); }
+            var pcm = Adpcm.Decode(block, sp.St);
+            RadioizeCore(pcm, sp.Hp, sp.Hp2, sp.Lp, sp.Lp2, _rnd, Volume);
+            Play(from ?? "", pcm);
         }
 
         // el chasquido: al empezar una transmisión, un golpe seco; al acabar, un «shhh» corto (como un walkie al soltar)
-        public void Squelch(bool start)
+        public void Squelch(bool start, string who = null)
         {
-            lock (_dec) _dec.Clear();   // (el siguiente que hable empieza de cero)
-            _play.Enqueue(SquelchCore(start, _rnd, Volume));
+            lock (_dec) { if (who == null) _dec.Clear(); else _dec.Remove(who); }   // (quien empieza o acaba, de cero; los demás siguen)
+            Play("~", SquelchCore(start, _rnd, Volume));
         }
 
         static short[] SquelchCore(bool start, Random rnd, float vol)
@@ -113,12 +119,11 @@ namespace SelectOR
         {
             int n = Rate * 32 / 100; var s = new short[n];
             for (int i = 0; i < n; i++) { bool on = i < Rate / 10 || i > Rate * 2 / 10 && i < Rate * 3 / 10; s[i] = on ? Clip(6000 * Math.Sin(i * 2 * Math.PI * 520 / Rate) * Volume) : (short)0; }
-            _play.Enqueue(s);
+            Play("~", s);
         }
 
         // (petición: «que se escuche como a través de una radio») banda estrecha de radio (400–2.800 Hz, con más pendiente),
         // con el detalle de un equipo portátil (8 kHz), saturada y con su soplido de fondo
-        void Radioize(short[] pcm) => RadioizeCore(pcm, _hp, _hp2, _lp, _lp2, _rnd, Volume);
 
         static void RadioizeCore(short[] pcm, Biquad hp, Biquad hp2, Biquad lp, Biquad lp2, Random rnd, float vol)
         {
@@ -149,13 +154,42 @@ namespace SelectOR
 
         static short Clip(double v) => (short)Math.Max(-32768, Math.Min(32767, v));
 
+        // (2026-11-09) Dispositivos de Windows por su nombre (en Ajustes se guarda el nombre: los números cambian al enchufar y
+        // desenchufar). null o uno que ya no está: el predeterminado de Windows.
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct WaveInCaps { public short wMid, wPid; public int vDriverVersion; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szPname; public int dwFormats; public short wChannels, wReserved1; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct WaveOutCaps { public short wMid, wPid; public int vDriverVersion; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szPname; public int dwFormats; public short wChannels, wReserved1; public int dwSupport; }
+        [DllImport("winmm.dll")] static extern int waveInGetNumDevs();
+        [DllImport("winmm.dll")] static extern int waveOutGetNumDevs();
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode, EntryPoint = "waveInGetDevCapsW")] static extern int waveInGetDevCaps(IntPtr id, ref WaveInCaps c, int size);
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode, EntryPoint = "waveOutGetDevCapsW")] static extern int waveOutGetDevCaps(IntPtr id, ref WaveOutCaps c, int size);
+        public static string InDevice, OutDevice;   // (RoomRadio, de AppPrefs) los elegidos
+        public static List<string> InputNames()
+        {
+            var l = new List<string>();
+            try { int n = waveInGetNumDevs(); for (int i = 0; i < n; i++) { var c = new WaveInCaps(); if (waveInGetDevCaps((IntPtr)i, ref c, Marshal.SizeOf<WaveInCaps>()) == 0 && !string.IsNullOrEmpty(c.szPname)) l.Add(c.szPname); } } catch { }
+            return l;
+        }
+        public static List<string> OutputNames()
+        {
+            var l = new List<string>();
+            try { int n = waveOutGetNumDevs(); for (int i = 0; i < n; i++) { var c = new WaveOutCaps(); if (waveOutGetDevCaps((IntPtr)i, ref c, Marshal.SizeOf<WaveOutCaps>()) == 0 && !string.IsNullOrEmpty(c.szPname)) l.Add(c.szPname); } } catch { }
+            return l;
+        }
+        static int DevIndex(List<string> names, string want)
+        {
+            if (string.IsNullOrEmpty(want)) return WAVE_MAPPER;
+            int i = names.FindIndex(x => string.Equals(x, want, StringComparison.OrdinalIgnoreCase));
+            return i >= 0 ? i : WAVE_MAPPER;
+        }
+
         // ---------------------------------------------------------------- el hilo
         void Loop()
         {
             try
             {
                 var f = Fmt();
-                int r = waveOutOpen(out _out, WAVE_MAPPER, ref f, IntPtr.Zero, IntPtr.Zero, CALLBACK_NULL);
+                int r = waveOutOpen(out _out, DevIndex(OutputNames(), OutDevice), ref f, IntPtr.Zero, IntPtr.Zero, CALLBACK_NULL);
+                if (r != 0 && !string.IsNullOrEmpty(OutDevice)) r = waveOutOpen(out _out, WAVE_MAPPER, ref f, IntPtr.Zero, IntPtr.Zero, CALLBACK_NULL);   // (la elegida falla: la predeterminada)
                 if (r != 0) { _out = IntPtr.Zero; LastError = "waveOutOpen " + r; }
                 for (int i = 0; i < 12; i++) _outBufs.Add(new Buf(Rate * 2 * 4 / 10));   // (400 ms: cabe el chasquido entero)
                 while (_run)
@@ -183,7 +217,8 @@ namespace SelectOR
         {
             if (_in != IntPtr.Zero) return;
             var f = Fmt();
-            int r = waveInOpen(out _in, WAVE_MAPPER, ref f, IntPtr.Zero, IntPtr.Zero, CALLBACK_NULL);
+            int r = waveInOpen(out _in, DevIndex(InputNames(), InDevice), ref f, IntPtr.Zero, IntPtr.Zero, CALLBACK_NULL);
+            if (r != 0 && !string.IsNullOrEmpty(InDevice)) r = waveInOpen(out _in, WAVE_MAPPER, ref f, IntPtr.Zero, IntPtr.Zero, CALLBACK_NULL);
             if (r != 0) { _in = IntPtr.Zero; LastError = "waveInOpen " + r; MicError?.Invoke(); return; }
             _enc.Reset(); _agc = 1f;
             for (int i = 0; i < 6; i++)
@@ -230,14 +265,28 @@ namespace SelectOR
 
         void PumpOut()
         {
-            if (_out == IntPtr.Zero) { while (_play.TryDequeue(out _)) { } return; }
+            if (_out == IntPtr.Zero) { lock (_play) _play.Clear(); return; }
             foreach (var b in _outBufs)
                 if (b.Queued && b.Done) { waveOutUnprepareHeader(_out, b.Hdr, HdrSize); b.Queued = false; b.Reset(); }
-            while (!_play.IsEmpty)
+            while (true)
             {
                 Buf free = null; foreach (var b in _outBufs) if (!b.Queued) { free = b; break; }
                 if (free == null) return;
-                if (!_play.TryDequeue(out var pcm)) return;
+                // un trozo de cada voz que tenga algo, sumados
+                short[] pcm = null;
+                lock (_play)
+                {
+                    var parts = new List<short[]>();
+                    foreach (var q in _play.Values) if (q.Count > 0) parts.Add(q.Dequeue());
+                    foreach (var k in _play.Where(kv => kv.Value.Count == 0).Select(kv => kv.Key).ToList()) _play.Remove(k);
+                    if (parts.Count == 1) pcm = parts[0];
+                    else if (parts.Count > 1)
+                    {
+                        pcm = new short[parts.Max(x => x.Length)];
+                        for (int i = 0; i < pcm.Length; i++) { int sum = 0; foreach (var x in parts) if (i < x.Length) sum += x[i]; pcm[i] = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, sum)); }
+                    }
+                }
+                if (pcm == null) return;
                 int bytes = Math.Min(pcm.Length * 2, free.Bytes);
                 Marshal.Copy(pcm, 0, free.Data, bytes / 2);
                 var h = new WaveHdr { lpData = free.Data, dwBufferLength = bytes };

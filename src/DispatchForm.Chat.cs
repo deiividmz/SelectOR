@@ -5,6 +5,7 @@
 // en ese momento llevan la etiqueta «Jefe de circulación». «›» lo recoge en una franja estrecha (con los nuevos sin leer).
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -15,7 +16,7 @@ namespace SelectOR
     {
         Panel _chatPanel, _chatBody;
         Label _chatHead, _chatToggle, _chatNote;
-        RichTextBox _chatLog;
+        RichTextBox _chatLog; ThinScrollBar _chatBar;
         TextBox _chatInput;
         bool _chatCollapsed;
         int _chatUnread;
@@ -49,7 +50,16 @@ namespace SelectOR
                 ChatSend();
             };
             inBox.Controls.Add(_chatInput);
-            _chatBody.Controls.Add(_chatLog); _chatBody.Controls.Add(inBox); _chatBody.Controls.Add(_chatNote);
+            // (2026-11-09) con la barra fina, como la de la lista de trenes (ThinScrollBar.cs)
+            _chatBar = ThinScrollBar.ForRichText(_chatLog);
+            _chatLog.SizeChanged += (s2, e2) => ChatToBottom();      // (2026-11-09) siempre en lo último
+            _chatLog.VisibleChanged += (s2, e2) => { if (_chatLog.Visible) ChatToBottom(); };
+            _chatLog.HandleCreated += (s2, e2) => ChatToBottom();
+            var logBox = new Panel { Dock = DockStyle.Fill, BackColor = _chatLog.BackColor };
+            var barGap = new Panel { Dock = DockStyle.Right, Width = Theme.Px(4), BackColor = _chatPanel.BackColor };
+            logBox.Controls.Add(_chatLog); logBox.Controls.Add(barGap); logBox.Controls.Add(_chatBar);
+            barGap.Visible = false; _chatBar.VisibleChanged += (s2, e2) => barGap.Visible = _chatBar.Visible;
+            _chatBody.Controls.Add(logBox); _chatBody.Controls.Add(inBox); _chatBody.Controls.Add(_chatNote);
             // (1.2.90) la radio de la sala, encima del chat: mantener pulsado para hablar (botón derecho: silenciar y volumen)
             _radioPanel = new RadioPanel { Dock = DockStyle.Top, Height = Theme.Px(46), BackColor = _chatPanel.BackColor, Margin = new Padding(0, 0, 0, Theme.Px(6)) };
             var radioGap = new Panel { Dock = DockStyle.Top, Height = Theme.Px(6), BackColor = _chatPanel.BackColor };
@@ -63,10 +73,38 @@ namespace SelectOR
         // (Prepare, con la conexión creada)
         void PrepareChat()
         {
-            try { _radio = new RoomRadio(_pilot, this, _me); if (_radioPanel != null) _radioPanel.Radio = _radio; FormClosed += (s, e) => { try { _radio?.Dispose(); } catch { } _radio = null; }; } catch { }
+            try
+            {
+                _radio = new RoomRadio(_pilot, this, _me) { Bands = RadioBands, Choices = RadioChoices };   // (2026-11-10) canales por banda y de jefes
+                if (_radioPanel != null) _radioPanel.Radio = _radio;
+                FormClosed += (s, e) => { try { _radio?.Dispose(); } catch { } _radio = null; };
+            }
+            catch { }
             _pilot.Chat += (at, kind, from, text) => { try { if (!IsDisposed) BeginInvoke(new Action(() => ChatAdd(at, kind, from, text))); } catch { } };
             _pilot.ChatReset += () => { try { if (!IsDisposed) BeginInvoke(new Action(ChatReady)); } catch { } };
             _pilot.ChatError += err => { try { if (!IsDisposed) BeginInvoke(new Action(() => ChatErr(err))); } catch { } };
+        }
+
+        // (2026-11-10) la radio en el puesto: oye las bandas de sus dependencias y la que ve (en el plano general, sin ninguna
+        // suya: toda la sala); habla, de serie, a la banda que ve (si no, a la primera suya); los jefes con mando, también a los
+        // demás jefes; el administrador, además, a todas las bandas
+        int ViewBand() => _curBand > 0 ? _curBand : BandOfZone(_curZone);
+        IReadOnlyList<string> RadioBands()
+        {
+            if (!BandsOn) return null;
+            var l = new List<string>();
+            int vb = ViewBand(); if (vb > 0) l.Add("b" + vb);
+            foreach (var z in MyZones()) { int b = BandOfZone(z); if (b > 0 && !l.Contains("b" + b)) l.Add("b" + b); }
+            return l.Count == 0 ? null : l;
+        }
+        IReadOnlyList<string> RadioChoices()
+        {
+            var l = new List<string>();
+            var bands = RadioBands(); if (bands != null) l.AddRange(bands); else l.Add("*");
+            bool jefe = Me != null && _pilot != null && _pilot.JefeZones.Any(q => q.Name == Me);
+            if (jefe || _chiefAdmin) l.Add("jefes");
+            if (_chiefAdmin) l.Add("todas");
+            return l;
         }
 
         // conexión lista (o rehecha): el servidor manda otra vez lo último
@@ -126,18 +164,32 @@ namespace SelectOR
                 int cut = box.GetFirstCharIndexFromLine(box.Lines.Length - 300);
                 box.Select(0, cut); box.ReadOnly = false; box.SelectedText = ""; box.ReadOnly = true;
             }
-            { box.SelectionStart = box.TextLength; box.ScrollToCaret(); }
+            ChatToBottom();
             if (_chatCollapsed && kind == 'm' && (DateTime.UtcNow - at).TotalSeconds < 20) { _chatUnread++; ChatHeadText(); }
+        }
+
+        // (2026-11-09) el chat, siempre en lo último: al llegar un mensaje y cada vez que cambia de tamaño o se enseña (al abrir
+        // el puesto, al repartir la columna con los trenes, al desplegarlo); también tras colocarse (BeginInvoke)
+        void ChatToBottom()
+        {
+            var box = _chatLog; if (box == null || box.IsDisposed || !box.IsHandleCreated) return;
+            void Go()
+            {
+                try { box.SelectionStart = box.TextLength; box.SelectionLength = 0; box.ScrollToCaret(); } catch { }
+                try { if (_chatBar?.Get != null) { var (total, view, _) = _chatBar.Get(); _chatBar.Set?.Invoke(Math.Max(0, total - view)); _chatBar.Sync(); } } catch { }
+            }
+            Go();
+            try { BeginInvoke((Action)Go); } catch { }
         }
 
         void ChatCollapse(bool on)
         {
             _chatCollapsed = on;
             _chatBody.Visible = !on;
-            _chatPanel.Width = on ? Theme.Px(64) : Theme.Px(300);
+            TrainsCollapse(on);   // (2026-11-09) la columna entera (los trenes, encima del chat: DispatchForm.Trenes.cs)
             _chatPanel.Padding = on ? new Padding(Theme.Px(4), Theme.Px(4), Theme.Px(2), 0) : new Padding(Theme.Px(8), Theme.Px(4), Theme.Px(8), Theme.Px(8));
             _chatToggle.Text = on ? "‹" : "›";
-            if (!on) { _chatUnread = 0; _chatLog.SelectionStart = _chatLog.TextLength; _chatLog.ScrollToCaret(); }
+            if (!on) { _chatUnread = 0; ChatToBottom(); }
             ChatHeadText();
         }
 

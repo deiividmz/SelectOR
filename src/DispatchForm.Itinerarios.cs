@@ -82,6 +82,9 @@ namespace SelectOR
                          : e == "nobot" || e == "nodisp" ? Tr("La sala no tiene ahora mismo el despachador fijo de SelectOR.")
                          : e == "notmine" ? Tr("Fuera de tus dependencias, las agujas solo las mueve quien está conduciendo.")
                          : e == "notin" ? Tr("Para eso tienes que estar conduciendo en la sala o tener el mando de esta dependencia.")   // (1.2.81)
+                         : e == "noadmin" ? Tr("El rebase autorizado forzado es del jefe de circulación de esa estación o del administrador. Para tu tren: pedir paso (Tab) o liberar su señal (Ctrl+Tab).")   // (2026-11-10)
+                         : e == "noforce" ? Tr("En la sala no se fuerzan señales en anuncio ni en vía libre: se abren solas según el cantón y el bloqueo.")
+                         : e == "nohelper" ? Tr("Pídele al despachador que te nombre ayudante: lo hace con un clic en tu nombre en la leyenda de su mapa grande.")
                          : null;
                 if (t != null) try { if (!IsDisposed) BeginInvoke(new Action(() => ItinSay(t, false))); } catch { }
             };

@@ -64,7 +64,8 @@ namespace SelectOR
             _climaGroups.Picked += id => { _climaPreview.ShowGroup(id, ClimaShownEffective()); };
 
             // administrador: un botón que abre su ventana (las imágenes del clima y publicar; ClimaAdminDialog)
-            _climaAdminStrip = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Visible = Supa.IsSuperadmin, Padding = new Padding(0, Theme.Px(14), 0, 0) };
+            // (2026-11-09) ya no se enseña aquí: el administrador lo gestiona en Empresas → Ajustes → Clima (OpenClimaAdmin)
+            _climaAdminStrip = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Visible = false, Padding = new Padding(0, Theme.Px(14), 0, 0) };
             var ah = new Label { Text = I18n.T("ADMINISTRADOR"), Dock = DockStyle.Top, Height = Theme.Px(24), ForeColor = Color.FromArgb(255, 183, 77), BackColor = Theme.Bg, Font = Theme.Font(8.5f, FontStyle.Bold) };
             var manage = DialogKit.Fit(DialogKit.Secondary(I18n.T("Gestionar el clima…")), 200); manage.Height = Theme.Px(34); manage.Dock = DockStyle.Top;
             manage.Click += (s, e) => ClimaAdminDialog();
@@ -165,7 +166,7 @@ namespace SelectOR
             _climaGroups.Invalidate();
             _climaPreview.ShowGroup(_climaPreview.Group ?? _climaGroups.Rows.FirstOrDefault(r => r.Count > 0)?.Id ?? "clouds", ClimaShownEffective());
             ClimaCloudRefresh();
-            _climaAdminStrip.Visible = Supa.IsSuperadmin;
+            _climaAdminStrip.Visible = false;
             if (Supa.IsSuperadmin)
             {
                 var pub = new HashSet<string>((_climaPub?.files ?? new List<ClimaFiles.Item>()).Select(f => f.name + ":" + f.sha));
@@ -197,13 +198,13 @@ namespace SelectOR
             if (folder)
             {
                 using var fd = new FolderBrowserDialog { Description = I18n.T("Carpeta con las imágenes del clima (con los nombres de las de Content de Open Rails)"), UseDescriptionForTitle = true };
-                if (fd.ShowDialog(this) != DialogResult.OK) return;
+                if (fd.ShowDialog(ClimaOwner) != DialogResult.OK) return;
                 paths.AddRange(Directory.GetFiles(fd.SelectedPath).Where(p => ClimaFiles.CanonicalName(Path.GetFileName(p)) != null));
             }
             else
             {
                 using var od = new OpenFileDialog { Multiselect = true, Filter = I18n.T("Imágenes de clima") + " (*.png;*.bmp)|*.png;*.bmp", Title = I18n.T("Imágenes del clima") };
-                if (od.ShowDialog(this) != DialogResult.OK) return;
+                if (od.ShowDialog(ClimaOwner) != DialogResult.OK) return;
                 paths.AddRange(od.FileNames);
             }
             await ClimaAddPaths(paths);
@@ -256,7 +257,7 @@ namespace SelectOR
         public async Task ClimaPublish(bool ask = true)
         {
             if (_climaBusy || !ClimaDirty()) return;
-            if (ask && ThemedBox.Show(this, string.Format(I18n.T("¿Publicar el clima con {0} imagen(es)? Lo recibirán todos los usuarios que tengan el clima activado."), _climaDraft.Count),
+            if (ask && ThemedBox.Show(ClimaOwner, string.Format(I18n.T("¿Publicar el clima con {0} imagen(es)? Lo recibirán todos los usuarios que tengan el clima activado."), _climaDraft.Count),
                                       "SelectOR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _climaBusy = true; _btnClimaPublish.Enabled = false;
             _lblClimaAdmin.Text = I18n.T("Publicando…");
@@ -288,7 +289,27 @@ namespace SelectOR
             DialogKit.Crown(dlg, I18n.T("Gestionar el clima"), I18n.T("Lo que reciben los usuarios con el clima activado."), "⛅");
             dlg.FormClosing += (s, e) => dlg.Controls.Remove(_climaAdminBox);   // (se queda para la próxima vez)
             ClimaRefresh();
-            dlg.ShowDialog(this);
+            dlg.ShowDialog(ClimaOwner);
+        }
+
+        // (2026-11-09) Desde Empresas → Ajustes → Clima: la ventana «Gestionar el clima» sin abrir Ajustes de SelectOR (esta
+        // ventana se crea sin enseñarse, solo por sus datos y su lista; las ventanas que abre van sobre «owner»).
+        IWin32Window _climaOwner;
+        IWin32Window ClimaOwner => _climaOwner ?? this;
+        public static async Task OpenClimaAdmin(IWin32Window owner, AppPrefs prefs)
+        {
+            if (!Supa.IsSuperadmin) return;
+            using var d = new SelectorSettingsDialog(prefs, "clima") { _climaOwner = owner };
+            try { await d.ClimaLoad(); } catch { }
+            d.ClimaAdminDialog();
+        }
+        // (2026-11-09) cuántas imágenes tiene el clima publicado (para Empresas → Ajustes → Clima)
+        public static string ClimaSummary()
+        {
+            var m = ClimaFiles.LoadCached();
+            if (m == null) return I18n.T("Sin clima publicado");
+            return string.Format(I18n.T("Clima n.º {0} · {1}"), m.ver, DateTime.TryParse(m.date, out var dd) ? dd.ToLocalTime().ToString("d MMM yyyy", I18n.Culture) : "")
+                   + " · " + string.Format(I18n.T("{0} imagen(es) en el clima"), m.files.Count);
         }
 
         // ---------------------------------------------------------------- grupos (casilla + nombre + imágenes)

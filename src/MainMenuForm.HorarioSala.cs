@@ -48,11 +48,11 @@ namespace SelectOR
         // (1.2.77) el mapa del horario: el mismo trazado que la pestaña Ruta (de su caché, o se prepara una vez)
         async Task<RouteMapData> HorarioMapData(string dir)
         {
-            if (_rutaMapCache.TryGetValue(dir, out var d)) return d;
+            if (_rutaMapCache.TryGetValue(dir, out var d)) { AddFreight(dir, d); return d; }
             if (!RutaMapPossible(dir)) return null;
             var track = await RouteTrackAsync(dir);
             d = await Task.Run(() => BuildRouteMapData(dir, track));
-            if (d != null) _rutaMapCache[dir] = d;
+            if (d != null) { _rutaMapCache[dir] = d; AddFreight(dir, d); }   // (2026-11-09) y los sitios de mercancías
             return d;
         }
 

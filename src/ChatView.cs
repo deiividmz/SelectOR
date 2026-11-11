@@ -351,7 +351,7 @@ namespace SelectOR
                     HudScale.Text(g, ShownText(m), FItalic, tr, Theme.Subtle, BodyFlags);
                 else
                 {
-                    if (ColorText.HasEmoji(m.Body) && ColorText.Available) ColorText.Draw(g, m.Body, BodyFont(m), tr, Theme.Text);   // emojis en color
+                    if (ColorText.HasEmoji(m.Body) && ColorText.Available) ColorText.Draw(g, m.Body, BodyFont(m), tr, Theme.Text, raw: true);   // emojis en color (los de verdad: es lo que escribe la gente)
                     else HudScale.Text(g, m.Body, FBody, tr, Theme.Text, BodyFlags);
                     if (m.Edited)
                     {

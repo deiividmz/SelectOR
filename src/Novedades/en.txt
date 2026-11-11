@@ -1,13 +1,17 @@
-﻿1.2.92
-Driver and dispatcher certificates|In My profile → Certificates you take the exam and level up (B, A and A+) with your services. To take command as a dispatcher you need to pass its exam. Certified players carry their badge in the room, the chat and the radio, and companies can ask for a certificate in their Board job offers.
-Tips on the Board|A new section with tips to earn more on every trip: fares, passengers by time of day and weather, and more, with current figures.
-Faster routes|In the control centre, click the signal and click the destination: the route is drawn straight away. Right-click for more options, and «Replay» sets the last ones again.
-Only your signal boxes|The «Only mine» button in the control centre shows only the signal boxes you run, and it's remembered.
-Disconnect from the control centre|Dispatchers can disconnect a player or remove loose wagons within their signal boxes, always with a reason that the player sees.
-Applicant profile|Managers can see the profile of whoever asks to join their company before accepting them.
-Every passenger counts in the league|The league and your service log count every passenger you carry, even though fares have their limit.
-More compatible controllers|Settings → Controllers: throttle + train brake lever, a combined lever that adapts to each train (with its rest point, automatic or manual) and buttons that stay on until the next press.
-Snappier set speed|In Stable, Testing and CYZYRails the cruise control set speed moves as quickly as in New Year.
-Lights on Breclav - Praha|With CYZYRails, the stations on the Breclav - Praha route light up in yellow.
-Steadier room trains|Your Open Rails no longer stalls with other players' trains that leave their path, and an AI train no longer couples to yours.
-No Ctrl+9 in the room|In the shared room the Ctrl+9 window no longer opens with any Open Rails version.
+﻿1.3.0
+Block direction|In the shared room every section between stations has a block direction: two trains can no longer enter the same track head-on. Without a dispatcher the first train to enter sets it; with one, the dispatcher changes it from the control centre, where it shows as an arrow on each track.
+Signals as in free driving|In the room, signals behave as when you drive alone: the ones behind your train only clear if you reverse, a cleared signal no longer drops when you can't stop in time, and flags and diverging-route aspects follow the switches.
+Signal orders|In the room signals are no longer forced to approach or clear: they clear by themselves. Call-on is given by the dispatcher of that station or the administrator, and at a dispatcher's stations their orders no longer expire on their own.
+Renewed control centre|A schematic of the whole route station by station, grouped into control areas, with kilometre posts, level crossings with their kilometre, tunnels, named sidings and the Parque Grande triangle. Signals no longer overlap and, where many are together, they hang from a gantry.
+Signal boxes and trains in the control centre|The Signal boxes column folds away and each station carries its line sections. On the right, the trains in view with their number, type, destination, stops and 2D consist: click to locate one, double-click to follow it.
+Your train in the room|Before joining you pick on a map the service type, the destination and your intermediate stops (stations, freight sites or sidings), and you get your train number. You see it in the HUD, the dispatcher sees it in the control centre, and you change it while driving by clicking your number.
+Radio by control area|While driving you hear the radio of your control area; dispatchers have their own channel and the administrator can talk to all of them at once. You can choose the microphone and the sound output.
+Station dispatcher|At some stations a station dispatcher gives the departure from the platform: stop, pass or «train may depart», with a flag by day, a green or red lamp by night, and a whistle. The dispatcher changes the indication from the control centre.
+Smoother AI trains|AI trains in the room no longer jam each other, passenger trains go before freight on single track, and they can stop at freight terminals and sidings. The consists you choose for them also apply to the ones already running when you join.
+Incident alerts|The control centre warns of incidents in the room with their own sound and marks them on the map.
+A new look for Companies|Companies as a line map: figures on tickets, service cards with their status signal, bonuses and photo, and each member's certificates.
+Company requirements|Companies can require a minimum of km or minutes per service and being on their Discord; a service that doesn't meet them is cancelled automatically, and you can appeal.
+Night bonus|Passenger services driven at night earn a bonus for each night kilometre.
+Service time, season and weather|Each service card keeps the simulator time you left at, the season and the weather.
+The room route first|If you have the shared room route installed (CGL_V22N_RE), it is pinned at the top of Routes with a golden frame.
+Freight on the maps|Freight terminals and sidings show with their name on every map.

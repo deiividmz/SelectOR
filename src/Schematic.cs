@@ -18,7 +18,7 @@ using System.Text.RegularExpressions;
 
 namespace SelectOR
 {
-    public sealed class Schematic
+    public sealed partial class Schematic
     {
         public const float Row = 26f;   // (1.2.75, estilo ADIF: filas más separadas, que se lean bien)
         const double Scale = 0.9, Gap = 8, VMax = 650, VPar = 140;
@@ -31,6 +31,7 @@ namespace SelectOR
             public int[] EndNode = new int[2]; public char[] EndKind = new char[2]; public double V, UMin, UMax, UA, UB;   // UA/UB: posición real a lo largo en sus extremos
             internal (double off, double u)[] Map;   // (vía en fila) del punto del tramo a la posición a lo largo
             internal double LenPx;
+            internal bool Linear;   // (2026-11-10) redibujada a mano (Apex): sus metros, repartidos a lo largo de su línea
         }
         public sealed class Switch { public int Node, Order = -1; public PointF At; public PointF[][] Legs = new PointF[2][]; public bool Hidden; public int Straight = -1; public int[] LegEdge = { -1, -1 }; public bool[] LegFromA = new bool[2]; public double[] LegLen = new double[2]; }   // LegEdge…: (1.2.81) el tramo de cada rama, para pintarla con el itinerario   // Straight: (1.2.81) la rama directa (0/1, como THROWNODE)
         public sealed class Signal
@@ -40,7 +41,7 @@ namespace SelectOR
             internal Func<int> SideCalc; int? _side;
             public int Side { get { if (_side.HasValue) return _side.Value; if (SideCalc == null || double.IsNaN(Sig?.PostLat ?? double.NaN)) return 0; _side = SideCalc(); return _side.Value; } }
         }   // Stack: varias en el mismo sitio, una encima de otra
-        public sealed class Platform { public RectangleF Bar; public string Label; public bool Above; }   // Above: (1.2.81) la barra encima de la vía
+        public sealed class Platform { public RectangleF Bar; public string Label; public bool Above; public string Station; }   // Station: (2026-11-09) de qué estación (en una banda hay varias)   // Above: (1.2.81) la barra encima de la vía
         public sealed class Exit { public PointF At; public bool Right; public string Station; public int Edge = -1, Side; }   // Edge/Side: el tramo y su extremo por donde sale
 
         public string Station;
@@ -71,6 +72,15 @@ namespace SelectOR
         public sealed class LevelX { public PasosNivel.Cr Cr; public PointF At; }   // (1.2.84) un paso a nivel, en su vía del esquema
         public readonly List<LevelX> LevelXs = new();
         public readonly List<Platform> Platforms = new();
+        // (2026-11-10, petición) los apartaderos con nombre de la ruta («Aranda Vía 4», «Cereales Paco S.A. Vía 1»): el rótulo,
+        // en medio de lo que marcan en su vía
+        public sealed class SidingLabel { public PointF At; public string Name; public int Edge; public double Off; }
+        public readonly List<SidingLabel> SidingLabels = new();
+        // (2026-11-10, petición) los hitos kilométricos (PK) de la ruta en las vías del esquema
+        public sealed class KmPost { public PointF At; public double V; public int Edge; public double Off; }
+        public readonly List<KmPost> KmPosts = new();
+        // (2026-11-10) en el esquema de la ruta, las dependencias (zonas) que dibuja cada pieza: una pieza unida lleva varias
+        public HashSet<string> ZoneNames;
         public readonly List<Exit> Exits = new();
         public RectangleF Bounds;
         public int Rows;
@@ -193,14 +203,563 @@ namespace SelectOR
             return acc.Select(kv => (kv.Key, kv.Value.x / kv.Value.n, kv.Value.y / kv.Value.n, kv.Value.n)).OrderBy(t => t.Key, StringComparer.CurrentCulture).ToList();
         }
 
-        double U(double x, double y) => _flip * ((x - _cx) * _ax + (y - _cy) * _ay);
-        double V(double x, double y) => _flip * (-(x - _cx) * _ay + (y - _cy) * _ax);   // (_flip: media vuelta, u y v a la vez; un espejo cambiaría el lado de las agujas)
+        double U(double x, double y) => _sp != null ? _flip * SpineUV(x, y).u : _flip * ((x - _cx) * _ax + (y - _cy) * _ay);
+        double V(double x, double y) => _sp != null ? _flip * SpineUV(x, y).v : _flip * (-(x - _cx) * _ay + (y - _cy) * _ax);
+
+        // ── (2026-11-09) MODO BANDA: el eje es la línea principal de la banda (una polilínea que se curva con la vía): u, lo
+        // recorrido por ella hasta el punto más cercano; v, la distancia a ella (a la izquierda, positiva, como con un eje recto)
+        List<(double x, double y)> _sp; double[] _spCum; Dictionary<(int, int), List<int>> _spGrid; HashSet<string> _bandSt;
+        HashSet<int> _bandEdges;   // (las vías de la banda: solo ellas en la franja de posición real)
+        public bool IsBand => _bandSt != null;
+        const double SpCell = 120;
+        (double x, double y, double u, double v) _spLast = (double.NaN, double.NaN, 0, 0);
+        double _spLastLocal;   // (la distancia a su propia línea: la de la franja de posición real)
+        // (2026-11-09) ramales: su polilínea (desde la aguja en el eje), y dónde va su franja: u = U0 + Sign·s, v = V0 + Sign·w
+        sealed class Branch { public List<(double x, double y)> P; public double[] Cum; public Dictionary<(int, int), List<int>> Grid; public double U0, V0, S0; public int Sign = 1; }   // S0: (2026-11-09) dónde empieza su franja (antes, posición real)
+        readonly List<Branch> _branches = new();
+        static (double[] cum, Dictionary<(int, int), List<int>> grid) PolyIndex(List<(double x, double y)> pts)
+        {
+            var cum = new double[pts.Count]; var grid = new Dictionary<(int, int), List<int>>();
+            for (int i = 1; i < pts.Count; i++) cum[i] = cum[i - 1] + Math.Sqrt((pts[i].x - pts[i - 1].x) * (pts[i].x - pts[i - 1].x) + (pts[i].y - pts[i - 1].y) * (pts[i].y - pts[i - 1].y));
+            for (int i = 0; i + 1 < pts.Count; i++)
+            {
+                int x0 = (int)Math.Floor(Math.Min(pts[i].x, pts[i + 1].x) / SpCell), x1 = (int)Math.Floor(Math.Max(pts[i].x, pts[i + 1].x) / SpCell);
+                int y0 = (int)Math.Floor(Math.Min(pts[i].y, pts[i + 1].y) / SpCell), y1 = (int)Math.Floor(Math.Max(pts[i].y, pts[i + 1].y) / SpCell);
+                for (int a = x0; a <= x1; a++) for (int b = y0; b <= y1; b++) { if (!grid.TryGetValue((a, b), out var l)) grid[(a, b)] = l = new(); l.Add(i); }
+            }
+            return (cum, grid);
+        }
+        // el punto más cercano de una polilínea: (distancia², recorrido, a qué lado); extStart/extEnd: con su prolongación
+        static (double d2, double u, double v) PolyNearest(List<(double x, double y)> P, double[] cum, Dictionary<(int, int), List<int>> grid, double x, double y, bool extStart, bool extEnd)
+        {
+            double bd = double.MaxValue, bu = 0, bv = 0;
+            void Seg(int i)
+            {
+                var a = P[i]; var b = P[i + 1]; double dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+                double t = L2 < 1e-9 ? 0 : ((x - a.x) * dx + (y - a.y) * dy) / L2;
+                t = Math.Max(i == 0 && extStart ? double.NegativeInfinity : 0, Math.Min(i + 2 == P.Count && extEnd ? double.PositiveInfinity : 1, t));
+                double px = a.x + dx * t, py = a.y + dy * t, d = (x - px) * (x - px) + (y - py) * (y - py);
+                if (d < bd) { bd = d; double L = Math.Sqrt(L2); bu = cum[i] + t * L; bv = L < 1e-9 ? 0 : (-(x - a.x) * dy + (y - a.y) * dx) / L; }
+            }
+            int cx = (int)Math.Floor(x / SpCell), cy = (int)Math.Floor(y / SpCell);
+            for (int ring = 0; ring <= 8; ring++)
+            {
+                for (int a = cx - ring; a <= cx + ring; a++)
+                    for (int b = cy - ring; b <= cy + ring; b++)
+                    {
+                        if (Math.Max(Math.Abs(a - cx), Math.Abs(b - cy)) != ring) continue;
+                        if (grid.TryGetValue((a, b), out var l)) foreach (int i in l) Seg(i);
+                    }
+                if (bd < double.MaxValue && Math.Sqrt(bd) <= ring * SpCell) break;
+            }
+            if (bd == double.MaxValue) for (int i = 0; i + 1 < P.Count; i++) Seg(i);
+            return (bd, bu, bv);
+        }
+        void PrepareSpine()
+        {
+            // (2026-11-09, auditoría) los extremos, prolongados 1,5 km en la dirección media de sus últimos 150 m: con la del último
+            // trocito (a veces unos metros de desvío) las vías de más allá del extremo salían todas en el mismo punto (Castañeda)
+            if (_sp.Count >= 2)
+            {
+                var sp = new List<(double x, double y)>(_sp);
+                (double x, double y) Ext(IList<(double x, double y)> l)
+                {
+                    var e0 = l[0]; double acc = 0; var far = l[^1];
+                    for (int i = 1; i < l.Count; i++) { acc += Math.Sqrt((l[i].x - l[i - 1].x) * (l[i].x - l[i - 1].x) + (l[i].y - l[i - 1].y) * (l[i].y - l[i - 1].y)); if (acc >= 150) { far = l[i]; break; } }
+                    double dx = e0.x - far.x, dy = e0.y - far.y, L = Math.Sqrt(dx * dx + dy * dy);
+                    return L < 1e-6 ? e0 : (e0.x + dx / L * 1500, e0.y + dy / L * 1500);
+                }
+                var head = Ext(sp); var rev = new List<(double x, double y)>(sp); rev.Reverse(); var tail = Ext(rev);
+                // (y suavizado: cada 25 m, la media de ±200 m. En un giro brusco del eje, en un nudo, todo lo de junto al vértice se
+                // proyectaba en el vértice, con la misma u, y salía en vertical: Castañeda)
+                var rs = new List<(double x, double y)> { sp[0] }; double carry = 0;
+                for (int i = 1; i < sp.Count; i++)
+                {
+                    var a0 = sp[i - 1]; var a1 = sp[i]; double L = Math.Sqrt((a1.x - a0.x) * (a1.x - a0.x) + (a1.y - a0.y) * (a1.y - a0.y)), t = 25 - carry;
+                    while (t <= L) { rs.Add((a0.x + (a1.x - a0.x) * t / L, a0.y + (a1.y - a0.y) * t / L)); t += 25; }
+                    carry = L - (t - 25);
+                }
+                if (rs[^1] != sp[^1]) rs.Add(sp[^1]);
+                const int W = 8;
+                var sm = new List<(double x, double y)>();
+                for (int i = 0; i < rs.Count; i++)
+                {
+                    int lo = Math.Max(0, i - W), hi = Math.Min(rs.Count - 1, i + W), w = Math.Min(i - lo, hi - i);   // (ventana simétrica: los extremos se quedan)
+                    double sx = 0, sy = 0; for (int k = i - w; k <= i + w; k++) { sx += rs[k].x; sy += rs[k].y; }
+                    sm.Add((sx / (2 * w + 1), sy / (2 * w + 1)));
+                }
+                sm.Insert(0, head); sm.Add(tail);
+                _sp = sm;
+            }
+            _spCum = new double[_sp.Count]; _spGrid = new();
+            for (int i = 1; i < _sp.Count; i++) _spCum[i] = _spCum[i - 1] + Math.Sqrt((_sp[i].x - _sp[i - 1].x) * (_sp[i].x - _sp[i - 1].x) + (_sp[i].y - _sp[i - 1].y) * (_sp[i].y - _sp[i - 1].y));
+            for (int i = 0; i + 1 < _sp.Count; i++)
+            {
+                int x0 = (int)Math.Floor(Math.Min(_sp[i].x, _sp[i + 1].x) / SpCell), x1 = (int)Math.Floor(Math.Max(_sp[i].x, _sp[i + 1].x) / SpCell);
+                int y0 = (int)Math.Floor(Math.Min(_sp[i].y, _sp[i + 1].y) / SpCell), y1 = (int)Math.Floor(Math.Max(_sp[i].y, _sp[i + 1].y) / SpCell);
+                for (int a = x0; a <= x1; a++) for (int b = y0; b <= y1; b++) { if (!_spGrid.TryGetValue((a, b), out var l)) _spGrid[(a, b)] = l = new(); l.Add(i); }
+            }
+        }
+        (double u, double v) SpineUV(double x, double y)
+        {
+            if (x == _spLast.x && y == _spLast.y) return (_spLast.u, _spLast.v);
+            double bd = double.MaxValue, bu = 0, bv = 0;
+            void Seg(int i)
+            {
+                var a = _sp[i]; var b = _sp[i + 1]; double dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+                double t = L2 < 1e-9 ? 0 : ((x - a.x) * dx + (y - a.y) * dy) / L2;
+                t = Math.Max(i == 0 ? double.NegativeInfinity : 0, Math.Min(i + 2 == _sp.Count ? double.PositiveInfinity : 1, t));   // (en los extremos, su prolongación)
+                double px = a.x + dx * t, py = a.y + dy * t, d = (x - px) * (x - px) + (y - py) * (y - py);
+                if (d < bd) { bd = d; double L = Math.Sqrt(L2); bu = _spCum[i] + t * L; bv = L < 1e-9 ? 0 : (-(x - a.x) * dy + (y - a.y) * dx) / L; }
+            }
+            int cx = (int)Math.Floor(x / SpCell), cy = (int)Math.Floor(y / SpCell);
+            for (int ring = 0; ring <= 8; ring++)
+            {
+                for (int a = cx - ring; a <= cx + ring; a++)
+                    for (int b = cy - ring; b <= cy + ring; b++)
+                    {
+                        if (Math.Max(Math.Abs(a - cx), Math.Abs(b - cy)) != ring) continue;
+                        if (_spGrid.TryGetValue((a, b), out var l)) foreach (int i in l) Seg(i);
+                    }
+                if (bd < double.MaxValue && Math.Sqrt(bd) <= ring * SpCell) break;
+            }
+            if (bd == double.MaxValue) for (int i = 0; i + 1 < _sp.Count; i++) Seg(i);   // (muy lejos: todos)
+            double local = bv;
+            // (2026-11-09) un ramal, si está claramente más cerca de él que del eje: en su franja
+            foreach (var br in _branches)
+            {
+                var (d2, su, sv) = PolyNearest(br.P, br.Cum, br.Grid, x, y, false, true);
+                if (d2 < bd * 0.81 && d2 < 900 * 900 && su >= br.S0 - 5) { bd = d2; bu = br.U0 + br.Sign * (su - br.S0); bv = br.V0 + br.Sign * sv; local = sv; }
+            }
+            _spLast = (x, y, bu, bv); _spLastLocal = local;
+            return (bu, bv);
+        }
+
+        // el esquema de una banda: sus estaciones (sus andenes son «los nuestros») y su línea principal como eje
+        public static Schematic BuildBand(RouteGraph g, RoomMapGeo geo, string label, IEnumerable<string> stations, List<(double x, double y)> spine, int flip = 1, IEnumerable<int> edges = null,
+                                          List<List<(double x, double y)>> branches = null)
+        {
+            if (spine == null || spine.Count < 2) return null;
+            var s = new Schematic { _g = g, Station = label, _flip = flip, _bandSt = new HashSet<string>(stations, StringComparer.Ordinal), _sp = spine,
+                                    _bandEdges = edges == null ? null : new HashSet<int>(edges) };
+            s.PrepareSpine();
+            // (2026-11-09) cada ramal: su franja paralela al eje, al lado al que sale (en el mapa) y en el sentido en que se aleja;
+            // si dos van al mismo lado y coinciden a lo largo, una más allá
+            var placed = new List<(int side, double lo, double hi, double v0)>();
+            foreach (var bp in branches ?? new List<List<(double x, double y)>>())
+            {
+                if (bp == null || bp.Count < 2) continue;
+                var (cum, grid) = PolyIndex(bp);
+                // (2026-11-09, auditoría) la franja empieza donde el ramal sale de la franja de su línea madre (a más de 380 m): hasta
+                // ahí, en su posición real, como las vías de la estación (si no, al apartarse unos metros saltaba 650 m a un lado y
+                // cruzaba todas las vías de ese lado: cruces que no existen, ramas al revés)
+                // un punto del ramal a una distancia dada de su principio
+                (double x, double y) At(double arc)
+                {
+                    arc = Math.Max(0, Math.Min(cum[^1], arc)); int i = 1; while (i + 1 < bp.Count && cum[i] < arc) i++;
+                    double f = cum[i] - cum[i - 1] > 1e-9 ? (arc - cum[i - 1]) / (cum[i] - cum[i - 1]) : 0;
+                    return (bp[i - 1].x + (bp[i].x - bp[i - 1].x) * f, bp[i - 1].y + (bp[i].y - bp[i - 1].y) * f);
+                }
+                (double u, double v, double local) UVL(double arc) { var q = At(arc); s._spLast = (double.NaN, double.NaN, 0, 0); var r = s.SpineUV(q.x, q.y); return (r.u, r.v, s._spLastLocal); }
+                // (2026-11-09, auditoría) la franja empieza donde el ramal sale de la franja de su línea madre (a más de 380 m): hasta
+                // ahí, en su posición real, como las vías de la estación (si no, al apartarse unos metros saltaba 650 m a un lado y
+                // cruzaba todas las vías de ese lado: cruces que no existen, ramas al revés)
+                double sT = -1;
+                for (double a = 0; a <= cum[^1]; a += 10) if (Math.Abs(UVL(a).local) > 380) { sT = a; break; }
+                // los andenes que hay a lo largo del ramal (de sus estaciones, y de todas)
+                var arcsMine = new List<double>(); var arcsAll = new List<double>();
+                for (int e = 0; e < g.Edges.Length; e++)
+                    foreach (var (off, name) in g.Edges[e].Platforms)
+                    {
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+                        var (px, py) = g.PointAt(e, off);
+                        var (d2, su, _) = PolyNearest(bp, cum, grid, px, py, false, false);
+                        if (d2 < 60 * 60) arcsAll.Add(su);
+                        if (d2 < 40 * 40 && s._bandSt.Contains(name)) arcsMine.Add(su);
+                    }
+                // (auditoría) un ramal con andenes atravesados al eje de su madre (más de 30°: un nudo, Castañeda) lleva franja aunque
+                // no se aparte: 150 m antes de la estación; si no, sus vías se proyectaban todas en el mismo punto del eje
+                bool steep = false; int steepSide = 0;
+                if (arcsMine.Count > 0)
+                {
+                    double a0 = arcsMine.Min(), a1 = arcsMine.Max();
+                    if (a1 - a0 < 60) { a0 -= 40; a1 += 40; }
+                    var A = UVL(a0); var B = UVL(a1);
+                    if (a1 - a0 > 20 && Math.Abs(B.u - A.u) < 0.87 * (a1 - a0))
+                    {
+                        steep = true; steepSide = (A.v + B.v) / 2 >= 0 ? 1 : -1;
+                        double st0 = Math.Max(0, a0 - 150);
+                        if (sT < 0 || sT > st0) sT = st0;
+                    }
+                }
+                bool dbgB = Environment.GetEnvironmentVariable("SELECTOR_BANDA_DEBUG") is string dbs && label.StartsWith(dbs);
+                if (dbgB) Console.WriteLine($"ramal de {cum[^1]:0} m: franja desde {sT:0} m{(steep ? " (nudo)" : "")}");
+                if (sT < 0) continue;   // (todo él cerca de su madre: ya sale en su posición real; no hace falta franja)
+                // (que no empiece dentro de una estación ni después de ella: sus vías saldrían en diagonal o en vertical y sin andenes,
+                // Lanuza, Industrias CAF) 150 m antes del primer andén del grupo que toca
+                {
+                    var near = arcsAll.Where(a => a > sT - 300 && a < sT + 300).ToList();
+                    if (near.Count > 0)
+                    {
+                        double lo0 = near.Min();
+                        foreach (var a in arcsAll.OrderByDescending(a => a)) if (a < lo0 && a > lo0 - 200) lo0 = a;
+                        sT = Math.Min(sT, Math.Max(0, lo0 - 150));
+                    }
+                }
+                var T0 = UVL(sT); double uT = T0.u, vT = T0.v;
+                var TB = UVL(Math.Min(cum[^1], sT + 250));
+                int sign = TB.u - uT >= -30 ? 1 : -1, side = steep ? steepSide : (vT >= 0 ? 1 : -1);
+                double len = cum[^1] - sT, lo = sign > 0 ? uT : uT - len, hi = sign > 0 ? uT + len : uT;
+                double v0 = vT;   // (a la altura a la que sale; si coincide con otro ramal del mismo lado, más allá)
+                if (steep && Math.Abs(v0) < 420) v0 = side * Math.Max(420, Math.Abs(vT) + 250);   // (un nudo: fuera de la franja de su madre)
+                for (int k2 = 0; k2 < 30 && placed.Any(q => q.lo < hi + 200 && lo - 200 < q.hi && Math.Abs(q.v0 - v0) < 420); k2++) v0 += side * 450;
+                placed.Add((side, lo, hi, v0));
+                s._branches.Add(new Branch { P = bp, Cum = cum, Grid = grid, U0 = uT, V0 = v0, S0 = sT, Sign = sign });
+                s._spLast = (double.NaN, double.NaN, 0, 0);
+            }
+            return s.Make(geo) ? s : null;
+        }
+
+        // (2026-11-09) el eje y los ramales de una banda
+        // entry / entryStation: (2026-11-09, esquema de la ruta) el eje empieza en ese nudo (por donde entra la línea en la banda) o en
+        // la cabecera de esa estación (Estación Sur) y va hasta lo más lejano
+        public static (List<(double x, double y)> main, List<List<(double x, double y)>> branches) BandSpines(RouteGraph g, IEnumerable<int> edges, ICollection<string> stations = null, int entry = -1, string entryStation = null, int exit = -1)
+        {
+            var es = new HashSet<int>(edges.Where(e => e >= 0 && e < g.Edges.Length));
+            var main = BandSpine(g, es, out var mainEdges, null, entry, entryStation, exit, stations);   // (el camino más largo; por estaciones salía peor: tramos de kilómetros)
+            var branches = new List<List<(double x, double y)>>();
+            if (main == null) return (null, branches);
+            var mainIdx = PolyIndex(main);
+            long NodeOf(int e, bool a) { var E = g.Edges[e]; int n = a ? E.A : E.B; return n >= 0 ? n : -(2L * e + (a ? 1 : 2)); }
+            var mainNodes = new HashSet<long>(); foreach (int e in mainEdges) { mainNodes.Add(NodeOf(e, true)); mainNodes.Add(NodeOf(e, false)); }
+            var rest = new HashSet<int>(es.Where(e => !mainEdges.Contains(e)));
+            var adj = new Dictionary<long, List<(int e, long to)>>();
+            foreach (int e in rest)
+            {
+                long a = NodeOf(e, true), b = NodeOf(e, false);
+                if (!adj.TryGetValue(a, out var la)) adj[a] = la = new(); la.Add((e, b));
+                if (!adj.TryGetValue(b, out var lb)) adj[b] = lb = new(); lb.Add((e, a));
+            }
+            // (2026-11-09) las estaciones de la banda que quedan lejos del eje (sus andenes, a más de 250 m): su línea, como ramal
+            var lonely = new HashSet<string>();
+            if (stations != null)
+                foreach (string st in stations)
+                {
+                    var pts0 = es.SelectMany(e => g.Edges[e].Platforms.Where(pl => pl.name == st).Select(pl => g.PointAt(e, pl.off))).ToList();
+                    if (pts0.Count > 0 && pts0.All(q => PolyNearest(main, mainIdx.cum, mainIdx.grid, q.x, q.y, false, false).d2 > 250 * 250)) lonely.Add(st);
+                }
+            // (2026-11-09) ramales, y ramales de ramales (los nudos de la ruta entera): por vueltas, desde lo que ya es eje
+            var used = new HashSet<int>();
+            var spineNodes = new HashSet<long>(mainNodes);
+            var polys = new List<(List<(double x, double y)> p, double[] cum, Dictionary<(int, int), List<int>> grid)> { (main, mainIdx.cum, mainIdx.grid) };
+            double NearSpine((double x, double y) q) => polys.Min(pl => PolyNearest(pl.p, pl.cum, pl.grid, q.x, q.y, false, false).d2);
+            var frontier = mainNodes.ToList();
+            for (int iter = 0; iter < 6 && frontier.Count > 0; iter++)
+            {
+                var next = new List<long>();
+                foreach (long start in frontier.Where(adj.ContainsKey).ToList())
+                {
+                    // lo más lejos que se llega desde esa aguja sin volver al eje
+                    var dist = new Dictionary<long, double> { [start] = 0 }; var prev = new Dictionary<long, (long from, int e)>();
+                    var pq = new PriorityQueue<long, double>(); pq.Enqueue(start, 0);
+                    while (pq.TryDequeue(out long n, out double d))
+                    {
+                        if (d > dist[n] + 1e-9 || (n != start && spineNodes.Contains(n))) continue;
+                        if (!adj.TryGetValue(n, out var nb)) continue;
+                        foreach (var (e, to) in nb) { if (used.Contains(e)) continue; double nd = d + g.Edges[e].Len; if (!dist.TryGetValue(to, out double od) || nd < od) { dist[to] = nd; prev[to] = (n, e); pq.Enqueue(to, nd); } }
+                    }
+                    var far = dist.Where(kv => !spineNodes.Contains(kv.Key)).OrderByDescending(kv => kv.Value).FirstOrDefault();
+                    if (far.Key == 0 && far.Value == 0) continue;
+                    bool StationOn(List<(int e, bool fromA)> l) => l.Any(t => g.Edges[t.e].Platforms.Any(pl => lonely.Contains(pl.name)));
+                    if (far.Value < 1500 && lonely.Count == 0) continue;
+                    var path = new List<(int e, bool fromA)>();
+                    for (long n = far.Key; prev.ContainsKey(n); n = prev[n].from) { var (from, e) = prev[n]; path.Add((e, NodeOf(e, true) == from)); }
+                    path.Reverse();
+                    var pts = new List<(double x, double y)>();
+                    foreach (var (e, fromA) in path)
+                    {
+                        var E = g.Edges[e];
+                        for (int k = 0; k < E.X.Length; k++) { int i = fromA ? k : E.X.Length - 1 - k; var q = ((double)E.X[i], (double)E.Y[i]); if (pts.Count == 0 || Math.Abs(pts[^1].x - q.Item1) + Math.Abs(pts[^1].y - q.Item2) > 0.5) pts.Add(q); }
+                    }
+                    if (pts.Count < 2) continue;
+                    bool withStation = StationOn(path);
+                    if (far.Value < 1500 && !withStation) continue;
+                    // (una vía que va en paralelo y vuelve al eje no es un ramal: su final, cerca del eje; salvo que lleve una estación
+                    // que si no se queda fuera)
+                    if (NearSpine(pts[^1]) < 600 * 600 && !withStation) continue;
+                    foreach (var t in path) foreach (var pl in g.Edges[t.e].Platforms) lonely.Remove(pl.name);
+                    foreach (var (e, _) in path) { used.Add(e); foreach (long nn in new[] { NodeOf(e, true), NodeOf(e, false) }) if (spineNodes.Add(nn)) next.Add(nn); }
+                    branches.Add(pts);
+                    var bi = PolyIndex(pts); polys.Add((pts, bi.cum, bi.grid));
+                }
+                frontier = next;
+            }
+            // (2026-11-09, auditoría) que no quede ninguna vía de la banda a más de 300 m de un eje: lo que quedaba más lejos no se
+            // dibujaba (Ingeniero Pizias, la playa de Industrias CAF, Lanuza, junto a Huerta de Molinero…). Desde lo ya dibujado, un
+            // ramal hasta el nudo más apartado de los ejes, y otra vez, hasta que todo quede cerca
+            var nodeXY = new Dictionary<long, (double x, double y)>();
+            foreach (int e in es) { var E = g.Edges[e]; nodeXY[NodeOf(e, true)] = (E.X[0], E.Y[0]); nodeXY[NodeOf(e, false)] = (E.X[^1], E.Y[^1]); }
+            var unreachable = new HashSet<int>();
+            for (int guard = 0; guard < 40; guard++)
+            {
+                double worst = 380 * 380; int we = -1;   // (la franja dibuja hasta 400 m)
+                foreach (int e in es)
+                {
+                    if (unreachable.Contains(e)) continue;
+                    var E = g.Edges[e]; int step = Math.Max(1, E.X.Length / 12);
+                    for (int k = 0; k < E.X.Length; k += step) { double d2 = NearSpine((E.X[k], E.Y[k])); if (d2 > worst) { worst = d2; we = e; } }
+                }
+                if (we < 0) break;
+                // desde todos los nudos de los ejes a la vez, por las vías que aún no son de ningún eje
+                var dist = new Dictionary<long, double>(); var prev = new Dictionary<long, (long from, int e)>();
+                var pq = new PriorityQueue<long, double>();
+                foreach (long n0 in spineNodes) if (adj.ContainsKey(n0)) { dist[n0] = 0; pq.Enqueue(n0, 0); }
+                while (pq.TryDequeue(out long n, out double d))
+                {
+                    if (d > dist[n] + 1e-9) continue;
+                    if (!adj.TryGetValue(n, out var nb)) continue;
+                    foreach (var (e, to) in nb) { if (used.Contains(e)) continue; double nd = d + g.Edges[e].Len; if (!dist.TryGetValue(to, out double od) || nd < od) { dist[to] = nd; prev[to] = (n, e); pq.Enqueue(to, nd); } }
+                }
+                long a0 = NodeOf(we, true), b0 = NodeOf(we, false);
+                if (!dist.ContainsKey(a0) && !dist.ContainsKey(b0)) { unreachable.Add(we); continue; }
+                // el nudo más apartado de los ejes de entre los que se alcanzan por ese tramo y más allá: el de más distancia a los ejes
+                // de los que están a menos de 2 km del tramo
+                var (wx, wy) = g.PointAt(we, g.Edges[we].Len / 2);
+                long target = dist.Keys.Where(n => nodeXY.ContainsKey(n) && !spineNodes.Contains(n))
+                                  .Where(n => { var q = nodeXY[n]; return (q.x - wx) * (q.x - wx) + (q.y - wy) * (q.y - wy) < 2000.0 * 2000; })
+                                  .OrderByDescending(n => NearSpine(nodeXY[n])).FirstOrDefault();
+                if (target == 0 || !prev.ContainsKey(target)) { unreachable.Add(we); continue; }
+                var path = new List<(int e, bool fromA)>();
+                for (long n = target; prev.ContainsKey(n); n = prev[n].from) { var (from, e) = prev[n]; path.Add((e, NodeOf(e, true) == from)); }
+                path.Reverse();
+                var pts = new List<(double x, double y)>();
+                foreach (var (e, fromA) in path)
+                {
+                    var E = g.Edges[e];
+                    for (int k = 0; k < E.X.Length; k++) { int i = fromA ? k : E.X.Length - 1 - k; var q = ((double)E.X[i], (double)E.Y[i]); if (pts.Count == 0 || Math.Abs(pts[^1].x - q.Item1) + Math.Abs(pts[^1].y - q.Item2) > 0.5) pts.Add(q); }
+                }
+                // (el ramal empieza donde su vía se aparta de verdad de los ejes, a más de 150 m: si no, sus primeros metros, junto al
+                // eje, se quedaban vías del eje)
+                int cut = pts.FindIndex(q => NearSpine(q) > 150 * 150);
+                if (cut > 0) pts = pts.Skip(cut - 1).ToList();
+                if (pts.Count < 2) { unreachable.Add(we); continue; }
+                double before = worst;
+                foreach (var (e, _) in path) { used.Add(e); spineNodes.Add(NodeOf(e, true)); spineNodes.Add(NodeOf(e, false)); }
+                branches.Add(pts);
+                var bi2 = PolyIndex(pts); polys.Add((pts, bi2.cum, bi2.grid));
+                if (NearSpine(g.PointAt(we, g.Edges[we].Len / 2)) >= before - 1) unreachable.Add(we);   // (no ha servido: no insistir)
+            }
+            return (main, branches);
+        }
+
+        // la línea principal de una banda: el camino más largo (por la vía) entre dos extremos de sus tramos
+        public static List<(double x, double y)> BandSpine(RouteGraph g, IEnumerable<int> edges) => BandSpine(g, edges, out _);
+        public static List<(double x, double y)> BandSpine(RouteGraph g, IEnumerable<int> edges, out HashSet<int> pathEdges, ICollection<string> stations = null, int entry = -1, string entryStation = null, int exit = -1, ICollection<string> scoreSt = null)
+        {
+            pathEdges = new HashSet<int>();
+            var es = new HashSet<int>(edges.Where(e => e >= 0 && e < g.Edges.Length));
+            if (es.Count == 0) return null;
+            long NodeOf(int e, bool a) { var E = g.Edges[e]; int n = a ? E.A : E.B; return n >= 0 ? n : -(2L * e + (a ? 1 : 2)); }
+            var adj = new Dictionary<long, List<(int e, long to)>>();
+            foreach (int e in es)
+            {
+                long a = NodeOf(e, true), b = NodeOf(e, false);
+                if (!adj.TryGetValue(a, out var la)) adj[a] = la = new(); la.Add((e, b));
+                if (!adj.TryGetValue(b, out var lb)) adj[b] = lb = new(); lb.Add((e, a));
+            }
+            (long far, Dictionary<long, (long from, int e)> prev) Far(long start)
+            {
+                var dist = new Dictionary<long, double> { [start] = 0 }; var prev = new Dictionary<long, (long, int)>();
+                var pq = new PriorityQueue<long, double>(); pq.Enqueue(start, 0);
+                while (pq.TryDequeue(out long n, out double d))
+                {
+                    if (d > dist[n] + 1e-9) continue;
+                    foreach (var (e, to) in adj[n]) { double nd = d + g.Edges[e].Len; if (!dist.TryGetValue(to, out double od) || nd < od) { dist[to] = nd; prev[to] = (n, e); pq.Enqueue(to, nd); } }
+                }
+                long far = dist.OrderByDescending(kv => kv.Value).First().Key;
+                return (far, prev);
+            }
+            // (la parte más grande, si la banda tiene trozos sueltos)
+            // (el trozo más largo: una banda puede quedar en varios trozos sin unir)
+            long seed = adj.Keys.First(); double bestLen = -1; var seen = new HashSet<long>();
+            foreach (long k0 in adj.Keys)
+            {
+                if (!seen.Add(k0)) continue;
+                double tot = 0; var q = new Queue<long>(); q.Enqueue(k0); var es2 = new HashSet<int>();
+                while (q.Count > 0) { long n = q.Dequeue(); foreach (var (e, to) in adj[n]) { if (es2.Add(e)) tot += g.Edges[e].Len; if (seen.Add(to)) q.Enqueue(to); } }
+                if (tot > bestLen) { bestLen = tot; seed = k0; }
+            }
+            // el camino de «start» a «to» por lo que dejó Dijkstra
+            List<(int e, bool fromA)> PathTo(Dictionary<long, (long from, int e)> prev, long to)
+            {
+                var l = new List<(int e, bool fromA)>();
+                for (long n = to; prev.ContainsKey(n); n = prev[n].from) { var (from, e) = prev[n]; l.Add((e, NodeOf(e, true) == from)); }
+                l.Reverse(); return l;
+            }
+            (Dictionary<long, double> dist, Dictionary<long, (long from, int e)> prev) Dij(long start, HashSet<long> avoid)
+            {
+                var dist = new Dictionary<long, double> { [start] = 0 }; var prev = new Dictionary<long, (long, int)>();
+                var pq = new PriorityQueue<long, double>(); pq.Enqueue(start, 0);
+                while (pq.TryDequeue(out long n, out double d))
+                {
+                    if (d > dist[n] + 1e-9) continue;
+                    foreach (var (e, to) in adj[n])
+                    {
+                        if (avoid != null && avoid.Contains(to)) continue;
+                        double nd = d + g.Edges[e].Len; if (!dist.TryGetValue(to, out double od) || nd < od) { dist[to] = nd; prev[to] = (n, e); pq.Enqueue(to, nd); }
+                    }
+                }
+                return (dist, prev);
+            }
+            List<(int e, bool fromA)> path = null;
+            // (2026-11-09) desde un nudo de entrada, o desde la cabecera de una estación (el extremo de sus andenes más alejado del
+            // otro extremo de la banda: en una terminal, sus toperas), hasta lo más lejano
+            // (2026-11-09, esquema de la ruta) de la entrada a la salida (los empalmes con la banda anterior y la siguiente): la línea
+            // de verdad; prolongada por los dos lados hasta lo más lejano
+            long startN = -1;
+            if (entry >= 0 && adj.ContainsKey(entry)) startN = entry;
+            else if (entryStation != null)
+            {
+                var pe0 = es.Where(e => g.Edges[e].Platforms.Any(pl => pl.name == entryStation)).ToList();
+                if (pe0.Count > 0)
+                {
+                    var (fE, _) = Far(NodeOf(pe0[0], true)); var (dE, _) = Dij(fE, null);
+                    startN = pe0.SelectMany(e => new[] { NodeOf(e, true), NodeOf(e, false) }).Where(dE.ContainsKey).OrderByDescending(n => dE[n]).First();
+                }
+            }
+            // (la prolongación se aleja del otro extremo: en vía doble, «lo más lejano» era volver por la otra vía al principio)
+            var nxy = new Dictionary<long, (double x, double y)>();
+            foreach (int e in es) { var E = g.Edges[e]; nxy[NodeOf(e, true)] = (E.X[0], E.Y[0]); nxy[NodeOf(e, false)] = (E.X[^1], E.Y[^1]); }
+            double Geo(long a, long b) { if (!nxy.TryGetValue(a, out var p) || !nxy.TryGetValue(b, out var q)) return 0; return Math.Sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)); }
+            long Away(Dictionary<long, double> d, long from, long other)
+            {
+                double base0 = Geo(from, other); long best = from; double bd = base0 + 50;
+                foreach (var kv in d) { double gd = Geo(kv.Key, other); if (gd > bd) { bd = gd; best = kv.Key; } }
+                return best;
+            }
+            if (startN != -1 && exit >= 0 && adj.ContainsKey(exit) && startN != exit)
+            {
+                var (dx0, px0) = Dij(startN, null);
+                if (px0.ContainsKey(exit))
+                {
+                    path = PathTo(px0, exit);
+                    var onP = new HashSet<long> { startN }; foreach (var (e, _) in path) { onP.Add(NodeOf(e, true)); onP.Add(NodeOf(e, false)); }
+                    var avE = new HashSet<long>(onP); avE.Remove(exit);
+                    var (dE2, pE2) = Dij(exit, avE); long fE2 = Away(dE2, exit, startN); if (fE2 != exit) path.AddRange(PathTo(pE2, fE2));
+                    if (entryStation == null)
+                    {
+                        foreach (var (e, _) in path) { onP.Add(NodeOf(e, true)); onP.Add(NodeOf(e, false)); }
+                        var avS = new HashSet<long>(onP); avS.Remove(startN);
+                        var (dS, pS) = Dij(startN, avS); long fS = Away(dS, startN, exit);
+                        if (fS != startN) { var pre = PathTo(pS, fS); pre.Reverse(); path.InsertRange(0, pre.Select(t => (t.e, !t.fromA))); }
+                    }
+                }
+            }
+            // (2026-11-09, auditoría) el eje: entre dos extremos de vía (o desde la cabecera), el camino que pasa por más andenes de
+            // sus estaciones y, a igualdad, el más largo. Con el más largo a secas, en un nudo se iba por otro brazo y la estación
+            // quedaba atravesada (Castañeda, Santa Ana)
+            if (path == null && exit < 0 && entry < 0 && scoreSt != null && scoreSt.Count > 0)
+            {
+                var deadEnds = adj.Where(kv => kv.Value.Count == 1).Select(kv => kv.Key).ToList();
+                var starts = startN != -1 ? new List<long> { startN } : deadEnds;
+                double best = -1;
+                foreach (long a in starts)
+                {
+                    var (da, pa) = Dij(a, null);
+                    foreach (long b in deadEnds)
+                    {
+                        if (b == a || !pa.ContainsKey(b)) continue;
+                        var l = PathTo(pa, b);
+                        double plat = l.Sum(t => g.Edges[t.e].Platforms.Any(pl => scoreSt.Contains(pl.name)) ? Math.Min(g.Edges[t.e].Len, 400) : 0);
+                        double sc = 3 * plat + da[b];
+                        if (sc > best) { best = sc; path = l; }
+                    }
+                }
+            }
+            if (path != null) { }
+            else if (entry >= 0 && adj.ContainsKey(entry)) { var (f0, p0) = Far(entry); var l0 = PathTo(p0, f0); if (l0.Count > 0) path = l0; }
+            else if (entryStation != null)
+            {
+                var pe = es.Where(e => g.Edges[e].Platforms.Any(pl => pl.name == entryStation)).ToList();
+                if (pe.Count > 0)
+                {
+                    var (fEnd, _) = Far(NodeOf(pe[0], true));
+                    var (dEnd, _) = Dij(fEnd, null);
+                    long head = pe.SelectMany(e => new[] { NodeOf(e, true), NodeOf(e, false) }).Where(dEnd.ContainsKey).OrderByDescending(n => dEnd[n]).First();
+                    var (f1, p1) = Far(head); var l1 = PathTo(p1, f1); if (l1.Count > 0) path = l1;
+                }
+            }
+            // (2026-11-09) por las estaciones: de una a la más alejada, por sus andenes (el camino más largo a secas se iba a
+            // veces por un ramal o un apartadero y una estación quedaba atravesada al eje, aplastada: Castañeda, Industrias CAF)
+            var anchors = new List<long>();
+            if (path == null && stations != null && stations.Count >= 2)
+                foreach (string st in stations)
+                {
+                    int pe = es.Where(e => g.Edges[e].Platforms.Any(pl => pl.name == st)).OrderByDescending(e => g.Edges[e].Platforms.Count(pl => pl.name == st)).DefaultIfEmpty(-1).First();
+                    if (pe >= 0) anchors.Add(NodeOf(pe, true));
+                }
+            if (anchors.Count >= 2)
+            {
+                double best = -1; long s1 = 0, s2 = 0; Dictionary<long, (long from, int e)> bprev = null;
+                foreach (long a in anchors)
+                {
+                    var (dist, prev) = Dij(a, null);
+                    foreach (long b in anchors) if (b != a && dist.TryGetValue(b, out double d) && d > best) { best = d; s1 = a; s2 = b; bprev = prev; }
+                }
+                if (bprev != null)
+                {
+                    path = PathTo(bprev, s2);
+                    var onPath = new HashSet<long> { s1 }; foreach (var (e, _) in path) { onPath.Add(NodeOf(e, true)); onPath.Add(NodeOf(e, false)); }
+                    // alargar por los dos extremos, sin volver al camino
+                    var av2 = new HashSet<long>(onPath); av2.Remove(s2);
+                    var (d2, p2) = Dij(s2, av2);
+                    long e2 = d2.OrderByDescending(kv => kv.Value).First().Key;
+                    path.AddRange(PathTo(p2, e2));
+                    foreach (var (e, _) in path) { onPath.Add(NodeOf(e, true)); onPath.Add(NodeOf(e, false)); }
+                    var av1 = new HashSet<long>(onPath); av1.Remove(s1);
+                    var (d1, p1) = Dij(s1, av1);
+                    long e1 = d1.OrderByDescending(kv => kv.Value).First().Key;
+                    var pre = PathTo(p1, e1); pre.Reverse();
+                    path.InsertRange(0, pre.Select(t => (t.e, !t.fromA)));
+                }
+            }
+            if (path == null)
+            {
+                var (f1, _) = Far(seed); var (f2, prev2) = Far(f1);
+                path = PathTo(prev2, f2);
+            }
+            foreach (var (e, _) in path) pathEdges.Add(e);
+            var pts = new List<(double x, double y)>();
+            foreach (var (e, fromA) in path)
+            {
+                var E = g.Edges[e];
+                for (int k = 0; k < E.X.Length; k++)
+                {
+                    int i = fromA ? k : E.X.Length - 1 - k;
+                    var q = ((double)E.X[i], (double)E.Y[i]);
+                    if (pts.Count == 0 || Math.Abs(pts[^1].x - q.Item1) + Math.Abs(pts[^1].y - q.Item2) > 0.5) pts.Add(q);
+                }
+            }
+            return pts.Count >= 2 ? pts : null;
+        }   // (_flip: media vuelta, u y v a la vez; un espejo cambiaría el lado de las agujas)
 
 
         double _flip = 1;
-        bool Mine(string name) => name == Station;   // (un andén de esta estación)
+        (double x, double y)? _want; Dictionary<int, (double lo, double hi)> _clip;   // (ruta entera) hacia dónde tiene que mirar el esquema, en el plano
+        // (2026-11-10) una estación o un tramo de línea, mirando hacia (wx, wy) en el plano
+        public static Schematic BuildToward(RouteGraph g, RoomMapGeo geo, Zone z, double wx, double wy, HashSet<int> skip = null, Dictionary<int, (double lo, double hi)> clip = null) => BuildWith(g, geo, z, (wx, wy), skip, clip);
+        // (ruta entera) sin los tramos que dibuja otra pieza (skip)
+        public static Schematic BuildWith(RouteGraph g, RoomMapGeo geo, Zone z, (double x, double y)? want, HashSet<int> skip, Dictionary<int, (double lo, double hi)> clip = null)
+        {
+            var sk = z.Line && z.Skip != null ? new HashSet<int>(z.Skip) : null;
+            if (skip != null && skip.Count > 0) { sk ??= new HashSet<int>(); sk.UnionWith(skip); }
+            var s = new Schematic { _g = g, Station = z.Name, _anchors = z.Line ? z.Anchors : null, _line = z.Line, _skip = sk, _want = want, _clip = clip != null && clip.Count > 0 ? clip : null,
+                                    _extra = z.Extra, _extraRange = z.ExtraRange, _bandSt = z.Also != null ? new HashSet<string>(z.Also.Append(z.Name), StringComparer.Ordinal) : null };
+            return s.Make(geo) ? s : null;
+        }
+        bool Mine(string name) => _bandSt != null ? name != null && _bandSt.Contains(name) : name == Station;   // (un andén de esta estación)
         public double AxisU(double x, double y) => U(x, y);   // (auditoría)
-        public bool Drawn(int e) => _byEdge.ContainsKey(e);
+        public bool Drawn(int e) => _parts != null ? _partOf.ContainsKey(e) : _byEdge.ContainsKey(e);
         public double AxisV(double x, double y) => V(x, y);
         public (double u0, double u1) Region => (_u0, _u1);
         // A lo largo, por tramos (1.2.75): entre dos cosas seguidas (agujas, señales, extremos de andén, toperas…) un ancho
@@ -231,8 +790,8 @@ namespace SelectOR
 
         // ── zonas: las estaciones y los tramos de línea que no cubre ninguna (1.2.75, por la auditoría: entre estaciones
         // lejanas quedaban kilómetros de línea, con sus señales, fuera de todos los esquemas)
-        public sealed class Zone { public string Name; public List<(double x, double y)> Anchors; public bool Line; public HashSet<int> Skip; }   // Skip: (1.2.81) tramos que ya dibuja entera una estación
-        List<(double x, double y)> _anchors; bool _line; HashSet<int> _skip;
+        public sealed class Zone { public string Name; public List<(double x, double y)> Anchors; public bool Line; public HashSet<int> Skip; public HashSet<int> Extra; public List<string> Also; public Dictionary<int, (double lo, double hi)> ExtraRange; public List<string> Members; }   // Members: (2026-11-10) las dependencias que lleva una pieza unida   // Extra/Also: (2026-11-10) piezas unidas en una (sus tramos, cerca; otras estaciones suyas)   // Skip: (1.2.81) tramos que ya dibuja entera una estación
+        List<(double x, double y)> _anchors; bool _line; HashSet<int> _skip; HashSet<int> _extra; Dictionary<int, (double lo, double hi)> _extraRange;
 
         // (panel por línea) girado o no: flip = 1 como sale, −1 media vuelta
         public static Schematic Build(RouteGraph g, RoomMapGeo geo, Zone z, int flip)
@@ -244,6 +803,7 @@ namespace SelectOR
 
         public static Schematic Build(RouteGraph g, RoomMapGeo geo, Zone z)
         {
+            if (z.Extra != null || z.Also != null) return BuildWith(g, geo, z, null, null);   // (piezas unidas)
             if (!z.Line) return Build(g, geo, z.Name);
             var s = new Schematic { _g = g, Station = z.Name, _anchors = z.Anchors, _line = true, _skip = z.Skip };
             return s.Make(geo) ? s : null;
@@ -253,6 +813,7 @@ namespace SelectOR
         // (con 25 m de margen: lo que queda justo en el borde va también a un tramo de línea)
         public bool Covers(int e, double off)
         {
+            if (_parts != null) return PartOf(e, off)?.Covers(e, off) ?? false;
             if (Missing.Contains(e)) return true;   // (1.2.75) los trocitos de dentro de una travesía: van en su rombo (si no, cada travesía creaba un tramo de línea que repetía la estación)
             if (!_byEdge.ContainsKey(e) || !_offRange.TryGetValue(e, out var r)) return false;
             if (r.a <= 0.5 && r.b >= _g.Edges[e].Len - 0.5) return true;   // (entero, también sus puntas)
@@ -262,6 +823,7 @@ namespace SelectOR
         public bool PathUV(int e, double off, out double u, out double v)
         {
             u = v = 0;
+            if (_parts != null) { var pp = PartOf(e, off); return pp != null && pp.PathUV(e, off, out u, out v); }
             if (!_full.TryGetValue(e, out var l) || l.Count < 2) return false;
             int i = 0; while (i + 2 < l.Count && l[i + 1].off < off) i++;
             double span = l[i + 1].off - l[i].off, t = span > 0 ? Math.Max(0, Math.Min(1, (off - l[i].off) / span)) : 0;
@@ -383,7 +945,13 @@ namespace SelectOR
             var g = _g; if (g?.Edges == null) return false;
             // andenes de la estación → centro y eje (componente principal)
             var pp = new List<(double x, double y)>();
-            if (_anchors != null) pp.AddRange(_anchors);   // (un tramo de línea: sus puntos)
+            if (_sp != null)
+            {
+                pp.AddRange(_sp); foreach (var br in _branches) pp.AddRange(br.P);   // (2026-11-09, banda: su línea principal y sus ramales)
+                // (auditoría) y los andenes de sus estaciones: una estación antes del principio del eje (Castañeda) quedaba fuera
+                if (_bandEdges != null) foreach (int e in _bandEdges) foreach (var (off, name) in g.Edges[e].Platforms) if (Mine(name)) pp.Add(g.PointAt(e, off));
+            }
+            else if (_anchors != null) pp.AddRange(_anchors);   // (un tramo de línea: sus puntos)
             else
             {
                 // (1.2.75) los nudos: una estación con andenes en vías que se cruzan en ángulo (dos líneas). El eje sale solo del
@@ -410,6 +978,7 @@ namespace SelectOR
                 pp.AddRange(plat.Where(o => AngDiff(o.a, bestA) < Tol).Select(o => (o.x, o.y)));
             }
             if (pp.Count == 0) return false;
+            if (_sp == null) {   // (2026-11-09, banda: el eje es su línea, no hace falta ni eje recto ni sentido)
             _cx = pp.Average(p => p.x); _cy = pp.Average(p => p.y);
             double sxx = 0, syy = 0, sxy = 0;
             foreach (var (x, y) in pp) { double dx = x - _cx, dy = y - _cy; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
@@ -425,6 +994,8 @@ namespace SelectOR
             double tot = 0;
             foreach (var E in g.Edges) for (int i = 0; i < E.X.Length; i++) { double u = U(E.X[i], E.Y[i]), v = V(E.X[i], E.Y[i]); if (Math.Abs(u) < 1500 && Math.Abs(v) < 400) tot += u; }
             if (tot < 0) { _ax = -_ax; _ay = -_ay; }
+            if (_want.HasValue && _ax * _want.Value.x + _ay * _want.Value.y < 0) { _ax = -_ax; _ay = -_ay; }   // (2026-11-10, ruta entera) mirando hacia donde va la línea
+            }
             // ── coordenadas del esquema. Cerca de la estación, las del plano (u a lo largo del eje, v a lo ancho). Al alejarse,
             // u es la distancia recorrida por la propia vía y v, la posición lateral con la que esa vía salió de la estación:
             // las curvas y los bucles de las líneas quedan enderezados, como en un esquema real (con un solo eje recto para
@@ -441,6 +1012,7 @@ namespace SelectOR
                 // (1.2.75) en un tramo de línea, el ancho de sus propias vías y 30 m (con 400 m, un tramo junto a una estación
                 // grande se quedaba con la estación entera y la dibujaba otra vez, mal: «Junto a Estación Sur»)
                 vNear = _line ? Math.Max(30, Math.Min(400, spread + 30)) : Math.Max(45, Math.Min(250, spread + 45));
+                if (_sp != null) vNear = _bandEdges != null ? 400 : 90;   // (2026-11-09, banda: a lo ancho, sus estaciones, sus playas y sus bifurcaciones, como en el mapa)
             }
             // (1.2.75, nudos) la franja acaba a medio camino del andén de otra estación que haya dentro de ella (a lo largo):
             // si no, se colaba la estación de al lado entera, con su playa y sus líneas (Museo con Domingo Gil)
@@ -455,7 +1027,7 @@ namespace SelectOR
                         if (ou > pu1 && ou < hiU + 1) hiU = Math.Min(hiU, Math.Max(pu1 + 60, (pu1 + ou) / 2));
                         if (ou < pu0 && ou > loU - 1) loU = Math.Max(loU, Math.Min(pu0 - 60, (pu0 + ou) / 2));
                     }
-            bool NearPt(double x, double y) { double u = U(x, y), v = V(x, y); return u >= loU && u <= hiU && Math.Abs(v) <= vNear; }
+            bool NearPt(double x, double y) { double u = U(x, y), v = V(x, y); if (_sp != null) v = _spLastLocal; return u >= loU && u <= hiU && Math.Abs(v) <= vNear; }
             // (1.2.81, nudos) y, más allá de esa franja (hasta VPar), las vías que van paralelas a la estación (menos de 10°):
             // en el Museo, el haz de vías de la línea pasa paralelo a los andenes a 60 m y, fuera de la franja, se rehacía a
             // ciegas (por los papeles de las agujas) y salía torcido y cruzado
@@ -469,8 +1041,9 @@ namespace SelectOR
                 double du = U(x2, y2) - U(x1, y1), dv = V(x2, y2) - V(x1, y1);
                 return Math.Abs(du) > 1 && Math.Abs(dv) < Math.Abs(du) * 0.176;   // (tan 10°)
             }
-            bool NearQ(int e, (double x, double y, double off) q) => NearPt(q.x, q.y) || ParPt(e, q.off);
-            bool NearNode(int n, double x, double y) => NearPt(x, y) || g.EdgesAt(n).Any(e => ParPt(e, g.Edges[e].A == n ? 0 : g.Edges[e].Len));
+            bool NearQ(int e, (double x, double y, double off) q) => _extra != null && _extra.Contains(e) && IsolatedEdge(e) || (_bandEdges == null || _bandEdges.Contains(e)) && (NearPt(q.x, q.y) || ParPt(e, q.off));
+            bool IsolatedEdge(int e) { var E = g.Edges[e]; return (E.A < 0 || g.EdgesAt(E.A).Count() <= 1) && (E.B < 0 || g.EdgesAt(E.B).Count() <= 1); }   // (un tramo suelto, sin agujas a ningún lado)
+            bool NearNode(int n, double x, double y) => (_bandEdges == null || g.EdgesAt(n).Any(_bandEdges.Contains)) && (NearPt(x, y) || g.EdgesAt(n).Any(e => ParPt(e, g.Edges[e].A == n ? 0 : g.Edges[e].Len)));
             (double x, double y) NodeXY(int n)
             {
                 foreach (int e in g.EdgesAt(n)) { var E = g.Edges[e]; return E.A == n ? (E.X[0], E.Y[0]) : (E.X[^1], E.Y[^1]); }
@@ -569,12 +1142,23 @@ namespace SelectOR
             if (!_line)
             {
                 var stDist = StationDist(g);
+                if (_bandSt != null)
+                {
+                    // (2026-11-09, banda: «nuestras» son las de sus estaciones; de otra, las de fuera)
+                    myDist = new Dictionary<int, double>();
+                    foreach (var kv in stDist.Where(kv => _bandSt.Contains(kv.Key))) foreach (var d in kv.Value) if (!myDist.TryGetValue(d.Key, out double o) || d.Value < o) myDist[d.Key] = d.Value;
+                    otherDist = stDist.Where(kv => !_bandSt.Contains(kv.Key)).Select(kv => kv.Value).ToList();
+                }
+                else
+                {
                 stDist.TryGetValue(Station, out myDist);
                 otherDist = stDist.Where(kv => kv.Key != Station).Select(kv => kv.Value).ToList();
+                }
             }
             bool Foreign(int n)
             {
                 if (myDist == null || g.EdgesAt(n).Count() < 3) return false;
+                if (_extra != null && g.EdgesAt(n).Any(_extra.Contains)) return false;   // (piezas unidas: lo suyo es suyo)
                 double mine = myDist.TryGetValue(n, out double md) ? md : double.MaxValue, other = double.MaxValue;
                 foreach (var od in otherDist) if (od.TryGetValue(n, out double o) && o < other) other = o;
                 return other + 100 < mine && other <= 500;   // (y que la otra estación llegue a dibujarla: si no, la aguja no salía en ningún esquema)
@@ -611,11 +1195,13 @@ namespace SelectOR
                         }
                     }
                     double nd = st0.d + dist, lim = st0.lim;
+                    bool ex = _extra != null && _extra.Contains(e);
+                    if (ex) lim = Math.Max(lim, nd + 60);   // (2026-11-10, piezas unidas: sus tramos, hasta el final, enderezados como las vías que salen)
                     // el andén de otra estación en este tramo: la rama acaba a medio camino
                     foreach (var (off, name) in E.Platforms)
                         if (!Mine(name)) { double dp = st0.d + (fromA ? off : E.Len - off); lim = Math.Min(lim, Math.Max(150, dp / 2)); }
                     if (ns.TryGetValue(m, out var old) && old.d <= nd) continue;
-                    if (Foreign(m)) foreign.Add(m);
+                    if (!ex && Foreign(m)) foreign.Add(m);
                     // si se llega a una aguja por su desviada, su vía principal está al otro lado
                     double mv = bv;
                     if (Roles(m) is { } Rm && e == Rm.dv) mv = bv + Rm.side * s * Spacing;
@@ -650,6 +1236,9 @@ namespace SelectOR
 
             // cada punto de cada tramo: (u, v, distancia, límite); se dibuja lo que está dentro del límite de su rama
             var T = new Dictionary<int, (List<(double u, double v, double off)> P, bool exA, bool exB)>();
+            // (2026-11-09, auditoría) en una banda, sin tope a lo ancho: sus ramales van en franjas a ±650 m y más (con el tope, las
+            // playas de Ingeniero Pizias, Industrias CAF o Castañeda no salían); ya limita la franja de 400 m de cada eje
+            double vMaxB = _sp != null ? double.MaxValue : VMax;
             for (int e = 0; e < g.Edges.Length; e++)
             {
                 var E = g.Edges[e];
@@ -713,7 +1302,10 @@ namespace SelectOR
                     for (int i = 0; i < Q.Count; i++)
                         if (fA && Q[i].off < cut || fB && Q[i].off > E.Len - cut) Q[i] = (Q[i].u, Q[i].v, Q[i].d, -1, Q[i].off);
                 _full[e] = Q.Select(q => (q.u, q.v, q.off)).ToList();
-                bool Ok((double u, double v, double d, double lim, double off) q) => q.d <= q.lim && Math.Abs(q.v) <= VMax;
+                bool exE = _extra != null && _extra.Contains(e);   // (piezas unidas: sus tramos, enteros)
+                var exR = exE && _extraRange != null && _extraRange.TryGetValue(e, out var xr) ? xr : (lo: double.MinValue, hi: double.MaxValue);
+                bool Ok((double u, double v, double d, double lim, double off) q) => (q.d <= q.lim || exE && q.off >= exR.lo - 10 && q.off <= exR.hi + 10) && Math.Abs(q.v) <= vMaxB
+                    && (_clip == null || !_clip.TryGetValue(e, out var cl) || q.off >= cl.lo - 0.01 && q.off <= cl.hi + 0.01);   // (ruta entera: lo que le toca de un tramo compartido)
                 if (!Q.Any(Ok)) continue;
                 var C = new List<(double u, double v, double off)>();
                 for (int i = 0; i < Q.Count; i++)
@@ -726,7 +1318,7 @@ namespace SelectOR
                         for (int k = 0; k < 30; k++)
                         {
                             double m = (lo + hi) / 2;
-                            var t = (A.u + (B.u - A.u) * m, A.v + (B.v - A.v) * m, A.d + (B.d - A.d) * m, A.lim, A.off);
+                            var t = (A.u + (B.u - A.u) * m, A.v + (B.v - A.v) * m, A.d + (B.d - A.d) * m, A.lim, A.off + (B.off - A.off) * m);
                             if (Ok(t)) lo = m; else hi = m;
                         }
                         C.Add((A.u + (B.u - A.u) * lo, A.v + (B.v - A.v) * lo, A.off + (B.off - A.off) * lo));
@@ -757,8 +1349,8 @@ namespace SelectOR
             }
             if (T.Count == 0) return false;
             _u0 = T.Values.Min(t => t.P.Min(p => p.u)); _u1 = T.Values.Max(t => t.P.Max(p => p.u));
-            bool In(double u, double v) => u >= _u0 && u <= _u1 && Math.Abs(v) <= VMax;
-            bool NodeIn(int n) => ns.TryGetValue(n, out var q) && q.d <= q.lim && Math.Abs(q.v) <= VMax;
+            bool In(double u, double v) => u >= _u0 && u <= _u1 && Math.Abs(v) <= vMaxB;
+            bool NodeIn(int n) => ns.TryGetValue(n, out var q) && q.d <= q.lim && Math.Abs(q.v) <= vMaxB;
 
             // travesías: agujas con el mismo identificador, juntas → un solo punto
             var group = new Dictionary<int, int>();          // nodo → nodo que representa a su travesía
@@ -1300,12 +1892,13 @@ namespace SelectOR
             var rowOf = new Dictionary<int, int>();
             for (int r = 0; r < levels.Count; r++) foreach (int e in levels[r].ids) rowOf[e] = r;
             var lv = levels.Select(l => l.v).ToList();
+            int[] rowShift = null;   // (2026-11-09, bandas: filas de más antes de cada fila, por la separación real)
             int VRow(double v)
             {
                 int k = lv.BinarySearch(v); if (k < 0) k = ~k;
                 int best = Math.Max(0, Math.Min(lv.Count - 1, k));
                 if (k - 1 >= 0 && Math.Abs(lv[k - 1] - v) < Math.Abs(lv[best] - v)) best = k - 1;
-                return best;
+                return rowShift != null && best < rowShift.Length ? best + rowShift[best] : best;
             }
             // (depuración: SELECTOR_ESQ_DEBUG=<dependencia>) papeles de las agujas, cadenas y filas
             if (Environment.GetEnvironmentVariable("SELECTOR_ESQ_DEBUG") is string dbg && dbg.Length > 0 && Station.Contains(dbg))
@@ -1437,6 +2030,48 @@ namespace SelectOR
                 foreach (var (v, r0, e, side) in ex.OrderBy(t => t.r).ThenBy(t => t.v)) { int r = r0 <= prev ? prev + 1 : r0; xrow[(e, side)] = r; prev = r; }
             }
             Rows = Math.Max(levels.Count, xrow.Count > 0 ? xrow.Values.Max() + 1 : 0);
+            // (2026-11-09, bandas) entre dos filas seguidas cuyas vías, donde coinciden a lo largo, van en la realidad a más de 40 m
+            // (las dos ramas de una bifurcación, una playa apartada), filas vacías en medio: como en el mapa, y no todo junto
+            if (_sp != null && Rows > 1)
+            {
+                var byRow = new Dictionary<int, List<int>>();
+                foreach (var kv in rowOf) if (T.ContainsKey(kv.Key)) { if (!byRow.TryGetValue(kv.Value, out var l)) byRow[kv.Value] = l = new(); l.Add(kv.Key); }
+                double RowVAt(int e, double u)
+                {
+                    var P = T[e].P; var a = P.OrderBy(q => q.u).ToList();
+                    if (u < a[0].u || u > a[^1].u) return double.NaN;
+                    int i = 0; while (i + 2 < a.Count && a[i + 1].u < u) i++;
+                    double span = a[i + 1].u - a[i].u, t = span > 0 ? (u - a[i].u) / span : 0;
+                    return a[i].v + (a[i + 1].v - a[i].v) * t;
+                }
+                double MinGap(int r0, int r1)
+                {
+                    if (!byRow.TryGetValue(r0, out var la) || !byRow.TryGetValue(r1, out var lb)) return double.NaN;
+                    double best = double.MaxValue;
+                    foreach (int ea in la) foreach (var q in T[ea].P) foreach (int eb in lb) { double vb = RowVAt(eb, q.u); if (!double.IsNaN(vb)) best = Math.Min(best, Math.Abs(q.v - vb)); }
+                    return best == double.MaxValue ? double.NaN : best;
+                }
+                int maxRow = Math.Max(Rows, (nrow.Count > 0 ? nrow.Values.Max() : 0) + 1);
+                var extra = new int[maxRow + 1]; int acc = 0;
+                for (int rr = 0; rr <= maxRow; rr++)
+                {
+                    if (rr > 0 && rr < levels.Count)
+                    {
+                        double gap = MinGap(rr - 1, rr);
+                        if (!double.IsNaN(gap) && gap > 40) acc += Math.Min(6, (int)Math.Round((gap - 20) / 35));
+                    }
+                    extra[rr] = acc;
+                }
+                if (acc > 0)
+                {
+                    int Sh(int rr) => rr + (rr >= 0 && rr < extra.Length ? extra[rr] : acc);
+                    foreach (var k in rowOf.Keys.ToList()) rowOf[k] = Sh(rowOf[k]);
+                    foreach (var k in nrow.Keys.ToList()) nrow[k] = Sh(nrow[k]);
+                    foreach (var k in xrow.Keys.ToList()) xrow[k] = Sh(xrow[k]);
+                    rowShift = extra;
+                    Rows += acc;
+                }
+            }
 
             // a lo largo, por tramos (X): las cosas que hay en el esquema, de izquierda a derecha
             {
@@ -1791,8 +2426,31 @@ namespace SelectOR
                     double tdx = ax2 - ax1, tdy = ay2 - ay1, tl = Math.Sqrt(tdx * tdx + tdy * tdy);
                     bool above = false;
                     if (tl > 1e-6) { tdx /= tl; tdy /= tl; above = V(pxr - tdy * rs * 3, pyr + tdx * rs * 3) < V(pxr, pyr); }
-                    Platforms.Add(new Platform { Bar = new RectangleF(x0, p0.Y, x1 - x0, 3f), Label = pst != null && mm.Success ? mm.Groups[1].Value : null, Above = above });
+                    Platforms.Add(new Platform { Bar = new RectangleF(x0, p0.Y, x1 - x0, 3f), Label = pst != null && mm.Success ? mm.Groups[1].Value : null, Above = above, Station = pst });
                 }
+            }
+            // (2026-11-10) apartaderos con nombre: en medio de sus dos marcas (o en la única), si esa parte de su vía sale aquí
+            {
+                var doneS = new HashSet<(int, string)>();
+                foreach (var tr in Tracks)
+                {
+                    if (tr.Pts == null || tr.Pts.Length < 2 || tr.Edge < 0 || HiddenEdges.Contains(tr.Edge)) continue;
+                    foreach (var grp in g.Edges[tr.Edge].Sidings.Where(q => !string.IsNullOrWhiteSpace(q.name)).GroupBy(q => q.name.Trim()))
+                    {
+                        if (!doneS.Add((tr.Edge, grp.Key))) continue;
+                        var offs = grp.Select(q => q.off).OrderBy(o => o).ToList();
+                        double mid = (offs[0] + offs[^1]) / 2;
+                        if (MapOff(tr.Edge, mid, out var sp)) SidingLabels.Add(new SidingLabel { At = sp, Name = grp.Key, Edge = tr.Edge, Off = mid });
+                    }
+                }
+            }
+            // (2026-11-10) los PK: cada hito en su vía, si esa parte sale aquí
+            foreach (var tr in Tracks)
+            {
+                if (tr.Pts == null || tr.Pts.Length < 2 || tr.Edge < 0 || HiddenEdges.Contains(tr.Edge)) continue;
+                foreach (var (off, v) in g.Edges[tr.Edge].MilePosts)
+                    if (_offRange.TryGetValue(tr.Edge, out var kr) && off >= kr.a - 1 && off <= kr.b + 1 && MapOff(tr.Edge, off, out var kp))
+                        KmPosts.Add(new KmPost { At = kp, V = v, Edge = tr.Edge, Off = off });
             }
             // señales: las del mapa de la sala que caen en una vía del esquema
             if (geo != null)
@@ -1844,6 +2502,7 @@ namespace SelectOR
                 {
                     if (cr.Edge < 0 || !_byEdge.ContainsKey(cr.Edge) || !_offRange.TryGetValue(cr.Edge, out var orr2)) continue;
                     if (cr.Off < orr2.a - 1 || cr.Off > orr2.b + 1 || !MapOff(cr.Edge, Math.Max(orr2.a, Math.Min(orr2.b, cr.Off)), out var p)) continue;
+                    cr.PkText(g);   // (2026-11-10) su PK, para el rótulo
                     LevelXs.Add(new LevelX { Cr = cr, At = p });
                 }
             // salidas: la estación siguiente por esa vía
@@ -1888,18 +2547,27 @@ namespace SelectOR
         public bool MapOff(int e, double off, out PointF p)
         {
             p = default;
+            if (_parts != null) { var pp = PartOf(e, off); return pp != null && pp.MapOff(e, off, out p); }
             if (!_byEdge.TryGetValue(e, out var tr)) return false;
+            if (tr.Linear)
+            {
+                var lr = _offRange.TryGetValue(e, out var lrr) ? lrr : (a: 0.0, b: _g.Edges[e].Len);
+                if (off < lr.a - 0.5 || off > lr.b + 0.5) return false;
+                double lf = lr.b - lr.a > 0 ? Math.Max(0, Math.Min(1, (off - lr.a) / (lr.b - lr.a))) : 0;
+                p = Along(tr.Pts, lf * tr.LenPx);
+                return true;
+            }
             if (tr.Flat && tr.Map != null && tr.Map.Length >= 2)
             {
                 var m = tr.Map; if (off < m[0].off - 0.5 || off > m[^1].off + 0.5) return false;
                 int i = 0; while (i + 2 < m.Length && m[i + 1].off < off) i++;
                 double span = m[i + 1].off - m[i].off, t = span > 0 ? Math.Max(0, Math.Min(1, (off - m[i].off) / span)) : 0;
                 double u = m[i].u + (m[i + 1].u - m[i].u) * t;
-                float x = X(u);
+                float x = X(u) + _ox;   // (_ox/_oy: la pieza movida dentro del esquema de la ruta)
                 // (1.2.81) entre los puntos que están en su fila (con el trecho por la fila de la aguja, el segundo punto ya no lo está)
-                var onRow = tr.Pts.Where(q => Math.Abs(q.Y - tr.RowIdx * Row) < 0.1f).Select(q => q.X).ToList();
+                var onRow = tr.Pts.Where(q => Math.Abs(q.Y - (tr.RowIdx * Row + _oy)) < 0.1f).Select(q => q.X).ToList();
                 float lo = onRow.Count >= 2 ? onRow.Min() : Math.Min(tr.Pts[0].X, tr.Pts[^1].X), hi = onRow.Count >= 2 ? onRow.Max() : Math.Max(tr.Pts[0].X, tr.Pts[^1].X);
-                p = new PointF(Math.Max(lo, Math.Min(hi, x)), tr.RowIdx * Row);
+                p = new PointF(Math.Max(lo, Math.Min(hi, x)), tr.RowIdx * Row + _oy);
                 return true;
             }
             var E = _g.Edges[e];
@@ -1912,7 +2580,133 @@ namespace SelectOR
         public bool Map(double lat, double lon, out PointF p)
         {
             p = default;
-            return _g.NearestOn(_byEdge.Keys, lat, lon, 8, out int e, out double off) && MapOff(e, off, out p);
+            return _g.NearestOn(_parts != null ? _partOf.Keys : _byEdge.Keys, lat, lon, 8, out int e, out double off) && MapOff(e, off, out p);
+        }
+
+        // (2026-11-10, petición) UN TRIÁNGULO DE VÍAS (Parque Grande): la unión de arriba se dibujaba con la línea de doble vía siguiendo
+        // recta hacia un lado y la cuerda que sube desde la otra estación llegando por ese mismo lado, de modo que el paso directo
+        // (cuerda → la línea, Filella → Santa Ana) parecía dar la vuelta y el que da la vuelta (cuerda → Museo) parecía seguido.
+        // Se reconoce en una aguja n cuya vía de entrada (t) y una de sus ramas (la cuerda) salen hacia el mismo lado, con la otra
+        // rama al otro (la línea, vía 2); t lleva a la aguja m de la vía 2 de la línea de doble vía (con su vía hacia ese lado) y su
+        // escape a la aguja k de la vía 1. Se redibuja como el vértice de un triángulo: la línea de doble vía sale hacia ARRIBA
+        // desde la unión y luego sigue a su lado; la cuerda sube hasta ella y la otra línea baja hacia su estación.
+        internal string Apex()
+        {
+            var g = _g;
+            PointF? NodeAt(int n)
+            {
+                foreach (int e in g.EdgesAt(n))
+                    if (_byEdge.TryGetValue(e, out var tr) && tr.Pts != null && tr.Pts.Length >= 2 && _offRange.TryGetValue(e, out var r))
+                    {
+                        var E = g.Edges[e];
+                        if (E.A == n && r.a <= 0.5) return tr.Pts[0];
+                        if (E.B == n && r.b >= E.Len - 0.5) return tr.Pts[^1];
+                    }
+                return null;
+            }
+            PointF[] From(int e, int n) { var tr = _byEdge[e]; return g.Edges[e].A == n ? tr.Pts : tr.Pts.Reverse().ToArray(); }
+            int Dir(int e, int n)
+            {
+                if (!_byEdge.ContainsKey(e)) return 0;
+                var pts = From(e, n); var q = Along(pts, Math.Min(10, Length(pts)));
+                float dx = q.X - pts[0].X; return Math.Abs(dx) < 0.5f ? 0 : Math.Sign(dx);
+            }
+            int Other(int e, int n) => g.Edges[e].A == n ? g.Edges[e].B : g.Edges[e].A;
+            PointF[] To(int e, int startNode, PointF[] pts) => g.Edges[e].A == startNode ? pts : pts.Reverse().ToArray();
+            foreach (var sw in Switches)
+            {
+                int n = sw.Node; var at = g.EdgesAt(n).ToList();
+                if (at.Count != 3 || sw.LegEdge[0] < 0 || sw.LegEdge[1] < 0) continue;
+                int t = at.FirstOrDefault(e => e != sw.LegEdge[0] && e != sw.LegEdge[1]);
+                if (!_byEdge.ContainsKey(t) || !_byEdge.ContainsKey(sw.LegEdge[0]) || !_byEdge.ContainsKey(sw.LegEdge[1])) continue;
+                int dt = Dir(t, n); if (dt == 0) continue;
+                int chord = Dir(sw.LegEdge[0], n) == dt ? sw.LegEdge[0] : Dir(sw.LegEdge[1], n) == dt ? sw.LegEdge[1] : -1;
+                if (chord < 0) continue;
+                int line2 = chord == sw.LegEdge[0] ? sw.LegEdge[1] : sw.LegEdge[0];
+                if (Dir(line2, n) != -dt) continue;
+                // la aguja m (al otro lado de t) y la k de la vía 1 (por el escape)
+                int m = Other(t, n); var atM = g.EdgesAt(m).Where(e => e != t).ToList();
+                if (atM.Count != 2) continue;
+                int s2 = -1, x = -1, k = -1, s1 = -1, line1 = -1;
+                foreach (var (cs, cx) in new[] { (atM[0], atM[1]), (atM[1], atM[0]) })
+                {
+                    if (!_byEdge.ContainsKey(cs) || !_byEdge.ContainsKey(cx) || Dir(cs, m) != dt) continue;
+                    int kk = Other(cx, m); var atK = g.EdgesAt(kk).Where(e => e != cx).ToList();
+                    if (atK.Count != 2) continue;
+                    var a1 = atK.Where(e => _byEdge.ContainsKey(e) && Dir(e, kk) == dt).ToList(); var b1 = atK.Where(e => _byEdge.ContainsKey(e) && Dir(e, kk) == -dt).ToList();
+                    if (a1.Count != 1 || b1.Count != 1) continue;
+                    s2 = cs; x = cx; k = kk; s1 = a1[0]; line1 = b1[0]; break;
+                }
+                if (s2 < 0) continue;
+                var pm = NodeAt(m); var pn = NodeAt(n); var pk = NodeAt(k);
+                if (pm == null || pn == null || pk == null) continue;
+                var ch0 = From(chord, n); var l20 = From(line2, n); var l10 = From(line1, k); var s20 = From(s2, m); var s10 = From(s1, k);
+                if (ch0.Length < 3 || Math.Abs(ch0[1].Y - ch0[2].Y) > 0.5f || l20.Length < 2 || l10.Length < 2) continue;
+                // el vértice: dos filas por encima de la vía 2 de la línea
+                float A = pm.Value.X, baseY = pn.Value.Y, ny = baseY - 2 * Row;
+                float gapN = Math.Abs(pn.Value.X - pm.Value.X), gapK = Math.Abs(pk.Value.X - pm.Value.X) + gapN;
+                // (2026-11-10, petición: «sin el pico en la 149») la aguja m justo encima de la n: la vía 2 de la línea baja recta por las
+                // dos y de la n salen, como una Y invertida, la cuerda (abajo, hacia su lado) y la línea (abajo, hacia el otro); la vía 1 (k),
+                // en paralelo, una fila más arriba y otra más allá
+                var nP = new PointF(A - dt * Math.Max(20, gapN), ny);
+                var mP = new PointF(nP.X, ny - Row);
+                var kP = new PointF(nP.X - dt * Row, ny - 2 * Row);
+                float rowChord = ch0[1].Y, ya = ny - 4 * Row, yb = ny - 3 * Row;
+                // (2026-11-10, petición: «muy cuadrado») la línea sube de la unión en curva (un cuarto de círculo) hasta su fila y sigue
+                // recta hacia su lado, sin esquinas
+                PointF[] Bend(PointF from, float row, float farX)
+                {
+                    float r = from.Y - row; var l = new List<PointF>();
+                    var c = new PointF(from.X + dt * r, from.Y);
+                    for (int i = 0; i <= 10; i++) { double th = -Math.PI / 2 * i / 10; l.Add(new PointF(c.X - dt * r * (float)Math.Cos(th), c.Y + r * (float)Math.Sin(th))); }
+                    l.Add(new PointF(farX, row));
+                    return l.ToArray();
+                }
+                var np = new Dictionary<int, PointF[]>
+                {
+                    [t] = To(t, m, new[] { mP, nP }),
+                    [chord] = To(chord, n, new[] { nP, new PointF(nP.X + dt * (rowChord - ny), rowChord) }.Concat(ch0.Skip(2)).ToArray()),
+                    [line2] = To(line2, n, new[] { nP, new PointF(nP.X - dt * (l20[1].Y - ny), l20[1].Y) }.Concat(l20.Skip(1)).ToArray()),
+                    [x] = To(x, k, new[] { kP, mP }),
+                    [line1] = To(line1, k, new[] { kP, new PointF(kP.X - dt * (l10[1].Y - kP.Y), l10[1].Y) }.Concat(l10.Skip(1)).ToArray()),
+                    [s2] = To(s2, m, Bend(mP, yb, s20[^1].X)),
+                    [s1] = To(s1, k, Bend(kP, ya, s10[^1].X)),
+                };
+                // (que la cuerda y las líneas sigan hacia donde iban: si no, no es este caso)
+                if (dt < 0 ? (np[chord].Max(q => q.X) > nP.X + 0.5f || l20[^1].X < nP.X || l10[^1].X < kP.X || s20[^1].X > A || s10[^1].X > kP.X)
+                           : (np[chord].Min(q => q.X) < nP.X - 0.5f || l20[^1].X > nP.X || l10[^1].X > kP.X || s20[^1].X < A || s10[^1].X < kP.X)) continue;
+                Redraw(np);
+                return $"triángulo en la aguja {n} ({Station}): la línea de las vías {s1}/{s2} sale hacia arriba; cuerda {chord}, línea {line1}/{line2}";
+            }
+            return null;
+        }
+
+        // redibujar unas vías de la pieza (tramo → sus puntos, de A a B) y lo que va encima de ellas
+        void Redraw(Dictionary<int, PointF[]> np)
+        {
+            foreach (var kv in np)
+                if (_byEdge.TryGetValue(kv.Key, out var tr)) { tr.Pts = kv.Value; tr.Flat = false; tr.Map = null; tr.Linear = true; tr.LenPx = Length(tr.Pts); }
+            _arc.Clear();
+            var set = new HashSet<int>(np.Keys);
+            double Clamp(int e, double off) => _offRange.TryGetValue(e, out var r) ? Math.Max(r.a, Math.Min(r.b, off)) : off;
+            foreach (var sg in Signals) if (sg.Sig != null && set.Contains(sg.Sig.Edge) && MapOff(sg.Sig.Edge, Clamp(sg.Sig.Edge, sg.Sig.Off), out var p)) sg.At = p;
+            foreach (var sl in SidingLabels) if (set.Contains(sl.Edge) && MapOff(sl.Edge, sl.Off, out var p)) sl.At = p;
+            foreach (var kp in KmPosts) if (set.Contains(kp.Edge) && MapOff(kp.Edge, kp.Off, out var p)) kp.At = p;
+            foreach (var lx in LevelXs) if (set.Contains(lx.Cr.Edge) && MapOff(lx.Cr.Edge, Clamp(lx.Cr.Edge, lx.Cr.Off), out var p)) lx.At = p;
+            foreach (var sw in Switches)
+            {
+                if (!_g.EdgesAt(sw.Node).Any(set.Contains)) continue;
+                foreach (int e in _g.EdgesAt(sw.Node))
+                    if (_byEdge.TryGetValue(e, out var tr) && _offRange.TryGetValue(e, out var r))
+                    {
+                        var E = _g.Edges[e];
+                        if (E.A == sw.Node && r.a <= 0.5) { sw.At = tr.Pts[0]; break; }
+                        if (E.B == sw.Node && r.b >= E.Len - 0.5) { sw.At = tr.Pts[^1]; break; }
+                    }
+                for (int k = 0; k < 2; k++) if (sw.LegEdge[k] >= 0 && _byEdge.TryGetValue(sw.LegEdge[k], out var tk)) sw.Legs[k] = Stub(tk, _g.Edges[sw.LegEdge[k]].A == sw.Node, 12);
+            }
+            var all = Tracks.Where(q => q.Pts != null).SelectMany(q => q.Pts).ToList();
+            if (all.Count > 0) Bounds = RectangleF.FromLTRB(all.Min(q => q.X), all.Min(q => q.Y), all.Max(q => q.X), all.Max(q => q.Y));
         }
 
         static PointF[] Stub(Track t, bool fromStart, float len)
@@ -1971,6 +2765,14 @@ namespace SelectOR
         // el trozo dibujado (puntos del esquema) de un tramo entre dos metros; null si el tramo no sale
         public PointF[] Piece(int e, double o1, double o2)
         {
+            if (_parts != null)
+            {
+                // (de la pieza del medio del trozo, lo que dibuja ella: los cantones ya vienen partidos por piezas)
+                var pp = PartOf(e, (o1 + o2) / 2); if (pp == null) return null;
+                if (!pp.DrawnRange(e, out double ra, out double rb)) return null;
+                double lo = Math.Max(Math.Min(o1, o2), ra), hi = Math.Min(Math.Max(o1, o2), rb);
+                return hi - lo < 0.3 ? null : pp.Piece(e, lo, hi);
+            }
             if (!_byEdge.TryGetValue(e, out var tr) || tr.Pts.Length < 2) return null;
             float a = ArcOf(tr, Math.Min(o1, o2)), b = ArcOf(tr, Math.Max(o1, o2));
             if (b - a < 0.3f) return null;
@@ -1984,6 +2786,7 @@ namespace SelectOR
         // otra esquina a la otra aguja (el ancho del símbolo depende del zoom: SchematicDraw.ScissorCorners).
         public PointF[] PieceDir(int e, double from, double to, float zoom)
         {
+            if (_parts != null) return PartOf(e, (from + to) / 2)?.PieceDir(e, from, to, zoom);
             if (HiddenEdges.Contains(e))
             {
                 var tg = ScissorGroups.FirstOrDefault(q => q.ParTop == e || q.ParBot == e || q.DiagDown == e || q.DiagUp == e);
@@ -2019,13 +2822,21 @@ namespace SelectOR
         public bool DrawnRange(int e, out double a, out double b)
         {
             a = b = 0;
+            if (_parts != null)
+            {
+                // (todo lo dibujado del tramo, entre todas las piezas que lo dibujan a trozos)
+                bool any = false; a = double.MaxValue; b = double.MinValue;
+                foreach (var pp in PartsOf(e)) if (pp.DrawnRange(e, out double a1, out double b1)) { any = true; a = Math.Min(a, a1); b = Math.Max(b, b1); }
+                if (!any) { a = b = 0; }
+                return any;
+            }
             if (!_byEdge.ContainsKey(e)) return false;
             if (_offRange.TryGetValue(e, out var r)) { a = r.a; b = r.b; } else { a = 0; b = _g.Edges[e].Len; }
             return true;
         }
-        public IEnumerable<int> DrawnEdges => _byEdge.Keys;
+        public IEnumerable<int> DrawnEdges => _parts != null ? _partOf.Keys : _byEdge.Keys;
         // un punto del mapa en una vía del esquema (tramo y metro)
-        public bool Locate(double lat, double lon, out int e, out double off) => _g.NearestOn(_byEdge.Keys, lat, lon, 8, out e, out off);
+        public bool Locate(double lat, double lon, out int e, out double off) => _g.NearestOn(_parts != null ? _partOf.Keys : _byEdge.Keys, lat, lon, 8, out e, out off);
 
         static PointF Along(PointF[] pts, double d)
         {

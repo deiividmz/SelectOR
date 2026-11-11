@@ -37,6 +37,7 @@ namespace SelectOR
         public readonly List<Sg> Signals = new();
         public readonly List<Plat> Platforms = new();
         public readonly List<(string name, PointF at, RectangleF box)> Stations = new();   // box: lo que ocupan sus andenes
+        public readonly List<(string name, PointF at)> Freight = new();   // (2026-11-09) apartaderos de mercancías con nombre
         public readonly List<PointF> Buffers = new();
         public sealed class Pn { public PasosNivel.Cr Cr; public PointF At; public PointF Dir; }   // (1.2.84) un paso a nivel en su vía (Dir: a lo largo de la vía)
         public readonly List<Pn> LevelXs = new();
@@ -343,6 +344,7 @@ namespace SelectOR
                     var w1 = b.At(cr.Edge, Math.Max(0, cr.Off - 3)); var w2 = b.At(cr.Edge, Math.Min(E.Len, cr.Off + 3));
                     double dx = w2.X - w1.X, dy = w2.Y - w1.Y, dl = Math.Sqrt(dx * dx + dy * dy);
                     if (dl < 1e-6) { dx = 1; dy = 0; } else { dx /= dl; dy /= dl; }
+                    cr.PkText(b.G);   // (2026-11-10) su PK, para el rótulo
                     b.LevelXs.Add(new Pn { Cr = cr, At = b.At(cr.Edge, cr.Off), Dir = new PointF((float)dx, (float)dy) });
                 }
             // andenes: entre sus marcas de principio y fin en cada tramo; el número de la vía del nombre del andén
@@ -379,6 +381,27 @@ namespace SelectOR
                 var box = RectangleF.FromLTRB(pts.Min(q => q.X), pts.Min(q => q.Y), pts.Max(q => q.X), pts.Max(q => q.Y));
                 b.Stations.Add((grp.Key, new PointF(box.X + box.Width / 2, box.Y + box.Height / 2), box));
             }
+            // (2026-11-09) los apartaderos de mercancías con nombre («Cereales Paco S.A.»): su sitio, como las estaciones
+            try
+            {
+                var stNames = new HashSet<string>(b.Stations.Select(s => s.name), StringComparer.OrdinalIgnoreCase);
+                try { foreach (var s in Schematic.Stations(b.G)) stNames.Add(s.name); } catch { }   // (y las de viajeros sin andén dibujado)
+                var acc = new Dictionary<string, List<PointF>>(StringComparer.OrdinalIgnoreCase);
+                for (int e = 0; e < b.G.Edges.Length; e++)
+                    foreach (var (off, name) in b.G.Edges[e].Sidings)
+                    {
+                        string fn = MainMenuForm.FreightName(name, stNames); if (fn == null) continue;
+                        if (!acc.TryGetValue(fn, out var l)) acc[fn] = l = new();
+                        l.Add(b.At(e, off));
+                    }
+                foreach (var kv in acc)
+                {
+                    var box = RectangleF.FromLTRB(kv.Value.Min(q => q.X), kv.Value.Min(q => q.Y), kv.Value.Max(q => q.X), kv.Value.Max(q => q.Y));
+                    var mid = new PointF(box.X + box.Width / 2, box.Y + box.Height / 2);   // (el punto de sus vías más cerca del centro: sobre la vía)
+                    b.Freight.Add((kv.Key, kv.Value.OrderBy(q => (q.X - mid.X) * (q.X - mid.X) + (q.Y - mid.Y) * (q.Y - mid.Y)).First()));
+                }
+            }
+            catch { }
         }
 
         // el lado del tramo e en el metro off sin otra vía cerca (+1 a la derecha del sentido A→B, −1 a la izquierda)
@@ -438,6 +461,9 @@ namespace SelectOR
     {
         static readonly ConditionalWeak<RouteBoard, List<(RouteBoard.Sg sg, RectangleF box)>> _sigBoxes = new();
         static readonly ConditionalWeak<RouteBoard, List<(RouteBoard.Sw sw, RectangleF box)>> _swBoxes = new();
+        static readonly ConditionalWeak<RouteBoard, List<PointF[]>> _sigPolys = new();
+        // (2026-11-10) lo que ocupa la figura de cada señal en el último dibujo (girada con su vía): para la auditoría
+        public static List<PointF[]> SignalShapes(RouteBoard b) => b != null && _sigPolys.Get(b, out var l) ? l : new();
         static readonly ConditionalWeak<RouteBoard, List<(string name, RectangleF box)>> _stBoxes = new();
         // los rótulos de las estaciones en el último dibujo (para el clic)
         public static IEnumerable<(string name, RectangleF box)> StationLabels(RouteBoard b) => b != null && _stBoxes.Get(b, out var l) ? l : Enumerable.Empty<(string, RectangleF)>();
@@ -562,9 +588,10 @@ namespace SelectOR
                     if (close)
                     {
                         using var pf = Theme.Font(Math.Max(6.4f, Math.Min(9f, 2.6f * zoom)), FontStyle.Bold);
-                        var sz = g.MeasureString(I18n.T("PN"), pf);
+                        string pnt = SchematicDraw.PnLabel(grp.Select(x => x.Cr));   // (2026-11-10) con su PK exacto
+                        var sz = g.MeasureString(pnt, pf);
                         var tip = Pt(0, a1 + 2); var tr = new RectangleF(tip.X - sz.Width / 2 + n.X * sz.Width / 2, tip.Y - sz.Height / 2 + n.Y * sz.Height / 2, sz.Width, sz.Height);
-                        using (var tb = new SolidBrush(closed == true ? Color.FromArgb(255, 120, 105) : Color.FromArgb(170, 178, 186))) g.DrawString(I18n.T("PN"), pf, tb, tr.X, tr.Y);
+                        using (var tb = new SolidBrush(closed == true ? Color.FromArgb(255, 120, 105) : Color.FromArgb(170, 178, 186))) g.DrawString(pnt, pf, tb, tr.X, tr.Y);
                         box = RectangleF.Union(box, tr);
                     }
                     pnBoxes.Add(box);
@@ -686,6 +713,7 @@ namespace SelectOR
 
             // señales (de cerca): el mástil hacia su lado y la figura a lo largo de la vía; más de cerca, el número
             var sigBoxes = new List<(RouteBoard.Sg, RectangleF)>(); _sigBoxes.Set(b, sigBoxes);
+            var sigPolys = new List<PointF[]>(); _sigPolys.Set(b, sigPolys);   // (2026-11-10) la figura de cada una, girada
             if (near)
             {
                 float sk = Math.Max(0.8f, Math.Min(3.2f, zoom / 1.6f));
@@ -703,17 +731,23 @@ namespace SelectOR
                     // (1.2.81) si su figura pisaría la de otra señal o un número de aguja, el mástil más largo (una fila más
                     // afuera, como las señales apiladas del esquema)
                     float side = ly < 0 ? -1 : 1, baseDy = lw / 2 + 6f * sk, stepDy = 5f * lr0 + 2;
-                    int lvl = 0;
-                    for (int L = 0; L < 4; L++)
+                    // (2026-11-10) sin pisar otra señal (con su figura girada, no su recuadro: en las vías en diagonal los recuadros
+                    // de dos vías vecinas se tocaban sin que las señales se tocasen) ni un número de aguja: primero, adelantada a lo
+                    // largo de su vía (en escalera, como en el esquema); si no, el mástil más largo; siempre de su lado
+                    float arm0 = 3.5f * sk, stepA = 8.5f * lr0;
+                    int lvl = 0; float arm = arm0; PointF[] figPoly = null;
+                    foreach (var (L, k) in new[] { (0, 0), (0, 1), (1, 0), (0, 2), (1, 1), (2, 0), (1, 2), (2, 1), (3, 0) })
                     {
-                        var est = EstBox(q, ar, 3.5f * sk, side * (baseDy + L * stepDy), face, lr0);
-                        if (!sigBoxes.Any(x => x.Item2.IntersectsWith(est)) && !numTaken.Any(r => r.IntersectsWith(est))) { lvl = L; break; }
-                        if (L == 3) lvl = 0;
+                        var est = EstPoly(q, ar, arm0 + k * stepA, side * (baseDy + L * stepDy), face, lr0);
+                        var eb = Bounds(est);
+                        if (sigPolys.Any(p => PolysTouch(p, est)) || numTaken.Any(r => r.IntersectsWith(eb) && PolysTouch(Corners(r), est))) continue;
+                        lvl = L; arm = arm0 + k * stepA; figPoly = est; break;
                     }
+                    figPoly ??= EstPoly(q, ar, arm0, side * baseDy, face, lr0);
+                    sigPolys.Add(figPoly);
                     float dy = side * (baseDy + lvl * stepDy);
                     var st = g.Save();
                     g.TranslateTransform(q.X, q.Y); g.RotateTransform((float)ang);
-                    float arm = 3.5f * sk;
                     g.DrawLine(mp, 0, (ly < 0 ? -1 : 1) * lw / 2, 0, dy);
                     g.DrawLine(mp, 0, dy, arm * face, dy);
                     RectangleF local;
@@ -833,17 +867,49 @@ namespace SelectOR
                     if (!near) { g.FillRectangle(sb, c.X - 3.5f, c.Y - 3.5f, 7, 7); g.FillRectangle(bb, r); g.DrawString(t, sf, sb, r.X, r.Y); }
                     else { g.FillRectangle(bb, r); g.DrawRectangle(fr, r.X, r.Y, r.Width, r.Height); g.DrawString(t, sf, sb, r.X + 8, r.Y + 3); }
                 }
+                // (2026-11-09) los apartaderos de mercancías: un cuadrado marrón y su nombre (donde no tapen una estación)
+                var fcol = Color.FromArgb(206, 150, 100);
+                using var ff = Theme.Font(near ? Math.Min(11f, 7f + zoom * 1.2f) : 7.6f);
+                using var fb2 = new SolidBrush(fcol);
+                using var fp = new Pen(Color.FromArgb(150, fcol), 1f);
+                foreach (var (name, at) in b.Freight)
+                {
+                    var c = P(at); if (!view.Contains(c)) continue;
+                    var sz = g.MeasureString(name, ff);
+                    var r = near ? new RectangleF(c.X - sz.Width / 2 - 5, c.Y + 16, sz.Width + 10, sz.Height + 2) : new RectangleF(c.X + 6, c.Y - sz.Height / 2, sz.Width, sz.Height);
+                    if (taken.Any(q => q.IntersectsWith(r))) { g.FillRectangle(fb2, c.X - 3f, c.Y - 3f, 6, 6); continue; }
+                    taken.Add(r);
+                    g.FillRectangle(fb2, c.X - 3f, c.Y - 3f, 6, 6);
+                    g.FillRectangle(bb, r);
+                    if (near) g.DrawRectangle(fp, r.X, r.Y, r.Width, r.Height);
+                    g.DrawString(name, ff, fb2, r.X + (near ? 5 : 0), r.Y + (near ? 1 : 0));
+                }
             }
         }
 
         // hacia dónde poner el número de una aguja: al lado contrario de sus ramas
         // (1.2.81) lo que ocupará en pantalla la figura de una señal (aproximado: 8 luces de largo y 5 de alto) con su mástil a dy
-        static RectangleF EstBox(PointF q, double ar, float arm, float dy, int face, float lr)
+        static PointF[] EstPoly(PointF q, double ar, float arm, float dy, int face, float lr)
         {
             float x0 = face > 0 ? arm : -arm - 8 * lr, x1 = face > 0 ? arm + 8 * lr : -arm, y0 = dy - 2.5f * lr, y1 = dy + 2.5f * lr;
             float c = (float)Math.Cos(ar), s = (float)Math.Sin(ar);
-            var pts = new[] { (x0, y0), (x1, y0), (x1, y1), (x0, y1) }.Select(p => new PointF(q.X + p.Item1 * c - p.Item2 * s, q.Y + p.Item1 * s + p.Item2 * c)).ToArray();
-            return Bounds(pts);
+            return new[] { (x0, y0), (x1, y0), (x1, y1), (x0, y1) }.Select(p => new PointF(q.X + p.Item1 * c - p.Item2 * s, q.Y + p.Item1 * s + p.Item2 * c)).ToArray();
+        }
+        static PointF[] Corners(RectangleF r) => new[] { new PointF(r.Left, r.Top), new PointF(r.Right, r.Top), new PointF(r.Right, r.Bottom), new PointF(r.Left, r.Bottom) };
+        // (2026-11-10) ¿se tocan dos cuadriláteros convexos? (ejes separadores)
+        public static bool PolysTouch(PointF[] a, PointF[] b)
+        {
+            foreach (var poly in new[] { a, b })
+                for (int i = 0; i < poly.Length; i++)
+                {
+                    var p1 = poly[i]; var p2 = poly[(i + 1) % poly.Length];
+                    float nx = p2.Y - p1.Y, ny = p1.X - p2.X;
+                    float amin = float.MaxValue, amax = float.MinValue, bmin = float.MaxValue, bmax = float.MinValue;
+                    foreach (var p in a) { float d = p.X * nx + p.Y * ny; amin = Math.Min(amin, d); amax = Math.Max(amax, d); }
+                    foreach (var p in b) { float d = p.X * nx + p.Y * ny; bmin = Math.Min(bmin, d); bmax = Math.Max(bmax, d); }
+                    if (amax <= bmin || bmax <= amin) return false;
+                }
+            return true;
         }
 
         static PointF Away(RouteBoard.Sw sw)

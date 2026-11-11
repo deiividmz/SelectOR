@@ -94,7 +94,7 @@ namespace SelectOR
         {
             if (_climaBusy || !Supa.IsSuperadmin) return;
             using var od = new OpenFileDialog { Multiselect = true, Filter = I18n.T("Nubes") + " (*.png)|*.png", Title = I18n.T("Texturas de nubes (el nombre del archivo es el nombre que verán los usuarios)") };
-            if (od.ShowDialog(this) != DialogResult.OK) return;
+            if (od.ShowDialog(ClimaOwner) != DialogResult.OK) return;
             await ClimaAddCloudPaths(od.FileNames.ToList());
         }
 

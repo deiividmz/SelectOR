@@ -121,6 +121,7 @@ namespace SelectOR.MapAgent
             if (_errors > 20) return;
             try { PuertasIA.Apply(); } catch { }   // (1.2.79) las puertas de los trenes IA (PuertasIA.cs)
             try { TrenPropio.Check(); } catch { }  // (1.2.82) ¿ha cambiado tu tren sin que lo hayas hecho tú? (TrenPropio.cs)
+            try { Inversor.Check(); } catch { }    // (2026-11-10) el inversor de tu tren, al despachador de la sala (Inversor.cs)
             try
             {
                 if (!MPManager.IsMultiPlayer() || !MPManager.IsServer()) return;
@@ -172,6 +173,7 @@ namespace SelectOR.MapAgent
             {
                 if (___sender != "SelectOR" || ___msgx == null || !___msgx.StartsWith("@selector:", StringComparison.Ordinal)) return true;
                 if (PuertasIA.Take(___msgx)) return false;   // (1.2.79) las puertas de los trenes IA (PuertasIA.cs)
+                if (___msgx.StartsWith("@selector:dir?", StringComparison.Ordinal) && !Inversor.On) { Inversor.On = true; Log("el servidor de la sala pide el inversor: se le manda al cambiar"); }   // (2026-11-10, Inversor.cs)
                 if (___msgx.StartsWith("@selector:blocked", StringComparison.Ordinal) && !_blockedOn)
                 {
                     _blockedLast = null; _blockedNext = 0; _blockedOn = true;

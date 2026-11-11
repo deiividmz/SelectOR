@@ -26,9 +26,10 @@ namespace SelectOR
 
         Panel BuildRulesSubpanel()
         {
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Theme.Bg };
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = Theme.Bg };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // explicación
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // (2026-11-09) requisitos de los servicios y Discord
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // categorías + búsqueda
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // normas
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // acciones
@@ -36,6 +37,7 @@ namespace SelectOR
             var intro = EmpIntro("El reglamento interno de la empresa: lo que todos los socios deben cumplir. El gerente y los gestores pueden crear, editar, ordenar y borrar normas; al publicar una nueva, los socios reciben un aviso.");
             intro.MaximumSize = new Size(900, 0);
             t.Controls.Add(intro);
+            var req = BuildReqStrip(); req.Dock = DockStyle.None; req.Anchor = AnchorStyles.Left | AnchorStyles.Right; t.Controls.Add(req);   // (MainMenuForm.EmpresaRequisitos.cs)
 
             var top = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 42, ColumnCount = 2, RowCount = 1, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 6) };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -90,6 +92,7 @@ namespace SelectOR
             if (c == null || _rulesView == null) return;
             int seq = ++_rulesSeq;
             if (_rulesAll.Count == 0) _rulesView.EmptyText = Tr("Cargando…");
+            LoadCompanyReq();   // (2026-11-09) requisitos y Discord
             var (json, err) = await Supa.RpcAsync("list_company_rules", new { p_company = c.Id });
             if (seq != _rulesSeq || _empSel?.Id != c.Id) return;
             _rulesAll.Clear();

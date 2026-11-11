@@ -136,6 +136,9 @@ namespace SelectOR
         // En una sala de Servidores SelectOR: agujas, señales y trenes en el mapa grande (RoomMap.cs) y qué hacer al pulsarlos.
         public Func<RoomMapView> RoomMap;
         public Func<string> RoomMeStatus;   // «Tú» en la leyenda de una sala: tu papel
+        public Action RoomTrainNoClick;   // (2026-11-09) clic en tu número: cambiar el tipo de servicio y el destino
+        Rectangle _hitTrainNo;
+        public Func<(string no, string sub)?> RoomTrainNo;   // (2026-11-09) tu número de tren en la sala (sobre el minimapa)
         public Func<object, Point, string> RoomClick;
         public Func<LiveMarker, Point, Action, bool> RoomPlayerClick;   // clic en un jugador de la leyenda (el despachador: ayudantes)
         public RoomMapView RoomMapNow() { try { return RoomMap?.Invoke(); } catch { return null; } }
@@ -511,6 +514,7 @@ namespace SelectOR
                 else if (_hitCab.Contains(e.Location)) { try { ToggleCab?.Invoke(); } catch { } Invalidate(); }
                 else if (_hitZoomIn.Contains(e.Location)) { Zoom(1); }
                 else if (_hitZoomOut.Contains(e.Location)) { Zoom(-1); }
+                else if (_hitTrainNo.Contains(e.Location)) { try { RoomTrainNoClick?.Invoke(); } catch { } }
                 else if (_hitBigMap.Contains(e.Location)) { ToggleBigMap(); }
                 else if (_hitMap.Contains(e.Location)) { ToggleMap(); }
                 else if (_hitCollapse.Contains(e.Location)) { ToggleCollapse(); }
@@ -844,7 +848,12 @@ namespace SelectOR
                 detail: _detail,   // el mismo detalle del .tdb que el mapa grande
                 trainStyle: LiveMapDraw.TrainStyle.Mini);
             // Cuántos usuarios hay en la ruta (arriba a la derecha; mientras se enseña el zoom, no).
-            if (mates != null && mates.Count > 0 && DateTime.UtcNow >= _zoomShownUntil) LiveMapDraw.Chip(g, area, mates.Count);
+            // (2026-11-09) en la sala compartida, sin «N maquinistas en la ruta» (a petición)
+            bool inRoom = false; try { inRoom = RoomMeStatus?.Invoke() != null; } catch { }   // (solo dentro de la sala: su papel)
+            if (!inRoom && mates != null && mates.Count > 0 && DateTime.UtcNow >= _zoomShownUntil) LiveMapDraw.Chip(g, area, mates.Count);
+            // (2026-11-09) tu número de tren en la sala, arriba a la izquierda
+            (string no, string sub)? tn = null; try { tn = RoomTrainNo?.Invoke(); } catch { }
+            _hitTrainNo = tn != null ? LiveMapDraw.TrainNoChip(g, area, tn.Value.no, tn.Value.sub, _hover && RoomTrainNoClick != null) : Rectangle.Empty;
 
             // Botones de zoom abajo a la izquierda (solo con el ratón encima, para no tapar el mapa).
             if (!_hover) { _hitZoomIn = _hitZoomOut = Rectangle.Empty; }

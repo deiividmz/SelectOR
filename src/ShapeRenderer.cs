@@ -193,7 +193,8 @@ namespace SelectOR
         }
 
         // -------- Construcción de geometría (hilo cualquiera, solo CPU) --------
-        public static ShapeGeom BuildGeometry(string engPath)
+        // (2026-11-09) sin caché: BuildGeometry (ShapeRenderer.Cache.cs) guarda lo leído
+        static ShapeGeom BuildGeometryCore(string engPath)
         {
             var sPath = ShapePathFor(engPath);
             if (sPath == null) return null;
@@ -964,17 +965,15 @@ namespace SelectOR
             using var bmp = LoadBitmap(path, out int bits);
             if (bmp == null) return null;
             var d = new Decoded { Bits = bits };
-            d.Levels.Add((bmp.Width, bmp.Height, ToColors(bmp)));
-            GdiBitmap cur = bmp; bool disposeCur = false; int lw = bmp.Width, lh = bmp.Height;
+            var px = ToColors(bmp); int lw = bmp.Width, lh = bmp.Height;
+            d.Levels.Add((lw, lh, px));
             while (lw > 1 || lh > 1)
             {
                 int nw = Math.Max(1, lw / 2), nh = Math.Max(1, lh / 2);
-                var down = MipDown(cur, nw, nh);
-                if (disposeCur) cur.Dispose();
-                d.Levels.Add((nw, nh, ToColors(down)));
-                cur = down; disposeCur = true; lw = nw; lh = nh;
+                px = Half(px, lw, lh, nw, nh);   // (2026-11-09) ShapeRenderer.Cache.cs
+                d.Levels.Add((nw, nh, px));
+                lw = nw; lh = nh;
             }
-            if (disposeCur) cur.Dispose();
             return d;
         }
 
@@ -1025,36 +1024,8 @@ namespace SelectOR
             int bits = 0;
             try
             {
-                using (var bmp = LoadBitmap(path, out bits))
-                {
-                    if (bmp != null)
-                    {
-                        int w = bmp.Width, h = bmp.Height;
-                        // nº de niveles mip (hasta 1x1): reduce el ruido/aliasing al minificar (techos, rejillas)
-                        int levels = 1; for (int mw = w, mh = h; mw > 1 || mh > 1; ) { mw = Math.Max(1, mw / 2); mh = Math.Max(1, mh / 2); levels++; }
-                        try { tex = new Texture2D(_gd, w, h, true, SurfaceFormat.Color); SetTexLevel(tex, 0, bmp); }
-                        catch { tex = new Texture2D(_gd, w, h, false, SurfaceFormat.Color); SetTexLevel(tex, 0, bmp); levels = 1; }
-                        if (levels > 1)
-                        {
-                            GdiBitmap cur = bmp; bool disposeCur = false; int lw = w, lh = h;
-                            for (int lvl = 1; lvl < levels; lvl++)
-                            {
-                                int nw = Math.Max(1, lw / 2), nh = Math.Max(1, lh / 2);
-                                var down = new GdiBitmap(nw, nh, GdiPixel.Format32bppArgb);
-                                using (var g = System.Drawing.Graphics.FromImage(down))
-                                {
-                                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-                                    g.DrawImage(cur, 0, 0, nw, nh);
-                                }
-                                if (disposeCur) cur.Dispose();
-                                SetTexLevel(tex, lvl, down);
-                                cur = down; disposeCur = true; lw = nw; lh = nh;
-                            }
-                            if (disposeCur) cur.Dispose();
-                        }
-                    }
-                }
+                var dec = Decode(path);   // (2026-11-09) mipmaps rápidos, como la preparación
+                if (dec != null) { bits = dec.Bits; tex = FromDecoded(dec); }
             }
             catch { tex = null; }
             _texCache[path] = tex;

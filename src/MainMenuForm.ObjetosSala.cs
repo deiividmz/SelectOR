@@ -3,9 +3,12 @@
 //  · mientras se conduce en la sala, leer la lista (Supabase: room_objects_get) cada 15 s y, si ha cambiado (o Open Rails
 //    se acaba de conectar), mandársela al agente por el enlace local: «OBJ BEGIN», una línea por objeto, «OBJ END»
 //    (MapAgent\Viajeros3D.Objetos.cs los dibuja).
+//  · (2026-11-10) la indicación de cada responsable de circulación (la reparte el servidor de la sala: SwitchPilot.BtStates),
+//    también al agente: «OBJSTATE id estado nueva» (nueva = 1: se acaba de dar; con «marche», suena el silbato si está cerca).
 
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace SelectOR
@@ -15,6 +18,28 @@ namespace SelectOR
         const string SalaObjRoute = "CGL_V22N_RE";
         ObjetosSalaForm _objetos;
         long _objSentVersion = -1; DateTime _objNextPoll = DateTime.MinValue; bool _objPolling;
+        string _btSent; readonly System.Collections.Concurrent.ConcurrentQueue<(long id, string st)> _btFresh = new();
+
+        void BtHook(SwitchPilot p)
+        {
+            _btSent = null;
+            p.BtChanged += (id, st) => _btFresh.Enqueue((id, st));   // (en el hilo de la conexión: se manda en el siguiente segundo)
+        }
+
+        // (ObjectsTick) las indicaciones, al agente: las recién dadas y, si ha cambiado algo o se acaba de conectar, todas
+        void BtTick(bool justConnected)
+        {
+            var link = _localMap; var p = _pilot;
+            if (link == null || !link.Connected || p == null) return;
+            if (justConnected) _btSent = null;
+            var ci = CultureInfo.InvariantCulture;
+            while (_btFresh.TryDequeue(out var f)) link.Send(string.Format(ci, "OBJSTATE {0} {1} 1", f.id, f.st));
+            var now = p.BtStates;
+            string sig = string.Join(",", now.OrderBy(kv => kv.Key).Select(kv => kv.Key + ":" + kv.Value));
+            if (sig == _btSent) return;
+            foreach (var kv in now) link.Send(string.Format(ci, "OBJSTATE {0} {1} 0", kv.Key, kv.Value));
+            _btSent = sig;
+        }
 
         void OpenObjetosSala()
         {
@@ -31,6 +56,7 @@ namespace SelectOR
         {
             if (justConnected) { _objSentVersion = -1; _objNextPoll = DateTime.MinValue; }
             if (_roomJoined == null && _roomPending == null) return;
+            try { BtTick(justConnected); } catch { }
             var l = _localMap; if (l == null || !l.Connected) return;
             if (_objPolling || DateTime.UtcNow < _objNextPoll) return;
             _objPolling = true; _objNextPoll = DateTime.UtcNow.AddSeconds(15);

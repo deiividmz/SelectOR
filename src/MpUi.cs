@@ -108,6 +108,42 @@ namespace SelectOR
         protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); int h = HitOpt(e.Location); if (h >= 0) { Select(h); Clicked?.Invoke(h); } }
     }
 
+    // (2026-11-09, petición) Franja de aviso de Multijugador: los servidores públicos son los de Open Rails, no de SelectOR.
+    // Un triángulo de aviso dibujado (no un emoji) y el texto, con el alto que pida el ancho.
+    public class MpNotice : Control
+    {
+        static readonly Color Amber = Color.FromArgb(232, 170, 60);
+        public MpNotice()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Bg; Font = Theme.Font(9f);
+        }
+        protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); FitHeight(); Invalidate(); }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); FitHeight(); }
+        int TextLeft => Theme.Px(48);
+        void FitHeight()
+        {
+            if (Width <= 0) return;
+            var sz = TextRenderer.MeasureText(Text ?? "", Font, new Size(Math.Max(50, Width - TextLeft - Theme.Px(14)), 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            int h = Math.Max(Theme.Px(44), sz.Height + Theme.Px(20)) + Theme.Px(8);
+            if (Height != h) Height = h;
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; g.Clear(BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
+            var box = new Rectangle(0, Theme.Px(4), Width - 1, Height - Theme.Px(8) - 1);
+            Theme.FillRound(g, box, Theme.Px(8), Theme.Mix(Theme.Surface, Amber, 0.14f));
+            Theme.DrawRoundBorder(g, box, Theme.Px(8), Theme.Mix(Theme.Surface, Amber, 0.55f));
+            // triángulo de aviso
+            int s = Theme.Px(22), cx = box.X + Theme.Px(24), cy = box.Y + box.Height / 2;
+            var tri = new[] { new PointF(cx, cy - s / 2f), new PointF(cx + s / 2f, cy + s / 2f - 1), new PointF(cx - s / 2f, cy + s / 2f - 1) };
+            using (var path = new GraphicsPath()) { path.AddPolygon(tri); using var b = new SolidBrush(Amber); g.FillPath(b, path); }
+            using (var f = Theme.Font(10.5f, FontStyle.Bold)) TextRenderer.DrawText(g, "!", f, new Rectangle(cx - s / 2, cy - s / 2 + Theme.Px(3), s, s), Color.FromArgb(40, 32, 18), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            var tr = new Rectangle(box.X + TextLeft, box.Y + Theme.Px(10), box.Width - TextLeft - Theme.Px(14), box.Height - Theme.Px(20));
+            TextRenderer.DrawText(g, Text ?? "", Font, tr, Theme.Text, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
+        }
+    }
+
     public class ServerCardGrid : CanvasPanel
     {
         public sealed class Item

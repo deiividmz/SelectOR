@@ -29,7 +29,7 @@ namespace SelectOR
         protected override void Dispose(bool disposing) { if (disposing) { _fCap.Dispose(); _fTitle.Dispose(); _fChip.Dispose(); _fDesc.Dispose(); _fMore.Dispose(); _bg?.Dispose(); } base.Dispose(disposing); }
 
         static int Pad => Theme.Px(20);
-        int TextW(int w) => Math.Max(Theme.Px(200), Math.Min(w - Pad * 2, Theme.Px(860)));
+        int TextW(int w) => Math.Max(Theme.Px(200), w - Pad * 2);   // (2026-11-09) la descripción, a todo el ancho de la imagen (antes como mucho 860 px)
         int _fdW = -1, _fdH; string _fdText;
         int FullDescH(int w)   // medir un texto largo cuesta: se recuerda para el mismo ancho y texto
         {

@@ -23,6 +23,16 @@ namespace SelectOR
         public double[] StLat, StLon; public string[] StName;
         public float[] StX, StY;
         public int[] StOrder;                      // estaciones de más a menos andenes (las grandes, primero)
+        // (2026-11-09) los sitios de mercancías con nombre (apartaderos): su nombre y dónde están
+        public string[] FrName = Array.Empty<string>(); public float[] FrX = Array.Empty<float>(), FrY = Array.Empty<float>();
+        public void SetFreight(List<(string name, double lat, double lon)> fr)
+        {
+            FrName = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(fr, f => f.name)); FrX = new float[fr.Count]; FrY = new float[fr.Count];
+            for (int i = 0; i < fr.Count; i++) { var (x, y) = Proj(fr[i].lat, fr[i].lon); FrX[i] = (float)x; FrY[i] = (float)y; }
+            try { Changed?.Invoke(); } catch { }
+        }
+        public bool FreightAsked;     // (ya se han pedido: una vez por ruta)
+        public event Action Changed;  // (los mapas que la enseñan se repintan)
         public int Points;
 
         // Niveles de detalle: el mismo trazado simplificado a Eps metros (y sin los tramos más cortos que
@@ -400,6 +410,8 @@ namespace SelectOR
 
         public void SetData(RouteMapData d)
         {
+            if (_d != null) _d.Changed -= DataChanged;
+            if (d != null) d.Changed += DataChanged;
             _d = d; _fitted = false; _follow = null; Live.Clear(); _gen++; DropLayer(); Invalidate();
         }
 
@@ -409,6 +421,8 @@ namespace SelectOR
         public string EmptyText { get => _empty; set { _empty = value ?? ""; if (_d == null) Invalidate(); } }
 
         void DropLayer() { _layer?.Dispose(); _layer = null; }
+        // (2026-11-09) han llegado los sitios de mercancías (desde otro hilo): repintar la capa
+        void DataChanged() { try { if (IsHandleCreated && !IsDisposed) BeginInvoke((Action)(() => { _gen++; RedrawLayer(); })); } catch { } }
 
         void Fit()
         {
@@ -516,6 +530,7 @@ namespace SelectOR
         // Se puede llamar desde cualquier hilo: todo lo que usa lo crea aquí. Los nombres van en un único
         // trazado de texto (contorno + relleno: dos llamadas), no uno a uno: con cientos de estaciones es lo
         // que más pesaba.
+        public static readonly Color FreightCol = Color.FromArgb(206, 150, 100);   // (2026-11-09) los sitios de mercancías (como en el puesto)
         public static Bitmap RenderLayer(RouteMapData d, double cx, double cy, double s, double fitS, int W, int H, string family, float emPx, bool transparent = false)
         {
             var bmp = new Bitmap(W, H, PixelFormat.Format32bppPArgb);
@@ -566,6 +581,20 @@ namespace SelectOR
                     shown.Add((i, new PointF(mx, my)));
                 }
 
+            // (2026-11-09) los sitios de mercancías: un cuadrado marrón (sin tapar una estación)
+            var frShown = new List<(int i, PointF m)>();
+            float fq = dr * 0.85f;
+            using (var fb = new SolidBrush(FreightCol))
+            using (var fring = new Pen(Bg, 1.3f))
+                for (int i = 0; i < d.FrName.Length; i++)
+                {
+                    float mx = (float)((d.FrX[i] - cx) * s + hx), my = (float)((d.FrY[i] - cy) * s + hy);
+                    if (mx < -10 || my < -10 || mx > W + 10 || my > H + 10) continue;
+                    if (!used.Add(((long)(int)Math.Floor(mx / cell) << 32) ^ (uint)(int)Math.Floor(my / cell))) continue;
+                    g.FillRectangle(fb, mx - fq, my - fq, fq * 2, fq * 2); g.DrawRectangle(fring, mx - fq, my - fq, fq * 2, fq * 2);
+                    frShown.Add((i, new PointF(mx, my)));
+                }
+
             // nombres donde quepan sin pisar otro (rejilla para comprobarlo rápido)
             const int GC = 96;
             var grid = new Dictionary<long, List<RectangleF>>();
@@ -614,11 +643,37 @@ namespace SelectOR
                 if (labels % 40 == 0) texts.Add(new GraphicsPath());
                 texts[^1].AddString(name, ff, (int)FontStyle.Regular, emPx, at.Value.Location, sf);
             }
+            // (2026-11-09) los nombres de los sitios de mercancías, donde quepan (las estaciones, antes)
+            var frTexts = new GraphicsPath();
+            foreach (var (i, m) in frShown)
+            {
+                if (labels >= 450) break;
+                string name = d.FrName[i];
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var sz = _textSize.GetOrAdd(name + "\u0001" + emPx.ToString("0.00"), _ => { var ms = g.MeasureString(name, font, PointF.Empty, sf); return new SizeF(ms.Width, lineH); });
+                RectangleF? at = null;
+                foreach (var c in new[]
+                {
+                    new RectangleF(m.X + fq + 4, m.Y - sz.Height / 2f, sz.Width, sz.Height),
+                    new RectangleF(m.X - fq - 4 - sz.Width, m.Y - sz.Height / 2f, sz.Width, sz.Height),
+                    new RectangleF(m.X - sz.Width / 2f, m.Y - fq - 3 - sz.Height, sz.Width, sz.Height),
+                    new RectangleF(m.X - sz.Width / 2f, m.Y + fq + 3, sz.Width, sz.Height)
+                })
+                    if (Free(c)) { at = c; break; }
+                if (at == null) continue;
+                Put(at.Value); labels++;
+                frTexts.AddString(name, ff, (int)FontStyle.Regular, emPx, at.Value.Location, sf);
+            }
             // contorno oscuro para que se lea encima de las vías, y el texto encima
             using (var halo = new Pen(Bg, 3f) { LineJoin = LineJoin.Round })
+            {
                 foreach (var t in texts) if (t.PointCount > 0) g.DrawPath(halo, t);
+                if (frTexts.PointCount > 0) g.DrawPath(halo, frTexts);
+            }
             using (var tb = new SolidBrush(Color.FromArgb(190, 197, 204)))
                 foreach (var t in texts) { if (t.PointCount > 0) g.FillPath(tb, t); t.Dispose(); }
+            using (var ftb = new SolidBrush(FreightCol)) if (frTexts.PointCount > 0) g.FillPath(ftb, frTexts);
+            frTexts.Dispose();
             return bmp;
         }
 

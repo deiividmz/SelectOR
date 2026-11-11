@@ -214,6 +214,7 @@ namespace SelectOR
             // El servicio empieza AHORA: tiempo, km y viajeros desde este momento.
             _pendingServiceId = sid;
             PublishServiceStrip(sid, co.Id, _drivenConsist);   // composición 2D del servicio
+            SaveServiceConditions(sid);   // (2026-11-10) hora, estación y clima con que se lanzó el simulador
             _svcOpenedUtc = DateTime.UtcNow;
             StartSvcClock(_tHave ? DateTime.UtcNow : (DateTime?)null);   // si aún carga, arranca con la 1.ª posición
             _estPatKm = 0; _estimatedKm = 0;

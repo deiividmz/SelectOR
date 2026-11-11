@@ -84,7 +84,7 @@ namespace SelectOR
                     Theme.FillRound(g, r, Theme.Px(6), i == _cat ? Theme.Surface2 : Color.FromArgb(48, 52, 56));
                 tabs.Add((Cats[i].icon, r));
             }
-            ColorText.DrawCells(g, tabs, _fTab, Theme.Text, new Rectangle(0, 0, Width, _tabH));
+            ColorText.DrawCells(g, tabs, _fTab, Theme.Text, new Rectangle(0, 0, Width, _tabH), raw: true);
             using (var p = new Pen(Theme.Border)) g.DrawLine(p, Theme.Px(6), _tabH, Width - Theme.Px(6), _tabH);
             // cuadrícula (solo lo visible)
             var grid = GridRect;
@@ -99,7 +99,7 @@ namespace SelectOR
                 cells.Add((items[i], r));
             }
             g.ResetClip();
-            ColorText.DrawCells(g, cells, _fEmoji, Theme.Text, grid);
+            ColorText.DrawCells(g, cells, _fEmoji, Theme.Text, grid, raw: true);
             // el contenido que se sale por arriba o por abajo se tapa (DrawCells no recorta por celdas)
             using (var b = new SolidBrush(BackColor))
             {

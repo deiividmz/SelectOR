@@ -20,6 +20,12 @@ namespace SelectOR
 {
     public sealed partial class DispatchForm : Form
     {
+        // (2026-11-09) el número de tren del maquinista (lo elige al entrar en la sala) junto a su nombre, y su tipo y destino
+        static string PlayerLabel(SwitchPilot p, string name) => p?.TrainNos != null && p.TrainNos.TryGetValue(name, out var n) ? n.no + " · " + name : name;
+        static string PlayerSub(SwitchPilot p, string name, string sub)
+            => p?.TrainNos != null && p.TrainNos.TryGetValue(name, out var n) && (n.type.Length > 0 || n.dest.Length > 0)
+               ? (n.type.Length > 0 ? n.type : "") + (n.dest.Length > 0 ? " → " + n.dest : "") + " · " + sub : sub;
+
         readonly string _routeDir, _host, _me; readonly int _port;
         readonly Func<string, RouteGraph> _buildGraph;
         RouteGraph _g; RoomMapGeo _geo; List<Schematic.Zone> _zones;
@@ -49,7 +55,9 @@ namespace SelectOR
         // siempre el tablero. Se recuerda mientras SelectOR está abierto.
         static bool _schema = true;
         readonly HashSet<string> _noSchema = new();   // dependencias sin esquema recto (no se pudo hacer): su trazado real
-        bool Board => _board != null && (_curZone == null || !_schema || _noSchema.Contains(_curZone));
+        bool Board => _board != null && (_curZone == null || !_schema || _noSchema.Contains(_curZone)
+                                          || (_curBand > 0 && !_cache.ContainsKey(_curZone))   // (2026-11-09) banda cuyo esquema aún se prepara: su trazado real
+                                          || _depWaiting);   // (2026-11-10) dependencia, con el esquema de la ruta aún preparándose: su trazado real (no el esquema suelto antiguo)
 
         static string General => "🗺  " + I18n.T("Plano general");
         bool Overview => _curZone == null;
@@ -72,7 +80,7 @@ namespace SelectOR
             _status = new Label { Text = Tr("Preparando el esquema de la ruta…"), AutoSize = false, TextAlign = ContentAlignment.MiddleRight, Font = Theme.Font(9f), ForeColor = Theme.Subtle, BackColor = top.BackColor, Dock = DockStyle.Right, Width = Theme.Px(420), Padding = new Padding(0, 0, Theme.Px(14), 0) };
             top.Controls.Add(_title); top.Controls.Add(_status);
 
-            var side = new Panel { Dock = DockStyle.Left, Width = Theme.Px(240), BackColor = Theme.BgSidebar, Padding = new Padding(Theme.Px(8)) };
+            var side = new Panel { Dock = DockStyle.Left, Width = Theme.Px(286), BackColor = Theme.BgSidebar, Padding = new Padding(Theme.Px(8)) };
             var cap = new Label { Text = Tr("DEPENDENCIAS"), Dock = DockStyle.Top, Height = Theme.Px(24), Font = Theme.Font(8.5f, FontStyle.Bold), ForeColor = Theme.Subtle, BackColor = side.BackColor };
             _list = new ListBox
             {
@@ -84,29 +92,32 @@ namespace SelectOR
                 if (e.Index < 0) return;
                 bool sel = (e.State & DrawItemState.Selected) != 0;
                 string nm = _list.Items[e.Index].ToString();
+                if (IsBandItem(nm, out int band)) { DrawBandRow(e, band, sel); return; }   // (2026-11-09) DispatchForm.Bandas.cs
+                int ind = BandOfZone(nm) > 0 ? Theme.Px(14) : 0;   // (las dependencias de una banda, debajo de ella)
                 using (var b = new SolidBrush(sel ? Theme.Surface2 : Theme.BgSidebar)) e.Graphics.FillRectangle(b, e.Bounds);
                 if (sel) using (var a = new SolidBrush(SchematicDraw.StationCol)) e.Graphics.FillRectangle(a, e.Bounds.X, e.Bounds.Y + 4, 3, e.Bounds.Height - 8);
                 bool line = nm != General && IsLineZone(nm);
                 if (nm == General) using (var p = new Pen(Color.FromArgb(60, 70, 82))) e.Graphics.DrawLine(p, e.Bounds.X + 6, e.Bounds.Bottom - 1, e.Bounds.Right - 6, e.Bounds.Bottom - 1);
-                bool bell = _unread.Contains(nm);
-                string own = nm == General ? null : OwnerOf(nm);
+                bool bell = nm != General && DepUnread(nm);   // (2026-11-10) la estación con sus tramos
+                string own = nm == General ? null : DepOwner(nm);
                 int ownW = own != null ? Theme.Px(70) : 0;
                 using var f = line ? Theme.Font(8.6f) : nm == General ? Theme.Font(9.5f, FontStyle.Bold) : null;
-                ColorText.Text(e.Graphics, nm, f ?? _list.Font, new Rectangle(e.Bounds.X + 10, e.Bounds.Y, e.Bounds.Width - (bell ? 34 : 12) - ownW, e.Bounds.Height),
+                ColorText.Text(e.Graphics, nm, f ?? _list.Font, new Rectangle(e.Bounds.X + 10 + ind, e.Bounds.Y, e.Bounds.Width - (bell ? 34 : 12) - ownW - ind, e.Bounds.Height),
                                       sel || nm == General ? Theme.Text : line ? Color.FromArgb(130, 140, 150) : Theme.Subtle, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                if (own != null) DrawOwnerTag(e.Graphics, e.Bounds, own, Mine(nm), bell ? 26 : 4);
+                if (own != null) DrawOwnerTag(e.Graphics, e.Bounds, own, DepMine(nm), bell ? 26 : 4);
                 if (bell) ColorText.Text(e.Graphics, "🔔", _list.Font, new Rectangle(e.Bounds.Right - 26, e.Bounds.Y, 24, e.Bounds.Height), Color.FromArgb(255, 213, 79), TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             };
-            _list.SelectedIndexChanged += (s, e) => { if (_list.SelectedItem is string st) { if (st == General) ShowOverview(); else ShowZone(st); } };
+            _list.SelectedIndexChanged += (s, e) => { if (_filling) return; if (_list.SelectedItem is string st) { if (st == General) ShowOverview(); else if (IsBandItem(st, out int b)) ShowBand(b); else ShowZone(st); } };
             try { Native.UseDarkScrollBars(_list); } catch { }
             side.Controls.Add(_list); BuildMineBtn(side); side.Controls.Add(cap);   // (2026-11-08) «Solo las mías» (DispatchForm.Mias.cs)
+            BuildFold(side, cap);   // (2026-11-10) plegable sobre el margen izquierdo (DispatchForm.Plegar.cs)
             BuildJefeBar(top);   // jefes de circulación (DispatchForm.Jefe.cs; necesita la lista)
             BuildItinBar(top);   // mando manual / automático (DispatchForm.Itinerarios.cs)
             BuildObjectsBtn(top);   // (2026-11-04) 🚧 objetos de la sala, solo el administrador (DispatchForm.Objetos.cs)
             BuildLayersBtn(top);    // (1.2.91) 🗺 capas: dependencias, PK y objetos (DispatchForm.Capas.cs)
 
             _canvas = new Canvas { Dock = DockStyle.Fill, BackColor = SchematicDraw.Bg, Cursor = Cursors.Hand };
-            _canvas.Paint += (s, e) => Paint_(e.Graphics);
+            _canvas.Paint += (s, e) => PaintTimed(e.Graphics);   // (2026-11-09) midiendo lo que cuesta (DispatchForm.Suave.cs)
             _canvas.MouseWheel += (s, e) =>
             {
                 if (Board)
@@ -121,7 +132,7 @@ namespace SelectOR
                 }
                 else
                 {
-                    float k = e.Delta > 0 ? 1.15f : 1 / 1.15f, nz = Math.Max(0.3f, Math.Min(6f, _zoom * k)); k = nz / _zoom;
+                    float k = e.Delta > 0 ? 1.15f : 1 / 1.15f, nz = Math.Max(_cur?.Parts != null ? 0.06f : 0.3f, Math.Min(6f, _zoom * k)); k = nz / _zoom;   // (el esquema de la ruta: se puede alejar hasta ver una banda entera)
                     _origin = new PointF(e.X - (e.X - _origin.X) * k, e.Y - (e.Y - _origin.Y) * k); _zoom = nz;
                 }
                 _canvas.Invalidate();
@@ -129,6 +140,7 @@ namespace SelectOR
             _canvas.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { _dragFrom = e.Location; _dragOrigin = Board ? _bOrigin : Overview ? _ovOrigin : _origin; _dragging = false; _canvas.Focus(); } };
             _canvas.MouseMove += (s, e) =>
             {
+                if (_arrowFrom != null) _canvas.Invalidate();   // (2026-11-09) la flecha que se está poniendo sigue al ratón
                 if (e.Button == MouseButtons.Left)
                 {
                     if (!_dragging && (Math.Abs(e.X - _dragFrom.X) > Theme.Px(6) || Math.Abs(e.Y - _dragFrom.Y) > Theme.Px(6))) _dragging = true;   // (1.2.75: con 3 px un clic con algo de temblor era un arrastre)
@@ -170,7 +182,11 @@ namespace SelectOR
             _canvas.MouseLeave += (s, e) => { if (_hover != null) { _hover = null; _canvas.Invalidate(); } };
             _canvas.MouseUp += (s, e) =>
             {
+                if (e.Button == MouseButtons.Right && !_dragging && (Board || !Overview) && BtRightClick(e.Location)) return;   // (2026-11-10) el responsable de circulación (DispatchForm.Responsable.cs)
                 if (e.Button == MouseButtons.Right && !_dragging && (Board || !Overview) && (SignalRightClick(e.Location) || TrainClick(e.Location))) return;   // (2026-11-08) el menú de la señal o del tren
+                if (e.Button == MouseButtons.Right && !_dragging && (Board || !Overview) && NotesRightClick(e.Location)) return;   // (2026-11-09) notas del administrador
+                if (e.Button == MouseButtons.Left && !_dragging && (Board || !Overview) && ArrowClick(e.Location)) return;          // … el final de una flecha
+                if (e.Button == MouseButtons.Left && !_dragging && (Board || !Overview) && BlockClick(e.Location)) return;          // (2026-11-10) sentido de bloqueo (DispatchForm.Bloqueo.cs)
                 if (e.Button != MouseButtons.Left || _dragging) { _dragging = false; return; }
                 if (NoticeClick(e.Location)) return;   // una notificación de Tab: a esa señal (DispatchForm.Avisos.cs)
                 if ((Board || !Overview) && RecentClick(e.Location)) return;   // (2026-11-08) «Repetir» un itinerario
@@ -179,8 +195,8 @@ namespace SelectOR
                     if (PickClick(e.Location)) return;     // eligiendo el destino de un itinerario
                     if (JefeClick(e.Location)) return;     // con el mando: una aguja o una señal
                     if (TrainClick(e.Location)) return;    // (2026-11-08) con el mando: un tren (DispatchForm.Expulsar.cs)
-                    var st = StationAt(e.Location); if (st != null && _list.Items.Contains(st)) { Select(st); return; }
-                    var zb = ZoneBandAt(e.Location); if (zb != null && _list.Items.Contains(zb)) Select(zb);   // (1.2.91) clic en la franja de una dependencia (también los trayectos)
+                    var st = StationAt(e.Location); if (st != null && Listed(st)) { Select(st); return; }
+                    var zb = ZoneBandAt(e.Location); if (zb != null && Listed(zb)) Select(zb);   // (1.2.91) clic en la franja de una dependencia (también los trayectos)
                     return;
                 }
                 if (Overview) { var z = ZoneAt(e.Location); if (z != null) Select(z); return; }
@@ -190,7 +206,7 @@ namespace SelectOR
                 if (TrainClick(e.Location)) return;    // (2026-11-08) con el mando: un tren (DispatchForm.Expulsar.cs)
                 using var g2 = _canvas.CreateGraphics();
                 var x = SchematicDraw.ExitAt(_cur, _origin, _zoom, e.Location, g2);
-                if (x != null && _list.Items.Contains(x.Station)) Select(x.Station);
+                if (x != null && Listed(x.Station)) Select(x.Station);
             };
             _canvas.DoubleClick += (s, e) =>
             {
@@ -202,14 +218,14 @@ namespace SelectOR
             new ToolTip().SetToolTip(_canvas, Tr("rueda: zoom · arrastrar: mover · doble clic: ajustar"));
             _canvas.Resize += (s, e) => { if (Board) { if (!_bFitted) FitBoard(); } else if (Overview ? !_ovFitted : !_fitted) { if (Overview) FitOverview(); else Fit(); } };
 
-            Controls.Add(_canvas); Controls.Add(BuildChat()); Controls.Add(side); Controls.Add(top);   // (1.2.77) el chat de la sala a la derecha (DispatchForm.Chat.cs)
+            Controls.Add(_canvas); Controls.Add(BuildRightColumn()); Controls.Add(side); Controls.Add(top);   // (1.2.77) el chat de la sala a la derecha (DispatchForm.Chat.cs); (2026-11-09) con los trenes encima (DispatchForm.Trenes.cs)
 
             // (1.2.75) luces a destellos (amarillo a destellos, rebase autorizado…): repintar cada cuarto de segundo mientras haya
             _blink = new Timer { Interval = 250 };
             _blink.Tick += (s, e) => { if (_blinking && (Board || !Overview)) _canvas.Invalidate(); };
             _blink.Start();
             _timer = new Timer { Interval = 1000 };
-            _timer.Tick += (s, e) => { UpdateStatus(); if (JefeBarStale()) UpdateJefe(); JefeKeepAlive(); RefreshHeaders(); LayersTick(); MineRefresh(); _canvas.Invalidate(); };
+            _timer.Tick += (s, e) => { UpdateStatus(); if (JefeBarStale()) UpdateJefe(); JefeKeepAlive(); RefreshHeaders(); LayersTick(); MineRefresh(); TrainsTick(); _canvas.Invalidate(); };
             Shown += async (s, e) => await Prepare();
             FormClosing += (s, e) => LeaveOnClose();   // con el mando: se suelta
             FormClosed += (s, e) => { _timer.Stop(); _blink.Stop(); try { _pilot?.Dispose(); } catch { } };
@@ -217,7 +233,12 @@ namespace SelectOR
 
         bool IsLineZone(string z) => _zones?.FirstOrDefault(q => q.Name == z) is { Line: true };
 
-        void Select(string item) { int i = _list.Items.IndexOf(item); if (i >= 0) { if (_list.SelectedIndex == i) { if (item == General) ShowOverview(); else ShowZone(item); } else _list.SelectedIndex = i; } }
+        void Select(string item)
+        {
+            if (item != null && item != General && !IsBandItem(item, out _)) item = DepOf(item);   // (2026-11-10) un tramo: su estación
+            int i = _list.Items.IndexOf(item);
+            if (i < 0 && BandOfZone(item) > 0 && _listable.Contains(item)) { _openBand = BandOfZone(item); Refill(); i = _list.Items.IndexOf(item); }   // (2026-11-09) dentro de una banda plegada
+            if (i >= 0) { if (_list.SelectedIndex == i) { if (item == General) ShowOverview(); else ShowZone(item); } else _list.SelectedIndex = i; } }
 
         async Task Prepare()
         {
@@ -236,9 +257,8 @@ namespace SelectOR
             float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
             foreach (var E in _g.Edges) for (int i = 0; i < E.X.Length; i++) { x0 = Math.Min(x0, E.X[i]); x1 = Math.Max(x1, E.X[i]); y0 = Math.Min(y0, E.Y[i]); y1 = Math.Max(y1, E.Y[i]); }
             _routeBox = RectangleF.FromLTRB(x0, y0, x1, y1);
-            _list.Items.Clear(); _list.Items.Add(General);
-            foreach (var z in _zones.Where(z => !z.Line).OrderBy(z => z.Name, StringComparer.CurrentCulture)) _list.Items.Add(z.Name);
-            foreach (var z in _zones.Where(z => z.Line).OrderBy(z => z.Name, StringComparer.CurrentCulture)) _list.Items.Add(z.Name);
+            FillList(false, new List<string>());   // (2026-11-09) con las bandas, si las hay (DispatchForm.Bandas.cs)
+            if (BandsOn && _schema) BuildRouteSchema();   // (2026-11-10) el esquema de la ruta, desde ya (antes, al pulsar la primera banda o dependencia)
             // conexión con la sala, solo para mirar
             try
             {
@@ -248,6 +268,7 @@ namespace SelectOR
                     if (_geo != null && _geo.ById.TryGetValue((tx, tz, id), out var sw)) lock (_swSet) _swSet[sw.Order] = (pos, DateTime.UtcNow);
                 };
                 _pilot.TabAsked += OnTab;   // avisos de Tab (DispatchForm.Avisos.cs)
+                _pilot.SpadSeen += OnSpad;  // (2026-11-09) alarma: un tren ha rebasado una señal en parada (DispatchForm.Avisos.cs)
                 PrepareChat();              // (1.2.77) chat de la sala (DispatchForm.Chat.cs)
                 _pilot.EnsureStarted();
                 _ = PrepareJefe();
@@ -262,7 +283,7 @@ namespace SelectOR
 
         void ShowOverview()
         {
-            _curZone = null; _cur = null; _sel = null; _heads = new();
+            _curZone = null; _cur = null; _sel = null; _heads = new(); _curBand = 0; _depParts = null; _depWaiting = false;
             _title.Text = Tr("PUESTO DE MANDO") + "  ·  " + Tr("Plano general");
             UpdateJefe();
             if (Board) { FitBoard(); return; }
@@ -272,8 +293,14 @@ namespace SelectOR
         void ShowZone(string zone)
         {
             if (_g == null) return;
+            if (IsBandItem(zone, out int bandOf)) { ShowBand(bandOf); return; }   // (2026-11-09) una banda (DispatchForm.Bandas.cs)
+            zone = DepOf(zone);
+            if (ShowDepInRoute(zone)) return;   // (2026-11-10) como la banda, encuadrada en ella (DispatchForm.Dependencias.cs)
+            _depParts = null;
+            _curBand = 0;
+            int zb = BandOfZone(zone); if (zb > 0 && zb != _openBand) { _openBand = zb; BeginInvoke((Action)Refill); }   // (2026-11-09) su banda, desplegada
             // (1.2.81) con «esquema»: el de la dependencia, si se puede hacer; si no, su trazado real
-            if (_schema && _board != null && !_noSchema.Contains(zone))
+            if (_schema && _board != null && !_noSchema.Contains(zone) && !_depWaiting)   // (2026-11-10: esperando al de la ruta, no)
             {
                 if (!_cache.TryGetValue(zone, out var s0))
                 {
@@ -290,7 +317,7 @@ namespace SelectOR
                 _cur = null; _curZone = zone;
                 _title.Text = Tr("PUESTO DE MANDO") + "  ·  " + zone;
                 if (_unread.Remove(zone)) _list.Invalidate();
-                _sel = new SchematicHeader { Name = zone, Zones = new List<string> { zone } };
+                _sel = new SchematicHeader { Name = zone, Zones = DepZones(zone) };
                 _heads = new List<SchematicHeader> { _sel };
                 RefreshHeaders(); UpdateJefe();
                 FocusZone(zone);
@@ -305,8 +332,8 @@ namespace SelectOR
             _cur = s; _curZone = zone;
             _title.Text = Tr("PUESTO DE MANDO") + "  ·  " + zone;
             if (_unread.Remove(zone)) _list.Invalidate();
-            // la dependencia entera, para el jefe de circulación
-            _sel = new SchematicHeader { Name = zone, Zones = new List<string> { zone } };
+            // la dependencia entera (con sus tramos), para el jefe de circulación
+            _sel = new SchematicHeader { Name = zone, Zones = DepZones(zone) };
             _heads = new List<SchematicHeader> { _sel };
             RefreshHeaders();
             UpdateJefe();
@@ -453,7 +480,7 @@ namespace SelectOR
             _trainSeen.Clear();
             foreach (var t in p.Trains)
             {
-                if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
+                if (!TrainLL(t.name, t.tx, t.tz, t.x, t.z, out double la, out double lo)) continue;
                 bool tLoose = RoomLoose.Is(t.name); double tMps = t.kmh / 3.6;
                 try { var (rx, ry) = geo.Graph.Proj(la, lo); ends.Add((rx, ry, tMps, tLoose)); } catch { }
                 var body = new List<PointF>();
@@ -504,7 +531,7 @@ namespace SelectOR
                 if (body.Count == 0) At(la, lo);
                 if (body.Count == 0) continue;
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
-                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
+                live.Trains.Add((t.player ? PlayerLabel(p, t.name) : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : t.player ? PlayerSub(p, t.name, sub) : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
                 _trainSeen.Add((t.name, t.player, body.ToArray()));   // (2026-11-08) para el clic en un tren (DispatchForm.Expulsar.cs)
             }
             // itinerarios de las señales abiertas (de estación, con alguna aguja, y los rebases), solo las que se ven
@@ -532,13 +559,13 @@ namespace SelectOR
         string ZoneAt(Point p)
         {
             if (_g == null) return null;
-            foreach (var (name, r) in _stLabels) if (r.Contains(p) && _list.Items.Contains(name)) return name;
+            foreach (var (name, r) in _stLabels) if (r.Contains(p) && Listed(name)) return name;
             string best = null; double bd = Theme.Px(14);
             if (_stations != null)
                 foreach (var st in _stations)
                 {
                     var q = Ov(st.x, st.y); double d = Math.Sqrt((q.X - p.X) * (q.X - p.X) + (q.Y - p.Y) * (q.Y - p.Y));
-                    if (d < bd && _list.Items.Contains(st.name)) { bd = d; best = st.name; }
+                    if (d < bd && Listed(st.name)) { bd = d; best = st.name; }
                 }
             if (best != null || _edgeZone == null) return best;
             double be = Theme.Px(9); int bestE = -1;
@@ -593,7 +620,7 @@ namespace SelectOR
                 using (var tf = Theme.Font(7.6f, FontStyle.Bold))
                     foreach (var t in pl.Trains)
                     {
-                        if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
+                        if (!TrainLL(t.name, t.tx, t.tz, t.x, t.z, out double la, out double lo)) continue;
                         var (x, y) = _g.Proj(la, lo); var q = Ov(x, y);
                         var col = t.player ? SchematicDraw.Occ : RoomAi.Is(t.name) ? RoomAi.Color : SchematicDraw.AiCol;
                         using (var b = new SolidBrush(col)) g.FillEllipse(b, q.X - 4.5f, q.Y - 4.5f, 9, 9);
@@ -713,7 +740,7 @@ namespace SelectOR
             _trainSeen.Clear();
             foreach (var t in p.Trains)
             {
-                if (!OrGeo.TryLatLon(t.tx * 2048.0 + t.x, t.tz * 2048.0 + t.z, out double la, out double lo)) continue;
+                if (!TrainLL(t.name, t.tx, t.tz, t.x, t.z, out double la, out double lo)) continue;
                 bool tLoose = RoomLoose.Is(t.name); double tMps = t.kmh / 3.6;
                 try { var (rx, ry) = geo.Graph.Proj(la, lo); ends.Add((rx, ry, tMps, tLoose)); } catch { }
                 var body = new List<PointF>();
@@ -763,7 +790,7 @@ namespace SelectOR
                 if (body.Count == 0) At(la, lo);
                 if (body.Count == 0) continue;
                 string sub = t.kmh >= 1 ? $"{t.kmh:0} km/h" : Tr("parado");
-                live.Trains.Add((t.player ? t.name : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
+                live.Trains.Add((t.player ? PlayerLabel(p, t.name) : RoomLoose.Is(t.name) ? RoomLoose.Label(t.name) : RoomAi.Is(t.name) ? RoomAi.Label(t.name) : Tr("IA"), RoomLoose.Is(t.name) ? Tr("suelto") : t.player ? PlayerSub(p, t.name, sub) : sub, body.ToArray(), t.player, RoomAi.Is(t.name)));
                 _trainSeen.Add((t.name, t.player, body.ToArray()));   // (2026-11-08) para el clic en un tren (DispatchForm.Expulsar.cs)
             }
             try { live.LevelClosed = PasosNivel.Closed(geo.LevelCrossings, geo.Graph, ends); } catch { }   // (1.2.84)
@@ -799,8 +826,11 @@ namespace SelectOR
             {
                 var lv = LiveBoard();
                 RouteBoardDraw.Draw(g, _board, lv, _bOrigin, _bZoom, area, DrawZonesUnder);
+                DrawTunnels(g, area);       // (2026-11-09) túneles (DispatchForm.Tuneles.cs)
                 DrawBoardLayers(g, area);   // (1.2.91) PK y objetos de la sala (DispatchForm.Capas.cs)
                 _blinking = lv?.Blinking == true;
+                DrawBlocks(g, area);        // (2026-11-10) sentido de bloqueo de los trayectos (DispatchForm.Bloqueo.cs)
+                DrawNotes(g, area);         // (2026-11-09) notas del administrador (DispatchForm.Notas.cs)
                 if (_pick == null && !(_itinMsg != null && DateTime.UtcNow < _itinMsgUntil))
                     using (var hf = Theme.Font(8.6f)) using (var tb = new SolidBrush(Theme.Subtle))
                         g.DrawString(Tr("rueda: zoom · arrastrar: mover · doble clic: toda la ruta · clic en una estación: acercar"), hf, tb, area.Left + Theme.Px(12), area.Top + Theme.Px(10));
@@ -815,7 +845,7 @@ namespace SelectOR
                 using (var bg = new SolidBrush(SchematicDraw.Bg)) g.FillRectangle(bg, area);
                 ColorText.Text(g, Tr("Esta dependencia no tiene esquema."), Theme.Font(10f), area, Theme.Subtle, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
-            else { var lv = Live(); SchematicDraw.Draw(g, _cur, lv, _origin, _zoom, area); _blinking = lv?.Blinking == true; DrawSchematicLayers(g, area); }
+            else { var lv = Live(); SchematicDraw.Draw(g, _cur, lv, _origin, _zoom, area); DimOtherBands(g, area); DimOutsideDep(g, area); _blinking = lv?.Blinking == true; DrawTunnels(g, area); DrawSchematicLayers(g, area); DrawBlocks(g, area); DrawNotes(g, area); }
             // «← Plano general»
             using (var bf = Theme.Font(9f, FontStyle.Bold))
             {
@@ -849,7 +879,7 @@ namespace SelectOR
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             if (keyData == Keys.Escape && _chatInput != null && _chatInput.Focused) { _canvas.Focus(); return true; }   // (1.2.77) Esc en el chat: solo sale del chat
-            if (keyData == Keys.Escape) { if (PickCancel()) return true; if (!Overview) { Select(General); return true; } Close(); return true; }
+            if (keyData == Keys.Escape) { if (ArrowCancel() || PickCancel()) return true; if (!Overview) { Select(General); return true; } Close(); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
         }
     }

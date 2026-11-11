@@ -62,14 +62,7 @@ namespace SelectOR
             _tabClima.Location = new Point(_tabGfx.Right + Theme.Px(8), Theme.Px(12));
             _tabGen.Click += (s, e) => ShowPage("general"); _tabJoy.Click += (s, e) => ShowPage("mandos"); _tabGfx.Click += (s, e) => ShowPage("graficos"); _tabClima.Click += (s, e) => ShowPage("clima");
             tabs.Controls.Add(_tabGen); tabs.Controls.Add(_tabJoy); tabs.Controls.Add(_tabGfx); tabs.Controls.Add(_tabClima);
-            // (1.2.77) Sala: los tiempos del multijugador, solo el administrador (SelectorSettingsDialog.Sala.cs)
-            if (Supa.IsSuperadmin)
-            {
-                _tabSala = DialogKit.Fit(DialogKit.Secondary(I18n.T("Sala")), 130); _tabSala.Height = Theme.Px(36);
-                _tabSala.Location = new Point(_tabClima.Right + Theme.Px(8), Theme.Px(12));
-                _tabSala.Click += (s, e) => ShowPage("sala");
-                tabs.Controls.Add(_tabSala);
-            }
+            // (2026-11-09) «Sala» (los tiempos de la sala) ya no está aquí: Empresas → Ajustes → Sala compartida (SalaTiemposPanel)
 
             var body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(Theme.Px(20), Theme.Px(12), Theme.Px(20), Theme.Px(8)) };
 
@@ -118,7 +111,32 @@ namespace SelectOR
             radioKey.SelectedIndexChanged += (s, e) => { if (radioKey.SelectedIndex >= 0) { _prefs.RadioKey = RoomRadio.Keys[radioKey.SelectedIndex].id; Save(); } };
             radioRow.Controls.Add(radioLbl); radioRow.Controls.Add(radioKey);
             radioRow.Layout += (s, e) => radioKey.Location = new Point(radioLbl.Right + Theme.Px(10), Theme.Px(6));
-            body.Controls.Add(cols); body.Controls.Add(_devView); body.Controls.Add(radioRow); body.Controls.Add(top);
+            // (2026-11-09) micrófono y salida de la radio (por su nombre de Windows; «Predeterminado de Windows» = null)
+            var audioRow = new Panel { Dock = DockStyle.Top, Height = Theme.Px(40), BackColor = Theme.Bg };
+            var micLbl = new Label { Text = I18n.T("Micrófono:"), AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Bg, Font = Theme.Font(9.5f) };
+            var outLbl = new Label { Text = I18n.T("Salida:"), AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Bg, Font = Theme.Font(9.5f) };
+            var mic = DialogKit.Combo(); mic.Width = Theme.Px(300);
+            var spk = DialogKit.Combo(); spk.Width = Theme.Px(300);
+            void FillDev(ComboBox cb, List<string> names, string cur)
+            {
+                cb.Items.Clear(); cb.Items.Add(I18n.T("Predeterminado de Windows"));
+                foreach (var n in names) cb.Items.Add(n);
+                if (!string.IsNullOrEmpty(cur) && !names.Contains(cur)) cb.Items.Add(cur);   // (el elegido, aunque no esté enchufado ahora)
+                cb.SelectedIndex = string.IsNullOrEmpty(cur) ? 0 : Math.Max(0, cb.Items.IndexOf(cur));
+            }
+            FillDev(mic, RadioAudio.InputNames(), _prefs.RadioMic); FillDev(spk, RadioAudio.OutputNames(), _prefs.RadioOut);
+            mic.SelectedIndexChanged += (s, e) => { _prefs.RadioMic = mic.SelectedIndex <= 0 ? null : mic.SelectedItem as string; Save(); };
+            spk.SelectedIndexChanged += (s, e) => { _prefs.RadioOut = spk.SelectedIndex <= 0 ? null : spk.SelectedItem as string; Save(); };
+            var devTip = new ToolTip();
+            devTip.SetToolTip(mic, I18n.T("Se aplica la próxima vez que entres en la sala o abras el puesto de mando."));
+            devTip.SetToolTip(spk, I18n.T("Se aplica la próxima vez que entres en la sala o abras el puesto de mando."));
+            audioRow.Controls.Add(micLbl); audioRow.Controls.Add(mic); audioRow.Controls.Add(outLbl); audioRow.Controls.Add(spk);
+            audioRow.Layout += (s, e) =>
+            {
+                micLbl.Location = new Point(Theme.Px(22), Theme.Px(10)); mic.Location = new Point(micLbl.Right + Theme.Px(10), Theme.Px(6));
+                outLbl.Location = new Point(mic.Right + Theme.Px(18), Theme.Px(10)); spk.Location = new Point(outLbl.Right + Theme.Px(10), Theme.Px(6));
+            };
+            body.Controls.Add(cols); body.Controls.Add(_devView); body.Controls.Add(audioRow); body.Controls.Add(radioRow); body.Controls.Add(top);
 
             var footer = new DialogKit.Footer();
             var close = DialogKit.Primary(I18n.T("Cerrar"), 140);
@@ -134,7 +152,6 @@ namespace SelectOR
             footer.AddLeft(_lblStatus);
 
             _pageJoy = body; _pageGfx = BuildGfxPage(); _pageClima = BuildClimaPage(); _pageGen = BuildGeneralPage();
-            if (_tabSala != null) { _pageSala = BuildSalaPage(); Controls.Add(_pageSala); }
             Controls.Add(_pageGen); Controls.Add(_pageClima); Controls.Add(_pageGfx); Controls.Add(body); Controls.Add(footer); Controls.Add(tabs); Controls.Add(header); Controls.Add(stripe);
             ShowPage(page ?? "general");
 
@@ -148,10 +165,8 @@ namespace SelectOR
 
         public void ShowPage(string page)
         {
-            bool sala = page == "sala" && _pageSala != null, gfx = page == "graficos", clima = page == "clima", gen = page == "general", joy = !gfx && !clima && !sala && !gen;
+            bool gfx = page == "graficos", clima = page == "clima", gen = page == "general", joy = !gfx && !clima && !gen;
             _pageGfx.Visible = gfx; _pageClima.Visible = clima; _pageJoy.Visible = joy; _pageGen.Visible = gen;
-            if (_pageSala != null) _pageSala.Visible = sala;
-            if (_tabSala != null) { _tabSala.BaseColor = sala ? Theme.Accent : Theme.Surface2; _tabSala.HoverColor = sala ? Theme.AccentHi : Theme.SurfaceHi; _tabSala.TextColor = sala ? Color.White : Theme.Text; _tabSala.Invalidate(); }
             if (_reset != null) _reset.Visible = joy;
             foreach (var (b, on) in new[] { (_tabGen, gen), (_tabJoy, joy), (_tabGfx, gfx), (_tabClima, clima) })
             { b.BaseColor = on ? Theme.Accent : Theme.Surface2; b.HoverColor = on ? Theme.AccentHi : Theme.SurfaceHi; b.TextColor = on ? Color.White : Theme.Text; b.Invalidate(); }

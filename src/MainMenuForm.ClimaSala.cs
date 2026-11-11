@@ -52,7 +52,7 @@ namespace SelectOR
         void SalaWeatherButtonUpdate()
         {
             if (_salaWxBtn == null || _salaHost == null) return;
-            bool admin = Supa.IsSuperadmin && Supa.IsLoggedIn;
+            bool admin = false;   // (2026-11-09) sin el botón ⛅: el clima de la sala está en Empresas → Ajustes → Clima
             bool ai = Supa.IsLoggedIn;   // (1.2.91) el 🚆 para todos: cómo ves los trenes IA (y, el administrador y los gestores, su horario)
             if (_salaWxOn == admin && _salaAiOn == ai) return;
             _salaWxOn = admin; _salaAiOn = ai;

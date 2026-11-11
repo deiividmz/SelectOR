@@ -1301,6 +1301,7 @@ namespace SelectOR.MapAgent
                         insts.Add((fl, m, Matrix.Invert(m)));
                     }
                     var spots = new List<(Vector3, int, Vector3)>(); var hs = new List<float>(); int outside = 0;
+                    var sTi = new List<int>(); var sNear = new List<bool>();   // (2026-11-09) de qué punto de vía y si es el pegado a ella
                     for (int ti = 0; ti < track.Count; ti++)
                     {
                         var (p, f) = track[ti];
@@ -1322,20 +1323,35 @@ namespace SelectOR.MapAgent
                                     float wy = Vector3.Transform(new Vector3(top.X, y, top.Z), m).Y;
                                     if (float.IsNaN(best) || wy < best) best = wy;
                                 }
-                                if (!float.IsNaN(best)) { spots.Add((new Vector3(w.X, best, w.Z), side, f)); hs.Add(best - p.Y); }
+                                if (!float.IsNaN(best)) { spots.Add((new Vector3(w.X, best, w.Z), side, f)); hs.Add(best - p.Y); sTi.Add(ti); sNear.Add(d < 4f); }
                             }
                         }
                     }
                     // a cada lado, solo los puntos a la altura del andén (fuera lo que se aparta más de 30 cm de su mediana)
                     float Med(IEnumerable<float> v) { var a = v.OrderBy(x => x).ToList(); return a.Count == 0 ? float.NaN : a[a.Count / 2]; }
-                    var keep = new List<(Vector3, int, Vector3)>(); var keptH = new List<float>(); int dropped = 0; var meds = new List<string>();
+                    var keep = new List<(Vector3, int, Vector3)>(); var keptH = new List<float>(); int dropped = 0, looseAll = 0; var meds = new List<string>();
                     foreach (int side in new[] { 1, -1 })
                     {
                         var ix = Enumerable.Range(0, spots.Count).Where(i => spots[i].Item2 == side).ToList();
                         if (ix.Count == 0) continue;
                         float med = Med(ix.Select(i => hs[i]));
                         meds.Add($"{(side > 0 ? "izquierda" : "derecha")} a {med:0.00} m");
-                        foreach (int i in ix) { if (Math.Abs(hs[i] - med) <= 0.3f) { keep.Add(spots[i]); keptH.Add(hs[i]); } else dropped++; }
+                        var ok = ix.Where(i => Math.Abs(hs[i] - med) <= 0.3f).ToList();
+                        dropped += ix.Count - ok.Count;
+                        // (2026-11-09) andén de verdad: suelo seguido (≥ 6 puntos de vía, unos 24 m, con algún hueco suelto) y pegado a la
+                        // vía (los puntos a 2,4 o 3,5 m del eje); lo suelto (bases de postes, bancos, columnas de agua, cajas de cables) no es andén
+                        var at = new HashSet<int>(ok.Where(i => sNear[i]).Select(i => sTi[i]));
+                        var run = new HashSet<int>();
+                        var sorted = at.OrderBy(x => x).ToList();
+                        for (int a = 0; a < sorted.Count;)
+                        {
+                            int b = a; while (b + 1 < sorted.Count && sorted[b + 1] - sorted[b] <= 2) b++;
+                            if (sorted[b] - sorted[a] + 1 >= 6) for (int k = sorted[a]; k <= sorted[b]; k++) run.Add(k);
+                            a = b + 1;
+                        }
+                        int loose = 0;
+                        foreach (int i in ok) { if (run.Contains(sTi[i])) { keep.Add(spots[i]); keptH.Add(hs[i]); } else loose++; }
+                        looseAll += loose;
                     }
                     // la ruta no dice el lado: el que tiene andén (si el otro tiene mucho menos, fuera: suele ser otra cosa)
                     string guessed = "";
@@ -1349,7 +1365,7 @@ namespace SelectOR.MapAgent
                     if (before != null) keep.AddRange(before.Where(b => !keep.Any(k => (k.Item1 - b.p).LengthSquared() < 1)));
                     s.Spots = keep;
                     Agent.Log($"viajeros en los andenes: medido el andén en {sw.ElapsedMilliseconds} ms ({objs.Count} objetos cerca, {insts.Count} con suelo, {track.Count} puntos de vía)"
-                              + (meds.Count > 0 ? " · andén " + string.Join(", ", meds) : "") + (dropped > 0 ? $" · {dropped} puntos fuera (bancos, otros niveles)" : "")
+                              + (meds.Count > 0 ? " · andén " + string.Join(", ", meds) : "") + (dropped > 0 ? $" · {dropped} puntos fuera (bancos, otros niveles)" : "") + (looseAll > 0 ? $" · {looseAll} puntos sueltos fuera (no es un andén seguido)" : "")
                               + (outside > 0 ? $" · {outside} tramos fuera del andén declarado" : "") + guessed);
                 }
                 catch (Exception ex) { Agent.Log("viajeros en los andenes (medir el andén): " + ex.GetType().Name + " " + ex.Message); }

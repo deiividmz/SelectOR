@@ -41,6 +41,8 @@ namespace SelectOR
             public bool InProgress;         // true = servicio "En conducción": aún no hay km/tiempo/economía
             public string Notes = "";       // notas del servicio, si las hay
             public string AnnulText = "";   // servicio anulado por el superadmin: quién, cuándo y por qué
+            public string NightNote = "";        // (2026-11-09) plus nocturno
+            public string CompanyRuleNote = "";   // (2026-11-09) no cumple los requisitos de la empresa (km o tiempo mínimos)
             public string RecoveredNote = "";   // registrado al volver a abrir SelectOR (se cerró todo durante el viaje)
             public bool Annulled => !string.IsNullOrEmpty(AnnulText);
             // Datos con los que el servidor calculó la economía (services.calc); null = servicio anterior
@@ -114,6 +116,8 @@ namespace SelectOR
             meta.Add((I18n.T("RUTA"), string.IsNullOrWhiteSpace(d.Route) ? "—" : d.Route, Theme.Text));
             body.Controls.Add(new Tiles(meta, small: true) { Width = W, Margin = new Padding(0, 0, 0, 8) });
             if (!string.IsNullOrEmpty(d.RecoveredNote)) body.Controls.Add(NoteCard(d.RecoveredNote, Theme.Surface, Gold));
+            if (!string.IsNullOrEmpty(d.NightNote)) body.Controls.Add(NoteCard(d.NightNote, Theme.Surface, Color.FromArgb(240, 196, 90)));
+            if (!string.IsNullOrEmpty(d.CompanyRuleNote)) body.Controls.Add(NoteCard(d.CompanyRuleNote, Theme.Surface, Color.FromArgb(251, 146, 60)));
 
             if (d.InProgress)
             {

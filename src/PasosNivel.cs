@@ -19,7 +19,7 @@ namespace SelectOR
     public static class PasosNivel
     {
         public sealed class Cr
-        {
+        {   // (2026-11-10) con su PK exacto en el rótulo del puesto: «PN · PK 12,345»
             public int Item;                 // el elemento del .tdb
             public int Group = -1;           // el objeto del mundo al que pertenece; −1: no se sabe todavía
             public int Cluster;              // el cruce: los elementos a menos de 40 m entre sí (un cruce puede venir en dos objetos)
@@ -27,6 +27,8 @@ namespace SelectOR
             public double Lat, Lon;
             public int Edge = -1; public double Off;   // su sitio en su vía
             public float Warn = 30, MinDist = 20;      // (los de Open Rails más comunes en CGL, hasta leer el mundo)
+            public double Pk = double.NaN; public bool PkDone;   // (2026-11-10) su PK exacto (PuntoKm), calculado una vez
+            public string PkText(RouteGraph g) { if (!PkDone) { Pk = PuntoKm.At(g, Edge, Off); PkDone = true; } return PuntoKm.Text(Pk); }
         }
 
         // (RoomMapGeo.Build) los de la ruta; el mundo, en segundo plano

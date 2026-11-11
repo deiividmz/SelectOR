@@ -326,6 +326,11 @@ namespace SelectOR
                 case "rule_new":
                     icon = "📜"; c = info; title = Tr("Norma nueva en la empresa");
                     body = string.Format(Tr("{0} ha publicado una norma en {1}: «{2}»."), who, co, DataStr(r, "title")); sub = NormasSubtab; break;
+                case "rule_breach":   // (2026-11-09) empresa-requisitos.sql
+                    icon = "📋"; c = bad; title = Tr("Servicio anulado por los requisitos");
+                    body = string.Format(Tr("El servicio de {0} en {1} no llega a los requisitos de la empresa: {2} km y {3} min (mínimos: {4} km, {5} min). Se ha anulado solo."),
+                                         DataOr(r, "driver", "?"), co, DataStr(r, "km"), DataStr(r, "minutes"), DataStr(r, "min_km"), DataStr(r, "min_minutes"));
+                    sub = NormasSubtab; break;
                 // Chat de empresa
                 case "chat_muted":
                     icon = "💬"; c = bad; title = Tr("Sin permiso para escribir en el chat");
